@@ -1,4 +1,4 @@
-name: Panthorium CI
+name: Panthorium CIname: Panthorium CI
 
 on:
   push:
