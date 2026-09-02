@@ -7,28 +7,29 @@ function sha256(value) {
 }
 
 class AuthService {
-  constructor({ store, config, audit }) {
-    this.store = store;
+  constructor({ repository, config, audit }) {
+    this.repository = repository;
     this.config = config;
     this.audit = audit;
-    this.ensureAdmin();
   }
 
-  ensureAdmin() {
+  async init() {
+    await this.repository.init();
+    await this.ensureAdmin();
+  }
+
+  async ensureAdmin() {
     if (!this.config.adminPassword) return;
-    const db = this.store.read();
-    if (db.users.some((u) => u.username === this.config.adminUsername)) return;
-    const passwordHash = bcrypt.hashSync(this.config.adminPassword, 12);
-    this.store.update((data) => {
-      data.users.push({
-        id: crypto.randomUUID(),
-        username: this.config.adminUsername,
-        passwordHash,
-        roles: ["administrator"],
-        permissions: ["chat", "core:command", "settings", "system:read"],
-        createdAt: new Date().toISOString()
-      });
-      return data;
+    const existing = await this.repository.findUserByUsername(this.config.adminUsername);
+    if (existing) return;
+    const passwordHash = await bcrypt.hash(this.config.adminPassword, 12);
+    await this.repository.createUser({
+      id: crypto.randomUUID(),
+      username: this.config.adminUsername,
+      passwordHash,
+      roles: ["administrator"],
+      permissions: ["chat", "core:command", "settings", "system:read"],
+      createdAt: new Date().toISOString()
     });
   }
 
@@ -45,27 +46,21 @@ class AuthService {
     });
   }
 
-  issueRefreshToken(principal) {
+  async issueRefreshToken(principal) {
     const raw = crypto.randomBytes(48).toString("base64url");
     const expiresAt = Date.now() + this.config.refreshTokenDays * 86400000;
-    const hash = sha256(raw);
-    this.store.update((data) => {
-      data.refreshTokens = (data.refreshTokens || []).filter((t) => t.expiresAt > Date.now());
-      data.refreshTokens.push({
-        id: crypto.randomUUID(),
-        userId: principal.id,
-        tokenHash: hash,
-        expiresAt,
-        createdAt: new Date().toISOString()
-      });
-      return data;
+    await this.repository.storeRefreshToken({
+      id: crypto.randomUUID(),
+      userId: principal.id,
+      tokenHash: sha256(raw),
+      expiresAt,
+      createdAt: new Date().toISOString()
     });
     return raw;
   }
 
   async login(username, password) {
-    const db = this.store.read();
-    const user = db.users.find((u) => u.username === username);
+    const user = await this.repository.findUserByUsername(username);
     if (!user || !(await bcrypt.compare(password || "", user.passwordHash))) {
       this.audit.record("auth.login_failed", { username });
       return null;
@@ -85,7 +80,7 @@ class AuthService {
     return { principal, accessToken: this.signAccessToken(principal), refreshToken: null };
   }
 
-  issueSession(user) {
+  async issueSession(user) {
     const principal = {
       id: user.id,
       username: user.username,
@@ -95,34 +90,23 @@ class AuthService {
     return {
       principal,
       accessToken: this.signAccessToken(principal),
-      refreshToken: this.issueRefreshToken(principal)
+      refreshToken: await this.issueRefreshToken(principal)
     };
   }
 
-  refresh(rawToken) {
+  async refresh(rawToken) {
     if (!rawToken) return null;
-    const hash = sha256(rawToken);
-    const db = this.store.read();
-    const stored = (db.refreshTokens || []).find((t) => t.tokenHash === hash && t.expiresAt > Date.now());
+    const stored = await this.repository.consumeRefreshToken(sha256(rawToken));
     if (!stored) return null;
-    const user = db.users.find((u) => u.id === stored.userId);
+    const user = await this.repository.findUserById(stored.userId);
     if (!user) return null;
-
-    this.store.update((data) => {
-      data.refreshTokens = (data.refreshTokens || []).filter((t) => t.tokenHash !== hash);
-      return data;
-    });
     this.audit.record("auth.refresh", { userId: user.id });
     return this.issueSession(user);
   }
 
-  revoke(rawToken) {
+  async revoke(rawToken) {
     if (!rawToken) return;
-    const hash = sha256(rawToken);
-    this.store.update((data) => {
-      data.refreshTokens = (data.refreshTokens || []).filter((t) => t.tokenHash !== hash);
-      return data;
-    });
+    await this.repository.revokeRefreshToken(sha256(rawToken));
   }
 
   verifyAccessToken(token) {
