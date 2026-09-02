@@ -685,7 +685,7 @@
         },
         config: {
             // Backend / Sentinel Core
-            backendUrl: localStorage.getItem("pt_backend_url") || "http://localhost:8787",
+            backendUrl: localStorage.getItem("pt_backend_url") || window.location.origin,
             useBackend: localStorage.getItem("pt_use_backend") !== "0",
             sessionId: localStorage.getItem("pt_session_id") || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
             // Access token stays in memory only; provider secrets remain server-side.
