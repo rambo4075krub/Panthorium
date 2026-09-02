@@ -688,14 +688,10 @@
             backendUrl: localStorage.getItem("pt_backend_url") || "http://localhost:8787",
             useBackend: localStorage.getItem("pt_use_backend") !== "0",
             sessionId: localStorage.getItem("pt_session_id") || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
-            // Local fallback (ใช้เมื่อไม่มี Backend)
+            // Access token stays in memory only; provider secrets remain server-side.
+            accessToken: "",
             aiPriority: ["groq", "openai", "gemini", "anthropic"],
-            keys: {
-                groq: localStorage.getItem("pt_key_groq") || "",
-                openai: localStorage.getItem("pt_key_openai") || "",
-                gemini: localStorage.getItem("pt_key_gemini") || "",
-                anthropic: localStorage.getItem("pt_key_anthropic") || ""
-            }
+            keys: { groq: "", openai: "", gemini: "", anthropic: "" }
         },
         biometrics: {
             faceDescriptor: null,
@@ -927,7 +923,45 @@
         speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
     }
 
-    // ---------- AI: Sentinel Core (Backend) + Local Fallback ----------
+    // ---------- Authentication boundary ----------
+    async function ensureAuth(force = false) {
+        if (OS.config.accessToken && !force) return true;
+        try {
+            const base = OS.config.backendUrl.replace(/\/$/, "");
+            const res = await fetch(base + "/api/auth/guest", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: "{}",
+                credentials: "include",
+                signal: AbortSignal.timeout(5000)
+            });
+            if (!res.ok) throw new Error("guest auth failed");
+            const data = await res.json();
+            OS.config.accessToken = data.accessToken || "";
+            return !!OS.config.accessToken;
+        } catch (e) {
+            console.warn("Authentication unavailable:", e.message);
+            OS.config.accessToken = "";
+            return false;
+        }
+    }
+
+    async function authorizedFetch(url, options = {}) {
+        await ensureAuth();
+        const headers = new Headers(options.headers || {});
+        if (OS.config.accessToken) headers.set("Authorization", `Bearer ${OS.config.accessToken}`);
+        let res = await fetch(url, { ...options, headers, credentials: "include" });
+        if (res.status === 401) {
+            const refreshed = await ensureAuth(true);
+            if (refreshed) {
+                headers.set("Authorization", `Bearer ${OS.config.accessToken}`);
+                res = await fetch(url, { ...options, headers, credentials: "include" });
+            }
+        }
+        return res;
+    }
+
+    // ---------- AI: Sentinel Core (Backend) ----------
     async function checkCoreStatus() {
         try {
             const base = OS.config.backendUrl.replace(/\/$/, "");
@@ -947,7 +981,7 @@
         if (OS.config.useBackend) {
             try {
                 const base = OS.config.backendUrl.replace(/\/$/, "");
-                const res = await fetch(base + "/api/chat", {
+                const res = await authorizedFetch(base + "/api/chat", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
@@ -981,8 +1015,8 @@
             }
         }
 
-        // 2) Fallback ภายในเครื่อง (ใช้เมื่อยังไม่มี Backend)
-        return callAILocal(prompt);
+        // Provider API keys are intentionally never exposed to the browser.
+        return { ok: false, text: "Sentinel Core ไม่พร้อมใช้งาน กรุณาตรวจสอบ Backend", provider: "Sentinel Core", via: "core" };
     }
 
     async function callAILocal(prompt) {
@@ -1470,12 +1504,10 @@
 
         $("save-keys").onclick = () => {
             ["groq", "openai", "gemini", "anthropic"].forEach(p => {
-                const val = $("key-" + p).value.trim();
-                OS.config.keys[p] = val;
-                if (val) localStorage.setItem("pt_key_" + p, val);
-                else localStorage.removeItem("pt_key_" + p);
+                const el = $("key-" + p);
+                if (el) el.value = "";
             });
-            toast("บันทึก API Keys สำรองเรียบร้อย");
+            toast("เพื่อความปลอดภัย API Keys ต้องตั้งค่าที่ Backend ผ่าน Environment Variables");
         };
 
         $("enroll-bio").onclick = async () => {
