@@ -1,12 +1,12 @@
 {
   "name": "panthorium-backend",
-  "version": "1.1.0",
-  "description": "Panthorium OS Backend - hardened Sentinel Core",
+  "version": "2.0.0-phase2",
+  "description": "Panthorium OS Backend - persistent authentication phase",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check server.js && node --check routes/api.js && node --check routes/auth.js && node --check services/sentinelCore.js && node --check services/authService.js",
+    "check": "node --check server.js && node --check routes/api.js && node --check routes/auth.js && node --check repositories/authRepository.js && node --check services/sentinelCore.js && node --check services/authService.js",
     "test": "node test/smoke.js"
   },
   "dependencies": {
@@ -17,7 +17,8 @@
     "express": "^4.21.0",
     "express-rate-limit": "^7.4.1",
     "helmet": "^8.0.0",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1"
   },
   "engines": { "node": ">=18" }
 }
