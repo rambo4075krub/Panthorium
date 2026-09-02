@@ -1,0 +1,2052 @@
+
+node_modules
+.git
+.env
+data/*.json
+logs/*.log
+*.zip
+
+# Panthorium Backend / Sentinel Core
+NODE_ENV=development
+PORT=8787
+HOST=0.0.0.0
+
+# Security: MUST set a long random secret in production
+JWT_SECRET=replace-with-at-least-32-random-characters
+ACCESS_TOKEN_TTL=15m
+REFRESH_TOKEN_DAYS=30
+ALLOWED_ORIGINS=http://localhost:8787,http://127.0.0.1:8787
+# Set to 1 on Render/reverse proxy deployments
+TRUST_PROXY=1
+
+# Optional administrator account. If empty, guest mode remains available.
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=
+
+# AI provider priority
+AI_PRIORITY=groq,openai,gemini,anthropic
+GROQ_API_KEY=
+OPENAI_API_KEY=
+GEMINI_API_KEY=
+ANTHROPIC_API_KEY=
+GROQ_MODEL=llama-3.1-8b-instant
+OPENAI_MODEL=gpt-4o-mini
+GEMINI_MODEL=gemini-1.5-flash
+ANTHROPIC_MODEL=claude-3-5-haiku-20241022
+
+node_modules/
+.env
+data/*.json
+logs/*.log
+*.zip
+
+module.exports = require("./routes/api");
+
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --omit=dev
+COPY . .
+ENV NODE_ENV=production
+EXPOSE 8787
+CMD ["node", "server.js"]
+
+{
+  "name": "Panthorium OS",
+  "short_name": "Panthorium",
+  "description": "Cross-platform AI Operating System powered by Sentinel AI",
+  "start_url": "./sentinel.html",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#00ffcc",
+  "lang": "th",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='80' fill='%23000'/%3E%3Ccircle cx='256' cy='256' r='140' fill='none' stroke='%2300ffcc' stroke-width='24'/%3E%3Ccircle cx='256' cy='256' r='80' fill='%2300ffcc' opacity='0.3'/%3E%3Ccircle cx='256' cy='256' r='30' fill='%2300ffcc'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "utilities"],
+  "screenshots": []
+}
+
+{
+  "name": "panthorium-backend",
+  "version": "1.1.0",
+  "description": "Panthorium OS Backend - hardened Sentinel Core",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "check": "node --check server.js && node --check routes/api.js && node --check routes/auth.js && node --check services/sentinelCore.js && node --check services/authService.js",
+    "test": "node test/smoke.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.4.1",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "engines": { "node": ">=18" }
+}
+
+# Panthorium OS
+
+Panthorium OS เป็น Web OS ที่ใช้ Sentinel Core เป็น backend AI orchestrator เวอร์ชันนี้รีแฟกเตอร์โครงสร้างภายในโดยคงหน้าตา `sentinel.html` เดิมไว้
+
+## เริ่มใช้งาน
+
+```bash
+cp .env.example .env
+npm install
+npm start
+```
+
+เปิด `http://localhost:8787`
+
+## Security model
+
+- UI ขอ guest access token อัตโนมัติและเก็บ token ใน memory เท่านั้น
+- `/api/chat` และ `/api/core/status` ต้องมี Bearer token
+- `/api/core/command` จำกัดสิทธิ์ `core:command` และ guest ใช้ไม่ได้
+- Admin password ถูก hash ด้วย bcrypt ก่อนบันทึก
+- Refresh token ของ admin อยู่ใน HttpOnly cookie และเก็บเฉพาะ SHA-256 hash ฝั่ง server
+- AI provider API keys อ่านจาก environment variables เท่านั้น ไม่เก็บใน browser/localStorage
+- มี Helmet/CSP, CORS allowlist, rate limit, request validation และ audit log
+
+ดูรายละเอียดที่ `docs/ARCHITECTURE.md`, `docs/AUTHENTICATION.md`, `docs/DEPLOYMENT.md`
+
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#00ffcc">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="manifest.json">
+    <title>Panthorium OS</title>
+    <style>
+        :root {
+            --accent: #00ffcc;
+            --accent-dim: #00ccaa;
+            --bg: #0a0a0f;
+            --surface: rgba(20, 25, 35, 0.92);
+            --surface-2: rgba(30, 38, 55, 0.95);
+            --text: #e8f0ff;
+            --text-dim: #8a9bb8;
+            --danger: #ff4466;
+            --success: #44ff99;
+            --window-radius: 12px;
+            --taskbar-h: 48px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            color: var(--text);
+            user-select: none;
+        }
+
+        /* ========== BOOT SCREEN ========== */
+        #boot-screen {
+            position: fixed; inset: 0;
+            background: #000;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.8s ease;
+        }
+        #boot-screen.hidden { opacity: 0; pointer-events: none; }
+        .boot-logo {
+            width: 120px; height: 120px;
+            border: 3px solid var(--accent);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            animation: pulse 2s ease-in-out infinite;
+            margin-bottom: 28px;
+        }
+        .boot-logo inner {
+            width: 60px; height: 60px;
+            background: var(--accent);
+            border-radius: 50%;
+            opacity: 0.35;
+        }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 20px var(--accent); }
+            50% { box-shadow: 0 0 50px var(--accent), 0 0 80px rgba(0,255,204,0.3); }
+        }
+        .boot-title { font-size: 28px; font-weight: 300; letter-spacing: 6px; color: var(--accent); margin-bottom: 8px; }
+        .boot-sub { font-size: 13px; color: var(--text-dim); letter-spacing: 2px; margin-bottom: 40px; }
+        .boot-progress {
+            width: 220px; height: 3px;
+            background: #1a1a25;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .boot-bar {
+            height: 100%; width: 0%;
+            background: linear-gradient(90deg, var(--accent), #00aaff);
+            transition: width 0.3s ease;
+        }
+        .boot-status { margin-top: 16px; font-size: 12px; color: var(--text-dim); }
+
+        /* ========== LOGIN ========== */
+        #login-screen {
+            position: fixed; inset: 0;
+            background: radial-gradient(ellipse at center, #0d1520 0%, #000 70%);
+            display: none; flex-direction: column;
+            align-items: center; justify-content: center;
+            z-index: 9000;
+        }
+        #login-screen.active { display: flex; }
+        .login-card {
+            background: var(--surface);
+            border: 1px solid rgba(0,255,204,0.2);
+            border-radius: 20px;
+            padding: 40px 36px;
+            text-align: center;
+            max-width: 360px; width: 90%;
+            backdrop-filter: blur(20px);
+        }
+        .login-avatar {
+            width: 90px; height: 90px;
+            border-radius: 50%;
+            border: 2px solid var(--accent);
+            margin: 0 auto 20px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 36px;
+            background: rgba(0,255,204,0.08);
+        }
+        .login-title { font-size: 20px; margin-bottom: 6px; }
+        .login-sub { font-size: 13px; color: var(--text-dim); margin-bottom: 28px; }
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #00ccaa, #0099cc);
+            border: none; border-radius: 12px;
+            color: #000; font-size: 15px; font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .login-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,255,204,0.3); }
+        .login-btn:active { transform: scale(0.98); }
+        .login-hint { margin-top: 16px; font-size: 12px; color: var(--text-dim); }
+
+        /* ========== DESKTOP ========== */
+        #desktop {
+            position: fixed; inset: 0;
+            display: none;
+            background: #050508;
+        }
+        #desktop.active { display: block; }
+
+        #bg-canvas {
+            position: absolute; inset: 0;
+            width: 100%; height: 100%;
+        }
+
+        .desktop-icons {
+            position: absolute;
+            top: 20px; left: 16px;
+            display: flex; flex-direction: column; gap: 18px;
+            z-index: 10;
+        }
+        .desk-icon {
+            width: 72px;
+            display: flex; flex-direction: column; align-items: center;
+            cursor: pointer;
+            padding: 8px 4px;
+            border-radius: 10px;
+            transition: background 0.15s;
+        }
+        .desk-icon:hover, .desk-icon:active { background: rgba(0,255,204,0.12); }
+        .desk-icon .icon-img {
+            width: 44px; height: 44px;
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px;
+            margin-bottom: 6px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .desk-icon span {
+            font-size: 11px;
+            text-align: center;
+            color: #dde8ff;
+            text-shadow: 0 1px 3px #000;
+            line-height: 1.25;
+        }
+
+        /* ========== TASKBAR ========== */
+        #taskbar {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            height: var(--taskbar-h);
+            background: rgba(10, 14, 22, 0.88);
+            backdrop-filter: blur(24px);
+            border-top: 1px solid rgba(255,255,255,0.06);
+            display: flex; align-items: center;
+            padding: 0 10px;
+            z-index: 8000;
+            gap: 6px;
+        }
+        .tb-btn {
+            height: 36px; min-width: 36px;
+            border-radius: 8px;
+            border: none;
+            background: transparent;
+            color: var(--text);
+            font-size: 18px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            padding: 0 10px;
+            transition: background 0.15s;
+        }
+        .tb-btn:hover { background: rgba(255,255,255,0.08); }
+        .tb-btn.active { background: rgba(0,255,204,0.15); color: var(--accent); }
+        .tb-apps {
+            flex: 1;
+            display: flex; align-items: center; gap: 4px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        .tb-apps::-webkit-scrollbar { display: none; }
+        .tb-app {
+            height: 34px;
+            padding: 0 12px;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid transparent;
+            color: var(--text);
+            font-size: 13px;
+            cursor: pointer;
+            display: flex; align-items: center; gap: 6px;
+            white-space: nowrap;
+            transition: all 0.15s;
+        }
+        .tb-app:hover { background: rgba(255,255,255,0.1); }
+        .tb-app.active {
+            background: rgba(0,255,204,0.12);
+            border-color: rgba(0,255,204,0.3);
+        }
+        .tb-right {
+            display: flex; align-items: center; gap: 8px;
+            margin-left: auto;
+        }
+        #clock {
+            font-size: 13px;
+            color: var(--text-dim);
+            padding: 0 8px;
+            font-variant-numeric: tabular-nums;
+        }
+        #status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 6px var(--success);
+        }
+
+        /* ========== START MENU ========== */
+        #start-menu {
+            position: fixed;
+            bottom: calc(var(--taskbar-h) + 8px);
+            left: 10px;
+            width: 280px;
+            max-height: 70vh;
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+            backdrop-filter: blur(30px);
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 8500;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+        }
+        #start-menu.open { display: flex; }
+        .sm-header {
+            padding: 16px 18px 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            display: flex; align-items: center; gap: 12px;
+        }
+        .sm-avatar {
+            width: 40px; height: 40px;
+            border-radius: 50%;
+            background: rgba(0,255,204,0.15);
+            border: 1px solid var(--accent);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px;
+        }
+        .sm-user { font-size: 14px; font-weight: 500; }
+        .sm-status { font-size: 11px; color: var(--text-dim); }
+        .sm-apps {
+            padding: 10px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            overflow-y: auto;
+        }
+        .sm-app {
+            display: flex; flex-direction: column; align-items: center;
+            padding: 14px 8px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.15s;
+            gap: 6px;
+        }
+        .sm-app:hover { background: rgba(255,255,255,0.06); }
+        .sm-app .ico { font-size: 26px; }
+        .sm-app span { font-size: 12px; color: var(--text-dim); }
+        .sm-footer {
+            padding: 10px;
+            border-top: 1px solid rgba(255,255,255,0.06);
+            display: flex; gap: 6px;
+        }
+        .sm-footer button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.05);
+            color: var(--text);
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .sm-footer button:hover { background: rgba(255,255,255,0.1); }
+
+        /* ========== WINDOWS ========== */
+        .window {
+            position: absolute;
+            min-width: 280px; min-height: 200px;
+            background: var(--surface);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: var(--window-radius);
+            display: flex; flex-direction: column;
+            box-shadow: 0 16px 48px rgba(0,0,0,0.45);
+            overflow: hidden;
+            z-index: 100;
+            backdrop-filter: blur(20px);
+        }
+        .window.maximized {
+            top: 0 !important; left: 0 !important;
+            width: 100% !important;
+            height: calc(100% - var(--taskbar-h)) !important;
+            border-radius: 0;
+        }
+        .window-titlebar {
+            height: 38px;
+            background: rgba(0,0,0,0.25);
+            display: flex; align-items: center;
+            padding: 0 12px;
+            cursor: grab;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .window-titlebar:active { cursor: grabbing; }
+        .window-title {
+            flex: 1;
+            font-size: 13px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .window-controls { display: flex; gap: 6px; }
+        .win-btn {
+            width: 28px; height: 28px;
+            border-radius: 6px;
+            border: none;
+            background: transparent;
+            color: var(--text-dim);
+            font-size: 14px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .win-btn:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+        .win-btn.close:hover { background: var(--danger); color: #fff; }
+        .window-body {
+            flex: 1;
+            overflow: auto;
+            position: relative;
+        }
+        .window-resize {
+            position: absolute;
+            right: 0; bottom: 0;
+            width: 16px; height: 16px;
+            cursor: nwse-resize;
+        }
+
+        /* ========== APP CONTENT STYLES ========== */
+        .app-content { padding: 16px; height: 100%; }
+
+        /* Sentinel Chat */
+        .chat-container {
+            display: flex; flex-direction: column;
+            height: 100%;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex; flex-direction: column; gap: 12px;
+        }
+        .msg {
+            max-width: 85%;
+            padding: 10px 14px;
+            border-radius: 14px;
+            font-size: 14px;
+            line-height: 1.45;
+            word-break: break-word;
+        }
+        .msg.user {
+            align-self: flex-end;
+            background: rgba(0,255,204,0.15);
+            border: 1px solid rgba(0,255,204,0.25);
+        }
+        .msg.ai {
+            align-self: flex-start;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .msg .provider {
+            font-size: 10px;
+            color: var(--text-dim);
+            margin-top: 4px;
+        }
+        .chat-input-area {
+            padding: 12px;
+            border-top: 1px solid rgba(255,255,255,0.06);
+            display: flex; gap: 8px;
+            align-items: center;
+        }
+        .chat-input {
+            flex: 1;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 12px 16px;
+            color: var(--text);
+            font-size: 14px;
+            outline: none;
+        }
+        .chat-input:focus { border-color: rgba(0,255,204,0.4); }
+        .chat-send, .chat-mic {
+            width: 42px; height: 42px;
+            border-radius: 12px;
+            border: none;
+            background: rgba(0,255,204,0.15);
+            color: var(--accent);
+            font-size: 18px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .chat-send:hover, .chat-mic:hover { background: rgba(0,255,204,0.25); }
+        .chat-mic.listening { background: var(--danger); color: #fff; animation: pulse-mic 1s infinite; }
+        @keyframes pulse-mic {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        /* Settings */
+        .settings-section {
+            margin-bottom: 24px;
+        }
+        .settings-section h3 {
+            font-size: 14px;
+            color: var(--accent);
+            margin-bottom: 12px;
+            font-weight: 500;
+        }
+        .setting-row {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 14px;
+        }
+        .setting-row label {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+        .setting-row input, .setting-row select {
+            background: rgba(0,0,0,0.35);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            padding: 10px 12px;
+            color: var(--text);
+            font-size: 13px;
+            outline: none;
+        }
+        .setting-row input:focus { border-color: var(--accent); }
+        .btn-primary {
+            padding: 10px 18px;
+            background: linear-gradient(135deg, #00ccaa, #0099cc);
+            border: none; border-radius: 10px;
+            color: #000; font-weight: 600; font-size: 13px;
+            cursor: pointer;
+        }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-danger {
+            padding: 10px 18px;
+            background: rgba(255,68,102,0.2);
+            border: 1px solid var(--danger);
+            border-radius: 10px;
+            color: var(--danger); font-size: 13px;
+            cursor: pointer;
+        }
+
+        /* Notes / Files */
+        .notes-area {
+            width: 100%; height: 100%;
+            background: transparent;
+            border: none;
+            color: var(--text);
+            font-size: 14px;
+            line-height: 1.6;
+            padding: 16px;
+            resize: none;
+            outline: none;
+            font-family: inherit;
+        }
+
+        /* Calculator */
+        .calc-display {
+            background: rgba(0,0,0,0.4);
+            padding: 20px 16px;
+            font-size: 32px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            min-height: 70px;
+            word-break: break-all;
+        }
+        .calc-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1px;
+            background: rgba(255,255,255,0.04);
+            flex: 1;
+        }
+        .calc-btn {
+            background: rgba(255,255,255,0.04);
+            border: none;
+            color: var(--text);
+            font-size: 20px;
+            padding: 18px;
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .calc-btn:hover { background: rgba(255,255,255,0.1); }
+        .calc-btn.op { color: var(--accent); }
+        .calc-btn.eq { background: rgba(0,255,204,0.15); color: var(--accent); }
+
+        /* File Manager */
+        .file-list { display: flex; flex-direction: column; gap: 4px; }
+        .file-item {
+            display: flex; align-items: center; gap: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        .file-item:hover { background: rgba(255,255,255,0.06); }
+        .file-item .fico { font-size: 20px; }
+        .file-item .fname { flex: 1; font-size: 13px; }
+        .file-item .fsize { font-size: 11px; color: var(--text-dim); }
+
+        /* Terminal */
+        .term {
+            background: #0a0a12;
+            height: 100%;
+            padding: 12px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 13px;
+            overflow-y: auto;
+            color: #a8ffb8;
+        }
+        .term-line { margin-bottom: 4px; white-space: pre-wrap; }
+        .term-input-line { display: flex; gap: 8px; }
+        .term-prompt { color: var(--accent); }
+        .term-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #a8ffb8;
+            font-family: inherit;
+            font-size: inherit;
+            outline: none;
+        }
+
+        /* About */
+        .about-content {
+            text-align: center;
+            padding: 30px 20px;
+        }
+        .about-logo {
+            width: 80px; height: 80px;
+            border: 2px solid var(--accent);
+            border-radius: 50%;
+            margin: 0 auto 16px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 32px;
+        }
+
+        /* Toast */
+        #toast {
+            position: fixed;
+            top: 20px; left: 50%;
+            transform: translateX(-50%) translateY(-80px);
+            background: var(--surface-2);
+            border: 1px solid rgba(0,255,204,0.3);
+            padding: 12px 22px;
+            border-radius: 12px;
+            font-size: 13px;
+            z-index: 10000;
+            transition: transform 0.3s ease;
+            pointer-events: none;
+        }
+        #toast.show { transform: translateX(-50%) translateY(0); }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .desktop-icons { top: 12px; left: 8px; gap: 12px; }
+            .desk-icon { width: 64px; }
+            .desk-icon .icon-img { width: 40px; height: 40px; font-size: 20px; }
+            #start-menu { width: calc(100% - 20px); left: 10px; }
+            .window { min-width: 260px; }
+            :root { --taskbar-h: 52px; }
+        }
+
+        /* Hidden video for face */
+        #faceVideo {
+            position: fixed;
+            width: 1px; height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <video id="faceVideo" autoplay muted playsinline></video>
+
+    <!-- BOOT -->
+    <div id="boot-screen">
+        <div class="boot-logo"><div style="width:50px;height:50px;background:var(--accent);border-radius:50%;opacity:0.4;"></div></div>
+        <div class="boot-title">PANTHORIUM</div>
+        <div class="boot-sub">OPERATING SYSTEM</div>
+        <div class="boot-progress"><div class="boot-bar" id="boot-bar"></div></div>
+        <div class="boot-status" id="boot-status">กำลังเริ่มต้นระบบ...</div>
+    </div>
+
+    <!-- LOGIN (disabled - free access mode) -->
+    <div id="login-screen" style="display:none;"></div>
+
+    <!-- DESKTOP -->
+    <div id="desktop">
+        <canvas id="bg-canvas"></canvas>
+
+        <div class="desktop-icons" id="desktop-icons">
+            <!-- icons injected by JS -->
+        </div>
+
+        <!-- Windows container -->
+        <div id="windows"></div>
+
+        <!-- Start Menu -->
+        <div id="start-menu">
+            <div class="sm-header">
+                <div class="sm-avatar">🛡️</div>
+                <div>
+                    <div class="sm-user">ผู้ใช้ทั่วไป</div>
+                    <div class="sm-status" id="sm-status">Online · ฟรี</div>
+                </div>
+            </div>
+            <div class="sm-apps" id="sm-apps"></div>
+            <div class="sm-footer">
+                <button id="btn-settings-quick">⚙️ ตั้งค่า</button>
+                <button id="btn-logout">🔄 รีสตาร์ท</button>
+            </div>
+        </div>
+
+        <!-- Taskbar -->
+        <div id="taskbar">
+            <button class="tb-btn" id="start-btn" title="Start">⊞</button>
+            <div class="tb-apps" id="tb-apps"></div>
+            <div class="tb-right">
+                <div id="status-dot" title="System Online"></div>
+                <div id="clock"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <!-- External libs -->
+    <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+    // =========================================================
+    // Panthorium OS - Core Kernel
+    // =========================================================
+    const OS = {
+        version: "1.1.0",
+        state: {
+            booted: false,
+            loggedIn: false,
+            online: navigator.onLine,
+            verified: false
+        },
+        config: {
+            // Backend / Sentinel Core
+            backendUrl: localStorage.getItem("pt_backend_url") || "http://localhost:8787",
+            useBackend: localStorage.getItem("pt_use_backend") !== "0",
+            sessionId: localStorage.getItem("pt_session_id") || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
+            // Access token stays in memory only; provider secrets remain server-side.
+            accessToken: "",
+            aiPriority: ["groq", "openai", "gemini", "anthropic"],
+            keys: { groq: "", openai: "", gemini: "", anthropic: "" }
+        },
+        biometrics: {
+            faceDescriptor: null,
+            voiceprint: null,
+            enrolled: false
+        },
+        conversationHistory: [],
+        windows: new Map(),
+        zCounter: 100,
+        apps: {},
+        coreOnline: false
+    };
+
+    // เก็บ session ถาวร
+    localStorage.setItem("pt_session_id", OS.config.sessionId);
+
+    // ---------- Utilities ----------
+    function toast(msg, duration = 2500) {
+        const el = document.getElementById("toast");
+        el.textContent = msg;
+        el.classList.add("show");
+        setTimeout(() => el.classList.remove("show"), duration);
+    }
+
+    function $(id) { return document.getElementById(id); }
+
+    // ---------- Clock ----------
+    function updateClock() {
+        const now = new Date();
+        const t = now.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+        const d = now.toLocaleDateString("th-TH", { day: "numeric", month: "short" });
+        $("clock").textContent = `${d}  ${t}`;
+    }
+    setInterval(updateClock, 10000);
+    updateClock();
+
+    // ---------- Network Status ----------
+    window.addEventListener("online", () => {
+        OS.state.online = true;
+        $("status-dot").style.background = "var(--success)";
+        $("sm-status").textContent = "Online";
+    });
+    window.addEventListener("offline", () => {
+        OS.state.online = false;
+        $("status-dot").style.background = "var(--danger)";
+        $("sm-status").textContent = "Offline";
+    });
+
+    // ---------- Boot Sequence ----------
+    async function boot() {
+        const bar = $("boot-bar");
+        const status = $("boot-status");
+        const steps = [
+            { p: 20, t: "โหลด Kernel..." },
+            { p: 40, t: "เริ่มต้นระบบกราฟิก..." },
+            { p: 60, t: "เตรียม Desktop Environment..." },
+            { p: 80, t: "ลงทะเบียนแอปพลิเคชัน..." },
+            { p: 100, t: "พร้อมใช้งาน" }
+        ];
+        for (const s of steps) {
+            bar.style.width = s.p + "%";
+            status.textContent = s.t;
+            await new Promise(r => setTimeout(r, 220 + Math.random() * 150));
+        }
+        await new Promise(r => setTimeout(r, 300));
+        $("boot-screen").classList.add("hidden");
+        setTimeout(() => {
+            $("boot-screen").style.display = "none";
+            // เข้าสู่ระบบฟรีทันที ไม่ต้อง login
+            $("login-screen").style.display = "none";
+            $("desktop").classList.add("active");
+            OS.state.booted = true;
+            OS.state.loggedIn = true;
+            OS.state.verified = true;
+            initDesktop();
+            toast("ยินดีต้อนรับสู่ Panthorium OS");
+        }, 600);
+    }
+
+    // ---------- Biometrics ----------
+    let faceModelsLoaded = false;
+    let analyser = null;
+
+    async function loadFaceModels() {
+        if (faceModelsLoaded) return true;
+        try {
+            const MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/";
+            await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+            faceModelsLoaded = true;
+            return true;
+        } catch (e) {
+            console.warn("Face models failed", e);
+            return false;
+        }
+    }
+
+    async function startCamera() {
+        const video = $("faceVideo");
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: "user", width: 320, height: 240 },
+                audio: true
+            });
+            video.srcObject = stream;
+
+            // Audio analyser for voiceprint
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioCtx.createMediaStreamSource(stream);
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 512;
+            source.connect(analyser);
+
+            return true;
+        } catch (e) {
+            console.warn("Media access denied", e);
+            return false;
+        }
+    }
+
+    function extractVoiceFeatures() {
+        if (!analyser) return 0;
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(data);
+        let sum = 0;
+        for (let i = 0; i < 48; i++) sum += data[i];
+        return sum / 48;
+    }
+
+    async function enrollBiometrics() {
+        toast("กำลังโหลดโมเดล AI...");
+        await loadFaceModels();
+        toast("กำลังเปิดกล้องและไมโครโฟน...");
+        const ok = await startCamera();
+        if (!ok) {
+            return false;
+        }
+
+        toast("กรุณามองกล้องสักครู่...");
+        await new Promise(r => setTimeout(r, 2200));
+
+        const video = $("faceVideo");
+        try {
+            const det = await faceapi
+                .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+                .withFaceLandmarks()
+                .withFaceDescriptor();
+            if (det) {
+                OS.biometrics.faceDescriptor = Array.from(det.descriptor);
+                localStorage.setItem("pt_face", JSON.stringify(OS.biometrics.faceDescriptor));
+            }
+        } catch (e) {}
+
+        // Capture simple voiceprint
+        const vp = extractVoiceFeatures();
+        if (vp > 0) {
+            OS.biometrics.voiceprint = vp;
+            localStorage.setItem("pt_voice", vp);
+        }
+
+        OS.biometrics.enrolled = true;
+        localStorage.setItem("pt_enrolled", "1");
+        return true;
+    }
+
+    async function verifyBiometrics() {
+        if (!OS.biometrics.enrolled) return true; // first time
+        const video = $("faceVideo");
+        let faceOK = true;
+        let voiceOK = true;
+
+        if (OS.biometrics.faceDescriptor && faceModelsLoaded) {
+            try {
+                const det = await faceapi
+                    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+                    .withFaceLandmarks()
+                    .withFaceDescriptor();
+                if (det) {
+                    const dist = faceapi.euclideanDistance(
+                        new Float32Array(OS.biometrics.faceDescriptor),
+                        det.descriptor
+                    );
+                    faceOK = dist < 0.52;
+                } else faceOK = false;
+            } catch (e) { faceOK = false; }
+        }
+
+        if (OS.biometrics.voiceprint) {
+            const cur = extractVoiceFeatures();
+            voiceOK = Math.abs(OS.biometrics.voiceprint - cur) < 18;
+        }
+
+        return faceOK; // prioritize face; voice is secondary
+    }
+
+    // Load saved biometrics
+    (function loadSavedBio() {
+        if (localStorage.getItem("pt_enrolled") === "1") {
+            OS.biometrics.enrolled = true;
+            try {
+                const f = localStorage.getItem("pt_face");
+                if (f) OS.biometrics.faceDescriptor = JSON.parse(f);
+                const v = localStorage.getItem("pt_voice");
+                if (v) OS.biometrics.voiceprint = parseFloat(v);
+            } catch (e) {}
+        }
+    })();
+
+    // ---------- Login (disabled - free access) ----------
+    // ระบบเปิดใช้ฟรีทันทีหลัง boot ไม่ต้อง login
+    // Biometric จะถูกใช้เฉพาะเมื่อผู้ใช้เลือกเปิดฟังก์ชันขั้นสูงเอง
+
+    // ---------- Speech ----------
+    function speak(text) {
+        if (!window.speechSynthesis) return;
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = "th-TH";
+        u.pitch = 0.6;
+        u.rate = 0.9;
+        const voices = speechSynthesis.getVoices();
+        const th = voices.find(v => v.lang.includes("th"));
+        if (th) u.voice = th;
+        speechSynthesis.speak(u);
+    }
+    if (window.speechSynthesis) {
+        speechSynthesis.getVoices();
+        speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+    }
+
+    // ---------- Authentication boundary ----------
+    async function ensureAuth(force = false) {
+        if (OS.config.accessToken && !force) return true;
+        try {
+            const base = OS.config.backendUrl.replace(/\/$/, "");
+            const res = await fetch(base + "/api/auth/guest", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: "{}",
+                credentials: "include",
+                signal: AbortSignal.timeout(5000)
+            });
+            if (!res.ok) throw new Error("guest auth failed");
+            const data = await res.json();
+            OS.config.accessToken = data.accessToken || "";
+            return !!OS.config.accessToken;
+        } catch (e) {
+            console.warn("Authentication unavailable:", e.message);
+            OS.config.accessToken = "";
+            return false;
+        }
+    }
+
+    async function authorizedFetch(url, options = {}) {
+        await ensureAuth();
+        const headers = new Headers(options.headers || {});
+        if (OS.config.accessToken) headers.set("Authorization", `Bearer ${OS.config.accessToken}`);
+        let res = await fetch(url, { ...options, headers, credentials: "include" });
+        if (res.status === 401) {
+            const refreshed = await ensureAuth(true);
+            if (refreshed) {
+                headers.set("Authorization", `Bearer ${OS.config.accessToken}`);
+                res = await fetch(url, { ...options, headers, credentials: "include" });
+            }
+        }
+        return res;
+    }
+
+    // ---------- AI: Sentinel Core (Backend) ----------
+    async function checkCoreStatus() {
+        try {
+            const base = OS.config.backendUrl.replace(/\/$/, "");
+            const res = await fetch(base + "/api/health", { signal: AbortSignal.timeout(2500) });
+            if (!res.ok) throw new Error("bad status");
+            const data = await res.json();
+            OS.coreOnline = !!(data && data.ok);
+            return OS.coreOnline;
+        } catch {
+            OS.coreOnline = false;
+            return false;
+        }
+    }
+
+    async function callAI(prompt) {
+        // 1) พยายามใช้ Sentinel Core บนเซิร์ฟเวอร์ก่อน
+        if (OS.config.useBackend) {
+            try {
+                const base = OS.config.backendUrl.replace(/\/$/, "");
+                const res = await authorizedFetch(base + "/api/chat", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-session-id": OS.config.sessionId
+                    },
+                    body: JSON.stringify({
+                        message: prompt,
+                        sessionId: OS.config.sessionId,
+                        mode: "default"
+                    }),
+                    signal: AbortSignal.timeout(30000)
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    OS.coreOnline = true;
+                    if (data.ok && data.text) {
+                        return {
+                            ok: true,
+                            text: data.text,
+                            provider: data.provider ? `Core→${data.provider}` : "Sentinel Core",
+                            via: "core"
+                        };
+                    }
+                    if (data.text) {
+                        return { ok: false, text: data.text, provider: "Sentinel Core", via: "core" };
+                    }
+                }
+            } catch (e) {
+                console.warn("Sentinel Core unavailable:", e.message);
+                OS.coreOnline = false;
+            }
+        }
+
+        // Provider API keys are intentionally never exposed to the browser.
+        return { ok: false, text: "Sentinel Core ไม่พร้อมใช้งาน กรุณาตรวจสอบ Backend", provider: "Sentinel Core", via: "core" };
+    }
+
+    async function callAILocal(prompt) {
+        OS.conversationHistory.push({ role: "user", content: prompt });
+        if (OS.conversationHistory.length > 12) {
+            OS.conversationHistory = OS.conversationHistory.slice(-12);
+        }
+
+        const systemPrompt = `คุณคือ Sentinel AI ผู้ช่วยอัจฉริยะของระบบปฏิบัติการ Panthorium OS
+พูดด้วยน้ำเสียงมั่นใจ สุภาพ และมีอำนาจเล็กน้อย เหมือน AI จาก Transformers
+ตอบเป็นภาษาไทย กระชับ ชัดเจน เป็นประโยชน์
+ห้ามตอบยาวเกินไป (ไม่เกิน 3-4 ประโยค เว้นแต่ถูกถามรายละเอียด)`;
+
+        for (const provider of OS.config.aiPriority) {
+            const key = OS.config.keys[provider];
+            if (!key) continue;
+            try {
+                const answer = await callProviderLocal(provider, key, systemPrompt);
+                if (answer) {
+                    OS.conversationHistory.push({ role: "assistant", content: answer });
+                    return { ok: true, text: answer, provider: provider + " (local)", via: "local" };
+                }
+            } catch (e) {
+                console.warn(provider, e.message);
+            }
+        }
+        return {
+            ok: false,
+            text: "ไม่สามารถเชื่อมต่อ AI ได้ — เปิด Backend (Sentinel Core) หรือใส่ API Key ในตั้งค่า",
+            provider: null,
+            via: "none"
+        };
+    }
+
+    async function callProviderLocal(provider, key, systemPrompt) {
+        if (provider === "groq") {
+            const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${key}`
+                },
+                body: JSON.stringify({
+                    model: "llama-3.1-8b-instant",
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        ...OS.conversationHistory
+                    ],
+                    temperature: 0.65,
+                    max_tokens: 280
+                })
+            });
+            if (!res.ok) throw new Error("Groq " + res.status);
+            const data = await res.json();
+            return data.choices[0].message.content.trim();
+        }
+
+        if (provider === "openai") {
+            const res = await fetch("https://api.openai.com/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${key}`
+                },
+                body: JSON.stringify({
+                    model: "gpt-4o-mini",
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        ...OS.conversationHistory
+                    ],
+                    temperature: 0.65,
+                    max_tokens: 280
+                })
+            });
+            if (!res.ok) throw new Error("OpenAI " + res.status);
+            const data = await res.json();
+            return data.choices[0].message.content.trim();
+        }
+
+        if (provider === "gemini") {
+            const res = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        contents: [{
+                            role: "user",
+                            parts: [{
+                                text: systemPrompt + "\n\n" +
+                                    OS.conversationHistory.map(m => `${m.role}: ${m.content}`).join("\n")
+                            }]
+                        }],
+                        generationConfig: { temperature: 0.65, maxOutputTokens: 280 }
+                    })
+                }
+            );
+            if (!res.ok) throw new Error("Gemini " + res.status);
+            const data = await res.json();
+            return data.candidates[0].content.parts[0].text.trim();
+        }
+
+        if (provider === "anthropic") {
+            const res = await fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-api-key": key,
+                    "anthropic-version": "2023-06-01"
+                },
+                body: JSON.stringify({
+                    model: "claude-3-5-haiku-20241022",
+                    max_tokens: 280,
+                    temperature: 0.65,
+                    system: systemPrompt,
+                    messages: OS.conversationHistory.map(m => ({
+                        role: m.role === "assistant" ? "assistant" : "user",
+                        content: m.content
+                    }))
+                })
+            });
+            if (!res.ok) throw new Error("Anthropic " + res.status);
+            const data = await res.json();
+            return data.content[0].text.trim();
+        }
+        return null;
+    }
+
+    // ---------- Window Manager ----------
+    function createWindow(id, title, contentHTML, opts = {}) {
+        if (OS.windows.has(id)) {
+            focusWindow(id);
+            return OS.windows.get(id);
+        }
+
+        const w = document.createElement("div");
+        w.className = "window";
+        w.dataset.id = id;
+        const width = opts.width || Math.min(520, window.innerWidth - 40);
+        const height = opts.height || Math.min(420, window.innerHeight - 80);
+        const left = opts.left ?? Math.max(20, (window.innerWidth - width) / 2 + (OS.windows.size * 24) % 80);
+        const top = opts.top ?? Math.max(20, 60 + (OS.windows.size * 24) % 60);
+
+        w.style.width = width + "px";
+        w.style.height = height + "px";
+        w.style.left = left + "px";
+        w.style.top = top + "px";
+        w.style.zIndex = ++OS.zCounter;
+
+        w.innerHTML = `
+            <div class="window-titlebar">
+                <div class="window-title">${title}</div>
+                <div class="window-controls">
+                    <button class="win-btn min" title="ย่อ">─</button>
+                    <button class="win-btn max" title="ขยาย">□</button>
+                    <button class="win-btn close" title="ปิด">✕</button>
+                </div>
+            </div>
+            <div class="window-body">${contentHTML}</div>
+            <div class="window-resize"></div>
+        `;
+
+        $("windows").appendChild(w);
+
+        // Events
+        const titlebar = w.querySelector(".window-titlebar");
+        let dragging = false, ox, oy;
+
+        titlebar.addEventListener("pointerdown", (e) => {
+            if (e.target.closest(".win-btn")) return;
+            if (w.classList.contains("maximized")) return;
+            dragging = true;
+            ox = e.clientX - w.offsetLeft;
+            oy = e.clientY - w.offsetTop;
+            focusWindow(id);
+            titlebar.setPointerCapture(e.pointerId);
+        });
+        titlebar.addEventListener("pointermove", (e) => {
+            if (!dragging) return;
+            w.style.left = (e.clientX - ox) + "px";
+            w.style.top = Math.max(0, e.clientY - oy) + "px";
+        });
+        titlebar.addEventListener("pointerup", () => { dragging = false; });
+
+        // Resize
+        const resizeHandle = w.querySelector(".window-resize");
+        let resizing = false, rw, rh, rx, ry;
+        resizeHandle.addEventListener("pointerdown", (e) => {
+            resizing = true;
+            rw = w.offsetWidth; rh = w.offsetHeight;
+            rx = e.clientX; ry = e.clientY;
+            resizeHandle.setPointerCapture(e.pointerId);
+            e.stopPropagation();
+        });
+        resizeHandle.addEventListener("pointermove", (e) => {
+            if (!resizing) return;
+            w.style.width = Math.max(280, rw + (e.clientX - rx)) + "px";
+            w.style.height = Math.max(200, rh + (e.clientY - ry)) + "px";
+        });
+        resizeHandle.addEventListener("pointerup", () => { resizing = false; });
+
+        w.querySelector(".close").onclick = () => closeWindow(id);
+        w.querySelector(".min").onclick = () => {
+            w.style.display = "none";
+            updateTaskbar();
+        };
+        w.querySelector(".max").onclick = () => {
+            w.classList.toggle("maximized");
+        };
+
+        w.addEventListener("pointerdown", () => focusWindow(id));
+
+        OS.windows.set(id, { el: w, title, minimized: false });
+        updateTaskbar();
+        return OS.windows.get(id);
+    }
+
+    function focusWindow(id) {
+        const win = OS.windows.get(id);
+        if (!win) return;
+        win.el.style.display = "flex";
+        win.el.style.zIndex = ++OS.zCounter;
+        win.minimized = false;
+        updateTaskbar();
+    }
+
+    function closeWindow(id) {
+        const win = OS.windows.get(id);
+        if (!win) return;
+        win.el.remove();
+        OS.windows.delete(id);
+        updateTaskbar();
+    }
+
+    function updateTaskbar() {
+        const container = $("tb-apps");
+        container.innerHTML = "";
+        OS.windows.forEach((win, id) => {
+            const btn = document.createElement("button");
+            btn.className = "tb-app" + (win.el.style.display !== "none" ? " active" : "");
+            btn.textContent = win.title;
+            btn.onclick = () => {
+                if (win.el.style.display === "none") {
+                    focusWindow(id);
+                } else {
+                    win.el.style.display = "none";
+                    win.minimized = true;
+                    updateTaskbar();
+                }
+            };
+            container.appendChild(btn);
+        });
+    }
+
+    // ---------- Apps Definition ----------
+    const APP_LIST = [
+        { id: "sentinel", name: "Sentinel AI", icon: "🤖", open: openSentinel },
+        { id: "files", name: "ไฟล์", icon: "📁", open: openFiles },
+        { id: "notes", name: "บันทึก", icon: "📝", open: openNotes },
+        { id: "calc", name: "เครื่องคิดเลข", icon: "🧮", open: openCalc },
+        { id: "terminal", name: "Terminal", icon: "⬛", open: openTerminal },
+        { id: "settings", name: "ตั้งค่า", icon: "⚙️", open: openSettings },
+        { id: "about", name: "เกี่ยวกับ", icon: "ℹ️", open: openAbout }
+    ];
+
+    function initDesktop() {
+        // Desktop icons
+        const desk = $("desktop-icons");
+        desk.innerHTML = "";
+        APP_LIST.forEach(app => {
+            const el = document.createElement("div");
+            el.className = "desk-icon";
+            el.innerHTML = `<div class="icon-img">${app.icon}</div><span>${app.name}</span>`;
+            el.onclick = () => app.open();
+            desk.appendChild(el);
+        });
+
+        // Start menu apps
+        const sm = $("sm-apps");
+        sm.innerHTML = "";
+        APP_LIST.forEach(app => {
+            const el = document.createElement("div");
+            el.className = "sm-app";
+            el.innerHTML = `<div class="ico">${app.icon}</div><span>${app.name}</span>`;
+            el.onclick = () => {
+                app.open();
+                closeStartMenu();
+            };
+            sm.appendChild(el);
+        });
+
+        initBackground();
+        // ตรวจสอบ Sentinel Core เงียบ ๆ หลังเข้า Desktop
+        checkCoreStatus().then((ok) => {
+            if (ok) toast("Sentinel Core ออนไลน์");
+        });
+    }
+
+    // Start menu toggle
+    $("start-btn").onclick = () => {
+        $("start-menu").classList.toggle("open");
+    };
+    document.addEventListener("click", (e) => {
+        if (!$("start-menu").contains(e.target) && e.target !== $("start-btn")) {
+            closeStartMenu();
+        }
+    });
+    function closeStartMenu() {
+        $("start-menu").classList.remove("open");
+    }
+
+    $("btn-settings-quick").onclick = () => { openSettings(); closeStartMenu(); };
+    $("btn-logout").onclick = () => {
+        if (confirm("ต้องการรีสตาร์ทระบบหรือไม่?")) {
+            location.reload();
+        }
+    };
+
+    // ---------- App: Sentinel AI ----------
+    function openSentinel() {
+        const html = `
+            <div class="chat-container">
+                <div class="chat-messages" id="chat-messages">
+                    <div class="msg ai">สวัสดี ฉันคือ Sentinel AI ผู้ช่วยของ Panthorium OS<br>มีอะไรให้ช่วยไหม?</div>
+                </div>
+                <div class="chat-input-area">
+                    <button class="chat-mic" id="chat-mic" title="พูด">🎤</button>
+                    <input class="chat-input" id="chat-input" placeholder="พิมพ์ข้อความหรือใช้เสียง..." />
+                    <button class="chat-send" id="chat-send">➤</button>
+                </div>
+            </div>
+        `;
+        createWindow("sentinel", "Sentinel AI", html, { width: 440, height: 520 });
+
+        const input = $("chat-input");
+        const sendBtn = $("chat-send");
+        const micBtn = $("chat-mic");
+        const messages = $("chat-messages");
+
+        async function send() {
+            const text = input.value.trim();
+            if (!text) return;
+            input.value = "";
+            appendMsg(text, "user");
+            appendMsg("กำลังคิด...", "ai", true);
+
+            const res = await callAI(text);
+            // remove loading
+            const last = messages.querySelector(".msg.loading");
+            if (last) last.remove();
+
+            appendMsg(res.text, "ai", false, res.provider);
+            speak(res.text);
+        }
+
+        function appendMsg(text, type, loading = false, provider = null) {
+            const div = document.createElement("div");
+            div.className = `msg ${type}` + (loading ? " loading" : "");
+            div.innerHTML = text + (provider ? `<div class="provider">via ${provider}</div>` : "");
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        sendBtn.onclick = send;
+        input.onkeydown = (e) => { if (e.key === "Enter") send(); };
+
+        // Voice
+        let recognition = null;
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SR) {
+            recognition = new SR();
+            recognition.lang = "th-TH";
+            recognition.interimResults = false;
+            recognition.onresult = (e) => {
+                const t = e.results[0][0].transcript;
+                input.value = t;
+                send();
+            };
+            recognition.onend = () => micBtn.classList.remove("listening");
+            recognition.onerror = () => micBtn.classList.remove("listening");
+        }
+
+        micBtn.onclick = () => {
+            if (!recognition) {
+                toast("เบราว์เซอร์ไม่รองรับการรู้จำเสียง");
+                return;
+            }
+            if (micBtn.classList.contains("listening")) {
+                recognition.stop();
+                return;
+            }
+            micBtn.classList.add("listening");
+            recognition.start();
+        };
+    }
+
+    // ---------- App: Settings ----------
+    function openSettings() {
+        const coreStatus = OS.coreOnline ? "🟢 Online" : "🔴 Offline";
+        const html = `
+            <div class="app-content">
+                <div class="settings-section">
+                    <h3>🧠 Sentinel Core (Backend)</h3>
+                    <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px;">
+                        สถานะ: <strong id="core-status-text">${coreStatus}</strong><br>
+                        <span style="font-size:12px;">AI หลักอยู่บนเซิร์ฟเวอร์ — API Key ไม่โผล่ฝั่งผู้ใช้</span>
+                    </p>
+                    <div class="setting-row">
+                        <label>Backend URL</label>
+                        <input type="text" id="backend-url" placeholder="http://localhost:8787" value="${OS.config.backendUrl}">
+                    </div>
+                    <div class="setting-row">
+                        <label>
+                            <input type="checkbox" id="use-backend" ${OS.config.useBackend ? "checked" : ""} style="width:auto;margin-right:8px;">
+                            ใช้ Sentinel Core เป็นหลัก
+                        </label>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn-primary" id="save-backend">บันทึก Backend</button>
+                        <button class="btn-primary" id="test-core" style="background:rgba(0,255,204,0.2);color:var(--accent);">ทดสอบการเชื่อมต่อ</button>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <h3>🔑 API Keys สำรอง (Local Fallback)</h3>
+                    <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">ใช้เมื่อ Backend ยังไม่พร้อมเท่านั้น</p>
+                    <div class="setting-row">
+                        <label>Groq API Key</label>
+                        <input type="password" id="key-groq" placeholder="gsk_..." value="${OS.config.keys.groq}">
+                    </div>
+                    <div class="setting-row">
+                        <label>OpenAI API Key</label>
+                        <input type="password" id="key-openai" placeholder="sk-..." value="${OS.config.keys.openai}">
+                    </div>
+                    <div class="setting-row">
+                        <label>Google Gemini API Key</label>
+                        <input type="password" id="key-gemini" placeholder="AIza..." value="${OS.config.keys.gemini}">
+                    </div>
+                    <div class="setting-row">
+                        <label>Anthropic API Key</label>
+                        <input type="password" id="key-anthropic" placeholder="sk-ant-..." value="${OS.config.keys.anthropic}">
+                    </div>
+                    <button class="btn-primary" id="save-keys">บันทึก API Keys สำรอง</button>
+                </div>
+                <div class="settings-section">
+                    <h3>🛡️ Biometric (ไม่บังคับ)</h3>
+                    <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px;">
+                        สถานะ: ${OS.biometrics.enrolled ? "ลงทะเบียนแล้ว" : "ยังไม่ได้ลงทะเบียน"}
+                    </p>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn-primary" id="enroll-bio">ลงทะเบียน Biometric</button>
+                        <button class="btn-danger" id="reset-bio">ล้างข้อมูล</button>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <h3>ℹ️ ระบบ</h3>
+                    <p style="font-size:13px;color:var(--text-dim);line-height:1.6;">
+                        Panthorium OS v${OS.version}<br>
+                        สถาปัตยกรรม: Frontend + Sentinel Core Backend<br>
+                        รองรับ: คอมพิวเตอร์ · แท็บเล็ต · สมาร์ทโฟน<br>
+                        <strong style="color:var(--accent);">ใช้งานฟรีทันที ไม่ต้อง login</strong>
+                    </p>
+                </div>
+            </div>
+        `;
+        createWindow("settings", "ตั้งค่า", html, { width: 420, height: 620 });
+
+        $("save-backend").onclick = () => {
+            const url = $("backend-url").value.trim().replace(/\/$/, "") || "http://localhost:8787";
+            const use = $("use-backend").checked;
+            OS.config.backendUrl = url;
+            OS.config.useBackend = use;
+            localStorage.setItem("pt_backend_url", url);
+            localStorage.setItem("pt_use_backend", use ? "1" : "0");
+            toast("บันทึกการตั้งค่า Backend แล้ว");
+            checkCoreStatus();
+        };
+
+        $("test-core").onclick = async () => {
+            toast("กำลังทดสอบ Sentinel Core...");
+            const ok = await checkCoreStatus();
+            const el = $("core-status-text");
+            if (el) el.textContent = ok ? "🟢 Online" : "🔴 Offline";
+            toast(ok ? "เชื่อมต่อ Sentinel Core สำเร็จ" : "เชื่อมต่อไม่ได้ — ตรวจ URL หรือเปิด Backend");
+        };
+
+        $("save-keys").onclick = () => {
+            ["groq", "openai", "gemini", "anthropic"].forEach(p => {
+                const el = $("key-" + p);
+                if (el) el.value = "";
+            });
+            toast("เพื่อความปลอดภัย API Keys ต้องตั้งค่าที่ Backend ผ่าน Environment Variables");
+        };
+
+        $("enroll-bio").onclick = async () => {
+            toast("กำลังเริ่มลงทะเบียน Biometric...");
+            const ok = await enrollBiometrics();
+            if (ok) {
+                toast("ลงทะเบียน Biometric สำเร็จ");
+                closeWindow("settings");
+                openSettings();
+            } else {
+                toast("ไม่สามารถลงทะเบียนได้ (ต้องอนุญาตกล้อง/ไมค์)");
+            }
+        };
+
+        $("reset-bio").onclick = () => {
+            if (confirm("ล้างข้อมูลใบหน้าและเสียง?")) {
+                localStorage.removeItem("pt_face");
+                localStorage.removeItem("pt_voice");
+                localStorage.removeItem("pt_enrolled");
+                OS.biometrics = { faceDescriptor: null, voiceprint: null, enrolled: false };
+                toast("ล้างข้อมูล Biometric แล้ว");
+                closeWindow("settings");
+                openSettings();
+            }
+        };
+    }
+
+    // ---------- App: Notes ----------
+    function openNotes() {
+        const saved = localStorage.getItem("pt_notes") || "";
+        const html = `<textarea class="notes-area" id="notes-area" placeholder="เขียนบันทึกที่นี่...">${saved}</textarea>`;
+        createWindow("notes", "บันทึก", html, { width: 420, height: 400 });
+        const area = $("notes-area");
+        area.addEventListener("input", () => {
+            localStorage.setItem("pt_notes", area.value);
+        });
+    }
+
+    // ---------- App: Calculator ----------
+    function openCalc() {
+        const html = `
+            <div style="display:flex;flex-direction:column;height:100%;">
+                <div class="calc-display" id="calc-display">0</div>
+                <div class="calc-grid">
+                    <button class="calc-btn" data-v="C">C</button>
+                    <button class="calc-btn" data-v="±">±</button>
+                    <button class="calc-btn" data-v="%">%</button>
+                    <button class="calc-btn op" data-v="/">÷</button>
+                    <button class="calc-btn" data-v="7">7</button>
+                    <button class="calc-btn" data-v="8">8</button>
+                    <button class="calc-btn" data-v="9">9</button>
+                    <button class="calc-btn op" data-v="*">×</button>
+                    <button class="calc-btn" data-v="4">4</button>
+                    <button class="calc-btn" data-v="5">5</button>
+                    <button class="calc-btn" data-v="6">6</button>
+                    <button class="calc-btn op" data-v="-">−</button>
+                    <button class="calc-btn" data-v="1">1</button>
+                    <button class="calc-btn" data-v="2">2</button>
+                    <button class="calc-btn" data-v="3">3</button>
+                    <button class="calc-btn op" data-v="+">+</button>
+                    <button class="calc-btn" data-v="0" style="grid-column:span 2;">0</button>
+                    <button class="calc-btn" data-v=".">.</button>
+                    <button class="calc-btn eq" data-v="=">=</button>
+                </div>
+            </div>
+        `;
+        createWindow("calc", "เครื่องคิดเลข", html, { width: 300, height: 420 });
+
+        let expr = "";
+        const display = $("calc-display");
+        document.querySelectorAll("#calc-display").length; // ensure
+        const win = OS.windows.get("calc").el;
+        win.querySelectorAll(".calc-btn").forEach(btn => {
+            btn.onclick = () => {
+                const v = btn.dataset.v;
+                if (v === "C") { expr = ""; display.textContent = "0"; return; }
+                if (v === "=") {
+                    try {
+                        const r = Function('"use strict";return (' + expr.replace(/×/g,"*").replace(/÷/g,"/").replace(/−/g,"-") + ")")();
+                        display.textContent = r;
+                        expr = String(r);
+                    } catch { display.textContent = "Error"; expr = ""; }
+                    return;
+                }
+                if (v === "±") {
+                    if (expr) { expr = String(-parseFloat(expr)); display.textContent = expr; }
+                    return;
+                }
+                expr += v;
+                display.textContent = expr;
+            };
+        });
+    }
+
+    // ---------- App: Files (simple) ----------
+    function openFiles() {
+        let files = JSON.parse(localStorage.getItem("pt_files") || "[]");
+        function render() {
+            const list = files.map((f, i) => `
+                <div class="file-item" data-i="${i}">
+                    <div class="fico">📄</div>
+                    <div class="fname">${f.name}</div>
+                    <div class="fsize">${f.size}</div>
+                </div>
+            `).join("") || `<p style="color:var(--text-dim);font-size:13px;padding:12px;">ยังไม่มีไฟล์ — ใช้แอปบันทึกเพื่อสร้าง</p>`;
+
+            return `
+                <div class="app-content">
+                    <div style="display:flex;gap:8px;margin-bottom:14px;">
+                        <button class="btn-primary" id="new-file">+ สร้างไฟล์ใหม่</button>
+                    </div>
+                    <div class="file-list" id="file-list">${list}</div>
+                </div>
+            `;
+        }
+
+        createWindow("files", "ตัวจัดการไฟล์", render(), { width: 400, height: 380 });
+
+        const win = OS.windows.get("files").el;
+        win.querySelector("#new-file").onclick = () => {
+            const name = prompt("ชื่อไฟล์:");
+            if (!name) return;
+            files.push({ name, size: "0 B", content: "", created: Date.now() });
+            localStorage.setItem("pt_files", JSON.stringify(files));
+            closeWindow("files");
+            openFiles();
+        };
+    }
+
+    // ---------- App: Terminal ----------
+    function openTerminal() {
+        const html = `
+            <div class="term" id="term">
+                <div class="term-line">Panthorium OS Terminal v${OS.version}</div>
+                <div class="term-line">พิมพ์ "help" เพื่อดูคำสั่ง</div>
+                <div class="term-input-line">
+                    <span class="term-prompt">guest@panthorium:~$</span>
+                    <input class="term-input" id="term-input" autofocus />
+                </div>
+            </div>
+        `;
+        createWindow("terminal", "Terminal", html, { width: 560, height: 360 });
+
+        const term = $("term");
+        const input = $("term-input");
+
+        const commands = {
+            help: () => "คำสั่ง: help, clear, date, whoami, version, echo [text], ai [คำถาม], neofetch",
+            clear: () => { term.querySelectorAll(".term-line").forEach(l => l.remove()); return null; },
+            date: () => new Date().toLocaleString("th-TH"),
+            whoami: () => "guest",
+            version: () => `Panthorium OS ${OS.version}`,
+            neofetch: () => `
+ ██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗ ██████╗ ██████╗ ██╗██╗   ██╗███╗   ███╗
+ ██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝██║  ██║██╔═══██╗██╔══██╗██║██║   ██║████╗ ████║
+ ██████╔╝███████║██╔██╗ ██║   ██║   ███████║██║   ██║██████╔╝██║██║   ██║██╔████╔██║
+ ██╔═══╝ ██╔══██║██║╚██╗██║   ██║   ██╔══██║██║   ██║██╔══██╗██║██║   ██║██║╚██╔╝██║
+ ██║     ██║  ██║██║ ╚████║   ██║   ██║  ██║╚██████╔╝██║  ██║██║╚██████╔╝██║ ╚═╝ ██║
+ ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝ ╚═════╝ ╚═╝     ╚═╝
+ OS: Panthorium ${OS.version} (Web)
+ Host: ${navigator.platform}
+ Browser: ${navigator.userAgent.split(" ").pop()}
+ Online: ${OS.state.online}
+            `.trim()
+        };
+
+        input.onkeydown = async (e) => {
+            if (e.key !== "Enter") return;
+            const cmd = input.value.trim();
+            input.value = "";
+
+            const line = document.createElement("div");
+            line.className = "term-line";
+            line.textContent = `guest@panthorium:~$ ${cmd}`;
+            term.insertBefore(line, input.parentElement);
+
+            if (!cmd) return;
+
+            let out = "";
+            const parts = cmd.split(" ");
+            const name = parts[0].toLowerCase();
+
+            if (name === "echo") {
+                out = parts.slice(1).join(" ");
+            } else if (name === "ai") {
+                const q = parts.slice(1).join(" ");
+                if (!q) out = "ใช้งาน: ai [คำถาม]";
+                else {
+                    const res = await callAI(q);
+                    out = res.text;
+                }
+            } else if (commands[name]) {
+                out = commands[name]();
+            } else {
+                out = `คำสั่งไม่พบ: ${name}`;
+            }
+
+            if (out !== null && out !== undefined) {
+                const o = document.createElement("div");
+                o.className = "term-line";
+                o.textContent = out;
+                term.insertBefore(o, input.parentElement);
+            }
+            term.scrollTop = term.scrollHeight;
+        };
+    }
+
+    // ---------- App: About ----------
+    function openAbout() {
+        const html = `
+            <div class="about-content">
+                <div class="about-logo">🛡️</div>
+                <h2 style="margin-bottom:8px;">Panthorium OS</h2>
+                <p style="color:var(--text-dim);font-size:13px;margin-bottom:20px;">Version ${OS.version}</p>
+                <p style="font-size:13px;line-height:1.7;color:var(--text-dim);max-width:300px;margin:0 auto;">
+                    ระบบปฏิบัติการจำลองที่ทำงานบนเว็บ<br>
+                    รองรับทุกอุปกรณ์และทุกระบบปฏิบัติการ<br>
+                    ขับเคลื่อนด้วย Sentinel AI
+                </p>
+                <p style="margin-top:24px;font-size:12px;color:var(--text-dim);">
+                    พัฒนาเพื่อการศึกษาและสาธิต<br>
+                    ไม่ใช่ระบบปฏิบัติการจริงของเครื่อง
+                </p>
+            </div>
+        `;
+        createWindow("about", "เกี่ยวกับ", html, { width: 360, height: 380 });
+    }
+
+    // ---------- Three.js Background ----------
+    let scene, camera, renderer, sphere, basePositions;
+    const COUNT = 3500;
+
+    function initBackground() {
+        const canvas = $("bg-canvas");
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(220, 180, 220);
+        camera.lookAt(0, 0, 0);
+
+        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+        const geometry = new THREE.BufferGeometry();
+        basePositions = new Float32Array(COUNT * 3);
+        const positions = new Float32Array(COUNT * 3);
+        const phi = Math.PI * (3 - Math.sqrt(5));
+
+        for (let i = 0; i < COUNT; i++) {
+            const y = 1 - (i / (COUNT - 1)) * 2;
+            const r = Math.sqrt(1 - y * y);
+            const theta = phi * i;
+            basePositions[i*3]     = Math.cos(theta) * r * 90;
+            basePositions[i*3 + 1] = y * 90;
+            basePositions[i*3 + 2] = Math.sin(theta) * r * 90;
+            positions[i*3] = basePositions[i*3];
+            positions[i*3+1] = basePositions[i*3+1];
+            positions[i*3+2] = basePositions[i*3+2];
+        }
+        geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+
+        const material = new THREE.PointsMaterial({
+            size: 1.1,
+            color: 0x00ffcc,
+            transparent: true,
+            opacity: 0.65
+        });
+        sphere = new THREE.Points(geometry, material);
+        scene.add(sphere);
+
+        window.addEventListener("resize", () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animateBg();
+    }
+
+    function animateBg() {
+        requestAnimationFrame(animateBg);
+        if (sphere) {
+            sphere.rotation.y += 0.0008;
+            sphere.rotation.x += 0.0003;
+        }
+        if (renderer) renderer.render(scene, camera);
+    }
+
+    // ---------- PWA ----------
+    if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("./sw.js").catch(() => {});
+    }
+
+    // ---------- Start ----------
+    boot();
+    </script>
+</body>
+</html>
+
+module.exports = require("./services/sentinelCore");
+
+/** Panthorium OS Backend */
+require("dotenv").config();
+
+const path = require("path");
+const fs = require("fs");
+const express = require("express");
+const cors = require("cors");
+const helmet = require("helmet");
+const cookieParser = require("cookie-parser");
+
+const config = require("./config");
+const { JsonStore } = require("./repositories/jsonStore");
+const { AuditService } = require("./services/auditService");
+const { AuthService } = require("./services/authService");
+const { SentinelCore } = require("./services/sentinelCore");
+const { createApiRouter } = require("./routes/api");
+const { createAuthRouter } = require("./routes/auth");
+const { requestContext } = require("./middleware/requestContext");
+
+const app = express();
+if (config.trustProxy) app.set("trust proxy", 1);
+
+const store = new JsonStore(config.dataFile);
+const audit = new AuditService(config.auditFile);
+const authService = new AuthService({ store, config, audit });
+const sentinelCore = new SentinelCore();
+
+app.disable("x-powered-by");
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      mediaSrc: ["'self'", "blob:"],
+      connectSrc: ["'self'", "https://cdn.jsdelivr.net", ...config.allowedOrigins],
+      workerSrc: ["'self'", "blob:"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"]
+    }
+  },
+  crossOriginEmbedderPolicy: false
+}));
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || config.allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error("CORS origin denied"));
+  },
+  credentials: true
+}));
+app.use(express.json({ limit: "256kb", type: "application/json" }));
+app.use(cookieParser());
+app.use(requestContext(audit));
+
+app.use("/api/auth", createAuthRouter(authService, config));
+app.use("/api", createApiRouter(sentinelCore, authService, audit));
+
+const frontendCandidates = [path.join(__dirname, ".."), __dirname];
+const frontendRoot = frontendCandidates.find((dir) => fs.existsSync(path.join(dir, "sentinel.html"))) || __dirname;
+app.use(express.static(frontendRoot, { index: false, etag: true, maxAge: config.isProduction ? "1h" : 0 }));
+app.get("/", (req, res) => res.sendFile(path.join(frontendRoot, "sentinel.html")));
+
+app.use((req, res) => res.status(404).json({ ok: false, error: "not_found" }));
+app.use((err, req, res, next) => {
+  console.error("[HTTP]", err.message);
+  if (err.message === "CORS origin denied") return res.status(403).json({ ok: false, error: "cors_denied" });
+  res.status(500).json({ ok: false, error: "internal_error" });
+});
+
+if (require.main === module) {
+  app.listen(config.port, config.host, () => {
+    console.log("========================================");
+    console.log("  Panthorium OS Backend");
+    console.log("  Sentinel Core is online");
+    console.log(`  http://localhost:${config.port}`);
+    console.log(`  API: http://localhost:${config.port}/api/health`);
+    console.log("========================================");
+  });
+}
+
+module.exports = { app, sentinelCore, authService };
+
+const CACHE_NAME = 'panthorium-os-v1';
+const ASSETS = [
+  './sentinel.html',
+  './manifest.json'
+];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+  );
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+    )
+  );
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', (event) => {
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      return cached || fetch(event.request).catch(() => {
+        if (event.request.mode === 'navigate') {
+          return caches.match('./sentinel.html');
+        }
+      });
+    })
+  );
+});
