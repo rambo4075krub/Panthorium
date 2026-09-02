@@ -6,37 +6,58 @@
 require("dotenv").config();
 
 const path = require("path");
+const fs = require("fs");
 const express = require("express");
 const cors = require("cors");
-const { SentinelCore } = require("./services/sentinelCore");
-const { createApiRouter } = require("./routes/api");
+
+function loadModule(candidates) {
+  for (const candidate of candidates) {
+    try {
+      return require(candidate);
+    } catch (err) {
+      if (err.code !== "MODULE_NOT_FOUND") throw err;
+    }
+  }
+  throw new Error("Cannot find module from candidates: " + candidates.join(", "));
+}
+
+const { SentinelCore } = loadModule([
+  "./services/sentinelCore",
+  "./sentinelCore"
+]);
+
+const { createApiRouter } = loadModule([
+  "./routes/api",
+  "./api"
+]);
 
 const app = express();
 const PORT = process.env.PORT || 8787;
 const HOST = process.env.HOST || "0.0.0.0";
 
-// Middleware
 app.use(cors({
   origin: true,
   credentials: true
 }));
 app.use(express.json({ limit: "1mb" }));
 
-// Sentinel Core instance
 const sentinelCore = new SentinelCore();
-
-// API routes
 app.use("/api", createApiRouter(sentinelCore));
 
-// Serve frontend (optional - when running full stack together)
-const frontendRoot = path.join(__dirname, "..");
+const frontendCandidates = [
+  path.join(__dirname, ".."),
+  __dirname
+];
+const frontendRoot = frontendCandidates.find((dir) =>
+  fs.existsSync(path.join(dir, "sentinel.html"))
+) || __dirname;
+
 app.use(express.static(frontendRoot));
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(frontendRoot, "sentinel.html"));
 });
 
-// Fallback
 app.use((req, res) => {
   res.status(404).json({ ok: false, error: "not_found" });
 });
