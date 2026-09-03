@@ -17,20 +17,21 @@
 
   function keepLogoutInStartMenuOnly() {
     var taskbarLogout = document.getElementById('btn-session-logout');
-    if (taskbarLogout) taskbarLogout.style.display = 'none';
+    if (taskbarLogout && taskbarLogout.style.display !== 'none') taskbarLogout.style.display = 'none';
 
     var startLogout = document.getElementById('btn-logout');
     if (startLogout) {
-      startLogout.style.display = '';
-      startLogout.textContent = '🚪 ออกจากระบบ';
-      startLogout.title = 'ออกจากระบบ';
+      if (startLogout.style.display === 'none') startLogout.style.display = '';
+      if (startLogout.textContent !== '🚪 ออกจากระบบ') startLogout.textContent = '🚪 ออกจากระบบ';
+      if (startLogout.title !== 'ออกจากระบบ') startLogout.title = 'ออกจากระบบ';
     }
   }
 
   function clearDesktopIcons() {
     var desktopIcons = document.getElementById('desktop-icons');
     if (!desktopIcons) return;
-    while (desktopIcons.firstChild) desktopIcons.removeChild(desktopIcons.firstChild);
+    if (desktopIcons.style.display !== 'none') desktopIcons.style.display = 'none';
+    if (desktopIcons.childNodes.length) desktopIcons.replaceChildren();
   }
 
   function fitSphere() {
@@ -68,14 +69,12 @@
   window.addEventListener('resize', fitSphere);
   window.addEventListener('orientationchange', function () { setTimeout(fitSphere, 150); });
   window.addEventListener('panthorium:auth-changed', function () { setTimeout(sync, 0); });
+  document.addEventListener('DOMContentLoaded', sync, { once: true });
 
-  var observer = new MutationObserver(function () {
-    clearDesktopIcons();
-    keepLogoutInStartMenuOnly();
-  });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-
-  setInterval(sync, 1200);
+  // Do not observe the entire DOM here. The previous observer changed textContent
+  // inside its own callback, recursively generating MutationObserver events and
+  // starving the timer queue. That froze boot at the first 20% step.
+  setInterval(sync, 1500);
   setTimeout(sync, 0);
   setTimeout(fitSphere, 800);
   setTimeout(fitSphere, 1800);
