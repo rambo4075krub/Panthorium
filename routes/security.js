@@ -13,53 +13,34 @@ function createSecurityRouter(authService, repository, audit) {
 
   router.get("/overview", async (req, res, next) => {
     try {
-      const [sessions, auditSummary] = await Promise.all([
-        repository.listActiveSessions(),
-        audit.summary()
+      const [sessions, auditSummary, alerts] = await Promise.all([
+        repository.listActiveSessions(), audit.summary(), audit.securityAlerts()
       ]);
-      res.json({
-        ok: true,
-        summary: {
-          ...auditSummary,
-          activeSessions: sessions.length,
-          persistence: repository.constructor.name.replace("AuthRepository", "")
-        },
-        sessions
-      });
+      res.json({ ok: true, summary: { ...auditSummary, activeSessions: sessions.length, persistence: repository.constructor.name.replace("AuthRepository", ""), riskStatus: alerts.status, alertCount: alerts.alerts.length }, sessions, alerts: alerts.alerts });
     } catch (error) { next(error); }
+  });
+
+  router.get("/alerts", async (req, res, next) => {
+    try { res.json({ ok: true, ...(await audit.securityAlerts()) }); }
+    catch (error) { next(error); }
   });
 
   router.get("/audit", async (req, res, next) => {
     try {
-      const entries = await audit.listRecent({
-        limit: req.query.limit,
-        event: req.query.event,
-        q: req.query.q,
-        userId: req.query.userId,
-        status: req.query.status,
-        from: req.query.from,
-        to: req.query.to
-      });
+      const entries = await audit.listRecent({ limit: req.query.limit, event: req.query.event, q: req.query.q, userId: req.query.userId, status: req.query.status, from: req.query.from, to: req.query.to });
       res.json({ ok: true, entries });
     } catch (error) { next(error); }
   });
 
   router.get("/sessions", async (req, res, next) => {
-    try {
-      res.json({ ok: true, sessions: await repository.listActiveSessions() });
-    } catch (error) { next(error); }
+    try { res.json({ ok: true, sessions: await repository.listActiveSessions() }); }
+    catch (error) { next(error); }
   });
 
   router.delete("/sessions/:id", async (req, res, next) => {
     try {
       const revoked = await repository.revokeSession(req.params.id);
-      audit.record("security.session_revoked", {
-        actorUserId: req.user.sub,
-        sessionId: req.params.id,
-        requestId: req.requestId,
-        ip: req.ip || null,
-        userAgent: req.headers["user-agent"] || null
-      });
+      audit.record("security.session_revoked", { actorUserId: req.user.sub, sessionId: req.params.id, requestId: req.requestId, ip: req.ip || null, userAgent: req.headers["user-agent"] || null });
       if (!revoked) return res.status(404).json({ ok: false, error: "session_not_found" });
       res.json({ ok: true });
     } catch (error) { next(error); }
@@ -68,14 +49,7 @@ function createSecurityRouter(authService, repository, audit) {
   router.delete("/users/:id/sessions", async (req, res, next) => {
     try {
       const count = await repository.revokeUserSessions(req.params.id);
-      audit.record("security.user_sessions_revoked", {
-        actorUserId: req.user.sub,
-        targetUserId: req.params.id,
-        count,
-        requestId: req.requestId,
-        ip: req.ip || null,
-        userAgent: req.headers["user-agent"] || null
-      });
+      audit.record("security.user_sessions_revoked", { actorUserId: req.user.sub, targetUserId: req.params.id, count, requestId: req.requestId, ip: req.ip || null, userAgent: req.headers["user-agent"] || null });
       res.json({ ok: true, revoked: count });
     } catch (error) { next(error); }
   });
