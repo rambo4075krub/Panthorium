@@ -12,6 +12,7 @@
     var headers = options.headers || {};
     var system = getOS();
     if (system && system.config && system.config.accessToken) headers.Authorization = 'Bearer ' + system.config.accessToken;
+    if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
     options.headers = headers; options.credentials = 'include';
     return fetch(path, options).then(function (response) { return response.json().catch(function () { return {}; }).then(function (data) { if (!response.ok) throw new Error(data.error || ('HTTP_' + response.status)); return data; }); });
   }
@@ -61,8 +62,29 @@
     if (!alerts || !alerts.length) { el.innerHTML = '<div style="padding:10px;border:1px solid rgba(110,255,181,.25);border-radius:9px;font-size:12px;"><strong style="color:' + badgeColor + ';">' + badge + '</strong> · ไม่พบความเสี่ยงที่เข้าเกณฑ์แจ้งเตือน</div>'; return; }
     el.innerHTML = alerts.map(function (alert) {
       var color = alert.level === 'critical' ? '#ff637d' : alert.level === 'warning' ? '#ffbf5f' : '#8cc8ff';
-      return '<div style="padding:10px;border:1px solid ' + color + '55;border-radius:9px;margin-top:7px;background:rgba(0,0,0,.15);"><div style="display:flex;justify-content:space-between;gap:8px;"><strong>' + escapeHtml(alert.title) + '</strong><span style="color:' + color + ';font-size:11px;text-transform:uppercase;">' + escapeHtml(alert.level) + '</span></div><div style="font-size:11px;color:var(--text-dim);margin-top:4px;">' + escapeHtml(alert.detail) + '</div><div style="font-size:10px;color:var(--text-dim);margin-top:3px;">' + escapeHtml(alert.code) + '</div></div>';
+      var ackText = alert.acknowledged ? 'รับทราบแล้ว' : 'รับทราบ 24 ชม.';
+      var ackStyle = alert.acknowledged ? 'opacity:.7;' : '';
+      var ackInfo = alert.acknowledged && alert.acknowledgement ? '<div style="font-size:10px;color:#6effb5;margin-top:4px;">รับทราบถึง ' + escapeHtml(formatTime(alert.acknowledgement.expiresAt)) + '</div>' : '';
+      return '<div style="padding:10px;border:1px solid ' + color + '55;border-radius:9px;margin-top:7px;background:rgba(0,0,0,.15);' + ackStyle + '">' +
+        '<div style="display:flex;justify-content:space-between;gap:8px;"><strong>' + escapeHtml(alert.title) + '</strong><span style="color:' + color + ';font-size:11px;text-transform:uppercase;">' + escapeHtml(alert.level) + '</span></div>' +
+        '<div style="font-size:11px;color:var(--text-dim);margin-top:4px;">' + escapeHtml(alert.detail) + '</div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:7px;"><span style="font-size:10px;color:var(--text-dim);">' + escapeHtml(alert.code) + '</span>' +
+        '<button data-p3-alert-id="' + escapeHtml(alert.id) + '" data-p3-alert-action="' + (alert.acknowledged ? 'reopen' : 'ack') + '" style="padding:5px 8px;border:0;border-radius:7px;cursor:pointer;">' + ackText + '</button></div>' + ackInfo + '</div>';
     }).join('');
+
+    Array.prototype.forEach.call(el.querySelectorAll('[data-p3-alert-id]'), function (button) {
+      button.onclick = function () {
+        var id = button.getAttribute('data-p3-alert-id');
+        var action = button.getAttribute('data-p3-alert-action');
+        var request = action === 'ack'
+          ? securityApi('/api/security/alerts/' + encodeURIComponent(id) + '/acknowledge', { method: 'POST', body: JSON.stringify({ ttlHours: 24 }) })
+          : securityApi('/api/security/alerts/' + encodeURIComponent(id) + '/acknowledgement', { method: 'DELETE' });
+        request.then(function () {
+          notify(action === 'ack' ? 'รับทราบ Security Alert แล้ว' : 'เปิด Security Alert กลับมาแล้ว');
+          renderDashboard(section);
+        }).catch(function (error) { notify('จัดการ Alert ไม่สำเร็จ: ' + error.message); });
+      };
+    });
   }
 
   function renderDashboard(section) {
@@ -71,7 +93,7 @@
     summaryEl.textContent = 'กำลังโหลด Security Data...';
     Promise.all([securityApi('/api/security/overview'), renderAudit(section)]).then(function (results) {
       var overview = results[0] || {}, s = overview.summary || {};
-      var cards = [['Risk', String(s.riskStatus || 'normal').toUpperCase()], ['Alerts', s.alertCount], ['Active Sessions', s.activeSessions], ['Login OK 24h', s.loginSuccess24h], ['Login Failed 24h', s.loginFailed24h], ['Guest 24h', s.guestSessions24h], ['User Changes 24h', s.userChanges24h], ['Persistence', s.persistence]];
+      var cards = [['Risk', String(s.riskStatus || 'normal').toUpperCase()], ['Active Alerts', s.alertCount], ['Acknowledged', s.acknowledgedAlertCount], ['Active Sessions', s.activeSessions], ['Login OK 24h', s.loginSuccess24h], ['Login Failed 24h', s.loginFailed24h], ['Guest 24h', s.guestSessions24h], ['Persistence', s.persistence]];
       summaryEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px;">' + cards.map(function (entry) { return '<div style="padding:12px;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:rgba(0,0,0,.18);"><div style="font-size:11px;color:var(--text-dim);">' + escapeHtml(entry[0]) + '</div><div style="font-size:18px;font-weight:700;margin-top:4px;">' + escapeHtml(entry[1] == null ? 0 : entry[1]) + '</div></div>'; }).join('') + '</div>';
       renderAlerts(section, overview.alerts || [], s.riskStatus || 'normal');
       var sessions = overview.sessions || [];
