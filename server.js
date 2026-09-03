@@ -22,7 +22,11 @@ const app = express();
 if (config.trustProxy) app.set("trust proxy", 1);
 
 const authRepository = createAuthRepository(config);
-const audit = new AuditService(config.auditFile);
+const audit = new AuditService({
+  file: config.auditFile,
+  databaseUrl: config.databaseUrl,
+  databaseSslMode: config.databaseSslMode
+});
 const authService = new AuthService({ repository: authRepository, config, audit });
 const sentinelCore = new SentinelCore();
 
@@ -85,7 +89,7 @@ for (const script of ["boot-recovery.js", "branding.js", "phase2-auth.js", "user
 function renderShell() {
   const file = path.join(frontendRoot, "sentinel.html");
   let html = fs.readFileSync(file, "utf8");
-  const version = "phase3-shell-v5";
+  const version = "phase3-audit-persistence";
   if (!html.includes('/boot-recovery.js')) html = html.replace(/<\/body>/i, `  <script src="/boot-recovery.js?v=${version}"></script>\n</body>`);
   if (!html.includes('/branding.js')) html = html.replace(/<\/body>/i, `  <script src="/branding.js?v=${version}"></script>\n</body>`);
   if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, `  <script src="/phase2-auth.js?v=${version}"></script>\n</body>`);
@@ -105,11 +109,8 @@ function serveShell(req, res, next) {
   } catch (error) { next(error); }
 }
 
-// IMPORTANT: both URLs must receive the transformed shell. The service worker and
-// legacy installs may navigate to /sentinel.html directly.
 app.get("/", serveShell);
 app.get("/sentinel.html", serveShell);
-
 app.use(express.static(frontendRoot, { index: false, etag: true, maxAge: config.isProduction ? "1h" : 0 }));
 
 app.use((req, res) => res.status(404).json({ ok: false, error: "not_found" }));
@@ -120,11 +121,13 @@ app.use((err, req, res, next) => {
 });
 
 async function start() {
+  await audit.init();
   await authService.init();
   return app.listen(config.port, config.host, () => {
     console.log("========================================");
     console.log("  Panthorium OS Backend");
     console.log(`  Auth persistence: ${config.databaseUrl ? "PostgreSQL" : "JSON fallback"}`);
+    console.log(`  Audit persistence: ${config.databaseUrl ? "PostgreSQL + file" : "file"}`);
     console.log("  Sentinel Core is online");
     console.log(`  http://localhost:${config.port}`);
     console.log(`  API: http://localhost:${config.port}/api/health`);
