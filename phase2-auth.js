@@ -18,6 +18,22 @@
     return 'User';
   }
 
+  function notifyAuthChanged() {
+    try { window.dispatchEvent(new CustomEvent('panthorium:auth-changed', { detail: { user: OS.state.user } })); } catch (_) {}
+    try { window.PanthoriumSecurityDashboard?.refresh?.(); } catch (_) {}
+    try { window.PanthoriumUserManager?.refresh?.(); } catch (_) {}
+  }
+
+  function ensureSecurityScript() {
+    if (window.PanthoriumSecurityDashboard || document.querySelector('script[data-phase3-security-loader]')) return;
+    const script = document.createElement('script');
+    script.src = '/security-dashboard.js?v=phase3-admin-sync-1';
+    script.dataset.phase3SecurityLoader = '1';
+    script.onload = () => notifyAuthChanged();
+    script.onerror = () => console.error('[Phase3] failed to load security-dashboard.js');
+    document.head.appendChild(script);
+  }
+
   function ensureLogoutControl() {
     const right = document.querySelector('.tb-right');
     if (!right || document.getElementById('btn-session-logout')) return;
@@ -46,6 +62,8 @@
       logoutBtn.title = 'ออกจากระบบ';
     }
     ensureLogoutControl();
+    if (isAdministrator()) ensureSecurityScript();
+    setTimeout(notifyAuthChanged, 0);
   }
 
   function permissionDenied(permission) {
@@ -56,6 +74,9 @@
   function closeForbiddenWindows() {
     if (!hasPermission('settings') && OS?.windows?.has('settings')) {
       try { closeWindow('settings'); } catch (_) {}
+    }
+    if (!isAdministrator() && OS?.windows?.has('security-dashboard')) {
+      try { closeWindow('security-dashboard'); } catch (_) {}
     }
   }
 
@@ -70,6 +91,8 @@
     OS.state.loggedIn = true;
     OS.state.verified = true;
     updateIdentityUI();
+    setTimeout(notifyAuthChanged, 100);
+    setTimeout(notifyAuthChanged, 800);
   }
 
   async function guestSession() {
@@ -86,52 +109,47 @@
     OS.state.user = data.user || null;
     updateIdentityUI();
     closeForbiddenWindows();
+    notifyAuthChanged();
     return data;
   }
 
   async function refreshSession() {
     const base = OS.config.backendUrl.replace(/\/$/, '');
-    const res = await fetch(base + '/api/auth/refresh', {
-      method: 'POST',
-      credentials: 'include'
-    });
+    const res = await fetch(base + '/api/auth/refresh', { method: 'POST', credentials: 'include' });
     if (!res.ok) return false;
     const data = await res.json();
     OS.config.accessToken = data.accessToken || '';
     OS.state.user = data.user || null;
     updateIdentityUI();
     closeForbiddenWindows();
+    notifyAuthChanged();
     return !!OS.config.accessToken;
   }
 
   async function fetchIdentity() {
     if (!OS.config.accessToken) return null;
     const base = OS.config.backendUrl.replace(/\/$/, '');
-    const res = await fetch(base + '/api/auth/me', {
-      headers: { Authorization: `Bearer ${OS.config.accessToken}` },
-      credentials: 'include'
-    });
+    const res = await fetch(base + '/api/auth/me', { headers: { Authorization: `Bearer ${OS.config.accessToken}` }, credentials: 'include' });
     if (!res.ok) return null;
     const data = await res.json();
     OS.state.user = data.user || OS.state.user;
     updateIdentityUI();
     closeForbiddenWindows();
+    notifyAuthChanged();
     return data.user || null;
   }
 
   async function login(username, password) {
     const base = OS.config.backendUrl.replace(/\/$/, '');
     const res = await fetch(base + '/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-      credentials: 'include'
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }), credentials: 'include'
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'login_failed');
     OS.config.accessToken = data.accessToken || '';
     OS.state.user = data.user || null;
     updateIdentityUI();
+    notifyAuthChanged();
     return data;
   }
 
@@ -147,6 +165,7 @@
     OS.state.loggedIn = false;
     OS.state.verified = false;
     closeForbiddenWindows();
+    notifyAuthChanged();
     document.getElementById('desktop')?.classList.remove('active');
     showLogin();
   }
@@ -155,10 +174,9 @@
     const loginScreen = document.getElementById('login-screen');
     const desktop = document.getElementById('desktop');
     if (!loginScreen || !desktop) return;
-
     loginScreen.innerHTML = `
       <div class="login-card">
-        <div class="login-avatar">🛡️</div>
+        <div class="login-avatar"><img src="/panthorium-logo.svg" alt="Panthorium" style="width:64px;height:64px;object-fit:contain;"></div>
         <div class="login-title">Panthorium OS</div>
         <div class="login-sub">เข้าสู่ระบบด้วยบัญชีของคุณ หรือใช้งานต่อในโหมด Guest</div>
         <input id="phase2-username" autocomplete="username" value="admin" placeholder="ชื่อผู้ใช้" style="width:100%;padding:12px;margin-bottom:10px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.25);color:var(--text);outline:none;">
@@ -167,123 +185,69 @@
         <button class="login-btn" id="phase2-guest-btn" style="margin-top:10px;background:rgba(255,255,255,.08);color:var(--text);">ใช้งานแบบ Guest</button>
         <div class="login-hint" id="phase2-login-status">ระบบ RBAC · Session ปลอดภัย</div>
       </div>`;
-
     desktop.classList.remove('active');
     loginScreen.style.display = 'flex';
     loginScreen.classList.add('active');
     OS.state.loggedIn = false;
-
     const status = document.getElementById('phase2-login-status');
     const password = document.getElementById('phase2-password');
-
     async function submitLogin() {
       const btn = document.getElementById('phase2-login-btn');
-      btn.disabled = true;
-      status.textContent = 'กำลังตรวจสอบสิทธิ์...';
+      btn.disabled = true; status.textContent = 'กำลังตรวจสอบสิทธิ์...';
       try {
         await login(document.getElementById('phase2-username').value.trim(), password.value);
-        activateDesktop();
-        toast('เข้าสู่ระบบสำเร็จ');
+        activateDesktop(); toast('เข้าสู่ระบบสำเร็จ');
       } catch (error) {
         status.textContent = error.message === 'invalid_credentials' ? 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' : 'ไม่สามารถเข้าสู่ระบบได้';
-      } finally {
-        btn.disabled = false;
-        password.value = '';
-      }
+      } finally { btn.disabled = false; password.value = ''; }
     }
-
     document.getElementById('phase2-login-btn').onclick = submitLogin;
     password.onkeydown = (event) => { if (event.key === 'Enter') submitLogin(); };
     document.getElementById('phase2-guest-btn').onclick = async () => {
       status.textContent = 'กำลังเปิด Guest session...';
-      try {
-        await guestSession();
-        activateDesktop();
-        toast('เข้าสู่ระบบแบบ Guest');
-      } catch {
-        status.textContent = 'ไม่สามารถสร้าง Guest session ได้';
-      }
+      try { await guestSession(); activateDesktop(); toast('เข้าสู่ระบบแบบ Guest'); }
+      catch { status.textContent = 'ไม่สามารถสร้าง Guest session ได้'; }
     };
   }
 
-  async function phase2EnsureAuth(force = false) {
-    if (OS.config.accessToken && !force) return true;
-    return false;
-  }
+  async function phase2EnsureAuth(force = false) { if (OS.config.accessToken && !force) return true; return false; }
 
   function installPermissionGuards() {
     const originalCreateWindow = typeof createWindow === 'function' ? createWindow : null;
     if (originalCreateWindow) {
       createWindow = function (id, title, contentHTML, opts = {}) {
-        if (id === 'settings' && !hasPermission('settings')) {
-          return permissionDenied('settings');
-        }
+        if (id === 'settings' && !hasPermission('settings')) return permissionDenied('settings');
+        if (id === 'security-dashboard' && !isAdministrator()) return permissionDenied('administrator');
         return originalCreateWindow(id, title, contentHTML, opts);
       };
     }
-
     const originalOpenSettings = typeof openSettings === 'function' ? openSettings : null;
     if (originalOpenSettings) {
-      const guardedSettings = function () {
-        if (!hasPermission('settings')) return permissionDenied('settings');
-        return originalOpenSettings();
-      };
+      const guardedSettings = function () { if (!hasPermission('settings')) return permissionDenied('settings'); return originalOpenSettings(); };
       openSettings = guardedSettings;
-
       if (typeof APP_LIST !== 'undefined' && Array.isArray(APP_LIST)) {
-        const settingsApp = APP_LIST.find((app) => app.id === 'settings');
-        if (settingsApp) settingsApp.open = guardedSettings;
+        const settingsApp = APP_LIST.find((app) => app.id === 'settings'); if (settingsApp) settingsApp.open = guardedSettings;
       }
-
       const quickSettings = document.getElementById('btn-settings-quick');
-      if (quickSettings) {
-        quickSettings.onclick = () => {
-          if (!hasPermission('settings')) return permissionDenied('settings');
-          guardedSettings();
-          if (typeof closeStartMenu === 'function') closeStartMenu();
-        };
-      }
+      if (quickSettings) quickSettings.onclick = () => { if (!hasPermission('settings')) return permissionDenied('settings'); guardedSettings(); if (typeof closeStartMenu === 'function') closeStartMenu(); };
     }
-
     const originalCallAI = typeof callAI === 'function' ? callAI : null;
-    if (originalCallAI) {
-      callAI = async function (prompt) {
-        if (!hasPermission('chat')) return { ok: false, text: 'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat', provider: 'RBAC', via: 'rbac' };
-        return originalCallAI(prompt);
-      };
-    }
+    if (originalCallAI) callAI = async function (prompt) { if (!hasPermission('chat')) return { ok: false, text: 'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat', provider: 'RBAC', via: 'rbac' }; return originalCallAI(prompt); };
   }
 
   async function initializePhase2() {
     OS.state.user = null;
     ensureAuth = phase2EnsureAuth;
-
     for (let i = 0; i < 40 && !OS.state.booted; i++) await sleep(100);
-
     installPermissionGuards();
-
-    // Explicit-login policy: every new page load starts at the login screen.
-    // Revoke any refresh cookie left by the previous browser session first.
     await revokeServerSession();
-    OS.config.accessToken = '';
-    OS.state.user = null;
-    OS.state.loggedIn = false;
-    OS.state.verified = false;
+    OS.config.accessToken = ''; OS.state.user = null; OS.state.loggedIn = false; OS.state.verified = false;
+    ensureSecurityScript();
     showLogin();
-
-    const logoutBtn = document.getElementById('btn-logout');
-    if (logoutBtn) logoutBtn.onclick = () => logout();
+    const logoutBtn = document.getElementById('btn-logout'); if (logoutBtn) logoutBtn.onclick = () => logout();
     ensureLogoutControl();
   }
 
-  window.PanthoriumAuth = {
-    login,
-    logout,
-    refreshSession,
-    guestSession,
-    fetchIdentity,
-    hasPermission,
-    isAdministrator
-  };
+  window.PanthoriumAuth = { login, logout, refreshSession, guestSession, fetchIdentity, hasPermission, isAdministrator };
   initializePhase2().catch((error) => console.error('[Phase2 Auth]', error));
 })();
