@@ -10,7 +10,7 @@ function validChatBody(body = {}) {
   if (body.model != null && (typeof body.model !== "string" || body.model.length > 120)) return "invalid_model";
   return null;
 }
-function createApiRouter(sentinelCore, authService, audit, aiOperations, agentService) {
+function createApiRouter(sentinelCore, authService, audit, aiOperations, agentService, agentPlanner) {
   const router = express.Router(); const auth = requireAuth(authService);
   const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
   const agentLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
@@ -29,6 +29,25 @@ function createApiRouter(sentinelCore, authService, audit, aiOperations, agentSe
       if (result.error === "tool_permission_denied") return res.status(403).json(result);
       if (result.error === "confirmation_required") return res.status(409).json(result);
       res.status(result.ok ? 200 : 400).json(result);
+    } catch (error) { next(error); }
+  });
+  router.post("/agent/plan", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => {
+    try {
+      const { request, provider } = req.body || {};
+      if (!validText(request, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" });
+      if (provider != null && !validText(provider, 40)) return res.status(400).json({ ok: false, error: "invalid_provider" });
+      const result = await agentPlanner.plan({ user: req.user, request, preferredProvider: provider?.toLowerCase(), requestId: req.requestId });
+      res.status(result.ok ? 200 : 422).json(result);
+    } catch (error) { next(error); }
+  });
+  router.post("/agent/run", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => {
+    try {
+      const { request, provider, confirmed } = req.body || {};
+      if (!validText(request, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" });
+      if (provider != null && !validText(provider, 40)) return res.status(400).json({ ok: false, error: "invalid_provider" });
+      const result = await agentPlanner.run({ user: req.user, request, preferredProvider: provider?.toLowerCase(), confirmed: confirmed === true, requestId: req.requestId });
+      if (result.confirmationRequired) return res.status(409).json(result);
+      res.status(result.ok ? 200 : 422).json(result);
     } catch (error) { next(error); }
   });
   router.get("/conversations", auth, requirePermission("chat"), async (req, res) => res.json({ ok: true, sessions: await sentinelCore.conversationSessions(req.user.sub, Number(req.query.limit) || 30) }));
