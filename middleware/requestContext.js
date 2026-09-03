@@ -12,7 +12,9 @@ function requestContext(audit) {
         path: req.originalUrl,
         status: res.statusCode,
         durationMs: Date.now() - started,
-        userId: req.user?.sub || null
+        userId: req.user?.sub || null,
+        ip: req.ip || req.socket?.remoteAddress || null,
+        userAgent: req.headers["user-agent"] || null
       });
     });
     next();
