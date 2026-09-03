@@ -10,14 +10,42 @@
     return !!OS?.state?.user?.roles?.includes('administrator');
   }
 
+  function roleLabel(user) {
+    const roles = user?.roles || [];
+    if (roles.includes('administrator')) return 'Administrator';
+    if (roles.includes('operator')) return 'Operator';
+    if (roles.includes('guest')) return 'Guest';
+    return 'User';
+  }
+
+  function ensureLogoutControl() {
+    const right = document.querySelector('.tb-right');
+    if (!right || document.getElementById('btn-session-logout')) return;
+    const btn = document.createElement('button');
+    btn.id = 'btn-session-logout';
+    btn.className = 'tb-btn';
+    btn.type = 'button';
+    btn.title = 'ออกจากระบบ';
+    btn.setAttribute('aria-label', 'ออกจากระบบ');
+    btn.style.fontSize = '13px';
+    btn.style.whiteSpace = 'nowrap';
+    btn.textContent = '🚪 ออกจากระบบ';
+    btn.onclick = () => logout();
+    right.prepend(btn);
+  }
+
   function updateIdentityUI() {
     const user = OS.state.user;
     const userEl = document.querySelector('.sm-user');
     const statusEl = document.getElementById('sm-status');
     const logoutBtn = document.getElementById('btn-logout');
     if (userEl) userEl.textContent = user?.username || 'ผู้ใช้ทั่วไป';
-    if (statusEl) statusEl.textContent = isAdministrator() ? 'Online · Administrator' : 'Online · Guest';
-    if (logoutBtn) logoutBtn.textContent = isAdministrator() ? '🚪 ออกจากระบบ' : '🔄 รีสตาร์ท';
+    if (statusEl) statusEl.textContent = `Online · ${roleLabel(user)}`;
+    if (logoutBtn) {
+      logoutBtn.textContent = '🚪 ออกจากระบบ';
+      logoutBtn.title = 'ออกจากระบบ';
+    }
+    ensureLogoutControl();
   }
 
   function permissionDenied(permission) {
@@ -29,6 +57,19 @@
     if (!hasPermission('settings') && OS?.windows?.has('settings')) {
       try { closeWindow('settings'); } catch (_) {}
     }
+  }
+
+  function activateDesktop() {
+    const loginScreen = document.getElementById('login-screen');
+    const desktop = document.getElementById('desktop');
+    if (loginScreen) {
+      loginScreen.classList.remove('active');
+      loginScreen.style.display = 'none';
+    }
+    if (desktop) desktop.classList.add('active');
+    OS.state.loggedIn = true;
+    OS.state.verified = true;
+    updateIdentityUI();
   }
 
   async function guestSession() {
@@ -94,12 +135,19 @@
     return data;
   }
 
-  async function logout() {
+  async function revokeServerSession() {
     const base = OS.config.backendUrl.replace(/\/$/, '');
     await fetch(base + '/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => null);
+  }
+
+  async function logout() {
+    await revokeServerSession();
     OS.config.accessToken = '';
     OS.state.user = null;
+    OS.state.loggedIn = false;
+    OS.state.verified = false;
     closeForbiddenWindows();
+    document.getElementById('desktop')?.classList.remove('active');
     showLogin();
   }
 
@@ -112,17 +160,18 @@
       <div class="login-card">
         <div class="login-avatar">🛡️</div>
         <div class="login-title">Panthorium OS</div>
-        <div class="login-sub">เข้าสู่ระบบเพื่อใช้สิทธิ์ผู้ดูแล หรือใช้งานต่อในโหมด Guest</div>
+        <div class="login-sub">เข้าสู่ระบบด้วยบัญชีของคุณ หรือใช้งานต่อในโหมด Guest</div>
         <input id="phase2-username" autocomplete="username" value="admin" placeholder="ชื่อผู้ใช้" style="width:100%;padding:12px;margin-bottom:10px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.25);color:var(--text);outline:none;">
         <input id="phase2-password" type="password" autocomplete="current-password" placeholder="รหัสผ่าน" style="width:100%;padding:12px;margin-bottom:12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.25);color:var(--text);outline:none;">
         <button class="login-btn" id="phase2-login-btn">เข้าสู่ระบบ</button>
         <button class="login-btn" id="phase2-guest-btn" style="margin-top:10px;background:rgba(255,255,255,.08);color:var(--text);">ใช้งานแบบ Guest</button>
-        <div class="login-hint" id="phase2-login-status">บัญชี Admin ใช้สิทธิ์จาก PostgreSQL / RBAC</div>
+        <div class="login-hint" id="phase2-login-status">ระบบ RBAC · Session ปลอดภัย</div>
       </div>`;
 
     desktop.classList.remove('active');
     loginScreen.style.display = 'flex';
     loginScreen.classList.add('active');
+    OS.state.loggedIn = false;
 
     const status = document.getElementById('phase2-login-status');
     const password = document.getElementById('phase2-password');
@@ -133,10 +182,7 @@
       status.textContent = 'กำลังตรวจสอบสิทธิ์...';
       try {
         await login(document.getElementById('phase2-username').value.trim(), password.value);
-        loginScreen.classList.remove('active');
-        loginScreen.style.display = 'none';
-        desktop.classList.add('active');
-        OS.state.loggedIn = true;
+        activateDesktop();
         toast('เข้าสู่ระบบสำเร็จ');
       } catch (error) {
         status.textContent = error.message === 'invalid_credentials' ? 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' : 'ไม่สามารถเข้าสู่ระบบได้';
@@ -152,10 +198,7 @@
       status.textContent = 'กำลังเปิด Guest session...';
       try {
         await guestSession();
-        loginScreen.classList.remove('active');
-        loginScreen.style.display = 'none';
-        desktop.classList.add('active');
-        OS.state.loggedIn = true;
+        activateDesktop();
         toast('เข้าสู่ระบบแบบ Guest');
       } catch {
         status.textContent = 'ไม่สามารถสร้าง Guest session ได้';
@@ -165,13 +208,10 @@
 
   async function phase2EnsureAuth(force = false) {
     if (OS.config.accessToken && !force) return true;
-    if (await refreshSession().catch(() => false)) return true;
-    return !!(await guestSession().catch(() => null));
+    return false;
   }
 
   function installPermissionGuards() {
-    // Strongest boundary: every Settings launch ultimately creates the "settings" window.
-    // Guard createWindow itself so stale function references or alternate launch paths cannot bypass RBAC.
     const originalCreateWindow = typeof createWindow === 'function' ? createWindow : null;
     if (originalCreateWindow) {
       createWindow = function (id, title, contentHTML, opts = {}) {
@@ -222,21 +262,18 @@
 
     installPermissionGuards();
 
-    const restored = await refreshSession().catch(() => false);
-    if (restored) {
-      await fetchIdentity().catch(() => null);
-      toast('กู้คืน Session สำเร็จ');
-    } else {
-      showLogin();
-    }
+    // Explicit-login policy: every new page load starts at the login screen.
+    // Revoke any refresh cookie left by the previous browser session first.
+    await revokeServerSession();
+    OS.config.accessToken = '';
+    OS.state.user = null;
+    OS.state.loggedIn = false;
+    OS.state.verified = false;
+    showLogin();
 
     const logoutBtn = document.getElementById('btn-logout');
-    if (logoutBtn) {
-      logoutBtn.onclick = async () => {
-        if (isAdministrator()) await logout();
-        else location.reload();
-      };
-    }
+    if (logoutBtn) logoutBtn.onclick = () => logout();
+    ensureLogoutControl();
   }
 
   window.PanthoriumAuth = {
