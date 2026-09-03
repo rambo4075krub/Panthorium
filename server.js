@@ -15,6 +15,7 @@ const { AuthService } = require("./services/authService");
 const { SentinelCore } = require("./services/sentinelCore");
 const { createApiRouter } = require("./routes/api");
 const { createAuthRouter } = require("./routes/auth");
+const { createSecurityRouter } = require("./routes/security");
 const { requestContext } = require("./middleware/requestContext");
 
 const app = express();
@@ -54,6 +55,7 @@ app.use(cookieParser());
 app.use(requestContext(audit));
 
 app.use("/api/auth", createAuthRouter(authService, config));
+app.use("/api/security", createSecurityRouter(authService, authRepository, audit));
 app.use("/api", createApiRouter(sentinelCore, authService, audit));
 
 const frontendCandidates = [path.join(__dirname, ".."), __dirname];
@@ -63,16 +65,11 @@ app.get("/", (req, res, next) => {
   try {
     const file = path.join(frontendRoot, "sentinel.html");
     let html = fs.readFileSync(file, "utf8");
-    if (!html.includes('/phase2-auth.js')) {
-      html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js"></script>\n</body>');
-    }
-    if (!html.includes('/user-manager.js')) {
-      html = html.replace(/<\/body>/i, '  <script src="/user-manager.js"></script>\n</body>');
-    }
+    if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js"></script>\n</body>');
+    if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, '  <script src="/user-manager.js"></script>\n</body>');
+    if (!html.includes('/security-dashboard.js')) html = html.replace(/<\/body>/i, '  <script src="/security-dashboard.js"></script>\n</body>');
     res.type("html").send(html);
-  } catch (error) {
-    next(error);
-  }
+  } catch (error) { next(error); }
 });
 
 app.use((req, res) => res.status(404).json({ ok: false, error: "not_found" }));
@@ -95,11 +92,5 @@ async function start() {
   });
 }
 
-if (require.main === module) {
-  start().catch((error) => {
-    console.error("[BOOT]", error);
-    process.exit(1);
-  });
-}
-
+if (require.main === module) start().catch((error) => { console.error("[BOOT]", error); process.exit(1); });
 module.exports = { app, sentinelCore, authService, start };
