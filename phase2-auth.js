@@ -159,6 +159,42 @@
     return !!(await guestSession().catch(() => null));
   }
 
+  function installPermissionGuards() {
+    const originalOpenSettings = typeof openSettings === 'function' ? openSettings : null;
+    if (originalOpenSettings) {
+      const guardedSettings = function () {
+        if (!hasPermission('settings')) return permissionDenied('settings');
+        return originalOpenSettings();
+      };
+      openSettings = guardedSettings;
+
+      // APP_LIST stores the original function reference at construction time,
+      // so patch that reference as well to cover desktop + Start Menu launchers.
+      if (typeof APP_LIST !== 'undefined' && Array.isArray(APP_LIST)) {
+        const settingsApp = APP_LIST.find((app) => app.id === 'settings');
+        if (settingsApp) settingsApp.open = guardedSettings;
+      }
+
+      // Quick Settings has its own handler; replace it explicitly.
+      const quickSettings = document.getElementById('btn-settings-quick');
+      if (quickSettings) {
+        quickSettings.onclick = () => {
+          if (!hasPermission('settings')) return permissionDenied('settings');
+          guardedSettings();
+          if (typeof closeStartMenu === 'function') closeStartMenu();
+        };
+      }
+    }
+
+    const originalCallAI = typeof callAI === 'function' ? callAI : null;
+    if (originalCallAI) {
+      callAI = async function (prompt) {
+        if (!hasPermission('chat')) return { ok: false, text: 'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat', provider: 'RBAC', via: 'rbac' };
+        return originalCallAI(prompt);
+      };
+    }
+  }
+
   async function initializePhase2() {
     OS.state.user = null;
     ensureAuth = phase2EnsureAuth;
@@ -173,27 +209,13 @@
       showLogin();
     }
 
+    installPermissionGuards();
+
     const logoutBtn = document.getElementById('btn-logout');
     if (logoutBtn) {
       logoutBtn.onclick = async () => {
         if (isAdministrator()) await logout();
         else location.reload();
-      };
-    }
-
-    const originalOpenSettings = typeof openSettings === 'function' ? openSettings : null;
-    if (originalOpenSettings) {
-      openSettings = function () {
-        if (!hasPermission('settings')) return permissionDenied('settings');
-        return originalOpenSettings();
-      };
-    }
-
-    const originalCallAI = typeof callAI === 'function' ? callAI : null;
-    if (originalCallAI) {
-      callAI = async function (prompt) {
-        if (!hasPermission('chat')) return { ok: false, text: 'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat', provider: 'RBAC', via: 'rbac' };
-        return originalCallAI(prompt);
       };
     }
   }
