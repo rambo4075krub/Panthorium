@@ -5,7 +5,7 @@ class ProviderManager {
     this.models = { groq: process.env.GROQ_MODEL || "llama-3.1-8b-instant", openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-1.5-flash", anthropic: process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-20241022" };
   }
   available() { return this.priority.filter((p) => this.keys[p]); }
-  catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: Boolean(this.keys[provider]), priority })); }
+  catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: Boolean(this.keys[provider]), priority, streaming: provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
   async call(provider, systemPrompt, history) { const result = await this.callDetailed(provider, systemPrompt, history); return result?.text || null; }
   async callDetailed(provider, systemPrompt, history, options = {}) {
     const key = this.keys[provider]; if (!key) return null; const model = options.model || this.models[provider];
@@ -14,6 +14,32 @@ class ProviderManager {
     if (provider === "gemini") return this.callGemini(key, model, systemPrompt, history);
     if (provider === "anthropic") return this.callAnthropic(key, model, systemPrompt, history);
     return null;
+  }
+  async streamDetailed(provider, systemPrompt, history, options = {}, onDelta = () => {}) {
+    const key = this.keys[provider]; if (!key) return null; const model = options.model || this.models[provider];
+    if (provider === "groq") return this.streamOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", key, model, systemPrompt, history, onDelta);
+    if (provider === "openai") return this.streamOpenAICompatible("https://api.openai.com/v1/chat/completions", key, model, systemPrompt, history, onDelta);
+    const result = await this.callDetailed(provider, systemPrompt, history, { model });
+    if (result?.text) onDelta(result.text);
+    return { ...result, streaming: "buffered" };
+  }
+  async streamOpenAICompatible(url, key, model, systemPrompt, history, onDelta) {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, max_tokens: 320, stream: true, stream_options: { include_usage: true } }), signal: AbortSignal.timeout(45000) });
+    if (!res.ok) throw new Error(`Provider HTTP ${res.status}`);
+    if (!res.body) throw new Error("provider_stream_unavailable");
+    const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let text = ""; let usage = null; let responseModel = model;
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n"); buffer = lines.pop() || "";
+      for (const raw of lines) {
+        const line = raw.trim(); if (!line.startsWith("data:")) continue; const payload = line.slice(5).trim(); if (!payload || payload === "[DONE]") continue;
+        let data; try { data = JSON.parse(payload); } catch { continue; }
+        responseModel = data.model || responseModel;
+        if (data.usage) usage = { inputTokens: data.usage.prompt_tokens || 0, outputTokens: data.usage.completion_tokens || 0, totalTokens: data.usage.total_tokens || 0 };
+        const delta = data.choices?.[0]?.delta?.content || ""; if (delta) { text += delta; onDelta(delta); }
+      }
+    }
+    return { text: text.trim(), model: responseModel, usage, streaming: "native" };
   }
   async callOpenAICompatible(url, key, model, systemPrompt, history) {
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, max_tokens: 320 }), signal: AbortSignal.timeout(30000) });
