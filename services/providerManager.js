@@ -6,9 +6,15 @@ class ProviderManager {
   }
   available() { return this.priority.filter((p) => this.keys[p]); }
   catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: Boolean(this.keys[provider]), priority, streaming: provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
+  resolveModel(provider, requestedModel) {
+    const configured = this.models[provider];
+    if (!configured) return null;
+    if (!requestedModel) return configured;
+    return String(requestedModel).trim() === configured ? configured : null;
+  }
   async call(provider, systemPrompt, history) { const result = await this.callDetailed(provider, systemPrompt, history); return result?.text || null; }
   async callDetailed(provider, systemPrompt, history, options = {}) {
-    const key = this.keys[provider]; if (!key) return null; const model = options.model || this.models[provider];
+    const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
     if (provider === "groq") return this.callOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", key, model, systemPrompt, history);
     if (provider === "openai") return this.callOpenAICompatible("https://api.openai.com/v1/chat/completions", key, model, systemPrompt, history);
     if (provider === "gemini") return this.callGemini(key, model, systemPrompt, history);
@@ -16,7 +22,7 @@ class ProviderManager {
     return null;
   }
   async streamDetailed(provider, systemPrompt, history, options = {}, onDelta = () => {}) {
-    const key = this.keys[provider]; if (!key) return null; const model = options.model || this.models[provider];
+    const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
     if (provider === "groq") return this.streamOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", key, model, systemPrompt, history, onDelta, false);
     if (provider === "openai") return this.streamOpenAICompatible("https://api.openai.com/v1/chat/completions", key, model, systemPrompt, history, onDelta, true);
     const result = await this.callDetailed(provider, systemPrompt, history, { model });
