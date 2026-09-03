@@ -77,10 +77,22 @@ app.get("/", (req, res, next) => {
   try {
     const file = path.join(frontendRoot, "sentinel.html");
     let html = fs.readFileSync(file, "utf8");
-    if (!html.includes('/branding.js')) html = html.replace(/<\/body>/i, '  <script src="/branding.js?v=phase3-syntax-fix"></script>\n</body>');
-    if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js?v=phase3-syntax-fix"></script>\n</body>');
-    if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, '  <script src="/user-manager.js?v=phase3-syntax-fix"></script>\n</body>');
-    if (!html.includes('/security-dashboard.js')) html = html.replace(/<\/body>/i, '  <script src="/security-dashboard.js?v=phase3-syntax-fix"></script>\n</body>');
+    if (!html.includes('/branding.js')) html = html.replace(/<\/body>/i, '  <script src="/branding.js?v=phase3-launcher-fix"></script>\n</body>');
+    if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js?v=phase3-launcher-fix"></script>\n</body>');
+    if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, '  <script src="/user-manager.js?v=phase3-launcher-fix"></script>\n</body>');
+    if (!html.includes('/security-dashboard.js')) html = html.replace(/<\/body>/i, '  <script src="/security-dashboard.js?v=phase3-launcher-fix"></script>\n</body>');
+
+    const launcher = [
+      '<script>',
+      '(function(){',
+      'function admin(){return !!(window.OS&&OS.state&&OS.state.user&&Array.isArray(OS.state.user.roles)&&OS.state.user.roles.indexOf("administrator")!==-1);}',
+      'function openSec(){if(window.PanthoriumSecurityDashboard&&typeof window.PanthoriumSecurityDashboard.open==="function"){window.PanthoriumSecurityDashboard.open();return;}if(typeof window.openSecurityDashboard==="function"){window.openSecurityDashboard();return;}if(window.toast){toast("Security Dashboard ยังโหลดไม่เสร็จ กรุณาลองอีกครั้ง");}}',
+      'function sync(){var d=document.getElementById("phase3-security-desktop-force");var s=document.getElementById("phase3-security-start-force");if(!admin()){if(d)d.remove();if(s)s.remove();return;}var desktop=document.getElementById("desktop-icons");var start=document.getElementById("sm-apps");if(desktop&&!d){d=document.createElement("div");d.id="phase3-security-desktop-force";d.className="desk-icon";d.innerHTML="<div class=\"icon-img\">🛡️</div><span>Security</span>";d.onclick=openSec;desktop.appendChild(d);}if(start&&!s){s=document.createElement("div");s.id="phase3-security-start-force";s.className="sm-app";s.innerHTML="<div class=\"ico\">🛡️</div><span>Security</span>";s.onclick=openSec;start.appendChild(s);}}',
+      'window.addEventListener("panthorium:auth-changed",sync);document.addEventListener("click",function(){setTimeout(sync,0);},true);setInterval(sync,500);setTimeout(sync,0);',
+      '})();',
+      '</script>'
+    ].join('\n');
+    html = html.replace(/<\/body>/i, launcher + '\n</body>');
 
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.set("Pragma", "no-cache");
