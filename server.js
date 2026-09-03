@@ -61,7 +61,7 @@ app.use("/api", createApiRouter(sentinelCore, authService, audit));
 const frontendCandidates = [path.join(__dirname, ".."), __dirname];
 const frontendRoot = frontendCandidates.find((dir) => fs.existsSync(path.join(dir, "sentinel.html"))) || __dirname;
 
-for (const script of ["branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js"]) {
+for (const script of ["branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "phase3-admin-inline.js"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
       res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -78,10 +78,20 @@ app.get("/", (req, res, next) => {
     const file = path.join(frontendRoot, "sentinel.html");
     let html = fs.readFileSync(file, "utf8");
     if (!html.includes('/branding.js')) html = html.replace(/<\/body>/i, '  <script src="/branding.js?v=phase3-brand"></script>\n</body>');
-    if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js?v=phase3-brand"></script>\n</body>');
-    if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, '  <script src="/user-manager.js?v=phase3-brand"></script>\n</body>');
-    if (!html.includes('/security-dashboard.js')) html = html.replace(/<\/body>/i, '  <script src="/security-dashboard.js?v=phase3-admin-app"></script>\n</body>');
-    res.set("Cache-Control", "no-store");
+    if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js?v=phase3-admin-inline"></script>\n</body>');
+    if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, '  <script src="/user-manager.js?v=phase3-admin-inline"></script>\n</body>');
+
+    // Inline the Phase 3 launcher/dashboard into the page itself so browser/service-worker
+    // caching or a failed secondary script request can no longer hide the Admin Security app.
+    const inlineFile = path.join(frontendRoot, "phase3-admin-inline.js");
+    if (fs.existsSync(inlineFile) && !html.includes('PanthoriumPhase3Admin')) {
+      const inlineCode = fs.readFileSync(inlineFile, "utf8").replace(/<\/script/gi, '<\\/script');
+      html = html.replace(/<\/body>/i, `  <script>\n${inlineCode}\n  </script>\n</body>`);
+    }
+
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
     res.type("html").send(html);
   } catch (error) { next(error); }
 });
