@@ -12,16 +12,19 @@ const config = require("./config");
 const { createAuthRepository } = require("./repositories/authRepository");
 const { AuditService } = require("./services/auditService");
 const { AuthService } = require("./services/authService");
+const { SecurityResponseService } = require("./services/securityResponseService");
 const { SentinelCore } = require("./services/sentinelCore");
 const { createApiRouter } = require("./routes/api");
 const { createAuthRouter } = require("./routes/auth");
+const { createSecurityRouter } = require("./routes/security");
 const { requestContext } = require("./middleware/requestContext");
 
 const app = express();
 if (config.trustProxy) app.set("trust proxy", 1);
 
 const authRepository = createAuthRepository(config);
-const audit = new AuditService(config.auditFile);
+const audit = new AuditService({ file: config.auditFile, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
+const securityResponse = new SecurityResponseService({ audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const authService = new AuthService({ repository: authRepository, config, audit });
 const sentinelCore = new SentinelCore();
 
@@ -53,13 +56,24 @@ app.use(express.json({ limit: "256kb", type: "application/json" }));
 app.use(cookieParser());
 app.use(requestContext(audit));
 
-app.use("/api/auth", createAuthRouter(authService, config));
+app.use("/api/auth", createAuthRouter(authService, config, securityResponse));
+app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
 app.use("/api", createApiRouter(sentinelCore, authService, audit));
 
 const frontendCandidates = [path.join(__dirname, ".."), __dirname];
 const frontendRoot = frontendCandidates.find((dir) => fs.existsSync(path.join(dir, "sentinel.html"))) || __dirname;
 
-for (const script of ["phase2-auth.js", "user-manager.js", "ui-shell.js"]) {
+app.get("/sw.js", (req, res, next) => {
+  try {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+    res.set("Service-Worker-Allowed", "/");
+    res.type("application/javascript").sendFile(path.join(frontendRoot, "sw.js"));
+  } catch (error) { next(error); }
+});
+
+for (const script of ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
       res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -70,22 +84,32 @@ for (const script of ["phase2-auth.js", "user-manager.js", "ui-shell.js"]) {
   });
 }
 
-app.use(express.static(frontendRoot, { index: false, etag: true, maxAge: config.isProduction ? "1h" : 0 }));
-app.get("/", (req, res, next) => {
+function renderShell() {
+  const file = path.join(frontendRoot, "sentinel.html");
+  let html = fs.readFileSync(file, "utf8");
+  const version = "phase3-final-security-response";
+  if (!html.includes('/boot-recovery.js')) html = html.replace(/<\/body>/i, `  <script src="/boot-recovery.js?v=${version}"></script>\n</body>`);
+  if (!html.includes('/branding.js')) html = html.replace(/<\/body>/i, `  <script src="/branding.js?v=${version}"></script>\n</body>`);
+  if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, `  <script src="/phase2-auth.js?v=${version}"></script>\n</body>`);
+  if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, `  <script src="/user-manager.js?v=${version}"></script>\n</body>`);
+  if (!html.includes('/security-dashboard.js')) html = html.replace(/<\/body>/i, `  <script src="/security-dashboard.js?v=${version}"></script>\n</body>`);
+  if (!html.includes('/ui-layout.js')) html = html.replace(/<\/body>/i, `  <script src="/ui-layout.js?v=${version}"></script>\n</body>`);
+  return html;
+}
+
+function serveShell(req, res, next) {
   try {
-    const file = path.join(frontendRoot, "sentinel.html");
-    let html = fs.readFileSync(file, "utf8");
-    if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js?v=prod-ui-shell"></script>\n</body>');
-    if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, '  <script src="/user-manager.js?v=prod-ui-shell"></script>\n</body>');
-    if (!html.includes('/ui-shell.js')) html = html.replace(/<\/body>/i, '  <script src="/ui-shell.js?v=prod-ui-shell"></script>\n</body>');
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.set("Pragma", "no-cache");
     res.set("Expires", "0");
-    res.type("html").send(html);
-  } catch (error) {
-    next(error);
-  }
-});
+    res.set("Surrogate-Control", "no-store");
+    res.type("html").send(renderShell());
+  } catch (error) { next(error); }
+}
+
+app.get("/", serveShell);
+app.get("/sentinel.html", serveShell);
+app.use(express.static(frontendRoot, { index: false, etag: true, maxAge: config.isProduction ? "1h" : 0 }));
 
 app.use((req, res) => res.status(404).json({ ok: false, error: "not_found" }));
 app.use((err, req, res, next) => {
@@ -95,11 +119,15 @@ app.use((err, req, res, next) => {
 });
 
 async function start() {
+  await audit.init();
+  await securityResponse.init();
   await authService.init();
   return app.listen(config.port, config.host, () => {
     console.log("========================================");
     console.log("  Panthorium OS Backend");
     console.log(`  Auth persistence: ${config.databaseUrl ? "PostgreSQL" : "JSON fallback"}`);
+    console.log(`  Audit persistence: ${config.databaseUrl ? "PostgreSQL + file" : "file"}`);
+    console.log(`  Security response: ${config.databaseUrl ? "PostgreSQL + automatic IP lockout" : "memory + automatic IP lockout"}`);
     console.log("  Sentinel Core is online");
     console.log(`  http://localhost:${config.port}`);
     console.log(`  API: http://localhost:${config.port}/api/health`);
@@ -107,11 +135,5 @@ async function start() {
   });
 }
 
-if (require.main === module) {
-  start().catch((error) => {
-    console.error("[BOOT]", error);
-    process.exit(1);
-  });
-}
-
-module.exports = { app, sentinelCore, authService, start };
+if (require.main === module) start().catch((error) => { console.error("[BOOT]", error); process.exit(1); });
+module.exports = { app, sentinelCore, authService, securityResponse, start };

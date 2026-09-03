@@ -79,11 +79,24 @@ class AuthService {
   async updateManagedUserAccess(id, { roles, permissions }, actorId) {
     const existing = await this.repository.findUserById(id);
     if (!existing) throw new Error("user_not_found");
-    const updated = await this.repository.updateUserAccess(id, {
-      roles: normalizeList(roles, ALLOWED_ROLES),
-      permissions: normalizeList(permissions, ALLOWED_PERMISSIONS)
-    });
-    this.audit.record("auth.user_access_updated", { actorId, userId: id });
+
+    const nextRoles = normalizeList(roles, ALLOWED_ROLES);
+    const nextPermissions = normalizeList(permissions, ALLOWED_PERMISSIONS);
+
+    if (id === actorId) {
+      if (!nextRoles.includes("administrator")) throw new Error("cannot_demote_self");
+      if (!nextPermissions.includes("settings")) throw new Error("cannot_remove_own_settings");
+    }
+
+    if ((existing.roles || []).includes("administrator") && !nextRoles.includes("administrator")) {
+      const users = await this.repository.listUsers();
+      const adminCount = users.filter((user) => (user.roles || []).includes("administrator")).length;
+      if (adminCount <= 1) throw new Error("last_administrator_required");
+    }
+
+    const updated = await this.repository.updateUserAccess(id, { roles: nextRoles, permissions: nextPermissions });
+    const revokedSessions = await this.repository.revokeUserSessions(id);
+    this.audit.record("auth.user_access_updated", { actorId, userId: id, revokedSessions });
     return this.publicUser(updated);
   }
 
@@ -93,7 +106,8 @@ class AuthService {
     if (!existing) throw new Error("user_not_found");
     const passwordHash = await bcrypt.hash(password, 12);
     const updated = await this.repository.updateUserPassword(id, passwordHash);
-    this.audit.record("auth.user_password_reset", { actorId, userId: id });
+    const revokedSessions = await this.repository.revokeUserSessions(id);
+    this.audit.record("auth.user_password_reset", { actorId, userId: id, revokedSessions });
     return this.publicUser(updated);
   }
 
@@ -134,24 +148,29 @@ class AuthService {
     return raw;
   }
 
-  async login(username, password) {
+  async login(username, password, context = {}) {
     const user = await this.repository.findUserByUsername(username);
+    const auditContext = {
+      requestId: context.requestId || null,
+      ip: context.ip || null,
+      userAgent: context.userAgent || null
+    };
     if (!user || !(await bcrypt.compare(password || "", user.passwordHash))) {
-      this.audit.record("auth.login_failed", { username });
+      this.audit.record("auth.login_failed", { username, ...auditContext });
       return null;
     }
-    this.audit.record("auth.login_success", { userId: user.id, username: user.username });
+    this.audit.record("auth.login_success", { userId: user.id, username: user.username, ...auditContext });
     return this.issueSession(user);
   }
 
-  guest() {
+  guest(context = {}) {
     const principal = {
       id: `guest:${crypto.randomUUID()}`,
       username: "guest",
       roles: ["guest"],
       permissions: ["chat", "system:read"]
     };
-    this.audit.record("auth.guest_session", { userId: principal.id });
+    this.audit.record("auth.guest_session", { userId: principal.id, requestId: context.requestId || null, ip: context.ip || null, userAgent: context.userAgent || null });
     return { principal, accessToken: this.signAccessToken(principal), refreshToken: null };
   }
 

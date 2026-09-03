@@ -1,9 +1,10 @@
-name: Panthorium Hardened CI
+name: Panthorium CI
 
 on:
   push:
     branches:
-      - hardened-v1.1
+      - main
+      - phase3-security-dashboard
   pull_request:
     branches:
       - main
@@ -23,6 +24,9 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Syntax checks
+        run: npm run check
 
       - name: Run tests
         run: npm test
