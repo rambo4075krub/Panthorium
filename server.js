@@ -1,139 +1,30 @@
 /** Panthorium OS Backend */
 require("dotenv").config();
-
-const path = require("path");
-const fs = require("fs");
-const express = require("express");
-const cors = require("cors");
-const helmet = require("helmet");
-const cookieParser = require("cookie-parser");
-
+const path = require("path"); const fs = require("fs"); const express = require("express"); const cors = require("cors"); const helmet = require("helmet"); const cookieParser = require("cookie-parser");
 const config = require("./config");
 const { createAuthRepository } = require("./repositories/authRepository");
-const { AuditService } = require("./services/auditService");
-const { AuthService } = require("./services/authService");
-const { SecurityResponseService } = require("./services/securityResponseService");
-const { SentinelCore } = require("./services/sentinelCore");
-const { createApiRouter } = require("./routes/api");
-const { createAuthRouter } = require("./routes/auth");
-const { createSecurityRouter } = require("./routes/security");
-const { requestContext } = require("./middleware/requestContext");
-
-const app = express();
-if (config.trustProxy) app.set("trust proxy", 1);
-
+const { AuditService } = require("./services/auditService"); const { AuthService } = require("./services/authService"); const { SecurityResponseService } = require("./services/securityResponseService");
+const { ConversationRepository } = require("./services/conversationRepository"); const { SentinelCore } = require("./services/sentinelCore");
+const { createApiRouter } = require("./routes/api"); const { createAuthRouter } = require("./routes/auth"); const { createSecurityRouter } = require("./routes/security"); const { requestContext } = require("./middleware/requestContext");
+const app = express(); if (config.trustProxy) app.set("trust proxy", 1);
 const authRepository = createAuthRepository(config);
 const audit = new AuditService({ file: config.auditFile, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const securityResponse = new SecurityResponseService({ audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const authService = new AuthService({ repository: authRepository, config, audit });
-const sentinelCore = new SentinelCore();
-
+const conversations = new ConversationRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
+const sentinelCore = new SentinelCore({ conversations, audit });
 app.disable("x-powered-by");
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:", "blob:"],
-      mediaSrc: ["'self'", "blob:"],
-      connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins],
-      workerSrc: ["'self'", "blob:"],
-      objectSrc: ["'none'"],
-      frameAncestors: ["'none'"]
-    }
-  },
-  crossOriginEmbedderPolicy: false
-}));
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin || config.allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error("CORS origin denied"));
-  },
-  credentials: true
-}));
-app.use(express.json({ limit: "256kb", type: "application/json" }));
-app.use(cookieParser());
-app.use(requestContext(audit));
-
-app.use("/api/auth", createAuthRouter(authService, config, securityResponse));
-app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
-app.use("/api", createApiRouter(sentinelCore, authService, audit));
-
-const frontendCandidates = [path.join(__dirname, ".."), __dirname];
-const frontendRoot = frontendCandidates.find((dir) => fs.existsSync(path.join(dir, "sentinel.html"))) || __dirname;
-
-app.get("/sw.js", (req, res, next) => {
-  try {
-    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-    res.set("Pragma", "no-cache");
-    res.set("Expires", "0");
-    res.set("Service-Worker-Allowed", "/");
-    res.type("application/javascript").sendFile(path.join(frontendRoot, "sw.js"));
-  } catch (error) { next(error); }
-});
-
-for (const script of ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js"]) {
-  app.get(`/${script}`, (req, res, next) => {
-    try {
-      res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      res.set("Pragma", "no-cache");
-      res.set("Expires", "0");
-      res.sendFile(path.join(frontendRoot, script));
-    } catch (error) { next(error); }
-  });
-}
-
-function renderShell() {
-  const file = path.join(frontendRoot, "sentinel.html");
-  let html = fs.readFileSync(file, "utf8");
-  const version = "phase3-final-security-response";
-  if (!html.includes('/boot-recovery.js')) html = html.replace(/<\/body>/i, `  <script src="/boot-recovery.js?v=${version}"></script>\n</body>`);
-  if (!html.includes('/branding.js')) html = html.replace(/<\/body>/i, `  <script src="/branding.js?v=${version}"></script>\n</body>`);
-  if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, `  <script src="/phase2-auth.js?v=${version}"></script>\n</body>`);
-  if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, `  <script src="/user-manager.js?v=${version}"></script>\n</body>`);
-  if (!html.includes('/security-dashboard.js')) html = html.replace(/<\/body>/i, `  <script src="/security-dashboard.js?v=${version}"></script>\n</body>`);
-  if (!html.includes('/ui-layout.js')) html = html.replace(/<\/body>/i, `  <script src="/ui-layout.js?v=${version}"></script>\n</body>`);
-  return html;
-}
-
-function serveShell(req, res, next) {
-  try {
-    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-    res.set("Pragma", "no-cache");
-    res.set("Expires", "0");
-    res.set("Surrogate-Control", "no-store");
-    res.type("html").send(renderShell());
-  } catch (error) { next(error); }
-}
-
-app.get("/", serveShell);
-app.get("/sentinel.html", serveShell);
-app.use(express.static(frontendRoot, { index: false, etag: true, maxAge: config.isProduction ? "1h" : 0 }));
-
-app.use((req, res) => res.status(404).json({ ok: false, error: "not_found" }));
-app.use((err, req, res, next) => {
-  console.error("[HTTP]", err.message);
-  if (err.message === "CORS origin denied") return res.status(403).json({ ok: false, error: "cors_denied" });
-  res.status(500).json({ ok: false, error: "internal_error" });
-});
-
-async function start() {
-  await audit.init();
-  await securityResponse.init();
-  await authService.init();
-  return app.listen(config.port, config.host, () => {
-    console.log("========================================");
-    console.log("  Panthorium OS Backend");
-    console.log(`  Auth persistence: ${config.databaseUrl ? "PostgreSQL" : "JSON fallback"}`);
-    console.log(`  Audit persistence: ${config.databaseUrl ? "PostgreSQL + file" : "file"}`);
-    console.log(`  Security response: ${config.databaseUrl ? "PostgreSQL + automatic IP lockout" : "memory + automatic IP lockout"}`);
-    console.log("  Sentinel Core is online");
-    console.log(`  http://localhost:${config.port}`);
-    console.log(`  API: http://localhost:${config.port}/api/health`);
-    console.log("========================================");
-  });
-}
-
+app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
+app.use(cors({ origin(origin, callback) { if (!origin || config.allowedOrigins.includes(origin)) return callback(null, true); return callback(new Error("CORS origin denied")); }, credentials: true }));
+app.use(express.json({ limit: "256kb", type: "application/json" })); app.use(cookieParser()); app.use(requestContext(audit));
+app.use("/api/auth", createAuthRouter(authService, config, securityResponse)); app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse)); app.use("/api", createApiRouter(sentinelCore, authService, audit));
+const frontendCandidates = [path.join(__dirname, ".."), __dirname]; const frontendRoot = frontendCandidates.find((dir) => fs.existsSync(path.join(dir, "sentinel.html"))) || __dirname;
+app.get("/sw.js", (req, res, next) => { try { res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate"); res.set("Pragma", "no-cache"); res.set("Expires", "0"); res.set("Service-Worker-Allowed", "/"); res.type("application/javascript").sendFile(path.join(frontendRoot, "sw.js")); } catch (error) { next(error); } });
+for (const script of ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js"]) app.get(`/${script}`, (req, res, next) => { try { res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate"); res.set("Pragma", "no-cache"); res.set("Expires", "0"); res.sendFile(path.join(frontendRoot, script)); } catch (error) { next(error); } });
+function renderShell() { const file = path.join(frontendRoot, "sentinel.html"); let html = fs.readFileSync(file, "utf8"); const version = "phase4-ai-platform"; for (const script of ["boot-recovery.js","branding.js","phase2-auth.js","user-manager.js","security-dashboard.js","ui-layout.js"]) if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`); return html; }
+function serveShell(req, res, next) { try { res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate"); res.set("Pragma", "no-cache"); res.set("Expires", "0"); res.set("Surrogate-Control", "no-store"); res.type("html").send(renderShell()); } catch (error) { next(error); } }
+app.get("/", serveShell); app.get("/sentinel.html", serveShell); app.use(express.static(frontendRoot, { index: false, etag: true, maxAge: config.isProduction ? "1h" : 0 }));
+app.use((req, res) => res.status(404).json({ ok: false, error: "not_found" })); app.use((err, req, res, next) => { console.error("[HTTP]", err.message); if (err.message === "CORS origin denied") return res.status(403).json({ ok: false, error: "cors_denied" }); res.status(500).json({ ok: false, error: "internal_error" }); });
+async function start() { await audit.init(); await securityResponse.init(); await authService.init(); await conversations.init(); return app.listen(config.port, config.host, () => { console.log("========================================"); console.log("  Panthorium OS Backend · Phase 4"); console.log(`  Auth persistence: ${config.databaseUrl ? "PostgreSQL" : "JSON fallback"}`); console.log(`  Conversation persistence: ${config.databaseUrl ? "PostgreSQL" : "memory"}`); console.log("  Sentinel Core AI Gateway is online"); console.log(`  http://localhost:${config.port}`); console.log("========================================"); }); }
 if (require.main === module) start().catch((error) => { console.error("[BOOT]", error); process.exit(1); });
-module.exports = { app, sentinelCore, authService, securityResponse, start };
+module.exports = { app, sentinelCore, authService, securityResponse, conversations, start };
