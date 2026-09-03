@@ -1,49 +1,41 @@
 const { SessionManager } = require("./sessionManager");
 const { PromptManager } = require("./promptManager");
 const { ProviderManager } = require("./providerManager");
+const { AiGateway } = require("./aiGateway");
 
 class SentinelCore {
-  constructor({ sessions, prompts, providers } = {}) {
+  constructor({ sessions, prompts, providers, gateway, conversations, audit } = {}) {
     this.sessions = sessions || new SessionManager();
     this.prompts = prompts || new PromptManager();
     this.providers = providers || new ProviderManager();
+    this.gateway = gateway || new AiGateway({ providers: this.providers, audit });
+    this.conversations = conversations || null;
     console.log("[Sentinel Core] Initialized");
-    console.log("[Sentinel Core] Available providers:", this.getAvailableProviders());
   }
-
   getAvailableProviders() { return this.providers.available(); }
+  providerCatalog() { return this.gateway.catalog(); }
   clearSession(sessionId) { this.sessions.clear(sessionId); }
+  async clearConversation(userId, sessionId) { this.sessions.clear(`${userId}:${sessionId}`); if (this.conversations) await this.conversations.clear(userId, sessionId); }
+  async conversationHistory(userId, sessionId, limit) { return this.conversations ? this.conversations.history(userId, sessionId, limit) : []; }
+  async conversationSessions(userId, limit) { return this.conversations ? this.conversations.listSessions(userId, limit) : []; }
 
-  async chat({ sessionId, message, mode = "default" }) {
+  async chat({ sessionId, userId = "system", message, mode = "default", provider, model }) {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
-    const clean = String(message).trim();
-    const history = this.sessions.append(sessionId || "default", { role: "user", content: clean });
-    const available = this.getAvailableProviders();
-    if (!available.length) return { ok: false, error: "no_provider", text: "Sentinel Core: ยังไม่ได้ตั้งค่า API Key ของผู้ให้บริการ AI บนเซิร์ฟเวอร์" };
+    const clean = String(message).trim(); const localId = `${userId}:${sessionId || "default"}`;
+    let history;
+    if (this.conversations) {
+      await this.conversations.append({ userId, sessionId: sessionId || "default", role: "user", content: clean });
+      history = (await this.conversations.history(userId, sessionId || "default", 40)).map(({ role, content }) => ({ role, content }));
+    } else history = this.sessions.append(localId, { role: "user", content: clean });
 
-    const errors = [];
-    for (const provider of available) {
-      try {
-        const text = await this.providers.call(provider, this.prompts.build(mode), history);
-        if (text) {
-          this.sessions.append(sessionId || "default", { role: "assistant", content: text });
-          return { ok: true, text, provider, sessionId: sessionId || "default", core: "Sentinel Core" };
-        }
-      } catch (err) {
-        errors.push(`${provider}: ${err.message}`);
-        console.warn(`[Sentinel Core] ${provider} failed:`, err.message);
-      }
+    const result = await this.gateway.complete({ systemPrompt: this.prompts.build(mode), history, preferredProvider: provider, preferredModel: model, userId, sessionId: sessionId || "default" });
+    if (result.ok) {
+      if (this.conversations) await this.conversations.append({ userId, sessionId: sessionId || "default", role: "assistant", content: result.text, provider: result.provider, model: result.model, usage: result.usage });
+      else this.sessions.append(localId, { role: "assistant", content: result.text });
+      return { ...result, sessionId: sessionId || "default", core: "Sentinel Core" };
     }
-    return {
-      ok: false,
-      error: "all_providers_failed",
-      text: "Sentinel Core: ไม่สามารถเชื่อมต่อกับหน่วยประมวลผลใดได้ในขณะนี้",
-      details: process.env.NODE_ENV === "production" ? undefined : errors
-    };
+    return result;
   }
-
-  status() {
-    return { name: "Sentinel Core", version: "1.1.0", providers: this.getAvailableProviders(), sessions: this.sessions.size(), uptime: process.uptime() };
-  }
+  status() { return { name: "Sentinel Core", version: "2.0.0-phase4", providers: this.getAvailableProviders(), sessions: this.sessions.size(), persistence: this.conversations?.pool ? "postgresql" : this.conversations ? "memory" : "legacy", uptime: process.uptime() }; }
 }
 module.exports = { SentinelCore };
