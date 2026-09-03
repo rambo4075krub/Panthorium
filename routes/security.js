@@ -1,7 +1,7 @@
 const express = require("express");
 const { requireAuth } = require("../middleware/auth");
 
-function createSecurityRouter(authService, repository, audit) {
+function createSecurityRouter(authService, repository, audit, securityResponse) {
   const router = express.Router();
   const auth = requireAuth(authService);
   const adminOnly = (req, res, next) => {
@@ -13,20 +13,22 @@ function createSecurityRouter(authService, repository, audit) {
 
   router.get("/overview", async (req, res, next) => {
     try {
-      const [sessions, auditSummary, alerts] = await Promise.all([
-        repository.listActiveSessions(), audit.summary(), audit.securityAlerts()
+      const [sessions, auditSummary, alerts, blocks] = await Promise.all([
+        repository.listActiveSessions(), audit.summary(), audit.securityAlerts(), securityResponse ? securityResponse.listBlocks() : []
       ]);
       res.json({
         ok: true,
         summary: {
           ...auditSummary,
           activeSessions: sessions.length,
+          activeIpBlocks: blocks.length,
           persistence: repository.constructor.name.replace("AuthRepository", ""),
           riskStatus: alerts.status,
           alertCount: alerts.activeCount,
           acknowledgedAlertCount: alerts.acknowledgedCount
         },
         sessions,
+        blocks,
         alerts: alerts.alerts
       });
     } catch (error) { next(error); }
@@ -43,15 +45,7 @@ function createSecurityRouter(authService, repository, audit) {
       const alert = current.alerts.find((item) => item.id === req.params.id);
       if (!alert) return res.status(404).json({ ok: false, error: "alert_not_found" });
       const acknowledgement = await audit.acknowledgeAlert(req.params.id, req.user.sub, req.body?.ttlHours);
-      audit.record("security.alert_action", {
-        actorUserId: req.user.sub,
-        alertId: req.params.id,
-        alertCode: alert.code,
-        action: "acknowledge",
-        requestId: req.requestId,
-        ip: req.ip || null,
-        userAgent: req.headers["user-agent"] || null
-      });
+      audit.record("security.alert_action", { actorUserId: req.user.sub, alertId: req.params.id, alertCode: alert.code, action: "acknowledge", requestId: req.requestId, ip: req.ip || null, userAgent: req.headers["user-agent"] || null });
       res.json({ ok: true, acknowledgement });
     } catch (error) { next(error); }
   });
@@ -60,6 +54,36 @@ function createSecurityRouter(authService, repository, audit) {
     try {
       const removed = await audit.clearAlertAcknowledgement(req.params.id, req.user.sub);
       if (!removed) return res.status(404).json({ ok: false, error: "acknowledgement_not_found" });
+      res.json({ ok: true });
+    } catch (error) { next(error); }
+  });
+
+  router.get("/blocks", async (req, res, next) => {
+    try { res.json({ ok: true, blocks: securityResponse ? await securityResponse.listBlocks() : [] }); }
+    catch (error) { next(error); }
+  });
+
+  router.post("/blocks", async (req, res, next) => {
+    try {
+      if (!securityResponse) return res.status(503).json({ ok: false, error: "security_response_unavailable" });
+      const block = await securityResponse.blockIp(req.body?.ip, {
+        durationMinutes: req.body?.durationMinutes,
+        reason: req.body?.reason || "Administrator block",
+        source: "manual",
+        actorUserId: req.user.sub
+      });
+      res.status(201).json({ ok: true, block });
+    } catch (error) {
+      if (error.message === "invalid_ip") return res.status(400).json({ ok: false, error: error.message });
+      next(error);
+    }
+  });
+
+  router.delete("/blocks/:ip", async (req, res, next) => {
+    try {
+      if (!securityResponse) return res.status(503).json({ ok: false, error: "security_response_unavailable" });
+      const removed = await securityResponse.unblockIp(req.params.ip, req.user.sub);
+      if (!removed) return res.status(404).json({ ok: false, error: "block_not_found" });
       res.json({ ok: true });
     } catch (error) { next(error); }
   });
