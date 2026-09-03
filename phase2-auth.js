@@ -25,6 +25,12 @@
     return false;
   }
 
+  function closeForbiddenWindows() {
+    if (!hasPermission('settings') && OS?.windows?.has('settings')) {
+      try { closeWindow('settings'); } catch (_) {}
+    }
+  }
+
   async function guestSession() {
     const base = OS.config.backendUrl.replace(/\/$/, '');
     const res = await fetch(base + '/api/auth/guest', {
@@ -38,6 +44,7 @@
     OS.config.accessToken = data.accessToken || '';
     OS.state.user = data.user || null;
     updateIdentityUI();
+    closeForbiddenWindows();
     return data;
   }
 
@@ -52,6 +59,7 @@
     OS.config.accessToken = data.accessToken || '';
     OS.state.user = data.user || null;
     updateIdentityUI();
+    closeForbiddenWindows();
     return !!OS.config.accessToken;
   }
 
@@ -66,6 +74,7 @@
     const data = await res.json();
     OS.state.user = data.user || OS.state.user;
     updateIdentityUI();
+    closeForbiddenWindows();
     return data.user || null;
   }
 
@@ -90,6 +99,7 @@
     await fetch(base + '/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => null);
     OS.config.accessToken = '';
     OS.state.user = null;
+    closeForbiddenWindows();
     showLogin();
   }
 
@@ -160,6 +170,18 @@
   }
 
   function installPermissionGuards() {
+    // Strongest boundary: every Settings launch ultimately creates the "settings" window.
+    // Guard createWindow itself so stale function references or alternate launch paths cannot bypass RBAC.
+    const originalCreateWindow = typeof createWindow === 'function' ? createWindow : null;
+    if (originalCreateWindow) {
+      createWindow = function (id, title, contentHTML, opts = {}) {
+        if (id === 'settings' && !hasPermission('settings')) {
+          return permissionDenied('settings');
+        }
+        return originalCreateWindow(id, title, contentHTML, opts);
+      };
+    }
+
     const originalOpenSettings = typeof openSettings === 'function' ? openSettings : null;
     if (originalOpenSettings) {
       const guardedSettings = function () {
@@ -168,14 +190,11 @@
       };
       openSettings = guardedSettings;
 
-      // APP_LIST stores the original function reference at construction time,
-      // so patch that reference as well to cover desktop + Start Menu launchers.
       if (typeof APP_LIST !== 'undefined' && Array.isArray(APP_LIST)) {
         const settingsApp = APP_LIST.find((app) => app.id === 'settings');
         if (settingsApp) settingsApp.open = guardedSettings;
       }
 
-      // Quick Settings has its own handler; replace it explicitly.
       const quickSettings = document.getElementById('btn-settings-quick');
       if (quickSettings) {
         quickSettings.onclick = () => {
@@ -201,6 +220,8 @@
 
     for (let i = 0; i < 40 && !OS.state.booted; i++) await sleep(100);
 
+    installPermissionGuards();
+
     const restored = await refreshSession().catch(() => false);
     if (restored) {
       await fetchIdentity().catch(() => null);
@@ -208,8 +229,6 @@
     } else {
       showLogin();
     }
-
-    installPermissionGuards();
 
     const logoutBtn = document.getElementById('btn-logout');
     if (logoutBtn) {
