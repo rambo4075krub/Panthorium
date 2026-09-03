@@ -12,6 +12,7 @@ const config = require("./config");
 const { createAuthRepository } = require("./repositories/authRepository");
 const { AuditService } = require("./services/auditService");
 const { AuthService } = require("./services/authService");
+const { SecurityResponseService } = require("./services/securityResponseService");
 const { SentinelCore } = require("./services/sentinelCore");
 const { createApiRouter } = require("./routes/api");
 const { createAuthRouter } = require("./routes/auth");
@@ -22,11 +23,8 @@ const app = express();
 if (config.trustProxy) app.set("trust proxy", 1);
 
 const authRepository = createAuthRepository(config);
-const audit = new AuditService({
-  file: config.auditFile,
-  databaseUrl: config.databaseUrl,
-  databaseSslMode: config.databaseSslMode
-});
+const audit = new AuditService({ file: config.auditFile, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
+const securityResponse = new SecurityResponseService({ audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const authService = new AuthService({ repository: authRepository, config, audit });
 const sentinelCore = new SentinelCore();
 
@@ -58,8 +56,8 @@ app.use(express.json({ limit: "256kb", type: "application/json" }));
 app.use(cookieParser());
 app.use(requestContext(audit));
 
-app.use("/api/auth", createAuthRouter(authService, config));
-app.use("/api/security", createSecurityRouter(authService, authRepository, audit));
+app.use("/api/auth", createAuthRouter(authService, config, securityResponse));
+app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
 app.use("/api", createApiRouter(sentinelCore, authService, audit));
 
 const frontendCandidates = [path.join(__dirname, ".."), __dirname];
@@ -89,7 +87,7 @@ for (const script of ["boot-recovery.js", "branding.js", "phase2-auth.js", "user
 function renderShell() {
   const file = path.join(frontendRoot, "sentinel.html");
   let html = fs.readFileSync(file, "utf8");
-  const version = "phase3-audit-persistence";
+  const version = "phase3-final-security-response";
   if (!html.includes('/boot-recovery.js')) html = html.replace(/<\/body>/i, `  <script src="/boot-recovery.js?v=${version}"></script>\n</body>`);
   if (!html.includes('/branding.js')) html = html.replace(/<\/body>/i, `  <script src="/branding.js?v=${version}"></script>\n</body>`);
   if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, `  <script src="/phase2-auth.js?v=${version}"></script>\n</body>`);
@@ -122,12 +120,14 @@ app.use((err, req, res, next) => {
 
 async function start() {
   await audit.init();
+  await securityResponse.init();
   await authService.init();
   return app.listen(config.port, config.host, () => {
     console.log("========================================");
     console.log("  Panthorium OS Backend");
     console.log(`  Auth persistence: ${config.databaseUrl ? "PostgreSQL" : "JSON fallback"}`);
     console.log(`  Audit persistence: ${config.databaseUrl ? "PostgreSQL + file" : "file"}`);
+    console.log(`  Security response: ${config.databaseUrl ? "PostgreSQL + automatic IP lockout" : "memory + automatic IP lockout"}`);
     console.log("  Sentinel Core is online");
     console.log(`  http://localhost:${config.port}`);
     console.log(`  API: http://localhost:${config.port}/api/health`);
@@ -136,4 +136,4 @@ async function start() {
 }
 
 if (require.main === module) start().catch((error) => { console.error("[BOOT]", error); process.exit(1); });
-module.exports = { app, sentinelCore, authService, start };
+module.exports = { app, sentinelCore, authService, securityResponse, start };
