@@ -13,11 +13,14 @@ function createSecurityRouter(authService, repository, audit) {
 
   router.get("/overview", async (req, res, next) => {
     try {
-      const sessions = await repository.listActiveSessions();
+      const [sessions, auditSummary] = await Promise.all([
+        repository.listActiveSessions(),
+        audit.summary()
+      ]);
       res.json({
         ok: true,
         summary: {
-          ...audit.summary(),
+          ...auditSummary,
           activeSessions: sessions.length,
           persistence: repository.constructor.name.replace("AuthRepository", "")
         },
@@ -26,8 +29,19 @@ function createSecurityRouter(authService, repository, audit) {
     } catch (error) { next(error); }
   });
 
-  router.get("/audit", (req, res) => {
-    res.json({ ok: true, entries: audit.listRecent(req.query.limit) });
+  router.get("/audit", async (req, res, next) => {
+    try {
+      const entries = await audit.listRecent({
+        limit: req.query.limit,
+        event: req.query.event,
+        q: req.query.q,
+        userId: req.query.userId,
+        status: req.query.status,
+        from: req.query.from,
+        to: req.query.to
+      });
+      res.json({ ok: true, entries });
+    } catch (error) { next(error); }
   });
 
   router.get("/sessions", async (req, res, next) => {
@@ -39,7 +53,13 @@ function createSecurityRouter(authService, repository, audit) {
   router.delete("/sessions/:id", async (req, res, next) => {
     try {
       const revoked = await repository.revokeSession(req.params.id);
-      audit.record("security.session_revoked", { actorUserId: req.user.sub, sessionId: req.params.id });
+      audit.record("security.session_revoked", {
+        actorUserId: req.user.sub,
+        sessionId: req.params.id,
+        requestId: req.requestId,
+        ip: req.ip || null,
+        userAgent: req.headers["user-agent"] || null
+      });
       if (!revoked) return res.status(404).json({ ok: false, error: "session_not_found" });
       res.json({ ok: true });
     } catch (error) { next(error); }
@@ -48,7 +68,14 @@ function createSecurityRouter(authService, repository, audit) {
   router.delete("/users/:id/sessions", async (req, res, next) => {
     try {
       const count = await repository.revokeUserSessions(req.params.id);
-      audit.record("security.user_sessions_revoked", { actorUserId: req.user.sub, targetUserId: req.params.id, count });
+      audit.record("security.user_sessions_revoked", {
+        actorUserId: req.user.sub,
+        targetUserId: req.params.id,
+        count,
+        requestId: req.requestId,
+        ip: req.ip || null,
+        userAgent: req.headers["user-agent"] || null
+      });
       res.json({ ok: true, revoked: count });
     } catch (error) { next(error); }
   });
