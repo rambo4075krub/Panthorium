@@ -3,18 +3,18 @@
 
   function hideDesktopSurface() {
     var desktopIcons = document.getElementById('desktop-icons');
-    if (desktopIcons) desktopIcons.style.display = 'none';
+    if (desktopIcons && desktopIcons.style.display !== 'none') desktopIcons.style.display = 'none';
 
     var taskbarLogout = document.getElementById('btn-session-logout');
-    if (taskbarLogout) taskbarLogout.style.display = 'none';
+    if (taskbarLogout && taskbarLogout.style.display !== 'none') taskbarLogout.style.display = 'none';
   }
 
   function keepStartMenuLogout() {
     var logout = document.getElementById('btn-logout');
     if (logout) {
-      logout.style.display = '';
-      logout.textContent = '🚪 ออกจากระบบ';
-      logout.title = 'ออกจากระบบ';
+      if (logout.style.display === 'none') logout.style.display = '';
+      if (logout.textContent !== '🚪 ออกจากระบบ') logout.textContent = '🚪 ออกจากระบบ';
+      if (logout.title !== 'ออกจากระบบ') logout.title = 'ออกจากระบบ';
     }
   }
 
@@ -57,11 +57,14 @@
     patchThreeRenderer();
   }
 
-  var observer = new MutationObserver(sync);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
   window.addEventListener('resize', sync);
   window.addEventListener('orientationchange', function () { setTimeout(sync, 150); });
   window.addEventListener('panthorium:auth-changed', sync);
-  setInterval(sync, 1000);
+  document.addEventListener('DOMContentLoaded', sync, { once: true });
+
+  // Avoid observing the entire DOM. The previous observer changed logout textContent
+  // from inside its own callback, creating a recursive MutationObserver loop that
+  // starved timers and froze the boot sequence at the first step.
+  setInterval(sync, 1500);
   setTimeout(sync, 0);
 })();
