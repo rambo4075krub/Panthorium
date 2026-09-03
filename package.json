@@ -1,24 +1,14 @@
 {
   "name": "panthorium-backend",
-  "version": "3.0.0-phase3",
-  "description": "Panthorium OS Backend - security dashboard, audit persistence and automated response",
+  "version": "4.0.0-phase4",
+  "description": "Panthorium OS Backend - AI platform, persistent conversations and security operations",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check server.js && node --check routes/api.js && node --check routes/auth.js && node --check routes/security.js && node --check repositories/authRepository.js && node --check services/sentinelCore.js && node --check services/authService.js && node --check services/auditService.js && node --check services/securityResponseService.js && node --check phase2-auth.js && node --check user-manager.js && node --check security-dashboard.js && node --check ui-layout.js && node --check boot-recovery.js",
-    "test": "node test/smoke.js && node test/security-response.js"
+    "check": "node --check server.js && node --check routes/api.js && node --check routes/auth.js && node --check routes/security.js && node --check repositories/authRepository.js && node --check services/sentinelCore.js && node --check services/providerManager.js && node --check services/aiGateway.js && node --check services/conversationRepository.js && node --check services/authService.js && node --check services/auditService.js && node --check services/securityResponseService.js && node --check phase2-auth.js && node --check user-manager.js && node --check security-dashboard.js && node --check ai-dashboard.js && node --check ui-layout.js && node --check boot-recovery.js",
+    "test": "node test/smoke.js && node test/security-response.js && node test/phase4-ai.js"
   },
-  "dependencies": {
-    "bcryptjs": "^2.4.3",
-    "cookie-parser": "^1.4.7",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.21.0",
-    "express-rate-limit": "^7.4.1",
-    "helmet": "^8.0.0",
-    "jsonwebtoken": "^9.0.2",
-    "pg": "^8.13.1"
-  },
+  "dependencies": { "bcryptjs": "^2.4.3", "cookie-parser": "^1.4.7", "cors": "^2.8.5", "dotenv": "^16.4.5", "express": "^4.21.0", "express-rate-limit": "^7.4.1", "helmet": "^8.0.0", "jsonwebtoken": "^9.0.2", "pg": "^8.13.1" },
   "engines": { "node": ">=18" }
 }
