@@ -82,24 +82,35 @@ for (const script of ["boot-recovery.js", "branding.js", "phase2-auth.js", "user
   });
 }
 
-app.use(express.static(frontendRoot, { index: false, etag: true, maxAge: config.isProduction ? "1h" : 0 }));
-app.get("/", (req, res, next) => {
-  try {
-    const file = path.join(frontendRoot, "sentinel.html");
-    let html = fs.readFileSync(file, "utf8");
-    if (!html.includes('/boot-recovery.js')) html = html.replace(/<\/body>/i, '  <script src="/boot-recovery.js?v=phase3-boot-recovery-v2"></script>\n</body>');
-    if (!html.includes('/branding.js')) html = html.replace(/<\/body>/i, '  <script src="/branding.js?v=phase3-boot-recovery-v2"></script>\n</body>');
-    if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js?v=phase3-boot-recovery-v2"></script>\n</body>');
-    if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, '  <script src="/user-manager.js?v=phase3-boot-recovery-v2"></script>\n</body>');
-    if (!html.includes('/security-dashboard.js')) html = html.replace(/<\/body>/i, '  <script src="/security-dashboard.js?v=phase3-boot-recovery-v2"></script>\n</body>');
-    if (!html.includes('/ui-layout.js')) html = html.replace(/<\/body>/i, '  <script src="/ui-layout.js?v=phase3-boot-recovery-v2"></script>\n</body>');
+function renderShell() {
+  const file = path.join(frontendRoot, "sentinel.html");
+  let html = fs.readFileSync(file, "utf8");
+  const version = "phase3-shell-v5";
+  if (!html.includes('/boot-recovery.js')) html = html.replace(/<\/body>/i, `  <script src="/boot-recovery.js?v=${version}"></script>\n</body>`);
+  if (!html.includes('/branding.js')) html = html.replace(/<\/body>/i, `  <script src="/branding.js?v=${version}"></script>\n</body>`);
+  if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, `  <script src="/phase2-auth.js?v=${version}"></script>\n</body>`);
+  if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, `  <script src="/user-manager.js?v=${version}"></script>\n</body>`);
+  if (!html.includes('/security-dashboard.js')) html = html.replace(/<\/body>/i, `  <script src="/security-dashboard.js?v=${version}"></script>\n</body>`);
+  if (!html.includes('/ui-layout.js')) html = html.replace(/<\/body>/i, `  <script src="/ui-layout.js?v=${version}"></script>\n</body>`);
+  return html;
+}
 
+function serveShell(req, res, next) {
+  try {
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.set("Pragma", "no-cache");
     res.set("Expires", "0");
-    res.type("html").send(html);
+    res.set("Surrogate-Control", "no-store");
+    res.type("html").send(renderShell());
   } catch (error) { next(error); }
-});
+}
+
+// IMPORTANT: both URLs must receive the transformed shell. The service worker and
+// legacy installs may navigate to /sentinel.html directly.
+app.get("/", serveShell);
+app.get("/sentinel.html", serveShell);
+
+app.use(express.static(frontendRoot, { index: false, etag: true, maxAge: config.isProduction ? "1h" : 0 }));
 
 app.use((req, res) => res.status(404).json({ ok: false, error: "not_found" }));
 app.use((err, req, res, next) => {
