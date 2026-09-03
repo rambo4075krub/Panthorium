@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { createHash } = require("crypto");
 const { Pool } = require("pg");
 
 class AuditService {
@@ -10,6 +11,7 @@ class AuditService {
     this.databaseUrl = options.databaseUrl || "";
     this.databaseSslMode = options.databaseSslMode || "disable";
     this.pool = null;
+    this.alertAcks = new Map();
     if (this.file) fs.mkdirSync(path.dirname(this.file), { recursive: true });
   }
 
@@ -25,6 +27,14 @@ class AuditService {
       CREATE INDEX IF NOT EXISTS idx_panthorium_audit_time ON panthorium_audit_events(time DESC);
       CREATE INDEX IF NOT EXISTS idx_panthorium_audit_event ON panthorium_audit_events(event);
       CREATE INDEX IF NOT EXISTS idx_panthorium_audit_actor ON panthorium_audit_events(actor_user_id);
+
+      CREATE TABLE IF NOT EXISTS panthorium_security_alert_acknowledgements (
+        alert_id TEXT PRIMARY KEY,
+        acknowledged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        acknowledged_by TEXT,
+        expires_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_panthorium_alert_ack_expiry ON panthorium_security_alert_acknowledgements(expires_at);
     `);
   }
 
@@ -91,6 +101,52 @@ class AuditService {
     return { total24h: entries.length, loginSuccess24h: count("auth.login_success"), loginFailed24h: count("auth.login_failed"), refresh24h: count("auth.refresh"), guestSessions24h: count("auth.guest_session"), userChanges24h: entries.filter((entry) => String(entry.event || "").startsWith("auth.user_")).length };
   }
 
+  alertId(alert) {
+    const subject = `${alert.code}|${alert.ip || "global"}`;
+    return createHash("sha256").update(subject).digest("hex").slice(0, 24);
+  }
+
+  async activeAcknowledgements() {
+    const now = Date.now();
+    if (this.pool) {
+      await this.pool.query("DELETE FROM panthorium_security_alert_acknowledgements WHERE expires_at <= NOW()");
+      const result = await this.pool.query("SELECT alert_id, acknowledged_at, acknowledged_by, expires_at FROM panthorium_security_alert_acknowledgements WHERE expires_at > NOW()");
+      return new Map(result.rows.map((row) => [row.alert_id, { acknowledgedAt: row.acknowledged_at, acknowledgedBy: row.acknowledged_by, expiresAt: row.expires_at }]));
+    }
+    for (const [id, ack] of this.alertAcks.entries()) if (Date.parse(ack.expiresAt) <= now) this.alertAcks.delete(id);
+    return new Map(this.alertAcks);
+  }
+
+  async acknowledgeAlert(alertId, actorUserId, ttlHours = 24) {
+    const safeHours = Math.max(1, Math.min(Number(ttlHours) || 24, 168));
+    const expiresAt = new Date(Date.now() + safeHours * 3600000).toISOString();
+    const acknowledgedAt = new Date().toISOString();
+    if (this.pool) {
+      await this.pool.query(
+        `INSERT INTO panthorium_security_alert_acknowledgements(alert_id, acknowledged_at, acknowledged_by, expires_at)
+         VALUES ($1,$2,$3,$4)
+         ON CONFLICT (alert_id) DO UPDATE SET acknowledged_at=EXCLUDED.acknowledged_at, acknowledged_by=EXCLUDED.acknowledged_by, expires_at=EXCLUDED.expires_at`,
+        [alertId, acknowledgedAt, actorUserId || null, expiresAt]
+      );
+    } else {
+      this.alertAcks.set(alertId, { acknowledgedAt, acknowledgedBy: actorUserId || null, expiresAt });
+    }
+    this.record("security.alert_acknowledged", { actorUserId, alertId, expiresAt });
+    return { alertId, acknowledgedAt, acknowledgedBy: actorUserId || null, expiresAt };
+  }
+
+  async clearAlertAcknowledgement(alertId, actorUserId) {
+    let removed = false;
+    if (this.pool) {
+      const result = await this.pool.query("DELETE FROM panthorium_security_alert_acknowledgements WHERE alert_id=$1", [alertId]);
+      removed = result.rowCount > 0;
+    } else {
+      removed = this.alertAcks.delete(alertId);
+    }
+    if (removed) this.record("security.alert_reopened", { actorUserId, alertId });
+    return removed;
+  }
+
   async securityAlerts() {
     const now = Date.now();
     const entries = await this.listRecent({ limit: 500, from: new Date(now - 3600000).toISOString() });
@@ -115,9 +171,24 @@ class AuditService {
     const revokes = recent(3600000).filter((e) => String(e.event || "").includes("session") && String(e.event || "").includes("revoked"));
     if (revokes.length >= 3) alerts.push({ level: "info", code: "SESSION_REVOCATIONS", title: "มีการ revoke sessions", detail: `${revokes.length} sessions ถูก revoke ใน 1 ชั่วโมง`, count: revokes.length });
 
+    const acknowledgements = await this.activeAcknowledgements();
+    for (const alert of alerts) {
+      alert.id = this.alertId(alert);
+      const ack = acknowledgements.get(alert.id);
+      alert.acknowledged = !!ack;
+      if (ack) alert.acknowledgement = ack;
+    }
+
     const rank = { critical: 3, warning: 2, info: 1 };
-    alerts.sort((a, b) => rank[b.level] - rank[a.level] || b.count - a.count);
-    return { generatedAt: new Date().toISOString(), status: alerts.some((a) => a.level === "critical") ? "critical" : alerts.some((a) => a.level === "warning") ? "warning" : "normal", alerts };
+    alerts.sort((a, b) => Number(a.acknowledged) - Number(b.acknowledged) || rank[b.level] - rank[a.level] || b.count - a.count);
+    const active = alerts.filter((a) => !a.acknowledged);
+    return {
+      generatedAt: new Date().toISOString(),
+      status: active.some((a) => a.level === "critical") ? "critical" : active.some((a) => a.level === "warning") ? "warning" : "normal",
+      activeCount: active.length,
+      acknowledgedCount: alerts.length - active.length,
+      alerts
+    };
   }
 }
 
