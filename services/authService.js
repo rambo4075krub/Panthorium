@@ -2,8 +2,16 @@ const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
+const ALLOWED_ROLES = new Set(["administrator", "operator", "guest"]);
+const ALLOWED_PERMISSIONS = new Set(["chat", "core:command", "settings", "system:read"]);
+
 function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function normalizeList(values, allowed) {
+  if (!Array.isArray(values)) return [];
+  return [...new Set(values.filter((value) => typeof value === "string" && allowed.has(value)))];
 }
 
 class AuthService {
@@ -31,6 +39,73 @@ class AuthService {
       permissions: ["chat", "core:command", "settings", "system:read"],
       createdAt: new Date().toISOString()
     });
+  }
+
+  publicUser(user) {
+    if (!user) return null;
+    return {
+      id: user.id,
+      username: user.username,
+      roles: user.roles || [],
+      permissions: user.permissions || [],
+      createdAt: user.createdAt || null
+    };
+  }
+
+  async listUsers() {
+    const users = await this.repository.listUsers();
+    return users.map((user) => this.publicUser(user));
+  }
+
+  async createManagedUser({ username, password, roles, permissions }, actorId) {
+    const cleanUsername = typeof username === "string" ? username.trim() : "";
+    if (!/^[A-Za-z0-9._-]{3,40}$/.test(cleanUsername)) throw new Error("invalid_username");
+    if (typeof password !== "string" || password.length < 10 || password.length > 256) throw new Error("invalid_password");
+    if (await this.repository.findUserByUsername(cleanUsername)) throw new Error("username_exists");
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = await this.repository.createUser({
+      id: crypto.randomUUID(),
+      username: cleanUsername,
+      passwordHash,
+      roles: normalizeList(roles, ALLOWED_ROLES),
+      permissions: normalizeList(permissions, ALLOWED_PERMISSIONS),
+      createdAt: new Date().toISOString()
+    });
+    this.audit.record("auth.user_created", { actorId, userId: user.id, username: user.username });
+    return this.publicUser(user);
+  }
+
+  async updateManagedUserAccess(id, { roles, permissions }, actorId) {
+    const existing = await this.repository.findUserById(id);
+    if (!existing) throw new Error("user_not_found");
+    const updated = await this.repository.updateUserAccess(id, {
+      roles: normalizeList(roles, ALLOWED_ROLES),
+      permissions: normalizeList(permissions, ALLOWED_PERMISSIONS)
+    });
+    this.audit.record("auth.user_access_updated", { actorId, userId: id });
+    return this.publicUser(updated);
+  }
+
+  async resetManagedUserPassword(id, password, actorId) {
+    if (typeof password !== "string" || password.length < 10 || password.length > 256) throw new Error("invalid_password");
+    const existing = await this.repository.findUserById(id);
+    if (!existing) throw new Error("user_not_found");
+    const passwordHash = await bcrypt.hash(password, 12);
+    const updated = await this.repository.updateUserPassword(id, passwordHash);
+    this.audit.record("auth.user_password_reset", { actorId, userId: id });
+    return this.publicUser(updated);
+  }
+
+  async deleteManagedUser(id, actorId) {
+    if (id === actorId) throw new Error("cannot_delete_self");
+    const existing = await this.repository.findUserById(id);
+    if (!existing) throw new Error("user_not_found");
+    if ((existing.roles || []).includes("administrator")) throw new Error("cannot_delete_administrator");
+    const deleted = await this.repository.deleteUser(id);
+    if (!deleted) throw new Error("user_not_found");
+    this.audit.record("auth.user_deleted", { actorId, userId: id, username: existing.username });
+    return true;
   }
 
   signAccessToken(principal) {
