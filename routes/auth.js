@@ -72,6 +72,9 @@ function createAuthRouter(authService, config) {
       res.json({ ok: true, user });
     } catch (error) {
       if (error.message === "user_not_found") return res.status(404).json({ ok: false, error: error.message });
+      if (["cannot_demote_self", "cannot_remove_own_settings", "last_administrator_required"].includes(error.message)) {
+        return res.status(400).json({ ok: false, error: error.message });
+      }
       next(error);
     }
   });
