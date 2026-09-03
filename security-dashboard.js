@@ -1,13 +1,22 @@
 (function () {
   'use strict';
 
+  function getOS() {
+    try { return (typeof OS !== 'undefined') ? OS : null; } catch (e) { return null; }
+  }
+
   function getUser() {
-    return window.OS && OS.state ? OS.state.user : null;
+    var system = getOS();
+    return system && system.state ? system.state.user : null;
   }
 
   function isAdmin() {
     var user = getUser();
     return !!(user && Array.isArray(user.roles) && user.roles.indexOf('administrator') !== -1);
+  }
+
+  function notify(message) {
+    try { if (typeof toast === 'function') toast(message); } catch (e) {}
   }
 
   function escapeHtml(value) {
@@ -24,7 +33,8 @@
   function securityApi(path, options) {
     options = options || {};
     var headers = options.headers || {};
-    if (OS.config && OS.config.accessToken) headers.Authorization = 'Bearer ' + OS.config.accessToken;
+    var system = getOS();
+    if (system && system.config && system.config.accessToken) headers.Authorization = 'Bearer ' + system.config.accessToken;
     options.headers = headers;
     options.credentials = 'include';
     return fetch(path, options).then(function (response) {
@@ -68,25 +78,21 @@
         ['User Changes 24h', s.userChanges24h],
         ['Persistence', s.persistence]
       ];
-      summaryEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;">' + cards.map(function (item) {
-        return '<div style="padding:12px;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:rgba(0,0,0,.18);"><div style="font-size:11px;color:var(--text-dim);">' + escapeHtml(item[0]) + '</div><div style="font-size:20px;font-weight:700;margin-top:4px;">' + escapeHtml(item[1] == null ? 0 : item[1]) + '</div></div>';
+      summaryEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;">' + cards.map(function (entry) {
+        return '<div style="padding:12px;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:rgba(0,0,0,.18);"><div style="font-size:11px;color:var(--text-dim);">' + escapeHtml(entry[0]) + '</div><div style="font-size:20px;font-weight:700;margin-top:4px;">' + escapeHtml(entry[1] == null ? 0 : entry[1]) + '</div></div>';
       }).join('') + '</div>';
 
       var sessions = overview.sessions || [];
-      if (!sessions.length) {
-        sessionsEl.innerHTML = '<div style="font-size:12px;color:var(--text-dim);">ไม่มี Refresh Session ที่ active</div>';
-      } else {
-        sessionsEl.innerHTML = sessions.map(function (session) {
-          return '<div style="padding:10px;border:1px solid rgba(255,255,255,.08);border-radius:9px;margin-top:7px;display:flex;justify-content:space-between;gap:8px;align-items:center;"><div><strong>' + escapeHtml(session.username) + '</strong><div style="font-size:11px;color:var(--text-dim);">สร้าง ' + escapeHtml(formatTime(session.createdAt)) + ' · หมดอายุ ' + escapeHtml(formatTime(session.expiresAt)) + '</div></div><button data-p3-revoke="' + escapeHtml(session.id) + '" style="padding:6px 9px;border:0;border-radius:7px;cursor:pointer;">ยกเลิก Session</button></div>';
-        }).join('');
-      }
+      sessionsEl.innerHTML = sessions.length ? sessions.map(function (session) {
+        return '<div style="padding:10px;border:1px solid rgba(255,255,255,.08);border-radius:9px;margin-top:7px;display:flex;justify-content:space-between;gap:8px;align-items:center;"><div><strong>' + escapeHtml(session.username) + '</strong><div style="font-size:11px;color:var(--text-dim);">สร้าง ' + escapeHtml(formatTime(session.createdAt)) + ' · หมดอายุ ' + escapeHtml(formatTime(session.expiresAt)) + '</div></div><button data-p3-revoke="' + escapeHtml(session.id) + '" style="padding:6px 9px;border:0;border-radius:7px;cursor:pointer;">ยกเลิก Session</button></div>';
+      }).join('') : '<div style="font-size:12px;color:var(--text-dim);">ไม่มี Refresh Session ที่ active</div>';
 
       Array.prototype.forEach.call(sessionsEl.querySelectorAll('[data-p3-revoke]'), function (button) {
         button.onclick = function () {
           if (!confirm('ยกเลิก Session นี้หรือไม่?')) return;
           securityApi('/api/security/sessions/' + encodeURIComponent(button.getAttribute('data-p3-revoke')), { method: 'DELETE' })
-            .then(function () { if (window.toast) toast('ยกเลิก Session แล้ว'); renderDashboard(section); })
-            .catch(function (error) { if (window.toast) toast('ยกเลิกไม่สำเร็จ: ' + error.message); });
+            .then(function () { notify('ยกเลิก Session แล้ว'); renderDashboard(section); })
+            .catch(function (error) { notify('ยกเลิกไม่สำเร็จ: ' + error.message); });
         };
       });
 
@@ -101,10 +107,10 @@
 
   function openSecurityDashboard() {
     if (!isAdmin()) {
-      if (window.toast) toast('Security Dashboard สำหรับ Administrator เท่านั้น');
+      notify('Security Dashboard สำหรับ Administrator เท่านั้น');
       return;
     }
-    if (typeof window.createWindow !== 'function') {
+    if (typeof createWindow !== 'function') {
       console.error('[Phase3] createWindow is unavailable');
       return;
     }
@@ -113,8 +119,9 @@
       height: Math.min(620, window.innerHeight - 80)
     });
     var el = record && record.el ? record.el : null;
-    if (!el && OS.windows && OS.windows.get) {
-      var stored = OS.windows.get('security-dashboard');
+    var system = getOS();
+    if (!el && system && system.windows && system.windows.get) {
+      var stored = system.windows.get('security-dashboard');
       el = stored && stored.el ? stored.el : null;
     }
     if (!el) return;
@@ -126,42 +133,42 @@
   }
 
   function syncLauncher() {
-    var oldDesktop = document.getElementById('phase3-security-desktop');
-    var oldStart = document.getElementById('phase3-security-start');
+    var desktopIcon = document.getElementById('phase3-security-desktop');
+    var startIcon = document.getElementById('phase3-security-start');
     if (!isAdmin()) {
-      if (oldDesktop) oldDesktop.remove();
-      if (oldStart) oldStart.remove();
+      if (desktopIcon) desktopIcon.remove();
+      if (startIcon) startIcon.remove();
       return;
     }
 
     var desktop = document.getElementById('desktop-icons');
-    if (desktop && !oldDesktop) {
-      var icon = document.createElement('div');
-      icon.id = 'phase3-security-desktop';
-      icon.className = 'desk-icon';
-      icon.innerHTML = '<div class="icon-img">🛡️</div><span>Security</span>';
-      icon.onclick = openSecurityDashboard;
-      desktop.appendChild(icon);
+    if (desktop && !desktopIcon) {
+      desktopIcon = document.createElement('div');
+      desktopIcon.id = 'phase3-security-desktop';
+      desktopIcon.className = 'desk-icon';
+      desktopIcon.innerHTML = '<div class="icon-img">🛡️</div><span>Security</span>';
+      desktopIcon.onclick = openSecurityDashboard;
+      desktop.appendChild(desktopIcon);
     }
 
     var startApps = document.getElementById('sm-apps');
-    if (startApps && !oldStart) {
-      var item = document.createElement('div');
-      item.id = 'phase3-security-start';
-      item.className = 'sm-app';
-      item.innerHTML = '<div class="ico">🛡️</div><span>Security</span>';
-      item.onclick = function () {
+    if (startApps && !startIcon) {
+      startIcon = document.createElement('div');
+      startIcon.id = 'phase3-security-start';
+      startIcon.className = 'sm-app';
+      startIcon.innerHTML = '<div class="ico">🛡️</div><span>Security</span>';
+      startIcon.onclick = function () {
         openSecurityDashboard();
-        if (typeof window.closeStartMenu === 'function') closeStartMenu();
+        try { if (typeof closeStartMenu === 'function') closeStartMenu(); } catch (e) {}
       };
-      startApps.appendChild(item);
+      startApps.appendChild(startIcon);
     }
   }
 
   window.openSecurityDashboard = openSecurityDashboard;
-  window.PanthoriumSecurityDashboard = { open: openSecurityDashboard, refresh: syncLauncher };
+  window.PanthoriumSecurityDashboard = { open: openSecurityDashboard, refresh: syncLauncher, isAdmin: isAdmin };
   window.addEventListener('panthorium:auth-changed', syncLauncher);
   document.addEventListener('click', function () { setTimeout(syncLauncher, 0); }, true);
-  setInterval(syncLauncher, 1000);
+  setInterval(syncLauncher, 500);
   setTimeout(syncLauncher, 0);
 })();
