@@ -2,7 +2,7 @@ const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { requireAuth } = require("../middleware/auth");
 
-function createAuthRouter(authService, config) {
+function createAuthRouter(authService, config, securityResponse) {
   const router = express.Router();
   const limiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false });
   const auth = requireAuth(authService);
@@ -17,9 +17,10 @@ function createAuthRouter(authService, config) {
     path: "/api/auth",
     maxAge: config.refreshTokenDays * 86400000
   };
+  const requestMeta = (req) => ({ requestId: req.requestId, ip: req.ip || null, userAgent: req.headers["user-agent"] || null });
 
   router.post("/guest", (req, res) => {
-    const session = authService.guest();
+    const session = authService.guest(requestMeta(req));
     res.json({ ok: true, accessToken: session.accessToken, user: session.principal });
   });
 
@@ -29,29 +30,33 @@ function createAuthRouter(authService, config) {
       if (typeof username !== "string" || typeof password !== "string" || username.length > 80 || password.length > 256) {
         return res.status(400).json({ ok: false, error: "invalid_credentials_format" });
       }
-      const session = await authService.login(username, password);
-      if (!session) return res.status(401).json({ ok: false, error: "invalid_credentials" });
+
+      if (securityResponse) {
+        const block = await securityResponse.getActiveBlock(req.ip);
+        if (block) {
+          const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(block.expiresAt) - Date.now()) / 1000));
+          res.set("Retry-After", String(retryAfterSeconds));
+          authService.audit.record("security.blocked_login", { requestId: req.requestId, ip: req.ip || null, username, expiresAt: block.expiresAt, reason: block.reason });
+          return res.status(429).json({ ok: false, error: "temporarily_blocked", retryAfterSeconds });
+        }
+      }
+
+      const session = await authService.login(username, password, requestMeta(req));
+      if (!session) {
+        if (securityResponse) await securityResponse.evaluateLoginFailure(req.ip);
+        return res.status(401).json({ ok: false, error: "invalid_credentials" });
+      }
       res.cookie("pt_refresh", session.refreshToken, cookieOptions);
       res.json({ ok: true, accessToken: session.accessToken, user: session.principal });
     } catch (error) { next(error); }
   });
 
   router.get("/me", auth, (req, res) => {
-    res.json({
-      ok: true,
-      user: {
-        id: req.user.sub,
-        username: req.user.username,
-        roles: req.user.roles || [],
-        permissions: req.user.permissions || []
-      }
-    });
+    res.json({ ok: true, user: { id: req.user.sub, username: req.user.username, roles: req.user.roles || [], permissions: req.user.permissions || [] } });
   });
 
   router.get("/users", auth, adminOnly, async (req, res, next) => {
-    try {
-      res.json({ ok: true, users: await authService.listUsers() });
-    } catch (error) { next(error); }
+    try { res.json({ ok: true, users: await authService.listUsers() }); } catch (error) { next(error); }
   });
 
   router.post("/users", auth, adminOnly, async (req, res, next) => {
@@ -59,9 +64,7 @@ function createAuthRouter(authService, config) {
       const user = await authService.createManagedUser(req.body || {}, req.user.sub);
       res.status(201).json({ ok: true, user });
     } catch (error) {
-      if (["invalid_username", "invalid_password", "username_exists"].includes(error.message)) {
-        return res.status(400).json({ ok: false, error: error.message });
-      }
+      if (["invalid_username", "invalid_password", "username_exists"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
       next(error);
     }
   });
@@ -72,9 +75,7 @@ function createAuthRouter(authService, config) {
       res.json({ ok: true, user });
     } catch (error) {
       if (error.message === "user_not_found") return res.status(404).json({ ok: false, error: error.message });
-      if (["cannot_demote_self", "cannot_remove_own_settings", "last_administrator_required"].includes(error.message)) {
-        return res.status(400).json({ ok: false, error: error.message });
-      }
+      if (["cannot_demote_self", "cannot_remove_own_settings", "last_administrator_required"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
       next(error);
     }
   });
@@ -96,9 +97,7 @@ function createAuthRouter(authService, config) {
       res.json({ ok: true });
     } catch (error) {
       if (error.message === "user_not_found") return res.status(404).json({ ok: false, error: error.message });
-      if (["cannot_delete_self", "cannot_delete_administrator"].includes(error.message)) {
-        return res.status(400).json({ ok: false, error: error.message });
-      }
+      if (["cannot_delete_self", "cannot_delete_administrator"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
       next(error);
     }
   });
