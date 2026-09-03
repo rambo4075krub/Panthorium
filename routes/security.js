@@ -16,13 +16,52 @@ function createSecurityRouter(authService, repository, audit) {
       const [sessions, auditSummary, alerts] = await Promise.all([
         repository.listActiveSessions(), audit.summary(), audit.securityAlerts()
       ]);
-      res.json({ ok: true, summary: { ...auditSummary, activeSessions: sessions.length, persistence: repository.constructor.name.replace("AuthRepository", ""), riskStatus: alerts.status, alertCount: alerts.alerts.length }, sessions, alerts: alerts.alerts });
+      res.json({
+        ok: true,
+        summary: {
+          ...auditSummary,
+          activeSessions: sessions.length,
+          persistence: repository.constructor.name.replace("AuthRepository", ""),
+          riskStatus: alerts.status,
+          alertCount: alerts.activeCount,
+          acknowledgedAlertCount: alerts.acknowledgedCount
+        },
+        sessions,
+        alerts: alerts.alerts
+      });
     } catch (error) { next(error); }
   });
 
   router.get("/alerts", async (req, res, next) => {
     try { res.json({ ok: true, ...(await audit.securityAlerts()) }); }
     catch (error) { next(error); }
+  });
+
+  router.post("/alerts/:id/acknowledge", async (req, res, next) => {
+    try {
+      const current = await audit.securityAlerts();
+      const alert = current.alerts.find((item) => item.id === req.params.id);
+      if (!alert) return res.status(404).json({ ok: false, error: "alert_not_found" });
+      const acknowledgement = await audit.acknowledgeAlert(req.params.id, req.user.sub, req.body?.ttlHours);
+      audit.record("security.alert_action", {
+        actorUserId: req.user.sub,
+        alertId: req.params.id,
+        alertCode: alert.code,
+        action: "acknowledge",
+        requestId: req.requestId,
+        ip: req.ip || null,
+        userAgent: req.headers["user-agent"] || null
+      });
+      res.json({ ok: true, acknowledgement });
+    } catch (error) { next(error); }
+  });
+
+  router.delete("/alerts/:id/acknowledgement", async (req, res, next) => {
+    try {
+      const removed = await audit.clearAlertAcknowledgement(req.params.id, req.user.sub);
+      if (!removed) return res.status(404).json({ ok: false, error: "acknowledgement_not_found" });
+      res.json({ ok: true });
+    } catch (error) { next(error); }
   });
 
   router.get("/audit", async (req, res, next) => {
