@@ -20,6 +20,8 @@ module.exports = {
   allowedOrigins: list(process.env.ALLOWED_ORIGINS, ["http://localhost:8787", "http://127.0.0.1:8787"]),
   dataFile: process.env.DATA_FILE || path.join(__dirname, "..", "data", "panthorium.json"),
   auditFile: process.env.AUDIT_FILE || path.join(__dirname, "..", "logs", "audit.log"),
+  databaseUrl: process.env.DATABASE_URL || "",
+  databaseSslMode: process.env.DATABASE_SSL_MODE || (isProduction ? "require" : "disable"),
   adminUsername: process.env.ADMIN_USERNAME || "admin",
   adminPassword: process.env.ADMIN_PASSWORD || "",
   trustProxy: process.env.TRUST_PROXY === "1"

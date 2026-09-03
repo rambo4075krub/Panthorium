@@ -9,7 +9,7 @@ const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
 
 const config = require("./config");
-const { JsonStore } = require("./repositories/jsonStore");
+const { createAuthRepository } = require("./repositories/authRepository");
 const { AuditService } = require("./services/auditService");
 const { AuthService } = require("./services/authService");
 const { SentinelCore } = require("./services/sentinelCore");
@@ -20,9 +20,9 @@ const { requestContext } = require("./middleware/requestContext");
 const app = express();
 if (config.trustProxy) app.set("trust proxy", 1);
 
-const store = new JsonStore(config.dataFile);
+const authRepository = createAuthRepository(config);
 const audit = new AuditService(config.auditFile);
-const authService = new AuthService({ store, config, audit });
+const authService = new AuthService({ repository: authRepository, config, audit });
 const sentinelCore = new SentinelCore();
 
 app.disable("x-powered-by");
@@ -34,7 +34,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "blob:"],
       mediaSrc: ["'self'", "blob:"],
-      connectSrc: ["'self'", "https://cdn.jsdelivr.net", ...config.allowedOrigins],
+      connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins],
       workerSrc: ["'self'", "blob:"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"]
@@ -59,7 +59,18 @@ app.use("/api", createApiRouter(sentinelCore, authService, audit));
 const frontendCandidates = [path.join(__dirname, ".."), __dirname];
 const frontendRoot = frontendCandidates.find((dir) => fs.existsSync(path.join(dir, "sentinel.html"))) || __dirname;
 app.use(express.static(frontendRoot, { index: false, etag: true, maxAge: config.isProduction ? "1h" : 0 }));
-app.get("/", (req, res) => res.sendFile(path.join(frontendRoot, "sentinel.html")));
+app.get("/", (req, res, next) => {
+  try {
+    const file = path.join(frontendRoot, "sentinel.html");
+    let html = fs.readFileSync(file, "utf8");
+    if (!html.includes('/phase2-auth.js')) {
+      html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js"></script>\n</body>');
+    }
+    res.type("html").send(html);
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.use((req, res) => res.status(404).json({ ok: false, error: "not_found" }));
 app.use((err, req, res, next) => {
@@ -68,10 +79,12 @@ app.use((err, req, res, next) => {
   res.status(500).json({ ok: false, error: "internal_error" });
 });
 
-if (require.main === module) {
-  app.listen(config.port, config.host, () => {
+async function start() {
+  await authService.init();
+  return app.listen(config.port, config.host, () => {
     console.log("========================================");
     console.log("  Panthorium OS Backend");
+    console.log(`  Auth persistence: ${config.databaseUrl ? "PostgreSQL" : "JSON fallback"}`);
     console.log("  Sentinel Core is online");
     console.log(`  http://localhost:${config.port}`);
     console.log(`  API: http://localhost:${config.port}/api/health`);
@@ -79,4 +92,11 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, sentinelCore, authService };
+if (require.main === module) {
+  start().catch((error) => {
+    console.error("[BOOT]", error);
+    process.exit(1);
+  });
+}
+
+module.exports = { app, sentinelCore, authService, start };
