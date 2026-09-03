@@ -1,12 +1,12 @@
 {
   "name": "panthorium-backend",
-  "version": "5.1.0-phase5-planner",
-  "description": "Panthorium OS Backend - AI agent planning and audited tool runtime",
+  "version": "5.2.0-phase5-agent-ui",
+  "description": "Panthorium OS Backend - AI agent planning, confirmation UI and audited tool runtime",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check server.js && node --check routes/api.js && node --check routes/auth.js && node --check routes/security.js && node --check repositories/authRepository.js && node --check services/sentinelCore.js && node --check services/providerManager.js && node --check services/aiGateway.js && node --check services/conversationRepository.js && node --check services/aiOperationsService.js && node --check services/toolRegistry.js && node --check services/agentService.js && node --check services/agentPlannerService.js && node --check services/authService.js && node --check services/auditService.js && node --check services/securityResponseService.js && node --check phase2-auth.js && node --check user-manager.js && node --check security-dashboard.js && node --check ui-layout.js && node --check ai-dashboard.js && node --check ai-stream-client.js && node --check boot-recovery.js",
+    "check": "node --check server.js && node --check routes/api.js && node --check routes/auth.js && node --check routes/security.js && node --check repositories/authRepository.js && node --check services/sentinelCore.js && node --check services/providerManager.js && node --check services/aiGateway.js && node --check services/conversationRepository.js && node --check services/aiOperationsService.js && node --check services/toolRegistry.js && node --check services/agentService.js && node --check services/agentPlannerService.js && node --check services/authService.js && node --check services/auditService.js && node --check services/securityResponseService.js && node --check phase2-auth.js && node --check user-manager.js && node --check security-dashboard.js && node --check ui-layout.js && node --check ai-dashboard.js && node --check ai-stream-client.js && node --check agent-ui.js && node --check boot-recovery.js",
     "test": "node test/smoke.js && node test/security-response.js && node test/phase4-ai.js && node test/phase4-stream.js && node test/phase4-ai-ops.js && node test/phase5-agent.js && node test/phase5-agent-planner.js"
   },
   "dependencies": {
