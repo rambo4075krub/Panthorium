@@ -58,17 +58,29 @@ app.use("/api", createApiRouter(sentinelCore, authService, audit));
 
 const frontendCandidates = [path.join(__dirname, ".."), __dirname];
 const frontendRoot = frontendCandidates.find((dir) => fs.existsSync(path.join(dir, "sentinel.html"))) || __dirname;
+
+for (const script of ["phase2-auth.js", "user-manager.js", "ui-shell.js"]) {
+  app.get(`/${script}`, (req, res, next) => {
+    try {
+      res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.set("Pragma", "no-cache");
+      res.set("Expires", "0");
+      res.sendFile(path.join(frontendRoot, script));
+    } catch (error) { next(error); }
+  });
+}
+
 app.use(express.static(frontendRoot, { index: false, etag: true, maxAge: config.isProduction ? "1h" : 0 }));
 app.get("/", (req, res, next) => {
   try {
     const file = path.join(frontendRoot, "sentinel.html");
     let html = fs.readFileSync(file, "utf8");
-    if (!html.includes('/phase2-auth.js')) {
-      html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js"></script>\n</body>');
-    }
-    if (!html.includes('/user-manager.js')) {
-      html = html.replace(/<\/body>/i, '  <script src="/user-manager.js"></script>\n</body>');
-    }
+    if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js?v=prod-ui-shell"></script>\n</body>');
+    if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, '  <script src="/user-manager.js?v=prod-ui-shell"></script>\n</body>');
+    if (!html.includes('/ui-shell.js')) html = html.replace(/<\/body>/i, '  <script src="/ui-shell.js?v=prod-ui-shell"></script>\n</body>');
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
     res.type("html").send(html);
   } catch (error) {
     next(error);
