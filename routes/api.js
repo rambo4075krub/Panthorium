@@ -10,13 +10,27 @@ function validChatBody(body = {}) {
   if (body.model != null && (typeof body.model !== "string" || body.model.length > 120)) return "invalid_model";
   return null;
 }
-function createApiRouter(sentinelCore, authService, audit, aiOperations) {
+function createApiRouter(sentinelCore, authService, audit, aiOperations, agentService) {
   const router = express.Router(); const auth = requireAuth(authService);
   const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
+  const agentLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
   router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", core: sentinelCore.status(), time: new Date().toISOString() }));
   router.get("/core/status", auth, requirePermission("system:read"), (req, res) => res.json({ ok: true, ...sentinelCore.status() }));
   router.get("/ai/providers", auth, requirePermission("chat"), (req, res) => res.json({ ok: true, providers: sentinelCore.providerCatalog() }));
   router.get("/ai/operations", auth, requirePermission("chat"), async (req, res, next) => { try { res.json({ ok: true, metrics: await aiOperations.overview(req.user.sub, req.query.hours) }); } catch (error) { next(error); } });
+  router.get("/agent/tools", auth, agentLimiter, (req, res) => res.json({ ok: true, tools: agentService.catalogFor(req.user) }));
+  router.post("/agent/execute", auth, agentLimiter, async (req, res, next) => {
+    try {
+      const { toolId, args, confirmed } = req.body || {};
+      if (!validText(toolId, 100)) return res.status(400).json({ ok: false, error: "invalid_tool_id" });
+      if (args != null && (typeof args !== "object" || Array.isArray(args))) return res.status(400).json({ ok: false, error: "invalid_tool_args" });
+      const result = await agentService.execute({ user: req.user, toolId, args: args || {}, confirmed: confirmed === true, requestId: req.requestId });
+      if (result.error === "tool_not_found") return res.status(404).json(result);
+      if (result.error === "tool_permission_denied") return res.status(403).json(result);
+      if (result.error === "confirmation_required") return res.status(409).json(result);
+      res.status(result.ok ? 200 : 400).json(result);
+    } catch (error) { next(error); }
+  });
   router.get("/conversations", auth, requirePermission("chat"), async (req, res) => res.json({ ok: true, sessions: await sentinelCore.conversationSessions(req.user.sub, Number(req.query.limit) || 30) }));
   router.get("/conversations/:sessionId", auth, requirePermission("chat"), async (req, res) => {
     if (!validText(req.params.sessionId, 120)) return res.status(400).json({ ok: false, error: "invalid_session_id" });
