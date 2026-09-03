@@ -15,6 +15,7 @@
     const summaryEl = section.querySelector('[data-sec-summary]');
     const sessionsEl = section.querySelector('[data-sec-sessions]');
     const auditEl = section.querySelector('[data-sec-audit]');
+    if (!summaryEl || !sessionsEl || !auditEl) return;
     summaryEl.innerHTML = 'กำลังโหลด...';
     try {
       const [overview, audit] = await Promise.all([api('/api/security/overview'), api('/api/security/audit?limit=50')]);
@@ -25,36 +26,76 @@
       sessionsEl.querySelectorAll('[data-revoke-session]').forEach(btn => { btn.onclick = async () => { if (!confirm('ยกเลิก Session นี้หรือไม่?')) return; try { await api(`/api/security/sessions/${encodeURIComponent(btn.dataset.revokeSession)}`, { method: 'DELETE' }); toast('ยกเลิก Session แล้ว'); await render(section); } catch (error) { toast(`ยกเลิกไม่สำเร็จ: ${error.message}`); } }; });
       const entries = audit.entries || [];
       auditEl.innerHTML = entries.length ? entries.map(entry => `<div style="padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:11px;"><strong>${esc(entry.event)}</strong> <span style="color:var(--text-dim);">${esc(fmtTime(entry.time))}</span><div style="color:var(--text-dim);margin-top:2px;white-space:pre-wrap;word-break:break-word;">${esc(JSON.stringify(Object.fromEntries(Object.entries(entry).filter(([k]) => !['event','time'].includes(k))))}</div></div>`).join('') : '<div style="font-size:12px;color:var(--text-dim);">ยังไม่มี Audit events</div>';
-    } catch (error) { summaryEl.innerHTML = `<div style="color:#ff8c8c;font-size:12px;">โหลด Security Dashboard ไม่สำเร็จ: ${esc(error.message)}</div>`; }
+    } catch (error) {
+      summaryEl.innerHTML = `<div style="color:#ff8c8c;font-size:12px;">โหลด Security Dashboard ไม่สำเร็จ: ${esc(error.message)}</div>`;
+    }
   }
 
-  function inject(settingsWindow) {
-    if (!settingsWindow || !isAdmin() || settingsWindow.querySelector('[data-phase3-security]')) return;
-    const host = settingsWindow.querySelector('.window-body .app-content') || settingsWindow.querySelector('.window-body');
-    if (!host) return;
-    const section = document.createElement('div');
-    section.dataset.phase3Security = '1';
-    section.className = 'settings-section';
-    section.style.marginTop = '18px';
-    section.innerHTML = `<h3>🛡️ Security Dashboard</h3><p style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">Audit Log, login activity และ active sessions สำหรับ Administrator</p><button data-sec-refresh style="padding:8px 12px;border:0;border-radius:8px;cursor:pointer;margin-bottom:10px;">รีเฟรช Security Data</button><div data-sec-summary></div><h4 style="margin:14px 0 6px;">Active Sessions</h4><div data-sec-sessions></div><h4 style="margin:14px 0 6px;">Audit Log ล่าสุด</h4><div data-sec-audit style="max-height:320px;overflow:auto;"></div>`;
-    host.appendChild(section);
+  function dashboardHTML() {
+    return `<div class="app-content" data-phase3-security style="overflow:auto;height:100%;"><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><img src="/panthorium-logo.svg" alt="Panthorium" style="width:34px;height:34px;object-fit:contain;"><div><h3 style="margin:0;">Security Dashboard</h3><div style="font-size:12px;color:var(--text-dim);">Administrator Security Center</div></div></div><button data-sec-refresh style="padding:8px 12px;border:0;border-radius:8px;cursor:pointer;margin-bottom:10px;">รีเฟรช Security Data</button><div data-sec-summary></div><h4 style="margin:14px 0 6px;">Active Sessions</h4><div data-sec-sessions></div><h4 style="margin:14px 0 6px;">Audit Log ล่าสุด</h4><div data-sec-audit style="max-height:360px;overflow:auto;"></div></div>`;
+  }
+
+  function openDashboard() {
+    if (!isAdmin()) { toast('Security Dashboard สำหรับ Administrator เท่านั้น'); return; }
+    const record = createWindow('security-dashboard', '🛡️ Security Dashboard', dashboardHTML(), { width: Math.min(760, innerWidth - 40), height: Math.min(620, innerHeight - 80) });
+    const el = record?.el || OS?.windows?.get?.('security-dashboard')?.el;
+    const section = el?.querySelector?.('[data-phase3-security]');
+    if (!section) return;
     section.querySelector('[data-sec-refresh]').onclick = () => render(section);
     render(section);
   }
 
-  function findSettingsWindows() {
-    const found = new Set(document.querySelectorAll('.window[data-id="settings"]'));
-    if (OS?.windows?.get) {
-      const record = OS.windows.get('settings');
-      if (record?.el) found.add(record.el);
-    }
-    return [...found];
+  function injectIntoSettings() {
+    if (!isAdmin()) return;
+    const record = OS?.windows?.get?.('settings');
+    const settingsWindow = record?.el || document.querySelector('.window[data-id="settings"]');
+    if (!settingsWindow || settingsWindow.querySelector('[data-security-launcher]')) return;
+    const host = settingsWindow.querySelector('.window-body .app-content') || settingsWindow.querySelector('.window-body');
+    if (!host) return;
+    const box = document.createElement('div');
+    box.dataset.securityLauncher = '1';
+    box.className = 'settings-section';
+    box.style.marginTop = '18px';
+    box.innerHTML = `<h3>🛡️ Security Center</h3><p style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">Audit Log และ Active Sessions สำหรับ Administrator</p><button data-open-security style="padding:8px 12px;border:0;border-radius:8px;cursor:pointer;">เปิด Security Dashboard</button>`;
+    host.appendChild(box);
+    box.querySelector('[data-open-security]').onclick = openDashboard;
   }
-  function refresh() { findSettingsWindows().forEach(inject); }
-  const observer = new MutationObserver(refresh);
+
+  function syncLauncher() {
+    const desktop = document.getElementById('desktop-icons');
+    const startApps = document.getElementById('sm-apps');
+    const existingDesk = document.getElementById('phase3-security-desktop');
+    const existingStart = document.getElementById('phase3-security-start');
+    if (!isAdmin()) {
+      existingDesk?.remove();
+      existingStart?.remove();
+      return;
+    }
+    if (desktop && !existingDesk) {
+      const icon = document.createElement('div');
+      icon.id = 'phase3-security-desktop';
+      icon.className = 'desk-icon';
+      icon.innerHTML = `<div class="icon-img">🛡️</div><span>Security</span>`;
+      icon.onclick = openDashboard;
+      desktop.appendChild(icon);
+    }
+    if (startApps && !existingStart) {
+      const item = document.createElement('div');
+      item.id = 'phase3-security-start';
+      item.className = 'sm-app';
+      item.innerHTML = `<div class="ico">🛡️</div><span>Security</span>`;
+      item.onclick = () => { openDashboard(); if (typeof closeStartMenu === 'function') closeStartMenu(); };
+      startApps.appendChild(item);
+    }
+    injectIntoSettings();
+  }
+
+  const observer = new MutationObserver(() => { syncLauncher(); injectIntoSettings(); });
   observer.observe(document.documentElement, { childList: true, subtree: true });
-  document.addEventListener('click', () => setTimeout(refresh, 0), true);
-  window.addEventListener('panthorium:auth-changed', refresh);
-  window.PanthoriumSecurityDashboard = { refresh };
-  setTimeout(refresh, 0);
+  document.addEventListener('click', () => setTimeout(syncLauncher, 0), true);
+  window.addEventListener('panthorium:auth-changed', syncLauncher);
+  setInterval(syncLauncher, 1200);
+  window.openSecurityDashboard = openDashboard;
+  window.PanthoriumSecurityDashboard = { refresh: syncLauncher, open: openDashboard };
+  setTimeout(syncLauncher, 0);
 })();
