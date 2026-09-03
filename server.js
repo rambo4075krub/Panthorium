@@ -61,6 +61,16 @@ app.use("/api", createApiRouter(sentinelCore, authService, audit));
 const frontendCandidates = [path.join(__dirname, ".."), __dirname];
 const frontendRoot = frontendCandidates.find((dir) => fs.existsSync(path.join(dir, "sentinel.html"))) || __dirname;
 
+app.get("/sw.js", (req, res, next) => {
+  try {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+    res.set("Service-Worker-Allowed", "/");
+    res.type("application/javascript").sendFile(path.join(frontendRoot, "sw.js"));
+  } catch (error) { next(error); }
+});
+
 for (const script of ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -77,12 +87,12 @@ app.get("/", (req, res, next) => {
   try {
     const file = path.join(frontendRoot, "sentinel.html");
     let html = fs.readFileSync(file, "utf8");
-    if (!html.includes('/boot-recovery.js')) html = html.replace(/<\/body>/i, '  <script src="/boot-recovery.js?v=phase3-boot-recovery"></script>\n</body>');
-    if (!html.includes('/branding.js')) html = html.replace(/<\/body>/i, '  <script src="/branding.js?v=phase3-boot-recovery"></script>\n</body>');
-    if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js?v=phase3-boot-recovery"></script>\n</body>');
-    if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, '  <script src="/user-manager.js?v=phase3-boot-recovery"></script>\n</body>');
-    if (!html.includes('/security-dashboard.js')) html = html.replace(/<\/body>/i, '  <script src="/security-dashboard.js?v=phase3-boot-recovery"></script>\n</body>');
-    if (!html.includes('/ui-layout.js')) html = html.replace(/<\/body>/i, '  <script src="/ui-layout.js?v=phase3-boot-recovery"></script>\n</body>');
+    if (!html.includes('/boot-recovery.js')) html = html.replace(/<\/body>/i, '  <script src="/boot-recovery.js?v=phase3-boot-recovery-v2"></script>\n</body>');
+    if (!html.includes('/branding.js')) html = html.replace(/<\/body>/i, '  <script src="/branding.js?v=phase3-boot-recovery-v2"></script>\n</body>');
+    if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js?v=phase3-boot-recovery-v2"></script>\n</body>');
+    if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, '  <script src="/user-manager.js?v=phase3-boot-recovery-v2"></script>\n</body>');
+    if (!html.includes('/security-dashboard.js')) html = html.replace(/<\/body>/i, '  <script src="/security-dashboard.js?v=phase3-boot-recovery-v2"></script>\n</body>');
+    if (!html.includes('/ui-layout.js')) html = html.replace(/<\/body>/i, '  <script src="/ui-layout.js?v=phase3-boot-recovery-v2"></script>\n</body>');
 
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.set("Pragma", "no-cache");
