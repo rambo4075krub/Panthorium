@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Panthorium logo">
+  <rect width="256" height="256" fill="none"/>
+  <path d="M64 2 L128 82 L64 164 Z" fill="#ff1111"/>
+  <path d="M192 2 L128 82 L192 164 Z" fill="#ff7a1a"/>
+  <path d="M64 92 L192 2 L192 164 L64 254 Z" fill="#ff6f1a"/>
+  <path d="M64 254 L128 174 L192 254 L192 164 Z" fill="#ff1111"/>
+</svg>
