@@ -6,14 +6,23 @@
     return permissions.includes(permission);
   }
 
+  function isAdministrator() {
+    return !!OS?.state?.user?.roles?.includes('administrator');
+  }
+
   function updateIdentityUI() {
     const user = OS.state.user;
     const userEl = document.querySelector('.sm-user');
     const statusEl = document.getElementById('sm-status');
     const logoutBtn = document.getElementById('btn-logout');
     if (userEl) userEl.textContent = user?.username || 'ผู้ใช้ทั่วไป';
-    if (statusEl) statusEl.textContent = user?.roles?.includes('administrator') ? 'Online · Administrator' : 'Online · Guest';
-    if (logoutBtn) logoutBtn.textContent = user?.roles?.includes('administrator') ? '🚪 ออกจากระบบ' : '🔄 รีสตาร์ท';
+    if (statusEl) statusEl.textContent = isAdministrator() ? 'Online · Administrator' : 'Online · Guest';
+    if (logoutBtn) logoutBtn.textContent = isAdministrator() ? '🚪 ออกจากระบบ' : '🔄 รีสตาร์ท';
+  }
+
+  function permissionDenied(permission) {
+    toast(`ไม่มีสิทธิ์ ${permission}`);
+    return false;
   }
 
   async function guestSession() {
@@ -46,6 +55,20 @@
     return !!OS.config.accessToken;
   }
 
+  async function fetchIdentity() {
+    if (!OS.config.accessToken) return null;
+    const base = OS.config.backendUrl.replace(/\/$/, '');
+    const res = await fetch(base + '/api/auth/me', {
+      headers: { Authorization: `Bearer ${OS.config.accessToken}` },
+      credentials: 'include'
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    OS.state.user = data.user || OS.state.user;
+    updateIdentityUI();
+    return data.user || null;
+  }
+
   async function login(username, password) {
     const base = OS.config.backendUrl.replace(/\/$/, '');
     const res = await fetch(base + '/api/auth/login', {
@@ -67,7 +90,6 @@
     await fetch(base + '/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => null);
     OS.config.accessToken = '';
     OS.state.user = null;
-    await guestSession().catch(() => null);
     showLogin();
   }
 
@@ -145,7 +167,7 @@
 
     const restored = await refreshSession().catch(() => false);
     if (restored) {
-      updateIdentityUI();
+      await fetchIdentity().catch(() => null);
       toast('กู้คืน Session สำเร็จ');
     } else {
       showLogin();
@@ -154,26 +176,36 @@
     const logoutBtn = document.getElementById('btn-logout');
     if (logoutBtn) {
       logoutBtn.onclick = async () => {
-        if (OS.state.user?.roles?.includes('administrator')) {
-          await logout();
-        } else {
-          location.reload();
-        }
+        if (isAdministrator()) await logout();
+        else location.reload();
       };
     }
 
     const originalOpenSettings = typeof openSettings === 'function' ? openSettings : null;
     if (originalOpenSettings) {
       openSettings = function () {
-        if (OS.state.user?.roles?.includes('administrator') && !hasPermission('settings')) {
-          toast('บัญชีนี้ไม่มีสิทธิ์ settings');
-          return;
-        }
+        if (!hasPermission('settings')) return permissionDenied('settings');
         return originalOpenSettings();
+      };
+    }
+
+    const originalCallAI = typeof callAI === 'function' ? callAI : null;
+    if (originalCallAI) {
+      callAI = async function (prompt) {
+        if (!hasPermission('chat')) return { ok: false, text: 'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat', provider: 'RBAC', via: 'rbac' };
+        return originalCallAI(prompt);
       };
     }
   }
 
-  window.PanthoriumAuth = { login, logout, refreshSession, guestSession, hasPermission };
+  window.PanthoriumAuth = {
+    login,
+    logout,
+    refreshSession,
+    guestSession,
+    fetchIdentity,
+    hasPermission,
+    isAdministrator
+  };
   initializePhase2().catch((error) => console.error('[Phase2 Auth]', error));
 })();
