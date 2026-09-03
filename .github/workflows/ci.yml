@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - phase3-security-dashboard
+      - phase4-ai-platform
   pull_request:
     branches:
       - main
@@ -12,21 +12,16 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
-
       - name: Install dependencies
         run: npm install
-
       - name: Syntax checks
         run: npm run check
-
       - name: Run tests
         run: npm test
