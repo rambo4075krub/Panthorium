@@ -61,9 +61,7 @@ app.use("/api", createApiRouter(sentinelCore, authService, audit));
 const frontendCandidates = [path.join(__dirname, ".."), __dirname];
 const frontendRoot = frontendCandidates.find((dir) => fs.existsSync(path.join(dir, "sentinel.html"))) || __dirname;
 
-// Security/auth UI must never be served stale. This avoids old service-worker/browser
-// cache keeping the previous auto-login or missing-logout behavior after a deploy.
-for (const script of ["phase2-auth.js", "user-manager.js", "security-dashboard.js"]) {
+for (const script of ["branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
       res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -79,9 +77,10 @@ app.get("/", (req, res, next) => {
   try {
     const file = path.join(frontendRoot, "sentinel.html");
     let html = fs.readFileSync(file, "utf8");
-    if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js?v=phase3-login-fix"></script>\n</body>');
-    if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, '  <script src="/user-manager.js?v=phase3-login-fix"></script>\n</body>');
-    if (!html.includes('/security-dashboard.js')) html = html.replace(/<\/body>/i, '  <script src="/security-dashboard.js?v=phase3-login-fix"></script>\n</body>');
+    if (!html.includes('/branding.js')) html = html.replace(/<\/body>/i, '  <script src="/branding.js?v=phase3-brand"></script>\n</body>');
+    if (!html.includes('/phase2-auth.js')) html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js?v=phase3-brand"></script>\n</body>');
+    if (!html.includes('/user-manager.js')) html = html.replace(/<\/body>/i, '  <script src="/user-manager.js?v=phase3-brand"></script>\n</body>');
+    if (!html.includes('/security-dashboard.js')) html = html.replace(/<\/body>/i, '  <script src="/security-dashboard.js?v=phase3-admin-app"></script>\n</body>');
     res.set("Cache-Control", "no-store");
     res.type("html").send(html);
   } catch (error) { next(error); }
