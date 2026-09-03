@@ -17,14 +17,16 @@ class ProviderManager {
   }
   async streamDetailed(provider, systemPrompt, history, options = {}, onDelta = () => {}) {
     const key = this.keys[provider]; if (!key) return null; const model = options.model || this.models[provider];
-    if (provider === "groq") return this.streamOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", key, model, systemPrompt, history, onDelta);
-    if (provider === "openai") return this.streamOpenAICompatible("https://api.openai.com/v1/chat/completions", key, model, systemPrompt, history, onDelta);
+    if (provider === "groq") return this.streamOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", key, model, systemPrompt, history, onDelta, false);
+    if (provider === "openai") return this.streamOpenAICompatible("https://api.openai.com/v1/chat/completions", key, model, systemPrompt, history, onDelta, true);
     const result = await this.callDetailed(provider, systemPrompt, history, { model });
     if (result?.text) onDelta(result.text);
     return { ...result, streaming: "buffered" };
   }
-  async streamOpenAICompatible(url, key, model, systemPrompt, history, onDelta) {
-    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, max_tokens: 320, stream: true, stream_options: { include_usage: true } }), signal: AbortSignal.timeout(45000) });
+  async streamOpenAICompatible(url, key, model, systemPrompt, history, onDelta, includeUsage = false) {
+    const body = { model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, max_tokens: 320, stream: true };
+    if (includeUsage) body.stream_options = { include_usage: true };
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}`, Accept: "text/event-stream" }, body: JSON.stringify(body), signal: AbortSignal.timeout(45000) });
     if (!res.ok) throw new Error(`Provider HTTP ${res.status}`);
     if (!res.body) throw new Error("provider_stream_unavailable");
     const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let text = ""; let usage = null; let responseModel = model;
@@ -39,6 +41,7 @@ class ProviderManager {
         const delta = data.choices?.[0]?.delta?.content || ""; if (delta) { text += delta; onDelta(delta); }
       }
     }
+    if (!text.trim()) throw new Error("provider_stream_empty");
     return { text: text.trim(), model: responseModel, usage, streaming: "native" };
   }
   async callOpenAICompatible(url, key, model, systemPrompt, history) {
