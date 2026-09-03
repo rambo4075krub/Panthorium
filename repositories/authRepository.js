@@ -17,6 +17,10 @@ class JsonAuthRepository {
     return this.store.read().users.find((u) => u.id === id) || null;
   }
 
+  async listUsers() {
+    return (this.store.read().users || []).slice().sort((a, b) => String(a.username).localeCompare(String(b.username)));
+  }
+
   async createUser(user) {
     this.store.update((data) => {
       data.users = data.users || [];
@@ -24,6 +28,46 @@ class JsonAuthRepository {
       return data;
     });
     return user;
+  }
+
+  async updateUserAccess(id, { roles, permissions }) {
+    let updated = null;
+    this.store.update((data) => {
+      data.users = data.users || [];
+      data.users = data.users.map((user) => {
+        if (user.id !== id) return user;
+        updated = { ...user, roles: roles || [], permissions: permissions || [] };
+        return updated;
+      });
+      return data;
+    });
+    return updated;
+  }
+
+  async updateUserPassword(id, passwordHash) {
+    let updated = null;
+    this.store.update((data) => {
+      data.users = data.users || [];
+      data.users = data.users.map((user) => {
+        if (user.id !== id) return user;
+        updated = { ...user, passwordHash };
+        return updated;
+      });
+      return data;
+    });
+    return updated;
+  }
+
+  async deleteUser(id) {
+    let removed = false;
+    this.store.update((data) => {
+      const before = (data.users || []).length;
+      data.users = (data.users || []).filter((user) => user.id !== id);
+      data.refreshTokens = (data.refreshTokens || []).filter((token) => token.userId !== id);
+      removed = data.users.length !== before;
+      return data;
+    });
+    return removed;
   }
 
   async storeRefreshToken(token) {
@@ -106,6 +150,11 @@ class PostgresAuthRepository {
     return this.mapUser(rows[0]);
   }
 
+  async listUsers() {
+    const { rows } = await this.pool.query("SELECT * FROM panthorium_users ORDER BY username ASC");
+    return rows.map((row) => this.mapUser(row));
+  }
+
   async createUser(user) {
     const { rows } = await this.pool.query(
       `INSERT INTO panthorium_users (id, username, password_hash, roles, permissions, created_at)
@@ -115,6 +164,30 @@ class PostgresAuthRepository {
       [user.id || crypto.randomUUID(), user.username, user.passwordHash, JSON.stringify(user.roles || []), JSON.stringify(user.permissions || []), user.createdAt || new Date().toISOString()]
     );
     return rows[0] ? this.mapUser(rows[0]) : this.findUserByUsername(user.username);
+  }
+
+  async updateUserAccess(id, { roles, permissions }) {
+    const { rows } = await this.pool.query(
+      `UPDATE panthorium_users
+       SET roles = $2::jsonb, permissions = $3::jsonb
+       WHERE id = $1
+       RETURNING *`,
+      [id, JSON.stringify(roles || []), JSON.stringify(permissions || [])]
+    );
+    return this.mapUser(rows[0]);
+  }
+
+  async updateUserPassword(id, passwordHash) {
+    const { rows } = await this.pool.query(
+      "UPDATE panthorium_users SET password_hash = $2 WHERE id = $1 RETURNING *",
+      [id, passwordHash]
+    );
+    return this.mapUser(rows[0]);
+  }
+
+  async deleteUser(id) {
+    const { rowCount } = await this.pool.query("DELETE FROM panthorium_users WHERE id = $1", [id]);
+    return rowCount > 0;
   }
 
   async storeRefreshToken(token) {

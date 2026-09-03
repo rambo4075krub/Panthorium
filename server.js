@@ -66,6 +66,9 @@ app.get("/", (req, res, next) => {
     if (!html.includes('/phase2-auth.js')) {
       html = html.replace(/<\/body>/i, '  <script src="/phase2-auth.js"></script>\n</body>');
     }
+    if (!html.includes('/user-manager.js')) {
+      html = html.replace(/<\/body>/i, '  <script src="/user-manager.js"></script>\n</body>');
+    }
     res.type("html").send(html);
   } catch (error) {
     next(error);
