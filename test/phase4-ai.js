@@ -1,6 +1,7 @@
 const assert = require('assert');
 const { AiGateway } = require('../services/aiGateway');
 const { ConversationRepository } = require('../services/conversationRepository');
+const { ProviderManager } = require('../services/providerManager');
 (async () => {
   const events = []; const audit = { record: (event, data) => events.push({ event, data }) };
   const providers = { available: () => ['primary','backup'], catalog: () => [{ provider:'primary', configured:true }], callDetailed: async (p) => { if (p === 'primary') throw new Error('down'); return { text:'fallback-ok', model:'test-model', usage:{ totalTokens:3 } }; } };
@@ -8,6 +9,12 @@ const { ConversationRepository } = require('../services/conversationRepository')
   assert.equal(gateway.catalog()[0].provider, 'primary');
   const result = await gateway.complete({ systemPrompt:'x', history:[], userId:'u1', sessionId:'s1' });
   assert.equal(result.ok, true); assert.equal(result.provider, 'backup'); assert.equal(result.fallbackCount, 1); assert.equal(result.usage.totalTokens, 3);
+
+  const manager = new ProviderManager();
+  assert.equal(manager.resolveModel('openai', null), manager.models.openai);
+  assert.equal(manager.resolveModel('openai', manager.models.openai), manager.models.openai);
+  assert.equal(manager.resolveModel('openai', 'unexpected-expensive-model'), null);
+
   const repo = new ConversationRepository(); await repo.init(); await repo.append({ userId:'u1', sessionId:'s1', role:'user', content:'hello' }); await repo.append({ userId:'u1', sessionId:'s1', role:'assistant', content:'hi' });
   assert.equal((await repo.history('u1','s1')).length, 2); assert.equal((await repo.listSessions('u1')).length, 1); await repo.clear('u1','s1'); assert.equal((await repo.history('u1','s1')).length, 0);
   assert(events.some(e => e.event === 'ai.gateway.provider_failed')); assert(events.some(e => e.event === 'ai.gateway.complete'));
