@@ -10,16 +10,21 @@ function validChatBody(body = {}) {
   if (body.model != null && (typeof body.model !== "string" || body.model.length > 120)) return "invalid_model";
   return null;
 }
-function createApiRouter(sentinelCore, authService, audit) {
+function createApiRouter(sentinelCore, authService, audit, aiOperations) {
   const router = express.Router(); const auth = requireAuth(authService);
   const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
   router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", core: sentinelCore.status(), time: new Date().toISOString() }));
   router.get("/core/status", auth, requirePermission("system:read"), (req, res) => res.json({ ok: true, ...sentinelCore.status() }));
   router.get("/ai/providers", auth, requirePermission("chat"), (req, res) => res.json({ ok: true, providers: sentinelCore.providerCatalog() }));
+  router.get("/ai/operations", auth, requirePermission("chat"), async (req, res, next) => { try { res.json({ ok: true, metrics: await aiOperations.overview(req.user.sub, req.query.hours) }); } catch (error) { next(error); } });
   router.get("/conversations", auth, requirePermission("chat"), async (req, res) => res.json({ ok: true, sessions: await sentinelCore.conversationSessions(req.user.sub, Number(req.query.limit) || 30) }));
   router.get("/conversations/:sessionId", auth, requirePermission("chat"), async (req, res) => {
     if (!validText(req.params.sessionId, 120)) return res.status(400).json({ ok: false, error: "invalid_session_id" });
     res.json({ ok: true, sessionId: req.params.sessionId, messages: await sentinelCore.conversationHistory(req.user.sub, req.params.sessionId, Number(req.query.limit) || 40) });
+  });
+  router.delete("/conversations/:sessionId", auth, requirePermission("chat"), async (req, res) => {
+    if (!validText(req.params.sessionId, 120)) return res.status(400).json({ ok: false, error: "invalid_session_id" });
+    await sentinelCore.clearConversation(req.user.sub, req.params.sessionId); audit.record("ai.conversation_deleted", { userId: req.user.sub, sessionId: req.params.sessionId }); res.json({ ok: true });
   });
   router.post("/chat", auth, requirePermission("chat"), aiLimiter, async (req, res) => {
     try {
