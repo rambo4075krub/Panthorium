@@ -1,5 +1,6 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
+const { requireAuth } = require("../middleware/auth");
 
 function createAuthRouter(authService, config) {
   const router = express.Router();
@@ -28,6 +29,18 @@ function createAuthRouter(authService, config) {
       res.cookie("pt_refresh", session.refreshToken, cookieOptions);
       res.json({ ok: true, accessToken: session.accessToken, user: session.principal });
     } catch (error) { next(error); }
+  });
+
+  router.get("/me", requireAuth(authService), (req, res) => {
+    res.json({
+      ok: true,
+      user: {
+        id: req.user.sub,
+        username: req.user.username,
+        roles: req.user.roles || [],
+        permissions: req.user.permissions || []
+      }
+    });
   });
 
   router.post("/refresh", async (req, res, next) => {
