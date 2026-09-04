@@ -1,7 +1,7 @@
 {
   "name": "panthorium-backend",
   "version": "5.5.0-phase5-agent-safety",
-  "description": "Panthorium OS Backend - risk-aware AI agent tools, workflows and safety policies",
+  "description": "Panthorium OS Backend - risk-aware AI agent tools, workflows, observability and safety policies",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
