@@ -38,9 +38,11 @@ const { AgentAutomationService } = require('../services/agentAutomationService')
   const allowed = await service.createSchedule({ user: operator, request:'status', firstRunAt:new Date(Date.now()+60000).toISOString(), everyMinutes:5, maxRuns:5 });
   assert.equal(allowed.ok, true);
 
+  // Final hardening adds a service-layer account guard before policy evaluation.
+  // Guests must now fail closed even if this service is called outside the HTTP router.
   const deniedGuest = await service.createTrigger({ user: guest, eventKey:'security.alert', request:'inspect alert' });
   assert.equal(deniedGuest.ok, false);
-  assert.equal(deniedGuest.error, 'automation_policy_denied');
+  assert.equal(deniedGuest.error, 'automation_requires_account');
 
   const deniedEmit = await service.emit({ user: account, eventKey:'custom.event', payload:{x:1} });
   assert.equal(deniedEmit.ok, false);
