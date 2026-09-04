@@ -1,0 +1,10 @@
+class ProviderCircuitBreaker {
+  constructor({failureThreshold=3,cooldownMs=30000,successThreshold=1,audit}={}){this.failureThreshold=Math.max(1,Number(failureThreshold)||3);this.cooldownMs=Math.max(1000,Number(cooldownMs)||30000);this.successThreshold=Math.max(1,Number(successThreshold)||1);this.audit=audit;this.states=new Map();}
+  state(provider){if(!this.states.has(provider))this.states.set(provider,{provider,state:'closed',failures:0,successes:0,openedAt:null,lastFailureAt:null,lastError:null});return this.states.get(provider);}
+  canAttempt(provider){const s=this.state(provider);if(s.state!=='open')return true;if(!s.openedAt||Date.now()-s.openedAt>=this.cooldownMs){s.state='half_open';s.successes=0;this.audit?.record('ai.circuit_half_open',{provider});return true;}return false;}
+  success(provider){const s=this.state(provider);if(s.state==='half_open'){s.successes++;if(s.successes>=this.successThreshold){s.state='closed';s.failures=0;s.successes=0;s.openedAt=null;s.lastError=null;this.audit?.record('ai.circuit_closed',{provider});}}else{s.failures=0;s.lastError=null;}return this.snapshot(provider);}
+  failure(provider,error){const s=this.state(provider);s.failures++;s.lastFailureAt=new Date().toISOString();s.lastError=String(error?.message||error||'provider_failure').slice(0,240);if(s.state==='half_open'||s.failures>=this.failureThreshold){s.state='open';s.openedAt=Date.now();s.successes=0;this.audit?.record('ai.circuit_opened',{provider,failures:s.failures,error:s.lastError,cooldownMs:this.cooldownMs});}return this.snapshot(provider);}
+  snapshot(provider){const s=this.state(provider);return{provider:s.provider,state:s.state,failures:s.failures,openedAt:s.openedAt?new Date(s.openedAt).toISOString():null,lastFailureAt:s.lastFailureAt,lastError:s.lastError,retryAfterMs:s.state==='open'&&s.openedAt?Math.max(0,this.cooldownMs-(Date.now()-s.openedAt)):0};}
+  catalog(){return[...this.states.keys()].map(p=>this.snapshot(p));}
+}
+module.exports={ProviderCircuitBreaker};
