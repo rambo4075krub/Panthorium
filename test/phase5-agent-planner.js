@@ -11,6 +11,7 @@ const { AgentPlannerService } = require('../services/agentPlannerService');
   const executions = [];
   const agentService = {
     catalogFor: () => tools,
+    validateArgs: () => ({ ok: true }),
     async execute(input) { executions.push(input); return { ok: true, toolId: input.toolId, output: { done: true } }; }
   };
   let response = JSON.stringify({ action: 'tool', toolId: 'system.status', args: {}, reason: 'Need runtime status', answer: null });
