@@ -3,7 +3,7 @@ const{IntegrationRepository}=require('../services/integrationRepository');
 const{IntegrationService}=require('../services/integrationService');
 (async()=>{
  const repo=new IntegrationRepository();await repo.init();const audit={record(){}};let called=0;
- const service=new IntegrationService({repository:repo,audit,allowedHosts:['hooks.example.com'],fetcher:async(url,options)=>{called++;assert.equal(url,'https://hooks.example.com/task');assert.equal(options.method,'POST');return{ok:true,status:200,async text(){return'ok';}};}});
+ const service=new IntegrationService({repository:repo,audit,allowedHosts:['hooks.example.com'],resolver:async()=>[{address:'8.8.8.8',family:4}],fetcher:async(url,options)=>{called++;assert.equal(url,'https://hooks.example.com/task');assert.equal(options.method,'POST');assert.equal(options.redirect,'error');return{ok:true,status:200,async text(){return'ok';}};}});
  const admin={sub:'admin-1',permissions:['settings','core:command','chat']};const other={sub:'admin-2',permissions:['settings','core:command','chat']};const guest={sub:'guest:1',permissions:['settings','core:command']};
  assert.equal((await service.create({user:guest,name:'x',endpointUrl:'https://hooks.example.com/task'})).error,'integration_settings_required');
  assert.equal((await service.create({user:admin,name:'bad',endpointUrl:'http://hooks.example.com/task'})).error,'invalid_integration_endpoint');
