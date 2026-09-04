@@ -5,7 +5,11 @@ const { AgentWorkflowService } = require('../services/agentWorkflowService');
 (async () => {
   const runs = new AgentRunRepository(); await runs.init();
   const tools = [{ id: 'read.one', description: 'read one', mutates: false, requiresConfirmation: false }];
-  const agentService = { catalogFor: () => tools, async execute({ toolId }) { return { ok: true, toolId, output: { value: 1 }, durationMs: 7 }; } };
+  const agentService = {
+    catalogFor: () => tools,
+    validateArgs: () => ({ ok: true }),
+    async execute({ toolId }) { return { ok: true, toolId, output: { value: 1 }, durationMs: 7 }; }
+  };
   const gateway = { async complete() { return { ok: true, provider: 'mock', model: 'mock-v1', text: JSON.stringify({ steps: [{ toolId: 'read.one', args: {}, reason: 'inspect' }], answer: 'done' }) }; } };
   const service = new AgentWorkflowService({ agentService, gateway, audit: { record() {} }, runs });
   const user = { sub: 'u1', permissions: ['chat'] };
