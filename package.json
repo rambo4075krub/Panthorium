@@ -1,13 +1,13 @@
 {
   "name": "panthorium-backend",
-  "version": "4.2.0-phase4-ops",
-  "description": "Panthorium OS Backend - AI platform, streaming chat and AI operations",
+  "version": "5.6.0-phase5-final-hardening",
+  "description": "Panthorium OS Backend - hardened risk-aware AI agent workflows with strict tool validation and expiry controls",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check server.js && node --check routes/api.js && node --check routes/auth.js && node --check routes/security.js && node --check repositories/authRepository.js && node --check services/sentinelCore.js && node --check services/providerManager.js && node --check services/aiGateway.js && node --check services/conversationRepository.js && node --check services/aiOperationsService.js && node --check services/authService.js && node --check services/auditService.js && node --check services/securityResponseService.js && node --check phase2-auth.js && node --check user-manager.js && node --check security-dashboard.js && node --check ui-layout.js && node --check ai-dashboard.js && node --check ai-stream-client.js && node --check boot-recovery.js",
-    "test": "node test/smoke.js && node test/security-response.js && node test/phase4-ai.js && node test/phase4-stream.js && node test/phase4-ai-ops.js"
+    "check": "node --check server.js && node --check routes/api.js && node --check routes/auth.js && node --check routes/security.js && node --check repositories/authRepository.js && node --check services/sentinelCore.js && node --check services/providerManager.js && node --check services/aiGateway.js && node --check services/conversationRepository.js && node --check services/aiOperationsService.js && node --check services/toolRegistry.js && node --check services/agentPolicyService.js && node --check services/agentService.js && node --check services/agentPlannerService.js && node --check services/agentWorkflowService.js && node --check services/agentRunRepository.js && node --check services/authService.js && node --check services/auditService.js && node --check services/securityResponseService.js && node --check phase2-auth.js && node --check user-manager.js && node --check security-dashboard.js && node --check ui-layout.js && node --check ai-dashboard.js && node --check ai-stream-client.js && node --check agent-ui.js && node --check boot-recovery.js",
+    "test": "node test/smoke.js && node test/security-response.js && node test/phase4-ai.js && node test/phase4-stream.js && node test/phase4-ai-ops.js && node test/phase5-agent.js && node test/phase5-agent-planner.js && node test/phase5-agent-workflow.js && node test/phase5-agent-observability.js && node test/phase5-agent-safety.js && node test/phase5-final-hardening.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

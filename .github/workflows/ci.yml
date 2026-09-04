@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - phase4-ai-platform
+      - phase5-agent-platform
   pull_request:
     branches:
       - main
