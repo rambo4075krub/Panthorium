@@ -2,82 +2,17 @@
   'use strict';
   function getOS() { try { return typeof OS !== 'undefined' ? OS : null; } catch (_) { return null; } }
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
-  async function ensureToken() {
-    const system = getOS();
-    if (system?.config?.accessToken) return system.config.accessToken;
-    if (window.PanthoriumAuth?.refreshSession) {
-      const ok = await window.PanthoriumAuth.refreshSession().catch(() => false);
-      if (ok) return getOS()?.config?.accessToken || '';
-    }
-    return '';
-  }
-  async function api(path, options = {}, retry = true) {
-    let token = await ensureToken();
-    const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) };
-    if (token) headers.Authorization = `Bearer ${token}`;
-    let res = await fetch(path, { ...options, headers, credentials: 'include' });
-    if (res.status === 401 && retry && window.PanthoriumAuth?.refreshSession) {
-      const ok = await window.PanthoriumAuth.refreshSession().catch(() => false);
-      if (ok) { token = getOS()?.config?.accessToken || ''; headers.Authorization = `Bearer ${token}`; res = await fetch(path, { ...options, headers, credentials: 'include' }); }
-    }
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok && ![409].includes(res.status)) throw new Error(data.error || `HTTP ${res.status}`);
-    return { status: res.status, data };
-  }
-  function append(role, html) {
-    const log = document.getElementById('agent-log'); if (!log) return;
-    const row = document.createElement('div'); row.style.cssText = 'padding:10px 12px;border-radius:10px;margin:7px 0;background:' + (role === 'user' ? '#132033' : '#0b1220') + ';border:1px solid #223047';
-    row.innerHTML = `<div style="font-size:10px;color:#7f93aa;margin-bottom:4px">${role === 'user' ? 'YOU' : 'SENTINEL AGENT'}</div>${html}`;
-    log.appendChild(row); log.scrollTop = log.scrollHeight;
-  }
-  function renderOutput(output) {
-    if (typeof output === 'string') return `<div>${esc(output)}</div>`;
-    return `<pre style="white-space:pre-wrap;word-break:break-word;margin:0;font-size:11px">${esc(JSON.stringify(output, null, 2))}</pre>`;
-  }
-  async function executeConfirmed(toolId, args) {
-    append('agent', `<div>กำลัง execute <b>${esc(toolId)}</b>...</div>`);
-    const { data } = await api('/api/agent/execute', { method: 'POST', body: JSON.stringify({ toolId, args, confirmed: true }) });
-    if (data.ok) append('agent', `<div>สำเร็จ · <b>${esc(toolId)}</b></div>${renderOutput(data.output)}`);
-    else append('agent', `<div>ไม่สำเร็จ: ${esc(data.error || 'tool_failed')}</div>`);
-  }
-  async function runAgent(text) {
-    if (!text.trim()) return;
-    append('user', `<div>${esc(text)}</div>`);
-    const state = document.getElementById('agent-state'); if (state) state.textContent = 'กำลังวางแผน...';
-    try {
-      const { data } = await api('/api/agent/run', { method: 'POST', body: JSON.stringify({ message: text, sessionId: getOS()?.config?.sessionId || 'default' }) });
-      if (data.answer) append('agent', `<div>${esc(data.answer)}</div>`);
-      if (data.plan) {
-        const plan = data.plan;
-        append('agent', `<div style="font-size:11px;color:#9fb0c5">แผน: ${esc(plan.action || '-')} ${plan.toolId ? '→ <b>' + esc(plan.toolId) + '</b>' : ''}${plan.reason ? '<br>เหตุผล: ' + esc(plan.reason) : ''}</div>`);
-      }
-      if (data.execution?.ok) append('agent', `<div>Tool completed: <b>${esc(data.execution.toolId)}</b></div>${renderOutput(data.execution.output)}`);
-      if (data.confirmationRequired && data.tool) {
-        const box = document.createElement('div'); box.style.cssText = 'padding:12px;border:1px solid #7c5b1a;background:#2a210d;border-radius:10px;margin:7px 0';
-        box.innerHTML = `<div style="font-weight:700">ต้องยืนยันก่อนดำเนินการ</div><div style="font-size:11px;margin:5px 0">${esc(data.tool.description || data.tool.id)}</div><div style="display:flex;gap:8px"><button data-confirm>ยืนยัน</button><button data-cancel>ยกเลิก</button></div>`;
-        document.getElementById('agent-log')?.appendChild(box);
-        box.querySelector('[data-confirm]').onclick = async () => { box.remove(); await executeConfirmed(data.tool.id, data.args || data.plan?.args || {}); };
-        box.querySelector('[data-cancel]').onclick = () => { box.remove(); append('agent', '<div>ยกเลิกการดำเนินการแล้ว</div>'); };
-      }
-    } catch (e) { append('agent', `<div>Agent error: ${esc(e.message)}</div>`); }
-    finally { if (state) state.textContent = 'พร้อม'; }
-  }
-  function openAgent() {
-    if (document.getElementById('phase5-agent-ui')) return;
-    const wrap = document.createElement('div'); wrap.id = 'phase5-agent-ui';
-    wrap.style.cssText = 'position:fixed;inset:7%;z-index:9999;background:rgba(7,11,18,.985);border:1px solid #334155;border-radius:16px;color:#e2e8f0;padding:16px;display:flex;flex-direction:column;box-shadow:0 24px 80px #000;font-family:system-ui';
-    wrap.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between"><div><h2 style="margin:0">🤖 Sentinel Agent</h2><div id="agent-state" style="font-size:11px;color:#7f93aa">พร้อม</div></div><button id="agent-close">✕</button></div><div id="agent-log" style="flex:1;overflow:auto;margin:12px 0;padding-right:4px"></div><div style="display:flex;gap:8px"><input id="agent-input" placeholder="บอก Sentinel ให้ตรวจสอบหรือดำเนินการ..." style="flex:1;padding:11px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#e2e8f0"><button id="agent-send">ส่ง</button></div>';
-    document.body.appendChild(wrap);
-    const input = document.getElementById('agent-input');
-    const send = () => { const value = input.value; input.value = ''; runAgent(value); };
-    document.getElementById('agent-close').onclick = () => wrap.remove(); document.getElementById('agent-send').onclick = send; input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
-    append('agent', '<div>Agent Mode พร้อมใช้งาน ผมสามารถเลือก Tool ที่มีสิทธิ์ใช้งาน และจะขอยืนยันก่อน action ที่แก้ไขข้อมูล</div>');
-    input.focus();
-  }
-  function installLauncher() {
-    const menu = document.querySelector('.start-menu, #start-menu'); if (!menu || document.getElementById('phase5-agent-launcher')) return true;
-    const btn = document.createElement('button'); btn.id = 'phase5-agent-launcher'; btn.textContent = '🤖 Sentinel Agent'; btn.style.cssText = 'display:block;width:100%;padding:10px;text-align:left'; btn.onclick = openAgent; menu.appendChild(btn); return true;
-  }
+  async function ensureToken() { const system = getOS(); if (system?.config?.accessToken) return system.config.accessToken; if (window.PanthoriumAuth?.refreshSession) { const ok = await window.PanthoriumAuth.refreshSession().catch(() => false); if (ok) return getOS()?.config?.accessToken || ''; } return ''; }
+  async function api(path, options = {}, retry = true) { let token = await ensureToken(); const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) }; if (token) headers.Authorization = `Bearer ${token}`; let res = await fetch(path, { ...options, headers, credentials: 'include' }); if (res.status === 401 && retry && window.PanthoriumAuth?.refreshSession) { const ok = await window.PanthoriumAuth.refreshSession().catch(() => false); if (ok) { token = getOS()?.config?.accessToken || ''; headers.Authorization = `Bearer ${token}`; res = await fetch(path, { ...options, headers, credentials: 'include' }); } } const data = await res.json().catch(() => ({})); if (!res.ok && res.status !== 409) throw new Error(data.error || `HTTP ${res.status}`); return { status: res.status, data }; }
+  function append(role, html) { const log = document.getElementById('agent-log'); if (!log) return; const row = document.createElement('div'); row.style.cssText = 'padding:10px 12px;border-radius:10px;margin:7px 0;background:' + (role === 'user' ? '#132033' : '#0b1220') + ';border:1px solid #223047'; row.innerHTML = `<div style="font-size:10px;color:#7f93aa;margin-bottom:4px">${role === 'user' ? 'YOU' : 'SENTINEL AGENT'}</div>${html}`; log.appendChild(row); log.scrollTop = log.scrollHeight; }
+  function renderOutput(output) { if (typeof output === 'string') return `<div>${esc(output)}</div>`; return `<pre style="white-space:pre-wrap;word-break:break-word;margin:0;font-size:11px">${esc(JSON.stringify(output, null, 2))}</pre>`; }
+  function renderResults(results) { for (const r of results || []) append('agent', `<div>${r.ok ? '✓' : '✕'} Step ${Number(r.index) + 1}: <b>${esc(r.toolId)}</b>${r.durationMs ? ` · ${esc(r.durationMs)} ms` : ''}</div>${r.ok ? renderOutput(r.output) : `<div>${esc(r.error || 'tool_failed')}</div>`}`); }
+  async function confirmWorkflow(workflowId) { const { data } = await api(`/api/agent/workflow/${encodeURIComponent(workflowId)}/confirm`, { method: 'POST', body: '{}' }); renderResults(data.results); if (data.confirmationRequired) showConfirmation(data); else if (data.completed) append('agent', `<div>Workflow เสร็จสมบูรณ์${data.answer ? '<br>' + esc(data.answer) : ''}</div>`); else if (!data.ok) append('agent', `<div>Workflow ไม่สำเร็จ: ${esc(data.error || 'workflow_failed')}</div>`); }
+  async function cancelWorkflow(workflowId) { try { await api(`/api/agent/workflow/${encodeURIComponent(workflowId)}/cancel`, { method: 'POST', body: '{}' }); append('agent', '<div>ยกเลิก Workflow แล้ว</div>'); } catch (e) { append('agent', `<div>ยกเลิกไม่สำเร็จ: ${esc(e.message)}</div>`); } }
+  function showConfirmation(data) { const step = data.pendingStep || {}; const box = document.createElement('div'); box.style.cssText = 'padding:12px;border:1px solid #7c5b1a;background:#2a210d;border-radius:10px;margin:7px 0'; box.innerHTML = `<div style="font-weight:700">ต้องยืนยัน Step ${Number(step.index || 0) + 1}</div><div style="font-size:11px;margin:5px 0"><b>${esc(step.toolId || '-')}</b>${step.reason ? '<br>' + esc(step.reason) : ''}</div><div style="display:flex;gap:8px"><button data-confirm>ยืนยันและทำต่อ</button><button data-cancel>ยกเลิก Workflow</button></div>`; document.getElementById('agent-log')?.appendChild(box); box.querySelector('[data-confirm]').onclick = async () => { box.remove(); await confirmWorkflow(data.workflowId); }; box.querySelector('[data-cancel]').onclick = async () => { box.remove(); await cancelWorkflow(data.workflowId); }; }
+  async function runAgent(text) { if (!text.trim()) return; append('user', `<div>${esc(text)}</div>`); const state = document.getElementById('agent-state'); if (state) state.textContent = 'กำลังวางแผน Workflow...'; try { const { data } = await api('/api/agent/workflow/run', { method: 'POST', body: JSON.stringify({ request: text }) }); if (data.workflow?.steps) { const steps = data.workflow.steps.map((s, i) => `${i + 1}. ${esc(s.toolId)}${s.requiresConfirmation ? ' 🔒' : ''}${s.reason ? ' — ' + esc(s.reason) : ''}`).join('<br>'); append('agent', `<div style="font-size:11px;color:#9fb0c5"><b>Workflow ${esc(data.workflowId || '')}</b><br>${steps || 'ไม่ต้องใช้ Tool'}</div>`); } renderResults(data.results); if (data.answer && (!data.workflow?.steps?.length || data.completed)) append('agent', `<div>${esc(data.answer)}</div>`); if (data.confirmationRequired) showConfirmation(data); else if (data.completed && data.workflow?.steps?.length) append('agent', '<div>Workflow เสร็จสมบูรณ์</div>'); if (!data.ok && !data.confirmationRequired) append('agent', `<div>Agent error: ${esc(data.error || 'workflow_failed')}</div>`); } catch (e) { append('agent', `<div>Agent error: ${esc(e.message)}</div>`); } finally { if (state) state.textContent = 'พร้อม'; } }
+  function openAgent() { if (document.getElementById('phase5-agent-ui')) return; const wrap = document.createElement('div'); wrap.id = 'phase5-agent-ui'; wrap.style.cssText = 'position:fixed;inset:7%;z-index:9999;background:rgba(7,11,18,.985);border:1px solid #334155;border-radius:16px;color:#e2e8f0;padding:16px;display:flex;flex-direction:column;box-shadow:0 24px 80px #000;font-family:system-ui'; wrap.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between"><div><h2 style="margin:0">🤖 Sentinel Agent</h2><div id="agent-state" style="font-size:11px;color:#7f93aa">พร้อม · Multi-step Workflow</div></div><button id="agent-close">✕</button></div><div id="agent-log" style="flex:1;overflow:auto;margin:12px 0;padding-right:4px"></div><div style="display:flex;gap:8px"><input id="agent-input" placeholder="บอก Sentinel ให้ตรวจสอบหรือดำเนินการหลายขั้นตอน..." style="flex:1;padding:11px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#e2e8f0"><button id="agent-send">ส่ง</button></div>'; document.body.appendChild(wrap); const input = document.getElementById('agent-input'); const send = () => { const value = input.value; input.value = ''; runAgent(value); }; document.getElementById('agent-close').onclick = () => wrap.remove(); document.getElementById('agent-send').onclick = send; input.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }; append('agent', '<div>Agent Workflow พร้อมใช้งาน สูงสุด 5 ขั้นตอน และจะหยุดขออนุมัติก่อนทุก action ที่แก้ไขข้อมูล</div>'); input.focus(); }
+  function installLauncher() { const menu = document.querySelector('.start-menu, #start-menu'); if (!menu || document.getElementById('phase5-agent-launcher')) return true; const btn = document.createElement('button'); btn.id = 'phase5-agent-launcher'; btn.textContent = '🤖 Sentinel Agent'; btn.style.cssText = 'display:block;width:100%;padding:10px;text-align:left'; btn.onclick = openAgent; menu.appendChild(btn); return true; }
   window.PanthoriumAgent = { open: openAgent, run: runAgent };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installLauncher); else installLauncher();
   let tries = 0; const timer = setInterval(() => { tries += 1; if (installLauncher() || tries > 30) clearInterval(timer); }, 500);
