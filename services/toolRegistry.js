@@ -1,13 +1,14 @@
 const { isIP } = require('node:net');
 
 const SESSION_ID_RE = /^[A-Za-z0-9._:-]{1,120}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function plainObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }
 function onlyKeys(args, allowed) { return plainObject(args) && Object.keys(args).every((key) => allowed.includes(key)); }
 function boundedInteger(value, min, max) { const n = Number(value); return Number.isInteger(n) && n >= min && n <= max; }
 function validateNoArgs(args) { return plainObject(args) && Object.keys(args).length === 0 ? null : 'invalid_tool_args'; }
 
 class ToolRegistry {
-  constructor({ sentinelCore, conversations, securityResponse, aiOperations } = {}) {
+  constructor({ sentinelCore, conversations, securityResponse, aiOperations, integrations } = {}) {
     this.tools = new Map();
     this.register({ id: 'system.status', description: 'Read Sentinel Core runtime status', permission: 'system:read', risk: 'low', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async () => sentinelCore.status() });
     this.register({ id: 'ai.providers', description: 'List configured AI providers and models', permission: 'chat', risk: 'low', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async () => sentinelCore.providerCatalog() });
@@ -35,6 +36,26 @@ class ToolRegistry {
       validateArgs: (args) => onlyKeys(args, ['sessionId']) && SESSION_ID_RE.test(String(args.sessionId || '')) ? null : 'invalid_tool_args',
       run: async ({ userId, args }) => { const sessionId = String(args.sessionId); await sentinelCore.clearConversation(userId, sessionId); return { cleared: true, sessionId }; }
     });
+
+    if (integrations) {
+      this.register({
+        id: 'integration.invoke', description: 'Invoke a configured external HTTPS integration for the current user', permission: 'core:command', risk: 'critical', mutates: true, requiresConfirmation: true,
+        argsSchema: { integrationId: 'required integration UUID', payload: 'JSON object up to 32KB (optional)' },
+        validateArgs: (args) => {
+          if (!onlyKeys(args, ['integrationId', 'payload'])) return 'invalid_tool_args';
+          if (!UUID_RE.test(String(args.integrationId || ''))) return 'invalid_integration_id';
+          if (args.payload != null && !plainObject(args.payload)) return 'invalid_integration_payload';
+          try { if (Buffer.byteLength(JSON.stringify(args.payload || {}), 'utf8') > 32768) return 'integration_payload_too_large'; }
+          catch { return 'invalid_integration_payload'; }
+          return null;
+        },
+        run: async ({ user, args }) => {
+          const result = await integrations.invoke({ user, integrationId: String(args.integrationId), payload: args.payload || {} });
+          if (!result.ok) { const error = new Error(result.error || 'integration_invoke_failed'); error.integrationResult = result; throw error; }
+          return result.output;
+        }
+      });
+    }
 
     if (securityResponse) {
       this.register({ id: 'security.blocks', description: 'List active temporary IP security blocks', permission: 'system:read', risk: 'medium', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async () => securityResponse.listBlocks() });

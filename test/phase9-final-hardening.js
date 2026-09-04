@@ -1,0 +1,21 @@
+const assert=require('assert');
+const{EventEmitter}=require('events');
+const{IntegrationRepository}=require('../services/integrationRepository');
+const{IntegrationService,isPrivateAddress}=require('../services/integrationService');
+(async()=>{
+ assert.equal(isPrivateAddress('::ffff:127.0.0.1'),true);
+ assert.equal(isPrivateAddress('::ffff:169.254.1.2'),true);
+ assert.equal(isPrivateAddress('2001:db8::1'),true);
+ assert.equal(isPrivateAddress('198.51.100.9'),true);
+ assert.equal(isPrivateAddress('203.0.113.8'),true);
+ assert.equal(isPrivateAddress('1.1.1.1'),false);
+ const auditEvents=[];const audit={record(event,data){auditEvents.push({event,data});}};const admin={sub:'admin-final',permissions:['settings','core:command','chat']};
+ const mixedRepo=new IntegrationRepository();await mixedRepo.init();let mixedCalled=0;
+ const mixed=new IntegrationService({repository:mixedRepo,audit,allowedHosts:['mixed.example.com'],resolver:async()=>[{address:'1.1.1.1',family:4},{address:'10.0.0.1',family:4}],fetcher:async()=>{mixedCalled++;throw new Error('must not call');}});
+ const mixedCreated=await mixed.create({user:admin,name:'mixed',endpointUrl:'https://mixed.example.com/hook'});const mixedResult=await mixed.invoke({user:admin,integrationId:mixedCreated.integration.integrationId,payload:{}});assert.equal(mixedResult.error,'integration_private_address_blocked');assert.equal(mixedCalled,0);
+ const dotRepo=new IntegrationRepository();await dotRepo.init();const dot=new IntegrationService({repository:dotRepo,audit,allowedHosts:['safe.example.com']});const dotted=await dot.create({user:admin,name:'dot',endpointUrl:'https://safe.example.com./hook'});assert.equal(dotted.ok,true);assert.equal(dotted.integration.endpointUrl,'https://safe.example.com/hook');
+ let requestOptions=null;const fakeHttps={request(options,callback){requestOptions=options;const req=new EventEmitter();req.end=()=>{const res=new EventEmitter();res.statusCode=204;res.setEncoding=()=>{};callback(res);process.nextTick(()=>res.emit('end'));};req.destroy=(error)=>req.emit('error',error);return req;}};
+ const pinnedRepo=new IntegrationRepository();await pinnedRepo.init();const pinned=new IntegrationService({repository:pinnedRepo,audit,allowedHosts:['public.example.com'],resolver:async()=>[{address:'1.1.1.1',family:4}],httpsModule:fakeHttps});const created=await pinned.create({user:admin,name:'pinned',endpointUrl:'https://public.example.com/action'});const circular={};circular.self=circular;assert.equal((await pinned.invoke({user:admin,integrationId:created.integration.integrationId,payload:circular})).error,'invalid_integration_payload');const invoked=await pinned.invoke({user:admin,integrationId:created.integration.integrationId,payload:{safe:true}});assert.equal(invoked.ok,true);assert.equal(requestOptions.hostname,'public.example.com');assert.equal(requestOptions.servername,'public.example.com');let lookupResult=null;requestOptions.lookup('public.example.com',{},(error,address,family)=>{assert.ifError(error);lookupResult={address,family};});assert.deepEqual(lookupResult,{address:'1.1.1.1',family:4});assert.equal(requestOptions.method,'POST');
+ assert(auditEvents.some(x=>x.event==='integration.destination_blocked'));
+ console.log('Phase 9 final hardening tests passed');
+})().catch(e=>{console.error(e);process.exit(1);});

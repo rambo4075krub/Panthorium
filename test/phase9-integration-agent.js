@@ -1,0 +1,20 @@
+const assert=require('assert');
+const{IntegrationRepository}=require('../services/integrationRepository');
+const{IntegrationExecutionRepository}=require('../services/integrationExecutionRepository');
+const{IntegrationService}=require('../services/integrationService');
+const{ToolRegistry}=require('../services/toolRegistry');
+const{AgentService}=require('../services/agentService');
+const{AgentPolicyService}=require('../services/agentPolicyService');
+(async()=>{
+ const audit={record(){}};const repo=new IntegrationRepository();const executions=new IntegrationExecutionRepository();await repo.init();await executions.init();let called=0;
+ const integrations=new IntegrationService({repository:repo,executions,audit,allowedHosts:['hooks.example.com'],resolver:async()=>[{address:'8.8.8.8',family:4}],fetcher:async()=>{called++;return{ok:true,status:202,async text(){return'accepted';}};}});
+ const admin={sub:'admin-1',permissions:['settings','core:command','chat']};const created=await integrations.create({user:admin,name:'Webhook',endpointUrl:'https://hooks.example.com/task'});const integrationId=created.integration.integrationId;
+ const sentinelCore={status(){return{};},providerCatalog(){return[];},async clearConversation(){}};const tools=new ToolRegistry({sentinelCore,integrations});const agent=new AgentService({tools,audit,policy:new AgentPolicyService()});
+ const catalog=agent.catalogFor(admin);const tool=catalog.find(x=>x.id==='integration.invoke');assert(tool);assert.equal(tool.risk,'critical');assert.equal(tool.requiresConfirmation,true);assert.equal(tool.mutates,true);
+ const denied=await agent.execute({user:admin,toolId:'integration.invoke',args:{integrationId,payload:{hello:'world'}},confirmed:false});assert.equal(denied.ok,false);assert.equal(denied.error,'confirmation_required');assert.equal(called,0);
+ const invalid=await agent.execute({user:admin,toolId:'integration.invoke',args:{integrationId:'bad',payload:{}},confirmed:true});assert.equal(invalid.error,'invalid_integration_id');
+ const executed=await agent.execute({user:admin,toolId:'integration.invoke',args:{integrationId,payload:{hello:'world'}},confirmed:true});assert.equal(executed.ok,true);assert.equal(executed.output.status,202);assert.equal(called,1);
+ const history=await integrations.history(admin,{integrationId});assert.equal(history.ok,true);assert.equal(history.executions.length,1);assert.equal(history.executions[0].status,'completed');assert.equal(history.executions[0].httpStatus,202);
+ const other={sub:'admin-2',permissions:['settings','core:command','chat']};assert.equal((await integrations.history(other,{integrationId})).executions.length,0);
+ console.log('Phase 9 integration Agent tests passed');
+})().catch(e=>{console.error(e);process.exit(1);});
