@@ -1,5 +1,5 @@
 class AgentMemoryService {
-  constructor({ repository, audit } = {}) { this.repository = repository; this.audit = audit; }
+  constructor({ repository, audit, knowledge } = {}) { this.repository = repository; this.audit = audit; this.knowledge = knowledge || null; }
   async init() { await this.repository?.init?.(); }
   allowed(user) { return !!user?.sub && !String(user.sub).startsWith('guest:') && Array.isArray(user.permissions) && user.permissions.includes('chat'); }
   validateKind(kind) { const value = String(kind || 'note').trim().toLowerCase(); return /^[a-z0-9._:-]{1,40}$/.test(value) ? value : null; }
@@ -40,10 +40,22 @@ class AgentMemoryService {
     return { ok: true };
   }
 
-  async context({ user, query, limit = 6 } = {}) {
-    const result = await this.search({ user, query, limit });
-    if (!result.ok) return result;
-    return { ok: true, context: result.memories.map((m) => ({ memoryId: m.memoryId, kind: m.kind, title: m.title, content: m.content, tags: m.tags, importance: m.importance })) };
+  async context({ user, query, limit = 6, requestId } = {}) {
+    const memoryResult = await this.search({ user, query, limit, requestId });
+    if (!memoryResult.ok) return memoryResult;
+    const memories = memoryResult.memories.map((m) => ({ sourceType: 'memory', memoryId: m.memoryId, kind: m.kind, title: m.title, content: m.content, tags: m.tags, importance: m.importance }));
+    let knowledge = [];
+    if (this.knowledge?.allowed?.(user)) {
+      try {
+        const result = await this.knowledge.context({ user, query, limit });
+        if (result.ok) knowledge = result.context.map((x) => ({ sourceType: 'knowledge', documentId: x.documentId, chunkId: x.chunkId, title: x.title, source: x.source, content: x.content, score: x.score }));
+      } catch (error) {
+        this.audit?.record('agent.knowledge_context_failed', { userId: user?.sub, requestId, error: error.message });
+      }
+    }
+    const combined = [...memories, ...knowledge].slice(0, Math.max(1, Math.min(Number(limit) || 6, 12)));
+    this.audit?.record('agent.context_retrieved', { userId: user?.sub, requestId, memoryMatches: memories.length, knowledgeMatches: knowledge.length, returned: combined.length });
+    return { ok: true, context: combined, memoryMatches: memories.length, knowledgeMatches: knowledge.length };
   }
 }
 
