@@ -11,15 +11,21 @@ class AgentService {
       return true;
     });
   }
-  async execute({ user, toolId, args = {}, confirmed = false, requestId }) {
+  validateArgs(toolId, args = {}) {
     const tool = this.tools.get(toolId);
-    if (!tool) return { ok: false, error: 'tool_not_found', toolId: String(toolId || '') };
-    if (!args || typeof args !== 'object' || Array.isArray(args)) return { ok: false, error: 'invalid_tool_args', toolId: tool.id };
-    const validationError = typeof tool.validateArgs === 'function' ? tool.validateArgs(args) : null;
-    if (validationError) {
-      this.audit?.record('agent.tool_rejected', { userId: user?.sub, requestId, toolId: tool.id, error: validationError, risk: tool.risk || 'low' });
-      return { ok: false, error: validationError, toolId: tool.id, risk: tool.risk || 'low' };
+    if (!tool) return { ok: false, error: 'tool_not_found' };
+    if (!args || typeof args !== 'object' || Array.isArray(args)) return { ok: false, error: 'invalid_tool_args', tool };
+    const error = typeof tool.validateArgs === 'function' ? tool.validateArgs(args) : null;
+    return error ? { ok: false, error, tool } : { ok: true, tool };
+  }
+  async execute({ user, toolId, args = {}, confirmed = false, requestId }) {
+    const validation = this.validateArgs(toolId, args);
+    if (!validation.ok) {
+      const tool = validation.tool;
+      if (tool) this.audit?.record('agent.tool_rejected', { userId: user?.sub, requestId, toolId: tool.id, error: validation.error, risk: tool.risk || 'low' });
+      return { ok: false, error: validation.error, toolId: tool?.id || String(toolId || ''), risk: tool?.risk || undefined };
     }
+    const tool = validation.tool;
     const policy = this.policy.evaluate({ user, tool, confirmed });
     if (!policy.ok) return { ...policy, toolId: tool.id };
     const runId = randomUUID(); const started = Date.now();
