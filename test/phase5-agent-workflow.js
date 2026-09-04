@@ -9,6 +9,7 @@ const { AgentWorkflowService } = require('../services/agentWorkflowService');
   ];
   const agentService = {
     catalogFor: () => tools,
+    validateArgs: () => ({ ok: true }),
     async execute({ user, toolId, confirmed }) {
       if (toolId === 'write.one' && !confirmed) return { ok: false, error: 'confirmation_required' };
       return { ok: true, toolId, output: { user: user.sub, toolId }, durationMs: 1 };
