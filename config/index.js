@@ -18,6 +18,7 @@ module.exports = {
   accessTokenTtl: process.env.ACCESS_TOKEN_TTL || "15m",
   refreshTokenDays: Number(process.env.REFRESH_TOKEN_DAYS || 30),
   allowedOrigins: list(process.env.ALLOWED_ORIGINS, ["http://localhost:8787", "http://127.0.0.1:8787"]),
+  integrationAllowedHosts: list(process.env.INTEGRATION_ALLOWED_HOSTS, []),
   dataFile: process.env.DATA_FILE || path.join(__dirname, "..", "data", "panthorium.json"),
   auditFile: process.env.AUDIT_FILE || path.join(__dirname, "..", "logs", "audit.log"),
   databaseUrl: process.env.DATABASE_URL || "",
