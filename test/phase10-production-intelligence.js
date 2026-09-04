@@ -15,7 +15,7 @@ const{ProductionIntelligenceService,clampHours}=require('../services/productionI
     database:{ok:true},
     process:{heapUsedBytes:20,heapTotalBytes:100},
     aggregate:{
-      audit:{total:100,httpErrors:1,rateLimited:0},
+      audit:{total:1000,httpErrors:1,rateLimited:0},
       agents:{total:20,failed:1,running:0,waitingConfirmation:0},
       jobs:{total:20,failed:0,running:0,scheduled:0,overdue:0},
       integrations:{total:0,failed:0,remoteErrors:0},
@@ -40,11 +40,13 @@ const{ProductionIntelligenceService,clampHours}=require('../services/productionI
   const errors=JSON.parse(JSON.stringify(baseline));
   errors.aggregate.audit.httpErrors=20;
   assert.equal(service.evaluate(errors).status,'critical');
+  assert(service.evaluate(errors).signals.some(s=>s.code==='SLO_BURN_RATE'));
 
   const overview=await service.overview(24);
   assert.equal(overview.status,'healthy');
   assert.equal(overview.aggregate.mode,'memory');
   assert(Array.isArray(overview.recommendations));
+  assert.equal(overview.slo.status,'healthy');
 
   console.log('Phase 10 production intelligence tests passed');
 })().catch(error=>{console.error(error);process.exit(1);});
