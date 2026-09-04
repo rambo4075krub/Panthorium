@@ -41,19 +41,31 @@ class AgentMemoryService {
   }
 
   async context({ user, query, limit = 6, requestId } = {}) {
-    const memoryResult = await this.search({ user, query, limit, requestId });
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 6, 12));
+    const memoryResult = await this.search({ user, query, limit: safeLimit, requestId });
     if (!memoryResult.ok) return memoryResult;
     const memories = memoryResult.memories.map((m) => ({ sourceType: 'memory', memoryId: m.memoryId, kind: m.kind, title: m.title, content: m.content, tags: m.tags, importance: m.importance }));
     let knowledge = [];
     if (this.knowledge?.allowed?.(user)) {
       try {
-        const result = await this.knowledge.context({ user, query, limit });
+        const result = await this.knowledge.context({ user, query, limit: safeLimit });
         if (result.ok) knowledge = result.context.map((x) => ({ sourceType: 'knowledge', documentId: x.documentId, chunkId: x.chunkId, title: x.title, source: x.source, content: x.content, score: x.score }));
       } catch (error) {
         this.audit?.record('agent.knowledge_context_failed', { userId: user?.sub, requestId, error: error.message });
       }
     }
-    const combined = [...memories, ...knowledge].slice(0, Math.max(1, Math.min(Number(limit) || 6, 12)));
+
+    // Reserve room for both retrieval sources when both have matches. This prevents
+    // a large knowledge result set from crowding out a relevant long-term memory
+    // (or vice versa) while still respecting the caller's total context limit.
+    const combined = [];
+    let memoryIndex = 0;
+    let knowledgeIndex = 0;
+    while (combined.length < safeLimit && (memoryIndex < memories.length || knowledgeIndex < knowledge.length)) {
+      if (memoryIndex < memories.length && combined.length < safeLimit) combined.push(memories[memoryIndex++]);
+      if (knowledgeIndex < knowledge.length && combined.length < safeLimit) combined.push(knowledge[knowledgeIndex++]);
+    }
+
     this.audit?.record('agent.context_retrieved', { userId: user?.sub, requestId, memoryMatches: memories.length, knowledgeMatches: knowledge.length, returned: combined.length });
     return { ok: true, context: combined, memoryMatches: memories.length, knowledgeMatches: knowledge.length };
   }
