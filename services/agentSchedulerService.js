@@ -1,8 +1,8 @@
 const { randomUUID } = require('crypto');
 
 class AgentSchedulerService {
-  constructor({ jobs, workflow, runs, audit, pollMs = 5000, workerId } = {}) {
-    this.jobs = jobs; this.workflow = workflow; this.runs = runs; this.audit = audit;
+  constructor({ jobs, workflow, runs, audit, authService, pollMs = 5000, workerId } = {}) {
+    this.jobs = jobs; this.workflow = workflow; this.runs = runs; this.audit = audit; this.authService = authService || null;
     this.pollMs = Math.max(1000, Number(pollMs) || 5000); this.workerId = workerId || `scheduler:${randomUUID()}`;
     this.timer = null; this.running = false;
   }
@@ -28,8 +28,9 @@ class AgentSchedulerService {
     const text = String(request || '').trim(); if (!text || text.length > 8000) return { ok: false, error: 'invalid_agent_request' };
     const timing = this.validateRunAt(runAt); if (!timing.ok) return timing;
     if (provider != null && (typeof provider !== 'string' || !provider.trim() || provider.length > 40)) return { ok: false, error: 'invalid_provider' };
-    const userContext = { sub: user?.sub, role: user?.role || 'guest', permissions: Array.isArray(user?.permissions) ? [...user.permissions] : [] };
+    const userContext = { sub: user?.sub, username: user?.username || null, roles: Array.isArray(user?.roles) ? [...user.roles] : [], permissions: Array.isArray(user?.permissions) ? [...user.permissions] : [] };
     if (!userContext.sub) return { ok: false, error: 'invalid_user' };
+    if (String(userContext.sub).startsWith('guest:')) return { ok: false, error: 'scheduled_jobs_require_account' };
     const job = await this.jobs.create({ userId: userContext.sub, userContext, request: text, provider: provider?.toLowerCase() || null, runAt: timing.runAt, status: 'scheduled' });
     this.audit?.record('agent.job_scheduled', { userId: userContext.sub, requestId, jobId: job.jobId, runAt: job.runAt, provider: job.provider });
     return { ok: true, job };
@@ -46,6 +47,13 @@ class AgentSchedulerService {
     return { ok: true, job };
   }
 
+  async resolveUser(job) {
+    if (!this.authService?.repository?.findUserById) return job.userContext;
+    const user = await this.authService.repository.findUserById(job.userId);
+    if (!user) return null;
+    return { sub: user.id, username: user.username, roles: user.roles || [], permissions: user.permissions || [] };
+  }
+
   async syncWaiting() {
     if (!this.runs) return;
     const waiting = await this.jobs.listWaiting(50);
@@ -60,7 +68,16 @@ class AgentSchedulerService {
   async executeJob(job) {
     this.audit?.record('agent.job_started', { userId: job.userId, jobId: job.jobId, workerId: this.workerId, attempts: job.attempts });
     try {
-      const result = await this.workflow.run({ user: job.userContext, request: job.request, preferredProvider: job.provider || undefined, requestId: `job:${job.jobId}` });
+      const user = await this.resolveUser(job);
+      if (!user) {
+        const next = await this.jobs.finish(job.jobId, { status: 'failed', error: 'scheduled_user_not_found', completedAt: new Date().toISOString() });
+        this.audit?.record('agent.job_failed', { userId: job.userId, jobId: job.jobId, error: 'scheduled_user_not_found' }); return next;
+      }
+      if (!Array.isArray(user.permissions) || !user.permissions.includes('chat')) {
+        const next = await this.jobs.finish(job.jobId, { status: 'failed', error: 'scheduled_user_permission_denied', completedAt: new Date().toISOString() });
+        this.audit?.record('agent.job_failed', { userId: job.userId, jobId: job.jobId, error: 'scheduled_user_permission_denied' }); return next;
+      }
+      const result = await this.workflow.run({ user, request: job.request, preferredProvider: job.provider || undefined, requestId: `job:${job.jobId}` });
       if (result.confirmationRequired) {
         const next = await this.jobs.finish(job.jobId, { status: 'waiting_confirmation', workflowId: result.workflowId || null, result: { confirmationRequired: true, pendingStep: result.pendingStep || null }, error: null });
         this.audit?.record('agent.job_waiting_confirmation', { userId: job.userId, jobId: job.jobId, workflowId: result.workflowId || null }); return next;
