@@ -178,11 +178,10 @@
       <div class="login-card">
         <div class="login-avatar"><img src="/panthorium-logo.svg" alt="Panthorium" style="width:64px;height:64px;object-fit:contain;"></div>
         <div class="login-title">Panthorium OS</div>
-        <div class="login-sub">เข้าสู่ระบบด้วยบัญชีของคุณ หรือใช้งานต่อในโหมด Guest</div>
+        <div class="login-sub">เข้าสู่ระบบด้วยบัญชีผู้ดูแลหรือบัญชีที่ได้รับอนุญาต</div>
         <input id="phase2-username" autocomplete="username" value="admin" placeholder="ชื่อผู้ใช้" style="width:100%;padding:12px;margin-bottom:10px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.25);color:var(--text);outline:none;">
         <input id="phase2-password" type="password" autocomplete="current-password" placeholder="รหัสผ่าน" style="width:100%;padding:12px;margin-bottom:12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.25);color:var(--text);outline:none;">
         <button class="login-btn" id="phase2-login-btn">เข้าสู่ระบบ</button>
-        <button class="login-btn" id="phase2-guest-btn" style="margin-top:10px;background:rgba(255,255,255,.08);color:var(--text);">ใช้งานแบบ Guest</button>
         <div class="login-hint" id="phase2-login-status">ระบบ RBAC · Session ปลอดภัย</div>
       </div>`;
     desktop.classList.remove('active');
@@ -203,11 +202,6 @@
     }
     document.getElementById('phase2-login-btn').onclick = submitLogin;
     password.onkeydown = (event) => { if (event.key === 'Enter') submitLogin(); };
-    document.getElementById('phase2-guest-btn').onclick = async () => {
-      status.textContent = 'กำลังเปิด Guest session...';
-      try { await guestSession(); activateDesktop(); toast('เข้าสู่ระบบแบบ Guest'); }
-      catch { status.textContent = 'ไม่สามารถสร้าง Guest session ได้'; }
-    };
   }
 
   async function phase2EnsureAuth(force = false) { if (OS.config.accessToken && !force) return true; return false; }
@@ -243,7 +237,13 @@
     await revokeServerSession();
     OS.config.accessToken = ''; OS.state.user = null; OS.state.loggedIn = false; OS.state.verified = false;
     ensureSecurityScript();
-    showLogin();
+    try {
+      await guestSession();
+      activateDesktop();
+    } catch (error) {
+      console.error('[Phase2 Auth] guest auto-entry failed', error);
+      showLogin();
+    }
     const logoutBtn = document.getElementById('btn-logout'); if (logoutBtn) logoutBtn.onclick = () => logout();
     ensureLogoutControl();
   }
