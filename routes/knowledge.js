@@ -1,3 +1,50 @@
-const express=require('express');
-function createKnowledgeRouter(authService,knowledge){const router=express.Router();const auth=authService.requireAuth.bind(authService);router.use(auth);router.get('/',async(req,res,next)=>{try{const r=await knowledge.list({user:req.user,limit:req.query.limit});res.status(r.ok?200:403).json(r);}catch(e){next(e);}});router.post('/',async(req,res,next)=>{try{const r=await knowledge.ingest({user:req.user,...(req.body||{}),requestId:req.requestId});res.status(r.ok?201:400).json(r);}catch(e){next(e);}});router.get('/search',async(req,res,next)=>{try{const r=await knowledge.search({user:req.user,query:req.query.q,limit:req.query.limit,requestId:req.requestId});res.status(r.ok?200:400).json(r);}catch(e){next(e);}});router.get('/:documentId',async(req,res,next)=>{try{const r=await knowledge.get({user:req.user,documentId:req.params.documentId});res.status(r.ok?200:r.error==='knowledge_not_found'?404:400).json(r);}catch(e){next(e);}});router.delete('/:documentId',async(req,res,next)=>{try{const r=await knowledge.remove({user:req.user,documentId:req.params.documentId,requestId:req.requestId});res.status(r.ok?200:r.error==='knowledge_not_found'?404:400).json(r);}catch(e){next(e);}});return router;}
-module.exports={createKnowledgeRouter};
+const express = require('express');
+const rateLimit = require('express-rate-limit');
+const { requireAuth, requirePermission } = require('../middleware/auth');
+
+function createKnowledgeRouter(authService, knowledge) {
+  const router = express.Router();
+  const auth = requireAuth(authService);
+  const limiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
+
+  router.get('/', auth, requirePermission('chat'), limiter, async (req, res, next) => {
+    try {
+      const out = await knowledge.list({ user: req.user, limit: Number(req.query.limit) || 50 });
+      res.status(out.ok ? 200 : out.error === 'knowledge_requires_account' ? 403 : 400).json(out);
+    } catch (error) { next(error); }
+  });
+
+  router.post('/', auth, requirePermission('chat'), limiter, async (req, res, next) => {
+    try {
+      const { title, content, source, metadata } = req.body || {};
+      const out = await knowledge.ingest({ user: req.user, title, content, source, metadata, requestId: req.requestId });
+      res.status(out.ok ? 201 : out.error === 'knowledge_requires_account' ? 403 : 400).json(out);
+    } catch (error) { next(error); }
+  });
+
+  router.get('/search', auth, requirePermission('chat'), limiter, async (req, res, next) => {
+    try {
+      const out = await knowledge.search({ user: req.user, query: req.query.q, limit: Number(req.query.limit) || 8, requestId: req.requestId });
+      res.status(out.ok ? 200 : out.error === 'knowledge_requires_account' ? 403 : 400).json(out);
+    } catch (error) { next(error); }
+  });
+
+  router.get('/:documentId', auth, requirePermission('chat'), limiter, async (req, res, next) => {
+    try {
+      const out = await knowledge.get({ user: req.user, documentId: req.params.documentId });
+      const status = out.ok ? 200 : out.error === 'knowledge_not_found' ? 404 : out.error === 'knowledge_requires_account' ? 403 : 400;
+      res.status(status).json(out);
+    } catch (error) { next(error); }
+  });
+
+  router.delete('/:documentId', auth, requirePermission('chat'), limiter, async (req, res, next) => {
+    try {
+      const out = await knowledge.remove({ user: req.user, documentId: req.params.documentId, requestId: req.requestId });
+      const status = out.ok ? 200 : out.error === 'knowledge_not_found' ? 404 : out.error === 'knowledge_requires_account' ? 403 : 400;
+      res.status(status).json(out);
+    } catch (error) { next(error); }
+  });
+
+  return router;
+}
+module.exports = { createKnowledgeRouter };
