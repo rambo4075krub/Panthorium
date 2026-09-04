@@ -1,0 +1,14 @@
+const express=require('express');
+const rateLimit=require('express-rate-limit');
+const {requireAuth,requirePermission}=require('../middleware/auth');
+function validId(v){return typeof v==='string'&&/^[A-Za-z0-9._:-]{1,80}$/.test(v);}
+function createAutomationRouter(authService,automation){const r=express.Router();const auth=requireAuth(authService);const limiter=rateLimit({windowMs:60000,limit:60,standardHeaders:true,legacyHeaders:false});
+r.get('/schedules',auth,requirePermission('chat'),limiter,async(req,res,next)=>{try{res.json({ok:true,schedules:await automation.listSchedules(req.user.sub,Number(req.query.limit)||30)});}catch(e){next(e);}});
+r.post('/schedules',auth,requirePermission('chat'),limiter,async(req,res,next)=>{try{if(String(req.user.sub||'').startsWith('guest:'))return res.status(403).json({ok:false,error:'automation_requires_account'});const {request,message,provider,firstRunAt,everyMinutes,maxRuns}=req.body||{};const out=await automation.createSchedule({user:req.user,request:request||message,provider,firstRunAt,everyMinutes,maxRuns,requestId:req.requestId});res.status(out.ok?201:400).json(out);}catch(e){next(e);}});
+r.delete('/schedules/:scheduleId',auth,requirePermission('chat'),limiter,async(req,res,next)=>{try{if(!validId(req.params.scheduleId))return res.status(400).json({ok:false,error:'invalid_schedule_id'});const out=await automation.disableSchedule({user:req.user,scheduleId:req.params.scheduleId,requestId:req.requestId});res.status(out.ok?200:404).json(out);}catch(e){next(e);}});
+r.get('/triggers',auth,requirePermission('chat'),limiter,async(req,res,next)=>{try{res.json({ok:true,triggers:await automation.listTriggers(req.user.sub,Number(req.query.limit)||30)});}catch(e){next(e);}});
+r.post('/triggers',auth,requirePermission('chat'),limiter,async(req,res,next)=>{try{if(String(req.user.sub||'').startsWith('guest:'))return res.status(403).json({ok:false,error:'automation_requires_account'});const {eventKey,request,message,provider}=req.body||{};const out=await automation.createTrigger({user:req.user,eventKey,request:request||message,provider,requestId:req.requestId});res.status(out.ok?201:400).json(out);}catch(e){next(e);}});
+r.delete('/triggers/:triggerId',auth,requirePermission('chat'),limiter,async(req,res,next)=>{try{if(!validId(req.params.triggerId))return res.status(400).json({ok:false,error:'invalid_trigger_id'});const out=await automation.disableTrigger({user:req.user,triggerId:req.params.triggerId,requestId:req.requestId});res.status(out.ok?200:404).json(out);}catch(e){next(e);}});
+r.post('/events/:eventKey',auth,requirePermission('chat'),limiter,async(req,res,next)=>{try{const out=await automation.emit({user:req.user,eventKey:req.params.eventKey,payload:req.body?.payload,requestId:req.requestId});res.status(out.ok?202:400).json(out);}catch(e){next(e);}});
+return r;}
+module.exports={createAutomationRouter};
