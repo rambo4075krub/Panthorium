@@ -7,7 +7,7 @@ const{AgentService}=require('../services/agentService');
 const{AgentPolicyService}=require('../services/agentPolicyService');
 (async()=>{
  const audit={record(){}};const repo=new IntegrationRepository();const executions=new IntegrationExecutionRepository();await repo.init();await executions.init();let called=0;
- const integrations=new IntegrationService({repository:repo,executions,audit,allowedHosts:['hooks.example.com'],fetcher:async()=>{called++;return{ok:true,status:202,async text(){return'accepted';}};}});
+ const integrations=new IntegrationService({repository:repo,executions,audit,allowedHosts:['hooks.example.com'],resolver:async()=>[{address:'8.8.8.8',family:4}],fetcher:async()=>{called++;return{ok:true,status:202,async text(){return'accepted';}};}});
  const admin={sub:'admin-1',permissions:['settings','core:command','chat']};const created=await integrations.create({user:admin,name:'Webhook',endpointUrl:'https://hooks.example.com/task'});const integrationId=created.integration.integrationId;
  const sentinelCore={status(){return{};},providerCatalog(){return[];},async clearConversation(){}};const tools=new ToolRegistry({sentinelCore,integrations});const agent=new AgentService({tools,audit,policy:new AgentPolicyService()});
  const catalog=agent.catalogFor(admin);const tool=catalog.find(x=>x.id==='integration.invoke');assert(tool);assert.equal(tool.risk,'critical');assert.equal(tool.requiresConfirmation,true);assert.equal(tool.mutates,true);
