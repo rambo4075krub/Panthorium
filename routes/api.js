@@ -10,7 +10,7 @@ function validChatBody(body = {}) {
   if (body.model != null && (typeof body.model !== "string" || body.model.length > 120)) return "invalid_model";
   return null;
 }
-function createApiRouter(sentinelCore, authService, audit, aiOperations, agentService, agentPlanner) {
+function createApiRouter(sentinelCore, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow) {
   const router = express.Router(); const auth = requireAuth(authService);
   const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
   const agentLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
@@ -33,22 +33,49 @@ function createApiRouter(sentinelCore, authService, audit, aiOperations, agentSe
   });
   router.post("/agent/plan", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => {
     try {
-      const { request, provider } = req.body || {};
-      if (!validText(request, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" });
+      const { request, message, provider } = req.body || {}; const input = request || message;
+      if (!validText(input, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" });
       if (provider != null && !validText(provider, 40)) return res.status(400).json({ ok: false, error: "invalid_provider" });
-      const result = await agentPlanner.plan({ user: req.user, request, preferredProvider: provider?.toLowerCase(), requestId: req.requestId });
+      const result = await agentPlanner.plan({ user: req.user, request: input, preferredProvider: provider?.toLowerCase(), requestId: req.requestId });
       res.status(result.ok ? 200 : 422).json(result);
     } catch (error) { next(error); }
   });
   router.post("/agent/run", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => {
     try {
-      const { request, provider, confirmed } = req.body || {};
-      if (!validText(request, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" });
+      const { request, message, provider, confirmed } = req.body || {}; const input = request || message;
+      if (!validText(input, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" });
       if (provider != null && !validText(provider, 40)) return res.status(400).json({ ok: false, error: "invalid_provider" });
-      const result = await agentPlanner.run({ user: req.user, request, preferredProvider: provider?.toLowerCase(), confirmed: confirmed === true, requestId: req.requestId });
+      const result = await agentPlanner.run({ user: req.user, request: input, preferredProvider: provider?.toLowerCase(), confirmed: confirmed === true, requestId: req.requestId });
       if (result.confirmationRequired) return res.status(409).json(result);
       res.status(result.ok ? 200 : 422).json(result);
     } catch (error) { next(error); }
+  });
+  router.post("/agent/workflow/run", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => {
+    try {
+      const { request, message, provider } = req.body || {}; const input = request || message;
+      if (!validText(input, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" });
+      if (provider != null && !validText(provider, 40)) return res.status(400).json({ ok: false, error: "invalid_provider" });
+      const result = await agentWorkflow.run({ user: req.user, request: input, preferredProvider: provider?.toLowerCase(), requestId: req.requestId });
+      if (result.confirmationRequired) return res.status(409).json(result);
+      res.status(result.ok ? 200 : 422).json(result);
+    } catch (error) { next(error); }
+  });
+  router.post("/agent/workflow/:workflowId/confirm", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => {
+    try {
+      if (!validText(req.params.workflowId, 80)) return res.status(400).json({ ok: false, error: "invalid_workflow_id" });
+      const result = await agentWorkflow.confirm({ user: req.user, workflowId: req.params.workflowId, requestId: req.requestId });
+      if (result.error === "workflow_not_found") return res.status(404).json(result);
+      if (result.error === "workflow_permission_denied") return res.status(403).json(result);
+      if (result.confirmationRequired) return res.status(409).json(result);
+      res.status(result.ok ? 200 : 422).json(result);
+    } catch (error) { next(error); }
+  });
+  router.post("/agent/workflow/:workflowId/cancel", auth, requirePermission("chat"), agentLimiter, (req, res) => {
+    if (!validText(req.params.workflowId, 80)) return res.status(400).json({ ok: false, error: "invalid_workflow_id" });
+    const result = agentWorkflow.cancel({ user: req.user, workflowId: req.params.workflowId, requestId: req.requestId });
+    if (result.error === "workflow_not_found") return res.status(404).json(result);
+    if (result.error === "workflow_permission_denied") return res.status(403).json(result);
+    res.json(result);
   });
   router.get("/conversations", auth, requirePermission("chat"), async (req, res) => res.json({ ok: true, sessions: await sentinelCore.conversationSessions(req.user.sub, Number(req.query.limit) || 30) }));
   router.get("/conversations/:sessionId", auth, requirePermission("chat"), async (req, res) => {
