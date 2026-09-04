@@ -13,8 +13,15 @@ class AgentService {
   }
   async execute({ user, toolId, args = {}, confirmed = false, requestId }) {
     const tool = this.tools.get(toolId);
+    if (!tool) return { ok: false, error: 'tool_not_found', toolId: String(toolId || '') };
+    if (!args || typeof args !== 'object' || Array.isArray(args)) return { ok: false, error: 'invalid_tool_args', toolId: tool.id };
+    const validationError = typeof tool.validateArgs === 'function' ? tool.validateArgs(args) : null;
+    if (validationError) {
+      this.audit?.record('agent.tool_rejected', { userId: user?.sub, requestId, toolId: tool.id, error: validationError, risk: tool.risk || 'low' });
+      return { ok: false, error: validationError, toolId: tool.id, risk: tool.risk || 'low' };
+    }
     const policy = this.policy.evaluate({ user, tool, confirmed });
-    if (!policy.ok) return { ...policy, toolId: tool?.id || String(toolId || '') };
+    if (!policy.ok) return { ...policy, toolId: tool.id };
     const runId = randomUUID(); const started = Date.now();
     this.audit?.record('agent.tool_started', { userId: user?.sub, requestId, runId, toolId: tool.id, mutates: !!tool.mutates, risk: policy.risk });
     try {
