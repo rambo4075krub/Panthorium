@@ -47,6 +47,12 @@ class AgentMemoryRepository {
     return this.normalize({ memoryId: row.memoryId, userId: row.userId, kind: row.kind, title: row.title, content: row.content, tags: row.tags, source: row.source, importance: row.importance, createdAt: row.createdAt, updatedAt: row.updatedAt });
   }
 
+  queryTerms(query) {
+    return [...new Set(String(query || '').toLowerCase().match(/[\p{L}\p{N}_:-]+/gu) || [])]
+      .filter((term) => term.length > 1)
+      .slice(0, 16);
+  }
+
   async create(input) {
     const item = this.normalize(input);
     if (!this.pool) { this.memory.set(item.memoryId, item); return item; }
@@ -74,11 +80,29 @@ class AgentMemoryRepository {
     const q = String(query || '').trim();
     const safe = Math.min(Math.max(Number(limit) || 10, 1), 30);
     if (!q) return [];
+    const terms = this.queryTerms(q);
+    if (!terms.length) return [];
     if (!this.pool) {
-      const needle = q.toLowerCase();
-      return [...this.memory.values()].filter((x) => x.userId === userId && `${x.title}\n${x.content}\n${x.tags.join(' ')}`.toLowerCase().includes(needle)).sort((a,b) => b.importance-a.importance || Date.parse(b.updatedAt)-Date.parse(a.updatedAt)).slice(0,safe);
+      return [...this.memory.values()]
+        .filter((x) => x.userId === userId)
+        .map((x) => {
+          const haystack = `${x.title}\n${x.content}\n${x.tags.join(' ')}`.toLowerCase();
+          const relevance = terms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0);
+          return { item: x, relevance };
+        })
+        .filter((x) => x.relevance > 0)
+        .sort((a,b) => b.relevance-a.relevance || b.item.importance-a.item.importance || Date.parse(b.item.updatedAt)-Date.parse(a.item.updatedAt))
+        .slice(0,safe)
+        .map((x) => x.item);
     }
-    const r = await this.pool.query(`SELECT memory_id AS "memoryId",user_id AS "userId",kind,title,content,tags,source,importance,created_at AS "createdAt",updated_at AS "updatedAt" FROM panthorium_agent_memories WHERE user_id=$1 AND (title ILIKE $2 OR content ILIKE $2 OR tags::text ILIKE $2) ORDER BY importance DESC, updated_at DESC LIMIT $3`, [userId, `%${q.replace(/[%_]/g, '')}%`, safe]);
+    const patterns = terms.map((term) => `%${term.replace(/[%_]/g, '')}%`);
+    const r = await this.pool.query(`
+      SELECT memory_id AS "memoryId",user_id AS "userId",kind,title,content,tags,source,importance,created_at AS "createdAt",updated_at AS "updatedAt",
+        (SELECT COUNT(*) FROM unnest($2::text[]) AS pattern WHERE title ILIKE pattern OR content ILIKE pattern OR tags::text ILIKE pattern) AS relevance
+      FROM panthorium_agent_memories
+      WHERE user_id=$1 AND (title ILIKE ANY($2::text[]) OR content ILIKE ANY($2::text[]) OR tags::text ILIKE ANY($2::text[]))
+      ORDER BY relevance DESC, importance DESC, updated_at DESC
+      LIMIT $3`, [userId, patterns, safe]);
     return r.rows.map((row) => this.mapRow(row));
   }
 
