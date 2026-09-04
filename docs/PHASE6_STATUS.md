@@ -2,11 +2,24 @@
 
 Started from production `main` after Phase 5 acceptance.
 
-Current foundation:
+Completed:
 - durable pending workflow confirmations
 - restart-safe confirm/cancel recovery
 - PostgreSQL + memory repository modes
 - expiry cleanup and audit/run-history updates
-- Phase 6 regression test registered in `npm test`
+- durable one-time scheduled Agent jobs
+- PostgreSQL worker claiming with `FOR UPDATE SKIP LOCKED`
+- stale running-job recovery after restart
+- user-scoped list/get/cancel APIs
+- current identity/permission revalidation before scheduled execution
+- guest scheduling blocked because guest identities are ephemeral
+- confirmation-gated scheduled workflows transition to `waiting_confirmation` and synchronize from Agent run history
+- Phase 6 persistent-workflow and scheduled-job regression tests registered in `npm test`
 
-Next implementation target: durable scheduled Agent jobs and worker claiming.
+Current API:
+- `POST /api/agent/jobs`
+- `GET /api/agent/jobs`
+- `GET /api/agent/jobs/:jobId`
+- `DELETE /api/agent/jobs/:jobId`
+
+Next implementation target: recurring schedules and event-driven triggers, followed by automation policy/dashboard controls.
