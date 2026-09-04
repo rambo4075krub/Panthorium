@@ -10,7 +10,7 @@ function validChatBody(body = {}) {
   if (body.model != null && (typeof body.model !== "string" || body.model.length > 120)) return "invalid_model";
   return null;
 }
-function createApiRouter(sentinelCore, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns) {
+function createApiRouter(sentinelCore, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler) {
   const router = express.Router(); const auth = requireAuth(authService);
   const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
   const agentLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
@@ -21,6 +21,14 @@ function createApiRouter(sentinelCore, authService, audit, aiOperations, agentSe
   router.get("/agent/tools", auth, agentLimiter, (req, res) => res.json({ ok: true, tools: agentService.catalogFor(req.user) }));
   router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { res.json({ ok: true, runs: await agentRuns.list(req.user.sub, Number(req.query.limit) || 30) }); } catch (error) { next(error); } });
   router.get("/agent/runs/:workflowId", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { if (!validText(req.params.workflowId, 80)) return res.status(400).json({ ok: false, error: "invalid_workflow_id" }); const run = await agentRuns.get(req.user.sub, req.params.workflowId); if (!run) return res.status(404).json({ ok: false, error: "agent_run_not_found" }); res.json({ ok: true, run }); } catch (error) { next(error); } });
+  router.get("/agent/jobs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { res.json({ ok: true, jobs: await agentScheduler.list(req.user.sub, Number(req.query.limit) || 30) }); } catch (error) { next(error); } });
+  router.get("/agent/jobs/:jobId", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { if (!validText(req.params.jobId, 80)) return res.status(400).json({ ok: false, error: "invalid_job_id" }); const job = await agentScheduler.get(req.user.sub, req.params.jobId); if (!job) return res.status(404).json({ ok: false, error: "agent_job_not_found" }); res.json({ ok: true, job }); } catch (error) { next(error); } });
+  router.post("/agent/jobs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => {
+    try { const { request, message, provider, runAt } = req.body || {}; const input = request || message; if (!validText(input, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" }); const result = await agentScheduler.schedule({ user: req.user, request: input, provider, runAt, requestId: req.requestId }); if (!result.ok) return res.status(400).json(result); res.status(201).json(result); } catch (error) { next(error); }
+  });
+  router.delete("/agent/jobs/:jobId", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => {
+    try { if (!validText(req.params.jobId, 80)) return res.status(400).json({ ok: false, error: "invalid_job_id" }); const result = await agentScheduler.cancel({ user: req.user, jobId: req.params.jobId, requestId: req.requestId }); if (result.error === "agent_job_not_found") return res.status(404).json(result); if (!result.ok) return res.status(409).json(result); res.json(result); } catch (error) { next(error); }
+  });
   router.post("/agent/execute", auth, agentLimiter, async (req, res, next) => {
     try { const { toolId, args, confirmed } = req.body || {}; if (!validText(toolId, 100)) return res.status(400).json({ ok: false, error: "invalid_tool_id" }); if (args != null && (typeof args !== "object" || Array.isArray(args))) return res.status(400).json({ ok: false, error: "invalid_tool_args" }); const result = await agentService.execute({ user: req.user, toolId, args: args || {}, confirmed: confirmed === true, requestId: req.requestId }); if (result.error === "tool_not_found") return res.status(404).json(result); if (result.error === "tool_permission_denied") return res.status(403).json(result); if (result.error === "confirmation_required") return res.status(409).json(result); res.status(result.ok ? 200 : 400).json(result); } catch (error) { next(error); }
   });
