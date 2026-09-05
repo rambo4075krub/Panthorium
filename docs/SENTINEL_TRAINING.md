@@ -1,28 +1,37 @@
-# Sentinel Training Lab
+# Sentinel Automatic Training
 
-Training Lab ทำให้ Sentinel เรียนรู้จากตัวอย่างที่ผู้ดูแลอนุมัติ โดยไม่ต้องฝึกโมเดลใหม่และไม่เปลี่ยน UI เดิม ตัวอย่างที่อนุมัติจะถูกค้นหาตามคำถามและแนบเป็นบริบทให้ AI แบบ RAG
+Training Lab ใช้การเรียนรู้แบบ RAG: บทสนทนาที่ Sentinel ตอบสำเร็จและตัวอย่างจาก AI ครูจะถูกเก็บ ตรวจ ให้คะแนน และอนุมัติอัตโนมัติ ข้อมูลที่อนุมัติแล้วเท่านั้นจึงถูกค้นหาและแนบเป็นบริบทให้คำตอบครั้งต่อไป ระบบนี้ไม่แก้น้ำหนักของโมเดลภายนอก
 
-## ค่าใช้จ่าย
+## ขั้นตอนอัตโนมัติ
 
-- การเพิ่มและอนุมัติตัวอย่างด้วยตัวเองไม่มีค่าบริการ AI
-- `POST /api/training/teachers/draft` เรียกเฉพาะ provider ที่มี API key อยู่แล้ว ค่าใช้จ่ายหรือโควตาฟรีขึ้นอยู่กับ provider
-- ระบบไม่ส่งคำถามให้ provider ใดเลยจนกว่าแอดมินจะเรียก endpoint สร้าง draft
+1. เก็บคู่คำถามและคำตอบที่สำเร็จจาก Sentinel รวมถึงตัวอย่างที่เพิ่มใน Training Lab
+2. ปกปิด token, API key, รหัสผ่าน, อีเมล และหมายเลขโทรศัพท์ก่อนบันทึก
+3. ป้องกันข้อมูลซ้ำด้วย SHA-256 fingerprint
+4. ให้ AI provider ที่ตั้งค่าไว้สูงสุดสองรายตรวจความถูกต้อง ความเกี่ยวข้อง ความชัดเจน และความปลอดภัย
+5. คำนวณคะแนนเฉลี่ย 0–100
+6. อนุมัติอัตโนมัติเมื่อผู้ตรวจทุกคนยืนยันว่าปลอดภัย/ถูกต้อง/เกี่ยวข้อง และคะแนนถึงเกณฑ์
+7. ปฏิเสธอัตโนมัติเมื่อไม่ผ่านเกณฑ์หรือ provider ตรวจไม่ครบ เพื่อป้องกันการอนุมัติผิดและการเรียก API ซ้ำไม่สิ้นสุด
 
-## ความปลอดภัย
+ค่าเริ่มต้นเปิดระบบอัตโนมัติ เปิดการเก็บบทสนทนา เกณฑ์ 85/100 และตรวจคิวซ้ำทุก 60 วินาที
 
-- ทุก endpoint ต้องล็อกอินและมี permission `settings`
-- คำตอบจาก AI ครูมีสถานะ `pending` และไม่มีผลกับ Sentinel จนกว่าแอดมินจะอนุมัติ
-- ห้ามใส่รหัสผ่าน, API key, token หรือข้อมูลส่วนบุคคลในตัวอย่างฝึก
-- มี rate limit สำหรับการเรียก AI ครู และบันทึก audit event ทุกการสร้าง/อนุมัติ
+## Environment variables
 
-## API
+- `SENTINEL_AUTO_TRAINING=0` — ปิดการตรวจและอนุมัติอัตโนมัติ
+- `SENTINEL_AUTO_CAPTURE=0` — ปิดการเก็บบทสนทนาอัตโนมัติ
+- `SENTINEL_AUTO_SCORE_THRESHOLD=85` — คะแนนขั้นต่ำ 60–100
+- `SENTINEL_AUTO_INTERVAL_MS=60000` — รอบตรวจคิวขั้นต่ำ 15 วินาที
 
-- `GET /api/training/status` — จำนวนตัวอย่างและชนิดที่เก็บข้อมูล
-- `GET /api/training/examples?status=pending` — ดูรายการรอตรวจ
-- `POST /api/training/examples` — เพิ่ม `{ "prompt", "answer", "tags" }`
-- `POST /api/training/teachers/draft` — ให้ provider ที่ตั้งค่าไว้สร้างคำตอบรอตรวจ โดยส่ง `{ "prompt", "providers", "tags" }`
-- `POST /api/training/examples/:id/approve` — อนุมัติให้ Sentinel ใช้
-- `POST /api/training/examples/:id/reject` — ปฏิเสธ
-- `GET /api/training/export.jsonl` — ส่งออกชุดข้อมูลที่อนุมัติสำหรับ fine-tuning ในอนาคต
+## API สำหรับแอดมิน
 
-ถ้ามี `DATABASE_URL` ระบบจะเก็บถาวรใน PostgreSQL หากไม่มีจะใช้หน่วยความจำและข้อมูลจะหายเมื่อเซิร์ฟเวอร์รีสตาร์ต
+- `GET /api/training/status` — สถิติและสถานะระบบอัตโนมัติ
+- `GET /api/training/examples` — ประวัติพร้อมคะแนนและผลประเมิน
+- `POST /api/training/examples` — เพิ่มตัวอย่างและเริ่มตรวจทันที
+- `POST /api/training/teachers/draft` — ให้ AI ครูสร้างคำตอบแล้วตรวจ/ให้คะแนน/อนุมัติทันที
+- `POST /api/training/auto/run` — สั่งตรวจคิวทันที
+- `POST /api/training/examples/:id/approve` — แอดมินแก้ผลเป็นอนุมัติ
+- `POST /api/training/examples/:id/reject` — แอดมินแก้ผลเป็นปฏิเสธ
+- `GET /api/training/export.jsonl` — ส่งออกเฉพาะข้อมูลที่อนุมัติ
+
+ทุก endpoint ต้องล็อกอินและมี permission `settings` การเรียก AI ผู้ตรวจและ AI ครูอาจใช้โควตาหรือเครดิตของ provider ที่กำหนดไว้ หากไม่มี provider หรือ provider ตอบไม่ครบ ระบบจะไม่อนุมัติข้อมูลเอง
+
+เมื่อมี `DATABASE_URL` ข้อมูล คะแนน และผลประเมินจะเก็บใน PostgreSQL หากไม่มีจะใช้หน่วยความจำและหายเมื่อเซิร์ฟเวอร์รีสตาร์ต
