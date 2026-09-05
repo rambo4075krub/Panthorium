@@ -16,8 +16,13 @@ function sync(){
  }
  const footer=document.getElementById('btn-logout');if(footer){if(isGuest){footer.textContent='🔐 เข้าสู่ระบบผู้ดูแล';footer.title='ไปหน้าผู้ดูแล';footer.onclick=()=>{location.href='/admin';};}else if(admin()){footer.textContent='🚪 ออกจากระบบ';footer.title='ออกจากระบบ';footer.onclick=()=>auth()?.logout?.();}}
 }
+function loadStagingAdminDesktop(){
+ if(location.hostname!=='panthorium-staging.onrender.com'||!(/^\/admin(?:\/|\.html)?$/.test(location.pathname)))return;
+ if(document.getElementById('staging-admin-desktop-script'))return;
+ const script=document.createElement('script');script.id='staging-admin-desktop-script';script.src='/staging-admin-desktop.js?v=staging-admin-desktop-v1';script.defer=true;document.head.appendChild(script);
+}
 window.addEventListener('panthorium:auth-changed',()=>setTimeout(sync,0));
 document.addEventListener('DOMContentLoaded',sync,{once:true});
-setInterval(sync,750);setTimeout(sync,0);
+setInterval(sync,750);setTimeout(sync,0);loadStagingAdminDesktop();
 window.PanthoriumAccessShell={sync};
 })();
