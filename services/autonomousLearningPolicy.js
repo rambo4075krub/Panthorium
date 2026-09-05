@@ -3,7 +3,7 @@
 class AutonomousLearningPolicy {
   constructor(options = {}) {
     this.promotionScore = clampInt(options.promotionScore ?? process.env.SENTINEL_AUTONOMOUS_PROMOTION_THRESHOLD, 90, 60, 100);
-    this.shadowMinSamples = clampInt(options.shadowMinSamples ?? process.env.SENTINEL_AUTONOMOUS_SHADOW_MIN_SAMPLES, 30, 1, 10000);
+    this.shadowMinSamples = clampInt(options.shadowMinSamples ?? process.env.SENTINEL_AUTONOMOUS_SHADOW_MIN_SAMPLES, 3, 1, 10000);
     this.shadowScore = clampInt(options.shadowScore ?? process.env.SENTINEL_AUTONOMOUS_SHADOW_SCORE, 90, 0, 100);
     this.maxRegressionPct = clampNumber(options.maxRegressionPct ?? process.env.SENTINEL_AUTONOMOUS_MAX_REGRESSION_PCT, 5, 0, 100);
     this.rollbackScore = clampInt(options.rollbackScore ?? process.env.SENTINEL_AUTONOMOUS_ROLLBACK_SCORE, 82, 0, 100);
