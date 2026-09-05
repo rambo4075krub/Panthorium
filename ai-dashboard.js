@@ -44,8 +44,8 @@
     } catch (e) { status.textContent = e.message === 'authentication_required' ? 'กรุณาเข้าสู่ระบบใหม่เพื่อเปิด AI Platform' : `โหลดข้อมูลไม่สำเร็จ: ${e.message}`; }
   }
   function installLauncher() {
-    const menu = document.querySelector('.start-menu, #start-menu'); if (!menu || document.getElementById('phase4-ai-launcher')) return;
-    const btn = document.createElement('button'); btn.id = 'phase4-ai-launcher'; btn.textContent = '🧠 AI Platform'; btn.style.cssText = 'display:block;width:100%;padding:10px;text-align:left'; btn.onclick = openDashboard; menu.appendChild(btn);
+    const menu = document.getElementById('sm-apps') || document.querySelector('.start-menu, #start-menu'); if (!menu || document.getElementById('phase4-ai-launcher')) return;
+    const btn = document.createElement('button'); btn.id = 'phase4-ai-launcher'; btn.className = 'sm-app'; btn.innerHTML = '<div class="ico">🧠</div><span>AI Platform</span>'; btn.style.cssText = 'border:0;background:transparent;color:inherit;font:inherit'; btn.onclick = () => { openDashboard(); try { closeStartMenu(); } catch (_) {} }; menu.appendChild(btn);
   }
   window.PanthoriumAI = { open: openDashboard, refresh };
   window.addEventListener('panthorium:auth-changed', () => { if (document.getElementById('phase4-ai-dashboard')) refresh(); });

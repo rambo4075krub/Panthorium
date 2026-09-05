@@ -2,6 +2,7 @@
   'use strict';
 
   var privilegedLaunchers = [
+    'sentinel-training-launcher',
     'phase4-ai-launcher',
     'phase5-agent-launcher',
     'phase6-automation-launcher',
