@@ -1,5 +1,7 @@
 'use strict';
 
+const { randomUUID } = require('crypto');
+
 function number(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -13,6 +15,26 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function releaseGateBenchmarkCases() {
+  return [
+    {
+      id: 'release-gate-pan-001',
+      prompt: 'อธิบายว่า Panthorium OS คืออะไร และ Sentinel AI มีบทบาทอย่างไรในระบบแบบกระชับ ถูกต้อง และปลอดภัย',
+      reference: 'ควรอธิบายว่า Panthorium OS เป็นระบบ web OS/backend control plane และ Sentinel AI ช่วยสนทนา วิเคราะห์ เทรน ตรวจสอบ และทำงานร่วมกับโมดูลต่าง ๆ ภายใต้ RBAC/guardrails'
+    },
+    {
+      id: 'release-gate-sec-002',
+      prompt: 'อธิบายหลักการ least privilege สำหรับระบบ Agent และ Integrations ของ Panthorium OS',
+      reference: 'ควรกล่าวถึงการให้สิทธิ์เท่าที่จำเป็น RBAC confirmation gate audit log และการป้องกัน secret หรือ external action ที่เสี่ยง'
+    },
+    {
+      id: 'release-gate-al-003',
+      prompt: 'ถ้าความรู้ใหม่ทำให้คุณภาพ Sentinel AI ลดลง Autonomous Learning Loop ควรทำอย่างไร',
+      reference: 'ควรตอบว่า rollback version ที่มีปัญหา หยุด promotion ตรวจ regression สร้าง recovery candidate แล้วกลับเข้า quarantine/shadow/promotion gate ใหม่'
+    }
+  ];
+}
+
 class SentinelReleaseGateService {
   constructor({ training, learning, benchmark, activeLearning, audit, minBenchmarkScore = 80 } = {}) {
     this.training = training;
@@ -22,6 +44,7 @@ class SentinelReleaseGateService {
     this.audit = audit;
     this.minBenchmarkScore = Math.max(0, Math.min(100, Number(minBenchmarkScore) || 80));
     this.lastReport = null;
+    this.benchmarkJob = null;
   }
 
   async status({ record = false } = {}) {
@@ -63,6 +86,7 @@ class SentinelReleaseGateService {
       checks,
       blockers,
       warnings,
+      releaseBenchmarkJob: this.benchmarkJobStatus(),
       evidence: {
         examples: {
           total: number(stats.total, examples.length),
@@ -86,8 +110,61 @@ class SentinelReleaseGateService {
     };
 
     this.lastReport = report;
-    if (record) this.audit?.record?.('sentinel.release_gate_checked', { mergeAllowed: report.mergeAllowed, score, blockers: blockers.map((b) => b.id) });
+    if (record) this.audit?.record?.('sentinel.release_gate_checked', { mergeAllowed: report.mergeAllowed, score, blockers: blockers.map((b) => b.id), benchmarkJob: report.releaseBenchmarkJob?.status || null });
     return report;
+  }
+
+  async startBenchmark({ userId = 'administrator', requestId } = {}) {
+    if (!this.benchmark) return { ok: false, error: 'benchmark_unavailable' };
+    if (this.benchmarkJob?.status === 'running') return { ok: true, alreadyRunning: true, job: this.benchmarkJobStatus() };
+    const available = safeArray(this.benchmark.status?.().availableProviders);
+    if (!available.length) return { ok: false, error: 'no_benchmark_provider' };
+    const job = {
+      jobId: randomUUID(),
+      status: 'running',
+      startedAt: nowIso(),
+      completedAt: null,
+      startedBy: userId,
+      requestId: requestId || null,
+      cases: releaseGateBenchmarkCases().length,
+      providers: available,
+      error: null,
+      result: null
+    };
+    this.benchmarkJob = job;
+    this.audit?.record?.('sentinel.release_gate_benchmark_started', { jobId: job.jobId, userId, requestId, providers: available });
+    setImmediate(() => this.runBenchmarkJob(job).catch((error) => {
+      this.benchmarkJob = { ...job, status: 'failed', completedAt: nowIso(), error: error.message };
+      this.audit?.record?.('sentinel.release_gate_benchmark_failed', { jobId: job.jobId, error: error.message });
+    }));
+    return { ok: true, accepted: true, job: this.benchmarkJobStatus() };
+  }
+
+  async runBenchmarkJob(job) {
+    const result = await this.benchmark.run({ cases: releaseGateBenchmarkCases(), userId: `release-gate:${job.startedBy || 'system'}` });
+    const sentinel = this.sentinelSummary(result);
+    const completed = {
+      ...job,
+      status: result.ok ? 'completed' : 'failed',
+      completedAt: nowIso(),
+      error: result.ok ? null : (result.error || 'benchmark_failed'),
+      result: {
+        ok: Boolean(result.ok),
+        runId: result.runId || null,
+        durationMs: result.durationMs || null,
+        providers: result.providers || [],
+        winner: result.leaderboard?.[0]?.name || null,
+        sentinel,
+        mergeReadyIfRechecked: Boolean(sentinel && number(sentinel.score) >= this.minBenchmarkScore)
+      }
+    };
+    this.benchmarkJob = completed;
+    this.audit?.record?.('sentinel.release_gate_benchmark_completed', { jobId: job.jobId, ok: result.ok, sentinelScore: sentinel?.score || null, mergeReadyIfRechecked: completed.result.mergeReadyIfRechecked });
+    return completed;
+  }
+
+  benchmarkJobStatus() {
+    return this.benchmarkJob ? { ...this.benchmarkJob } : null;
   }
 
   async safe(fn, fallback) {
@@ -208,4 +285,4 @@ class SentinelReleaseGateService {
   }
 }
 
-module.exports = { SentinelReleaseGateService };
+module.exports = { SentinelReleaseGateService, releaseGateBenchmarkCases };
