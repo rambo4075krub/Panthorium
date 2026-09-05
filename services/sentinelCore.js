@@ -4,12 +4,13 @@ const { ProviderManager } = require("./providerManager");
 const { AiGateway } = require("./aiGateway");
 
 class SentinelCore {
-  constructor({ sessions, prompts, providers, gateway, conversations, audit } = {}) {
+  constructor({ sessions, prompts, providers, gateway, conversations, training, audit } = {}) {
     this.sessions = sessions || new SessionManager();
     this.prompts = prompts || new PromptManager();
     this.providers = providers || new ProviderManager();
     this.gateway = gateway || new AiGateway({ providers: this.providers, audit });
     this.conversations = conversations || null;
+    this.training = training || null;
     console.log("[Sentinel Core] Initialized");
   }
   getAvailableProviders() { return this.providers.available(); }
@@ -34,17 +35,19 @@ class SentinelCore {
   async chat({ sessionId, userId = "system", message, mode = "default", provider, model }) {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message });
-    const result = await this.gateway.complete({ systemPrompt: this.prompts.build(mode), history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid });
+    const trainingContext = this.training ? await this.training.contextFor(message) : '';
+    const result = await this.gateway.complete({ systemPrompt: this.prompts.build(mode) + trainingContext, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid });
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });
     return result.ok ? { ...result, sessionId: prepared.sid, core: "Sentinel Core" } : result;
   }
   async streamChat({ sessionId, userId = "system", message, mode = "default", provider, model, onDelta, onProvider }) {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message });
-    const result = await this.gateway.stream({ systemPrompt: this.prompts.build(mode), history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, onDelta, onProvider });
+    const trainingContext = this.training ? await this.training.contextFor(message) : '';
+    const result = await this.gateway.stream({ systemPrompt: this.prompts.build(mode) + trainingContext, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, onDelta, onProvider });
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });
     return result.ok ? { ...result, sessionId: prepared.sid, core: "Sentinel Core" } : result;
   }
-  status() { return { name: "Sentinel Core", version: "2.1.0-phase4-stream", providers: this.getAvailableProviders(), sessions: this.sessions.size(), persistence: this.conversations?.pool ? "postgresql" : this.conversations ? "memory" : "legacy", streaming: true, uptime: process.uptime() }; }
+  status() { return { name: "Sentinel Core", version: "2.2.0-training-lab", providers: this.getAvailableProviders(), sessions: this.sessions.size(), persistence: this.conversations?.pool ? "postgresql" : this.conversations ? "memory" : "legacy", training: Boolean(this.training), streaming: true, uptime: process.uptime() }; }
 }
 module.exports = { SentinelCore };
