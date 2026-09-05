@@ -36,18 +36,31 @@ function releaseGateBenchmarkCases() {
 }
 
 class SentinelReleaseGateService {
-  constructor({ training, learning, benchmark, activeLearning, audit, minBenchmarkScore = 80 } = {}) {
+  constructor({
+    training,
+    learning,
+    benchmark,
+    activeLearning,
+    audit,
+    minBenchmarkScore = 80,
+    autoBenchmarkEnabled = process.env.SENTINEL_RELEASE_GATE_AUTO_BENCHMARK !== 'false',
+    autoBenchmarkCooldownMs = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_BENCHMARK_COOLDOWN_MS || 300000)
+  } = {}) {
     this.training = training;
     this.learning = learning || training?.learning || null;
     this.benchmark = benchmark;
     this.activeLearning = activeLearning;
     this.audit = audit;
     this.minBenchmarkScore = Math.max(0, Math.min(100, Number(minBenchmarkScore) || 80));
+    this.autoBenchmarkEnabled = autoBenchmarkEnabled !== false;
+    this.autoBenchmarkCooldownMs = Math.max(30000, Number(autoBenchmarkCooldownMs) || 300000);
+    this.lastAutoBenchmarkAt = null;
+    this.lastAutoBenchmarkReason = null;
     this.lastReport = null;
     this.benchmarkJob = null;
   }
 
-  async status({ record = false } = {}) {
+  async status({ record = false, auto = true } = {}) {
     const [trainingStatus, learningStatus, versions, benchmarkStatus, activeStatus] = await Promise.all([
       this.safe(() => this.training?.list?.({ limit: 200 }), { ok: false, error: 'training_unavailable' }),
       this.safe(() => this.learning?.status?.(), { ok: false, error: 'learning_unavailable' }),
@@ -86,6 +99,7 @@ class SentinelReleaseGateService {
       checks,
       blockers,
       warnings,
+      automation: this.automationStatus(),
       releaseBenchmarkJob: this.benchmarkJobStatus(),
       evidence: {
         examples: {
@@ -109,9 +123,55 @@ class SentinelReleaseGateService {
       }
     };
 
+    if (auto !== false) {
+      report.automation = await this.maybeAutoBenchmark(report);
+      report.releaseBenchmarkJob = this.benchmarkJobStatus();
+    }
+
     this.lastReport = report;
-    if (record) this.audit?.record?.('sentinel.release_gate_checked', { mergeAllowed: report.mergeAllowed, score, blockers: blockers.map((b) => b.id), benchmarkJob: report.releaseBenchmarkJob?.status || null });
+    if (record) {
+      this.audit?.record?.('sentinel.release_gate_checked', {
+        mergeAllowed: report.mergeAllowed,
+        score,
+        blockers: blockers.map((b) => b.id),
+        automation: report.automation?.state || null,
+        benchmarkJob: report.releaseBenchmarkJob?.status || null
+      });
+    }
     return report;
+  }
+
+  automationStatus() {
+    const lastAutoAt = this.lastAutoBenchmarkAt;
+    const remaining = lastAutoAt ? Math.max(0, this.autoBenchmarkCooldownMs - (Date.now() - new Date(lastAutoAt).getTime())) : 0;
+    return {
+      enabled: this.autoBenchmarkEnabled,
+      state: this.autoBenchmarkEnabled ? 'watching' : 'disabled',
+      description: 'Auto-runs Benchmark Arena when Release Gate is otherwise ready and only benchmark evidence is missing.',
+      lastAutoBenchmarkAt: lastAutoAt,
+      lastAutoBenchmarkReason: this.lastAutoBenchmarkReason,
+      cooldownMs: this.autoBenchmarkCooldownMs,
+      cooldownRemainingMs: Number.isFinite(remaining) ? remaining : 0
+    };
+  }
+
+  async maybeAutoBenchmark(report) {
+    const base = this.automationStatus();
+    if (!base.enabled) return base;
+    if (report.mergeAllowed) return { ...base, state: 'merge_ready' };
+    if (this.benchmarkJob?.status === 'running') return { ...base, state: 'benchmark_running', job: this.benchmarkJobStatus() };
+    const blockers = safeArray(report.blockers);
+    const benchmarkOnly = blockers.length === 1 && blockers[0].id === 'benchmark_evidence';
+    if (!benchmarkOnly) return { ...base, state: 'waiting_for_prerequisites', waitingFor: blockers.map((b) => b.id) };
+    if (base.cooldownRemainingMs > 0) return { ...base, state: 'cooldown' };
+    const started = await this.startBenchmark({ userId: 'release-gate:auto', requestId: 'automatic-release-gate' });
+    if (!started.ok) {
+      this.lastAutoBenchmarkReason = started.error || 'auto_benchmark_start_failed';
+      return { ...base, state: 'blocked', error: started.error || 'auto_benchmark_start_failed' };
+    }
+    this.lastAutoBenchmarkAt = nowIso();
+    this.lastAutoBenchmarkReason = 'benchmark_evidence_missing';
+    return { ...this.automationStatus(), state: started.alreadyRunning ? 'benchmark_running' : 'benchmark_started', job: started.job };
   }
 
   async startBenchmark({ userId = 'administrator', requestId } = {}) {
@@ -126,16 +186,17 @@ class SentinelReleaseGateService {
       completedAt: null,
       startedBy: userId,
       requestId: requestId || null,
+      automatic: userId === 'release-gate:auto',
       cases: releaseGateBenchmarkCases().length,
       providers: available,
       error: null,
       result: null
     };
     this.benchmarkJob = job;
-    this.audit?.record?.('sentinel.release_gate_benchmark_started', { jobId: job.jobId, userId, requestId, providers: available });
+    this.audit?.record?.('sentinel.release_gate_benchmark_started', { jobId: job.jobId, userId, requestId, automatic: job.automatic, providers: available });
     setImmediate(() => this.runBenchmarkJob(job).catch((error) => {
       this.benchmarkJob = { ...job, status: 'failed', completedAt: nowIso(), error: error.message };
-      this.audit?.record?.('sentinel.release_gate_benchmark_failed', { jobId: job.jobId, error: error.message });
+      this.audit?.record?.('sentinel.release_gate_benchmark_failed', { jobId: job.jobId, error: error.message, automatic: job.automatic });
     }));
     return { ok: true, accepted: true, job: this.benchmarkJobStatus() };
   }
@@ -159,7 +220,7 @@ class SentinelReleaseGateService {
       }
     };
     this.benchmarkJob = completed;
-    this.audit?.record?.('sentinel.release_gate_benchmark_completed', { jobId: job.jobId, ok: result.ok, sentinelScore: sentinel?.score || null, mergeReadyIfRechecked: completed.result.mergeReadyIfRechecked });
+    this.audit?.record?.('sentinel.release_gate_benchmark_completed', { jobId: job.jobId, ok: result.ok, automatic: job.automatic, sentinelScore: sentinel?.score || null, mergeReadyIfRechecked: completed.result.mergeReadyIfRechecked });
     return completed;
   }
 
