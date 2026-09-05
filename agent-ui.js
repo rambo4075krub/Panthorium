@@ -18,5 +18,6 @@
   function installLauncher() { const menu = document.getElementById('sm-apps') || document.querySelector('.start-menu, #start-menu'); if (!menu || document.getElementById('phase5-agent-launcher')) return true; const btn = document.createElement('button'); btn.id = 'phase5-agent-launcher'; btn.className = 'sm-app'; btn.innerHTML = '<div class="ico">🤖</div><span>Sentinel Agent</span>'; btn.style.cssText = 'border:0;background:transparent;color:inherit;font:inherit'; btn.onclick = () => { openAgent(); try { closeStartMenu(); } catch (_) {} }; menu.appendChild(btn); return true; }
   window.PanthoriumAgent = { open: openAgent, run: runAgent, history: showHistory };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installLauncher); else installLauncher();
-  let tries = 0; const timer = setInterval(() => { tries += 1; if (installLauncher() || tries > 30) clearInterval(timer); }, 500);
+  window.addEventListener('panthorium:auth-changed', installLauncher);
+  setInterval(installLauncher, 1500);
 })();
