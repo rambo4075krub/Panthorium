@@ -1,7 +1,7 @@
 (function(){
 'use strict';
-const BACKOFFICE_IDS=['phase4-ai-launcher','phase5-agent-launcher','phase6-automation-launcher','phase7-memory-launcher','phase8-multi-agent-launcher','phase9-integrations-launcher','phase10-production-launcher','phase3-security-launcher','phase2-user-manager-launcher'];
-const BACKOFFICE_WORDS=['AI Platform','Sentinel Agent','Agent Automation','Memory & Knowledge','Multi-Agent','Integrations','Production Intelligence','Security Dashboard','User Management'];
+const BACKOFFICE_IDS=['sentinel-training-launcher','phase4-ai-launcher','phase5-agent-launcher','phase6-automation-launcher','phase7-memory-launcher','phase8-multi-agent-launcher','phase9-integrations-launcher','phase10-production-launcher','phase3-security-launcher','phase2-user-manager-launcher'];
+const BACKOFFICE_WORDS=['Sentinel Training Lab','AI Platform','Sentinel Agent','Agent Automation','Memory & Knowledge','Multi-Agent','Integrations','Production Intelligence','Security Dashboard','User Management'];
 function auth(){return window.PanthoriumAuth;}
 function guest(){try{return auth()?.isGuest?.()===true;}catch(_){return false;}}
 function admin(){try{return auth()?.isAdministrator?.()===true;}catch(_){return false;}}
