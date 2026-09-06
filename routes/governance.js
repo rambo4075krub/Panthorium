@@ -38,6 +38,25 @@ function createGovernanceRouter(authService, governance) {
     }
   });
 
+  router.get('/incidents', ...admin, readLimiter, async (req, res, next) => {
+    try {
+      if (!governance) return res.status(503).json({ ok: false, error: 'governance_unavailable' });
+      res.json({ ok: true, incidents: await governance.incidents({ status: req.query.status || 'open', limit: req.query.limit }) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/incidents/:incidentId/resolve', ...admin, writeLimiter, async (req, res, next) => {
+    try {
+      if (!governance) return res.status(503).json({ ok: false, error: 'governance_unavailable' });
+      const result = await governance.resolveIncident(req.params.incidentId, { userId: req.user?.sub || 'administrator', requestId: req.requestId });
+      res.status(result.ok ? 200 : 404).json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/summary', ...admin, readLimiter, async (req, res, next) => {
     try {
       if (!governance) return res.status(503).json({ ok: false, error: 'governance_unavailable' });
