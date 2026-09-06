@@ -12,6 +12,10 @@
     'phase10-production-launcher'
   ];
 
+  function isStagingAdmin() {
+    return location.hostname === 'panthorium-staging.onrender.com' && /^\/admin(?:\/|\.html)?$/.test(location.pathname);
+  }
+
   function currentUser() {
     try { return OS && OS.state ? OS.state.user : null; } catch (_) { return null; }
   }
@@ -25,14 +29,15 @@
     if (document.getElementById('panthorium-ui-layout-style')) return;
     var style = document.createElement('style');
     style.id = 'panthorium-ui-layout-style';
-    style.textContent = [
-      '#desktop-icons{display:none!important;}',
+    var rules = [
       '#btn-session-logout{display:none!important;}',
       '#phase2-guest-btn{display:none!important;}',
       '#start-menu{max-height:min(82vh,720px);overflow:hidden;}',
       '#sm-apps{overflow-y:auto;}',
       '@media (max-width:600px){#start-menu{width:calc(100% - 20px);max-height:78vh;}}'
-    ].join('');
+    ];
+    if (!isStagingAdmin()) rules.unshift('#desktop-icons{display:none!important;}');
+    style.textContent = rules.join('');
     document.head.appendChild(style);
   }
 
@@ -69,6 +74,7 @@
   }
 
   function clearDesktopIcons() {
+    if (isStagingAdmin()) return;
     var desktopIcons = document.getElementById('desktop-icons');
     if (!desktopIcons) return;
     if (desktopIcons.style.display !== 'none') desktopIcons.style.display = 'none';
@@ -110,7 +116,6 @@
   window.addEventListener('orientationchange', function () { setTimeout(fitSphere, 150); });
   window.addEventListener('panthorium:auth-changed', function () { setTimeout(sync, 0); setTimeout(sync, 250); });
   document.addEventListener('DOMContentLoaded', sync, { once: true });
-  setInterval(sync, 1000);
   setTimeout(sync, 0);
   setTimeout(fitSphere, 800);
   setTimeout(fitSphere, 1800);
