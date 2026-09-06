@@ -1732,7 +1732,7 @@
     }
 
     // ---------- Three.js Background ----------
-    let scene, camera, renderer, sphere, basePositions;
+    let scene, camera, renderer, sphere, sphereGlow, sphereHalo, basePositions;
     const COUNT = 3500;
 
     function initBackground() {
@@ -1749,6 +1749,11 @@
         const geometry = new THREE.BufferGeometry();
         basePositions = new Float32Array(COUNT * 3);
         const positions = new Float32Array(COUNT * 3);
+        const colors = new Float32Array(COUNT * 3);
+        const colorTop = new THREE.Color(0x68d7ff);
+        const colorMiddle = new THREE.Color(0x536dfe);
+        const colorBottom = new THREE.Color(0xa855f7);
+        const particleColor = new THREE.Color();
         const phi = Math.PI * (3 - Math.sqrt(5));
 
         for (let i = 0; i < COUNT; i++) {
@@ -1761,17 +1766,71 @@
             positions[i*3] = basePositions[i*3];
             positions[i*3+1] = basePositions[i*3+1];
             positions[i*3+2] = basePositions[i*3+2];
+
+            if (y >= 0) {
+                particleColor.lerpColors(colorMiddle, colorTop, y);
+            } else {
+                particleColor.lerpColors(colorBottom, colorMiddle, y + 1);
+            }
+            const depthLight = 0.82 + ((basePositions[i*3 + 2] / 90 + 1) * 0.09);
+            colors[i*3] = particleColor.r * depthLight;
+            colors[i*3+1] = particleColor.g * depthLight;
+            colors[i*3+2] = particleColor.b * depthLight;
         }
         geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
         const material = new THREE.PointsMaterial({
-            size: 1.1,
-            color: 0x00ffcc,
+            size: 1.25,
+            vertexColors: true,
             transparent: true,
-            opacity: 0.65
+            opacity: 0.88,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            sizeAttenuation: true
         });
         sphere = new THREE.Points(geometry, material);
+        sphere.renderOrder = 2;
         scene.add(sphere);
+
+        const glowMaterial = new THREE.PointsMaterial({
+            size: 4.2,
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.08,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            sizeAttenuation: true
+        });
+        sphereGlow = new THREE.Points(geometry, glowMaterial);
+        sphereGlow.renderOrder = 1;
+        scene.add(sphereGlow);
+
+        const haloCanvas = document.createElement("canvas");
+        haloCanvas.width = haloCanvas.height = 256;
+        const haloContext = haloCanvas.getContext("2d");
+        const haloGradient = haloContext.createRadialGradient(128, 128, 8, 128, 128, 128);
+        haloGradient.addColorStop(0, "rgba(96, 112, 255, 0.32)");
+        haloGradient.addColorStop(0.42, "rgba(90, 82, 255, 0.18)");
+        haloGradient.addColorStop(0.72, "rgba(156, 75, 255, 0.08)");
+        haloGradient.addColorStop(1, "rgba(80, 60, 255, 0)");
+        haloContext.fillStyle = haloGradient;
+        haloContext.fillRect(0, 0, 256, 256);
+
+        const haloMaterial = new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(haloCanvas),
+            color: 0x8174ff,
+            transparent: true,
+            opacity: 0.22,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            depthTest: false
+        });
+        sphereHalo = new THREE.Sprite(haloMaterial);
+        sphereHalo.scale.set(235, 235, 1);
+        sphereHalo.position.z = -35;
+        sphereHalo.renderOrder = 0;
+        scene.add(sphereHalo);
 
         window.addEventListener("resize", () => {
             camera.aspect = window.innerWidth / window.innerHeight;
@@ -1784,9 +1843,19 @@
 
     function animateBg() {
         requestAnimationFrame(animateBg);
+        const glowTime = performance.now() * 0.001;
         if (sphere) {
             sphere.rotation.y += 0.0008;
             sphere.rotation.x += 0.0003;
+        }
+        if (sphereGlow && sphere) {
+            sphereGlow.rotation.copy(sphere.rotation);
+            sphereGlow.material.opacity = 0.075 + Math.sin(glowTime * 1.35) * 0.015;
+        }
+        if (sphereHalo) {
+            const breathe = 1 + Math.sin(glowTime * 0.9) * 0.025;
+            sphereHalo.scale.set(235 * breathe, 235 * breathe, 1);
+            sphereHalo.material.opacity = 0.20 + Math.sin(glowTime * 1.1) * 0.025;
         }
         if (renderer) renderer.render(scene, camera);
     }
