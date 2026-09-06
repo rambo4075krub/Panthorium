@@ -19,14 +19,20 @@ assert(production.includes('removeLegacyFloatingLaunchers'), 'production intelli
 assert(!production.includes('position:fixed;right:16px;bottom:58px'), 'duplicate bottom-right Production Intelligence launcher must be removed');
 assert(!production.includes('new MutationObserver'), 'production intelligence UI must not install a whole-document MutationObserver');
 
-assert(shell.includes('colorTop = new THREE.Color(0x45e6ff)'), 'particle sphere should use the electric-cyan highlight');
-assert(shell.includes('colorMiddle = new THREE.Color(0x2563ff)'), 'particle sphere should use the deep-blue middle');
-assert(shell.includes('colorBottom = new THREE.Color(0xffffff)'), 'particle sphere should fade to white');
-assert(shell.includes('vertexColors: true'), 'particle sphere should keep its cyan-blue-white vertex gradient');
-assert(shell.includes('sphereGlow = new THREE.Points'), 'particle sphere should include a soft glow layer');
+assert(shell.includes('red: new THREE.Color(0xff3b30)'), 'particle sphere should use red at the top');
+assert(shell.includes('purple: new THREE.Color(0xa855f7)'), 'particle sphere should transition through purple');
+assert(shell.includes('blue: new THREE.Color(0x2563ff)'), 'particle sphere should transition through blue');
+assert(shell.includes('white: new THREE.Color(0xffffff)'), 'particle sphere should fade to white at the bottom');
+assert(shell.includes('SPHERE_RADIUS * 0.005'), 'particle sphere should continuously ripple at 0.5 percent');
+assert(shell.includes('SPHERE_RADIUS * 0.015'), 'user and admin speech should ripple at 1.5 percent');
+assert(shell.includes('SPHERE_RADIUS * 0.05'), 'AI speech should ripple at 5 percent');
+assert(shell.includes('userSpeechActive = true'), 'microphone recognition should activate user speech motion');
+assert(shell.includes('aiSpeechActive || synthesisSpeaking'), 'speech synthesis should activate AI speech motion');
+assert(shell.includes('organicNoise'), 'particle sphere should include organic noise');
+assert(shell.includes('proceduralNoise'), 'particle sphere should include procedural noise');
+assert(shell.includes('rotatingBands'), 'particle color groups should rotate dynamically');
+assert(shell.includes('vertexColors: true'), 'particle sphere should use per-point dynamic colors');
+assert(shell.includes('sphereGlow = new THREE.Points'), 'particle sphere should include an additive glow layer');
 assert(shell.includes('blending: THREE.AdditiveBlending'), 'particle sphere glow should use additive blending');
-assert(shell.includes('proceduralSpeechNoise'), 'particle sphere should include procedural speech deformation');
-assert(shell.includes('aiSpeechActive || synthesisSpeaking'), 'particle sphere deformation should only activate while AI speech is active');
-assert(shell.includes('aiSpeechEnvelope * 0.72'), 'particle sphere speech deformation should remain subtle');
 
 console.log('Phase 14 desktop layout fix tests passed');
