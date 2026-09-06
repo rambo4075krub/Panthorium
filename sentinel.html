@@ -906,9 +906,15 @@
     // Biometric จะถูกใช้เฉพาะเมื่อผู้ใช้เลือกเปิดฟังก์ชันขั้นสูงเอง
 
     // ---------- Speech ----------
+    let aiSpeechActive = false;
+    let aiSpeechPulse = 0;
+    let aiSpeechEnvelope = 0;
+
     function speak(text) {
         if (!window.speechSynthesis) return;
         window.speechSynthesis.cancel();
+        aiSpeechActive = false;
+        aiSpeechPulse = 0;
         const u = new SpeechSynthesisUtterance(text);
         u.lang = "th-TH";
         u.pitch = 0.6;
@@ -916,6 +922,18 @@
         const voices = speechSynthesis.getVoices();
         const th = voices.find(v => v.lang.includes("th"));
         if (th) u.voice = th;
+        u.onstart = () => {
+            aiSpeechActive = true;
+            aiSpeechPulse = 1;
+        };
+        u.onboundary = () => {
+            aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
+        };
+        const stopSpeechMotion = () => {
+            aiSpeechActive = false;
+        };
+        u.onend = stopSpeechMotion;
+        u.onerror = stopSpeechMotion;
         speechSynthesis.speak(u);
     }
     if (window.speechSynthesis) {
@@ -1735,6 +1753,14 @@
     let scene, camera, renderer, sphere, sphereGlow, sphereHalo, basePositions;
     const COUNT = 3500;
 
+    function proceduralSpeechNoise(x, y, z, t) {
+        return (
+            Math.sin(x * 0.075 + y * 0.035 + t * 6.1) * 0.52 +
+            Math.sin(y * 0.092 - z * 0.061 - t * 8.3) * 0.29 +
+            Math.cos(z * 0.083 + x * 0.041 + t * 4.7) * 0.19
+        );
+    }
+
     function initBackground() {
         const canvas = $("bg-canvas");
         scene = new THREE.Scene();
@@ -1750,9 +1776,9 @@
         basePositions = new Float32Array(COUNT * 3);
         const positions = new Float32Array(COUNT * 3);
         const colors = new Float32Array(COUNT * 3);
-        const colorTop = new THREE.Color(0x68d7ff);
-        const colorMiddle = new THREE.Color(0x536dfe);
-        const colorBottom = new THREE.Color(0xa855f7);
+        const colorTop = new THREE.Color(0x45e6ff);
+        const colorMiddle = new THREE.Color(0x2563ff);
+        const colorBottom = new THREE.Color(0xffffff);
         const particleColor = new THREE.Color();
         const phi = Math.PI * (3 - Math.sqrt(5));
 
@@ -1810,16 +1836,16 @@
         haloCanvas.width = haloCanvas.height = 256;
         const haloContext = haloCanvas.getContext("2d");
         const haloGradient = haloContext.createRadialGradient(128, 128, 8, 128, 128, 128);
-        haloGradient.addColorStop(0, "rgba(96, 112, 255, 0.32)");
-        haloGradient.addColorStop(0.42, "rgba(90, 82, 255, 0.18)");
-        haloGradient.addColorStop(0.72, "rgba(156, 75, 255, 0.08)");
-        haloGradient.addColorStop(1, "rgba(80, 60, 255, 0)");
+        haloGradient.addColorStop(0, "rgba(255, 255, 255, 0.28)");
+        haloGradient.addColorStop(0.38, "rgba(69, 230, 255, 0.18)");
+        haloGradient.addColorStop(0.72, "rgba(37, 99, 255, 0.09)");
+        haloGradient.addColorStop(1, "rgba(37, 99, 255, 0)");
         haloContext.fillStyle = haloGradient;
         haloContext.fillRect(0, 0, 256, 256);
 
         const haloMaterial = new THREE.SpriteMaterial({
             map: new THREE.CanvasTexture(haloCanvas),
-            color: 0x8174ff,
+            color: 0x6ea8ff,
             transparent: true,
             opacity: 0.22,
             blending: THREE.AdditiveBlending,
@@ -1844,9 +1870,38 @@
     function animateBg() {
         requestAnimationFrame(animateBg);
         const glowTime = performance.now() * 0.001;
+        const synthesisSpeaking = Boolean(window.speechSynthesis && window.speechSynthesis.speaking);
+        const speechTarget = (aiSpeechActive || synthesisSpeaking)
+            ? 0.58 + aiSpeechPulse * 0.22
+            : 0;
+        aiSpeechEnvelope += (speechTarget - aiSpeechEnvelope) * (speechTarget > 0 ? 0.16 : 0.09);
+        aiSpeechPulse *= 0.88;
+
         if (sphere) {
             sphere.rotation.y += 0.0008;
             sphere.rotation.x += 0.0003;
+
+            const positionAttribute = sphere.geometry.getAttribute("position");
+            if (aiSpeechEnvelope > 0.001) {
+                const points = positionAttribute.array;
+                for (let i = 0; i < COUNT; i++) {
+                    const offset = i * 3;
+                    const x = basePositions[offset];
+                    const y = basePositions[offset + 1];
+                    const z = basePositions[offset + 2];
+                    const invRadius = 1 / Math.max(1, Math.hypot(x, y, z));
+                    const displacement = proceduralSpeechNoise(x, y, z, glowTime) * aiSpeechEnvelope * 0.72;
+                    points[offset] = x + x * invRadius * displacement;
+                    points[offset + 1] = y + y * invRadius * displacement;
+                    points[offset + 2] = z + z * invRadius * displacement;
+                }
+                positionAttribute.needsUpdate = true;
+                sphere.userData.speechDeformed = true;
+            } else if (sphere.userData.speechDeformed) {
+                positionAttribute.array.set(basePositions);
+                positionAttribute.needsUpdate = true;
+                sphere.userData.speechDeformed = false;
+            }
         }
         if (sphereGlow && sphere) {
             sphereGlow.rotation.copy(sphere.rotation);
