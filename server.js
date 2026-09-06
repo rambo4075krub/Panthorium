@@ -48,6 +48,7 @@ const { IntegrationExecutionRepository } = require("./services/integrationExecut
 const { IntegrationService } = require("./services/integrationService");
 const { ProductionIntelligenceService } = require("./services/productionIntelligenceService");
 const { AutonomousGovernanceService } = require("./services/autonomousGovernanceService");
+const { DualAiOrchestratorService } = require("./services/dualAiOrchestratorService");
 
 const { createApiRouter } = require("./routes/api");
 const { createAuthRouter } = require("./routes/auth");
@@ -61,6 +62,7 @@ const { createProductionRouter } = require("./routes/production");
 const { createTrainingRouter } = require("./routes/training");
 const { createReleaseGateRouter } = require("./routes/releaseGate");
 const { createGovernanceRouter } = require("./routes/governance");
+const { createDualAiRouter } = require("./routes/dualAi");
 const { requestContext } = require("./middleware/requestContext");
 
 const app = express();
@@ -107,8 +109,10 @@ const sentinelBenchmark = new SentinelBenchmarkService({ core: sentinelCore, pro
 const sentinelActiveLearning = new SentinelActiveLearningService({ training: sentinelTraining, learning: sentinelLearning, providers: sentinelCore.providers, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const sentinelReleaseGate = new SentinelReleaseGateService({ training: sentinelTraining, learning: sentinelLearning, benchmark: sentinelBenchmark, activeLearning: sentinelActiveLearning, audit, minBenchmarkScore: Number(process.env.SENTINEL_RELEASE_GATE_MIN_BENCHMARK_SCORE || 80) });
 const autonomousGovernance = new AutonomousGovernanceService({ production: productionIntelligence, releaseGate: sentinelReleaseGate, benchmark: sentinelBenchmark, activeLearning: sentinelActiveLearning, learning: sentinelLearning, training: sentinelTraining, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, mode: process.env.PANTHORIUM_GOVERNANCE_MODE || 'observe', intervalMs: process.env.PANTHORIUM_GOVERNANCE_INTERVAL_MS || 300000 });
+const dualAiOrchestrator = new DualAiOrchestratorService({ core: sentinelCore, training: sentinelTraining, learning: sentinelLearning, releaseGate: sentinelReleaseGate, benchmark: sentinelBenchmark, activeLearning: sentinelActiveLearning, governance: autonomousGovernance, production: productionIntelligence, providers: sentinelCore.providers, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, mode: process.env.PANTHORIUM_DUAL_AI_MODE || 'observe', intervalMs: process.env.PANTHORIUM_DUAL_AI_INTERVAL_MS || 300000 });
 sentinelLearning.recovery = sentinelRecovery;
 sentinelCore.training = sentinelTraining;
+sentinelCore.dualAi = dualAiOrchestrator;
 
 app.disable("x-powered-by");
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
@@ -129,6 +133,7 @@ app.get("/healthz", async (req, res) => {
 app.use("/api/training/release-gate", createReleaseGateRouter(authService, sentinelReleaseGate));
 app.use("/api/training", createTrainingRouter(authService, sentinelTraining, sentinelBenchmark, sentinelActiveLearning));
 app.use("/api/governance", createGovernanceRouter(authService, autonomousGovernance));
+app.use("/api/dual-ai", createDualAiRouter(authService, dualAiOrchestrator));
 app.use("/api/auth", createAuthRouter(authService, config, securityResponse));
 app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
 app.use("/api/agent/automation", createAutomationRouter(authService, agentAutomation));
@@ -151,7 +156,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "staging-admin-desktop.js", "access-shell-ui.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "dual-ai-ui.js", "staging-admin-desktop.js", "access-shell-ui.js"];
 for (const script of shellScripts) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -165,7 +170,7 @@ for (const script of shellScripts) {
 
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
-  const version = "phase13-governance-v2";
+  const version = "phase14-dual-ai-v2";
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
   }
@@ -213,16 +218,18 @@ async function start() {
   await sentinelBenchmark.init();
   await sentinelActiveLearning.init();
   await autonomousGovernance.init();
+  await dualAiOrchestrator.init();
 
   const server = app.listen(config.port, config.host, () => {
     console.log("========================================");
-    console.log("  Panthorium OS Backend · Phase 13 Autonomous Governance");
+    console.log("  Panthorium OS Backend · Phase 14 Dual AI Control Plane");
     console.log(`  Auto training: ${config.sentinelAutoTraining ? "enabled" : "disabled"} · review threshold ${config.sentinelAutoScoreThreshold}`);
     console.log(`  Autonomous promotion: ${sentinelLearningPolicy.promotionScore} · shadow samples ${sentinelLearningPolicy.shadowMinSamples}`);
     console.log(`  Automatic recovery: enabled · max attempts ${sentinelRecovery.maxAttempts}`);
     console.log("  Active Learning Runner: manual 24h provider training controls online");
     console.log(`  Release Gate: requires benchmark score >= ${sentinelReleaseGate.minBenchmarkScore}`);
     console.log(`  Governance mode: ${autonomousGovernance.mode} · interval ${autonomousGovernance.intervalMs}ms · incident ledger online`);
+    console.log(`  Dual AI mode: ${dualAiOrchestrator.mode} · Sentinel Core supervises Sentinel through gated frontier learning`);
     console.log(`  Benchmark Arena providers: ${sentinelCore.providers.available().join(', ') || 'none'} · persistent evidence store online`);
     console.log(`  http://localhost:${config.port}`);
     console.log("========================================");
@@ -230,10 +237,11 @@ async function start() {
   agentScheduler.start();
   sentinelTraining.start();
   autonomousGovernance.start();
-  server.on('close', () => { sentinelTraining.stop(); sentinelActiveLearning.shutdown?.(); autonomousGovernance.stop(); });
+  dualAiOrchestrator.start();
+  server.on('close', () => { sentinelTraining.stop(); sentinelActiveLearning.shutdown?.(); autonomousGovernance.stop(); dualAiOrchestrator.stop(); });
   return server;
 }
 
 if (require.main === module) start().catch((error) => { console.error("[BOOT]", error); process.exit(1); });
 
-module.exports = { app, sentinelCore, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, authService, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
+module.exports = { app, sentinelCore, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, dualAiOrchestrator, authService, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
