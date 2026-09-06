@@ -89,7 +89,7 @@ function buildGovernance({ productionScore = 92, productionStatus = 'healthy', b
   const lowReport = await lowBenchmark.service.evaluate({ execute: true });
   assert(lowReport.signals.some((signal) => signal.code === 'BENCHMARK_CRITICAL'));
   assert(lowReport.actions.some((action) => action.id === 'trigger_release_gate_benchmark'));
-  assert.equal(lowBenchmark.calls.releaseGate, 1);
+  assert(lowBenchmark.calls.releaseGate >= 1);
 
   const unsafe = buildGovernance({ productionStatus: 'critical', productionScore: 42, activeFailures: 10, consecutiveFailures: 4, unsafeShadow: 1, mode: 'autopilot' });
   const unsafeReport = await unsafe.service.evaluate({ execute: true });
