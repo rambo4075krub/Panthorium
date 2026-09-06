@@ -170,7 +170,7 @@ for (const script of shellScripts) {
 
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
-  const version = "phase14-dual-ai-v1";
+  const version = "phase14-dual-ai-v2";
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
   }
@@ -229,7 +229,7 @@ async function start() {
     console.log("  Active Learning Runner: manual 24h provider training controls online");
     console.log(`  Release Gate: requires benchmark score >= ${sentinelReleaseGate.minBenchmarkScore}`);
     console.log(`  Governance mode: ${autonomousGovernance.mode} · interval ${autonomousGovernance.intervalMs}ms · incident ledger online`);
-    console.log(`  Dual AI mode: ${dualAiOrchestrator.mode} · Sentinel Core supervises Sentinel through gated learning`);
+    console.log(`  Dual AI mode: ${dualAiOrchestrator.mode} · Sentinel Core supervises Sentinel through gated frontier learning`);
     console.log(`  Benchmark Arena providers: ${sentinelCore.providers.available().join(', ') || 'none'} · persistent evidence store online`);
     console.log(`  http://localhost:${config.port}`);
     console.log("========================================");
