@@ -34,6 +34,12 @@ Sentinel
 - Grounded tool use and code/deploy separation
 - Self-improvement loop with quarantine/shadow/promotion
 
+References used for architecture direction:
+
+- OpenAI Agents SDK: agents, tools, handoffs, guardrails and tracing.
+- Model Context Protocol: resources, prompts, tools and confirmation boundaries.
+- Gemini API tools: function calling, grounding and code-execution separation.
+
 ## New backend service
 
 `services/dualAiOrchestratorService.js`
