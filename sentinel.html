@@ -909,6 +909,7 @@
     let aiSpeechActive = false;
     let aiSpeechPulse = 0;
     let aiSpeechEnvelope = 0;
+    let userSpeechActive = false;
 
     function speak(text) {
         if (!window.speechSynthesis) return;
@@ -1408,8 +1409,18 @@
                 input.value = t;
                 send();
             };
-            recognition.onend = () => micBtn.classList.remove("listening");
-            recognition.onerror = () => micBtn.classList.remove("listening");
+            recognition.onstart = () => {
+                userSpeechActive = true;
+                micBtn.classList.add("listening");
+            };
+            recognition.onend = () => {
+                userSpeechActive = false;
+                micBtn.classList.remove("listening");
+            };
+            recognition.onerror = () => {
+                userSpeechActive = false;
+                micBtn.classList.remove("listening");
+            };
         }
 
         micBtn.onclick = () => {
@@ -1752,13 +1763,37 @@
     // ---------- Three.js Background ----------
     let scene, camera, renderer, sphere, sphereGlow, sphereHalo, basePositions;
     const COUNT = 3500;
+    const SPHERE_RADIUS = 90;
+    const NOISE_LEVEL_IDLE = SPHERE_RADIUS * 0.005;
+    const NOISE_LEVEL_USER_SPEECH = SPHERE_RADIUS * 0.015;
+    const NOISE_LEVEL_AI_SPEECH = SPHERE_RADIUS * 0.05;
+    let currentNoiseAmplitude = NOISE_LEVEL_IDLE;
 
-    function proceduralSpeechNoise(x, y, z, t) {
+    function organicNoise(x, y, z, t) {
         return (
-            Math.sin(x * 0.075 + y * 0.035 + t * 6.1) * 0.52 +
-            Math.sin(y * 0.092 - z * 0.061 - t * 8.3) * 0.29 +
-            Math.cos(z * 0.083 + x * 0.041 + t * 4.7) * 0.19
+            Math.sin(x * 0.031 + y * 0.024 + t * 1.35) * 0.46 +
+            Math.sin(y * 0.039 - z * 0.028 - t * 1.08) * 0.34 +
+            Math.cos(z * 0.033 + x * 0.021 + t * 0.82) * 0.20
         );
+    }
+
+    function proceduralNoise(x, y, z, t) {
+        return (
+            Math.sin(x * 0.075 + y * 0.035 + t * 4.8) * 0.50 +
+            Math.sin(y * 0.092 - z * 0.061 - t * 6.2) * 0.31 +
+            Math.cos(z * 0.083 + x * 0.041 + t * 3.7) * 0.19
+        );
+    }
+
+    function writePaletteColor(color, position, palette) {
+        const value = Math.max(0, Math.min(1, position));
+        if (value < 0.31) {
+            color.lerpColors(palette.red, palette.purple, value / 0.31);
+        } else if (value < 0.66) {
+            color.lerpColors(palette.purple, palette.blue, (value - 0.31) / 0.35);
+        } else {
+            color.lerpColors(palette.blue, palette.white, (value - 0.66) / 0.34);
+        }
     }
 
     function initBackground() {
@@ -1776,9 +1811,12 @@
         basePositions = new Float32Array(COUNT * 3);
         const positions = new Float32Array(COUNT * 3);
         const colors = new Float32Array(COUNT * 3);
-        const colorTop = new THREE.Color(0x45e6ff);
-        const colorMiddle = new THREE.Color(0x2563ff);
-        const colorBottom = new THREE.Color(0xffffff);
+        const palette = {
+            red: new THREE.Color(0xff3b30),
+            purple: new THREE.Color(0xa855f7),
+            blue: new THREE.Color(0x2563ff),
+            white: new THREE.Color(0xffffff)
+        };
         const particleColor = new THREE.Color();
         const phi = Math.PI * (3 - Math.sqrt(5));
 
@@ -1786,22 +1824,19 @@
             const y = 1 - (i / (COUNT - 1)) * 2;
             const r = Math.sqrt(1 - y * y);
             const theta = phi * i;
-            basePositions[i*3]     = Math.cos(theta) * r * 90;
-            basePositions[i*3 + 1] = y * 90;
-            basePositions[i*3 + 2] = Math.sin(theta) * r * 90;
-            positions[i*3] = basePositions[i*3];
-            positions[i*3+1] = basePositions[i*3+1];
-            positions[i*3+2] = basePositions[i*3+2];
+            const offset = i * 3;
+            basePositions[offset] = Math.cos(theta) * r * SPHERE_RADIUS;
+            basePositions[offset + 1] = y * SPHERE_RADIUS;
+            basePositions[offset + 2] = Math.sin(theta) * r * SPHERE_RADIUS;
+            positions[offset] = basePositions[offset];
+            positions[offset + 1] = basePositions[offset + 1];
+            positions[offset + 2] = basePositions[offset + 2];
 
-            if (y >= 0) {
-                particleColor.lerpColors(colorMiddle, colorTop, y);
-            } else {
-                particleColor.lerpColors(colorBottom, colorMiddle, y + 1);
-            }
-            const depthLight = 0.82 + ((basePositions[i*3 + 2] / 90 + 1) * 0.09);
-            colors[i*3] = particleColor.r * depthLight;
-            colors[i*3+1] = particleColor.g * depthLight;
-            colors[i*3+2] = particleColor.b * depthLight;
+            writePaletteColor(particleColor, (1 - y) * 0.5, palette);
+            const depthLight = 0.82 + ((basePositions[offset + 2] / SPHERE_RADIUS + 1) * 0.09);
+            colors[offset] = particleColor.r * depthLight;
+            colors[offset + 1] = particleColor.g * depthLight;
+            colors[offset + 2] = particleColor.b * depthLight;
         }
         geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
         geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -1810,12 +1845,14 @@
             size: 1.25,
             vertexColors: true,
             transparent: true,
-            opacity: 0.88,
+            opacity: 0.90,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
             sizeAttenuation: true
         });
         sphere = new THREE.Points(geometry, material);
+        sphere.userData.palette = palette;
+        sphere.userData.flowColor = new THREE.Color();
         sphere.renderOrder = 2;
         scene.add(sphere);
 
@@ -1836,18 +1873,18 @@
         haloCanvas.width = haloCanvas.height = 256;
         const haloContext = haloCanvas.getContext("2d");
         const haloGradient = haloContext.createRadialGradient(128, 128, 8, 128, 128, 128);
-        haloGradient.addColorStop(0, "rgba(255, 255, 255, 0.28)");
-        haloGradient.addColorStop(0.38, "rgba(69, 230, 255, 0.18)");
-        haloGradient.addColorStop(0.72, "rgba(37, 99, 255, 0.09)");
-        haloGradient.addColorStop(1, "rgba(37, 99, 255, 0)");
+        haloGradient.addColorStop(0, "rgba(255, 255, 255, 0.24)");
+        haloGradient.addColorStop(0.34, "rgba(105, 66, 255, 0.16)");
+        haloGradient.addColorStop(0.68, "rgba(37, 99, 255, 0.09)");
+        haloGradient.addColorStop(1, "rgba(255, 59, 48, 0)");
         haloContext.fillStyle = haloGradient;
         haloContext.fillRect(0, 0, 256, 256);
 
         const haloMaterial = new THREE.SpriteMaterial({
             map: new THREE.CanvasTexture(haloCanvas),
-            color: 0x6ea8ff,
+            color: 0xffffff,
             transparent: true,
-            opacity: 0.22,
+            opacity: 0.21,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
             depthTest: false
@@ -1871,10 +1908,14 @@
         requestAnimationFrame(animateBg);
         const glowTime = performance.now() * 0.001;
         const synthesisSpeaking = Boolean(window.speechSynthesis && window.speechSynthesis.speaking);
-        const speechTarget = (aiSpeechActive || synthesisSpeaking)
-            ? 0.58 + aiSpeechPulse * 0.22
-            : 0;
-        aiSpeechEnvelope += (speechTarget - aiSpeechEnvelope) * (speechTarget > 0 ? 0.16 : 0.09);
+        const aiSpeaking = aiSpeechActive || synthesisSpeaking;
+        const targetNoiseAmplitude = aiSpeaking
+            ? NOISE_LEVEL_AI_SPEECH
+            : userSpeechActive
+                ? NOISE_LEVEL_USER_SPEECH
+                : NOISE_LEVEL_IDLE;
+        currentNoiseAmplitude += (targetNoiseAmplitude - currentNoiseAmplitude) * 0.10;
+        aiSpeechEnvelope += ((aiSpeaking ? 1 : 0) - aiSpeechEnvelope) * (aiSpeaking ? 0.16 : 0.09);
         aiSpeechPulse *= 0.88;
 
         if (sphere) {
@@ -1882,35 +1923,52 @@
             sphere.rotation.x += 0.0003;
 
             const positionAttribute = sphere.geometry.getAttribute("position");
-            if (aiSpeechEnvelope > 0.001) {
-                const points = positionAttribute.array;
-                for (let i = 0; i < COUNT; i++) {
-                    const offset = i * 3;
-                    const x = basePositions[offset];
-                    const y = basePositions[offset + 1];
-                    const z = basePositions[offset + 2];
-                    const invRadius = 1 / Math.max(1, Math.hypot(x, y, z));
-                    const displacement = proceduralSpeechNoise(x, y, z, glowTime) * aiSpeechEnvelope * 0.72;
-                    points[offset] = x + x * invRadius * displacement;
-                    points[offset + 1] = y + y * invRadius * displacement;
-                    points[offset + 2] = z + z * invRadius * displacement;
-                }
-                positionAttribute.needsUpdate = true;
-                sphere.userData.speechDeformed = true;
-            } else if (sphere.userData.speechDeformed) {
-                positionAttribute.array.set(basePositions);
-                positionAttribute.needsUpdate = true;
-                sphere.userData.speechDeformed = false;
+            const colorAttribute = sphere.geometry.getAttribute("color");
+            const points = positionAttribute.array;
+            const colors = colorAttribute.array;
+            const palette = sphere.userData.palette;
+            const flowColor = sphere.userData.flowColor;
+            const flowSpeed = aiSpeaking ? 1.55 : userSpeechActive ? 1.05 : 0.72;
+
+            for (let i = 0; i < COUNT; i++) {
+                const offset = i * 3;
+                const x = basePositions[offset];
+                const y = basePositions[offset + 1];
+                const z = basePositions[offset + 2];
+                const invRadius = 1 / Math.max(1, Math.hypot(x, y, z));
+                const organic = organicNoise(x, y, z, glowTime);
+                const procedural = proceduralNoise(x, y, z, glowTime);
+                const displacement = (organic * 0.68 + procedural * 0.32) * currentNoiseAmplitude;
+                points[offset] = x + x * invRadius * displacement;
+                points[offset + 1] = y + y * invRadius * displacement;
+                points[offset + 2] = z + z * invRadius * displacement;
+
+                const latitude = (1 - y / SPHERE_RADIUS) * 0.5;
+                const longitude = Math.atan2(z, x);
+                const poleLock = Math.sin(Math.PI * latitude);
+                const rotatingBands = (
+                    Math.sin(longitude * 3.0 - glowTime * flowSpeed + latitude * Math.PI * 2.4) * 0.075 +
+                    Math.sin(longitude * 7.0 + glowTime * flowSpeed * 0.54) * 0.025
+                ) * poleLock;
+                writePaletteColor(flowColor, latitude + rotatingBands, palette);
+                const shimmer = 0.84 + (Math.sin(longitude * 5 - glowTime * flowSpeed * 1.4) + 1) * 0.045;
+                colors[offset] = flowColor.r * shimmer;
+                colors[offset + 1] = flowColor.g * shimmer;
+                colors[offset + 2] = flowColor.b * shimmer;
             }
+            positionAttribute.needsUpdate = true;
+            colorAttribute.needsUpdate = true;
         }
         if (sphereGlow && sphere) {
             sphereGlow.rotation.copy(sphere.rotation);
-            sphereGlow.material.opacity = 0.075 + Math.sin(glowTime * 1.35) * 0.015;
+            const activityGlow = currentNoiseAmplitude / NOISE_LEVEL_AI_SPEECH;
+            sphereGlow.material.opacity = 0.075 + Math.sin(glowTime * 1.35) * 0.015 + activityGlow * 0.035;
         }
         if (sphereHalo) {
-            const breathe = 1 + Math.sin(glowTime * 0.9) * 0.025;
+            const activityGlow = currentNoiseAmplitude / NOISE_LEVEL_AI_SPEECH;
+            const breathe = 1 + Math.sin(glowTime * 0.9) * 0.025 + activityGlow * 0.018;
             sphereHalo.scale.set(235 * breathe, 235 * breathe, 1);
-            sphereHalo.material.opacity = 0.20 + Math.sin(glowTime * 1.1) * 0.025;
+            sphereHalo.material.opacity = 0.19 + Math.sin(glowTime * 1.1) * 0.025 + activityGlow * 0.035;
         }
         if (renderer) renderer.render(scene, camera);
     }
