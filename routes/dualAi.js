@@ -20,6 +20,16 @@ function createDualAiRouter(authService, dualAi) {
     }
   });
 
+  router.get('/frontier', ...admin, readLimiter, async (req, res, next) => {
+    try {
+      if (!dualAi) return res.status(503).json({ ok: false, error: 'dual_ai_unavailable' });
+      const status = await dualAi.status();
+      res.json({ ok: true, frontier: status.frontier, architecturePatterns: status.architecturePatterns, learningChannels: status.learningChannels, boundaries: status.boundaries });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/history', ...admin, readLimiter, async (req, res, next) => {
     try {
       if (!dualAi) return res.status(503).json({ ok: false, error: 'dual_ai_unavailable' });
