@@ -2,6 +2,7 @@
 
 const { Pool } = require('pg');
 const { randomUUID } = require('crypto');
+const { FrontierArchitectureService, FRONTIER_ARCHITECTURE_PATTERNS, LEARNING_CHANNELS } = require('./frontierArchitectureService');
 
 function nowIso() { return new Date().toISOString(); }
 function safeArray(value) { return Array.isArray(value) ? value : []; }
@@ -16,7 +17,8 @@ const AI_PROFILES = Object.freeze({
     label: 'Sentinel Core',
     audience: 'administrator/back-office',
     mission: 'Operate Panthorium back office, observe production, govern learning loops, propose system improvements, and manage Sentinel through safe gates.',
-    capabilities: ['system_governance', 'release_gate_supervision', 'training_orchestration', 'benchmark_repair', 'incident_runbook', 'provider_teacher_loop'],
+    capabilities: ['system_governance', 'release_gate_supervision', 'training_orchestration', 'benchmark_repair', 'incident_runbook', 'provider_teacher_loop', 'frontier_pattern_alignment'],
+    learningChannels: LEARNING_CHANNELS.sentinel_core.map((item) => item.id),
     boundaries: ['no_auto_merge', 'no_auto_deploy', 'no_secret_exposure', 'no_gate_bypass', 'no_unapproved_external_mutation']
   },
   sentinel: {
@@ -24,18 +26,13 @@ const AI_PROFILES = Object.freeze({
     label: 'Sentinel',
     audience: 'general users',
     mission: 'Serve public users with safe, clear, Thai-first answers and learned Panthorium knowledge that has reached active state.',
-    capabilities: ['user_assistance', 'safe_qna', 'active_knowledge_retrieval', 'conversation_learning_capture'],
+    capabilities: ['user_assistance', 'safe_qna', 'active_knowledge_retrieval', 'conversation_learning_capture', 'benchmark_repair_learning'],
+    learningChannels: LEARNING_CHANNELS.sentinel.map((item) => item.id),
     boundaries: ['active_only_context', 'no_backoffice_access', 'no_settings_without_permission', 'no_unreviewed_knowledge']
   }
 });
 
-const FRONTIER_PATTERNS = Object.freeze([
-  { id: 'agent_tools_handoffs_guardrails', label: 'Agent + Tools + Handoffs + Guardrails', appliedTo: ['sentinel_core'], implementation: 'Core can plan actions, delegate through existing agents/tools, and run guardrails before any execution.' },
-  { id: 'tracing_and_evaluation', label: 'Tracing + Evaluation + Release Gates', appliedTo: ['sentinel_core', 'sentinel'], implementation: 'Every cycle stores telemetry, proposals, actions, benchmark evidence and governance snapshots.' },
-  { id: 'tool_resource_boundary', label: 'Tool/Resource Boundary', appliedTo: ['sentinel_core'], implementation: 'Core uses existing RBAC routes and governance actions instead of direct hidden side effects.' },
-  { id: 'grounded_tool_use', label: 'Grounded tool use and code/execution separation', appliedTo: ['sentinel_core', 'sentinel'], implementation: 'Sentinel answers from active learning context; Core never runs code/deploy/merge automatically.' },
-  { id: 'self_improvement_loop', label: 'Self-improvement loop with shadow promotion', appliedTo: ['sentinel'], implementation: 'Provider drafts become training candidates, then auto review, quarantine, shadow, promote and monitor.' }
-]);
+const FRONTIER_PATTERNS = FRONTIER_ARCHITECTURE_PATTERNS;
 
 function sentinelSummary(run, minScore = 80) {
   if (!run) return null;
@@ -58,6 +55,7 @@ class DualAiOrchestratorService {
     governance,
     production,
     providers,
+    frontierArchitecture,
     audit,
     databaseUrl = '',
     databaseSslMode = 'disable',
@@ -74,6 +72,7 @@ class DualAiOrchestratorService {
     this.governance = governance;
     this.production = production;
     this.providers = providers || core?.providers;
+    this.frontierArchitecture = frontierArchitecture || new FrontierArchitectureService({ benchmarkScore });
     this.audit = audit;
     this.pool = databaseUrl ? new Pool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } }) : null;
     this.mode = clampMode(mode);
@@ -127,6 +126,7 @@ class DualAiOrchestratorService {
   }
 
   async status() {
+    const frontier = this.frontierArchitecture.status({ telemetry: this.lastCycle?.rawTelemetry || null });
     return {
       ok: true,
       mode: this.mode,
@@ -134,25 +134,27 @@ class DualAiOrchestratorService {
       processing: this.running,
       intervalMs: this.intervalMs,
       profiles: AI_PROFILES,
-      architecturePatterns: FRONTIER_PATTERNS,
+      architecturePatterns: frontier.patterns,
+      frontier,
+      learningChannels: frontier.learningChannels,
       boundaries: this.boundaries(),
       providers: this.providers?.available?.() || [],
-      lastCycle: this.lastCycle,
+      lastCycle: this.lastCycle ? this.publicCycle(this.lastCycle) : null,
       history: await this.history({ limit: 10 })
     };
   }
 
   boundaries() {
     return {
-      sentinelCoreCan: ['observe_production', 'evaluate_release_gate', 'trigger_gated_benchmark_repair', 'stop_unsafe_learning', 'draft_training_candidates', 'run_auto_review_backlog'],
-      sentinelCoreCannot: ['merge_pull_requests', 'deploy_render', 'bypass_rbac', 'bypass_quarantine_shadow_promote', 'read_or_expose_provider_secrets'],
-      sentinelCan: ['answer_users', 'use_active_learning_context', 'capture_conversations_for_review'],
-      sentinelCannot: ['admin_backoffice_actions', 'use_shadow_or_rolled_back_knowledge', 'promote_its_own_training_without_gates']
+      sentinelCoreCan: ['observe_production', 'evaluate_release_gate', 'trigger_gated_benchmark_repair', 'stop_unsafe_learning', 'draft_training_candidates', 'run_auto_review_backlog', 'align_frontier_architecture_patterns'],
+      sentinelCoreCannot: ['merge_pull_requests', 'deploy_render', 'bypass_rbac', 'bypass_quarantine_shadow_promote', 'read_or_expose_provider_secrets', 'claim_frontier_superiority_without_benchmark_evidence'],
+      sentinelCan: ['answer_users', 'use_active_learning_context', 'capture_conversations_for_review', 'benefit_from_promoted_training'],
+      sentinelCannot: ['admin_backoffice_actions', 'use_shadow_or_rolled_back_knowledge', 'promote_its_own_training_without_gates', 'directly_train_from_external_sources_without_review']
     };
   }
 
   async cycle({ execute = false, persist = false, source = 'api', scope = 'dual-ai-24h' } = {}) {
-    if (this.running) return this.lastCycle || { ok: true, status: 'running', score: 0, proposals: [], executed: [] };
+    if (this.running) return this.lastCycle ? this.publicCycle(this.lastCycle) : { ok: true, status: 'running', score: 0, proposals: [], executed: [] };
     this.running = true;
     const cycleId = randomUUID();
     const startedAt = nowIso();
@@ -161,10 +163,11 @@ class DualAiOrchestratorService {
       const proposals = this.plan(telemetry);
       const executed = execute ? await this.execute(proposals, telemetry) : [];
       const report = this.buildReport({ cycleId, source, scope, telemetry, proposals, executed, startedAt });
+      report.rawTelemetry = telemetry;
       this.lastCycle = report;
       if (persist) await this.persist(report);
-      this.audit?.record?.('dual_ai.cycle_completed', { cycleId, source, mode: this.mode, score: report.score, proposals: proposals.map((p) => p.id), executed: executed.map((e) => e.proposalId) });
-      return report;
+      this.audit?.record?.('dual_ai.cycle_completed', { cycleId, source, mode: this.mode, score: report.score, proposals: proposals.map((p) => p.id), executed: executed.map((e) => e.proposalId), frontierScore: report.frontier?.maturity?.score });
+      return this.publicCycle(report);
     } catch (error) {
       const failed = { ok: false, cycleId, mode: this.mode, status: 'failed', score: 0, source, scope, startedAt, completedAt: nowIso(), error: error.message, profiles: AI_PROFILES };
       this.lastCycle = failed;
@@ -174,6 +177,12 @@ class DualAiOrchestratorService {
     } finally {
       this.running = false;
     }
+  }
+
+  publicCycle(report) {
+    if (!report) return null;
+    const { rawTelemetry, ...safe } = report;
+    return safe;
   }
 
   async collectTelemetry({ execute = false } = {}) {
@@ -189,7 +198,9 @@ class DualAiOrchestratorService {
     ]);
     const benchmarkHistory = safeArray(benchmark?.history);
     const lastBenchmark = benchmark?.lastRun || benchmarkHistory[0] || null;
-    return { production, governance, releaseGate, benchmark, benchmarkHistory, lastBenchmark, activeLearning, learningStatus, versions: safeArray(versions), training, providerCount: safeArray(benchmark?.availableProviders || this.providers?.available?.()).length };
+    const telemetry = { production, governance, releaseGate, benchmark, benchmarkHistory, lastBenchmark, activeLearning, learningStatus, versions: safeArray(versions), training, providerCount: safeArray(benchmark?.availableProviders || this.providers?.available?.()).length, providers: benchmark?.availableProviders || this.providers?.available?.() || [] };
+    telemetry.frontier = this.frontierArchitecture.status({ telemetry });
+    return telemetry;
   }
 
   async safe(fn, fallback) {
@@ -209,6 +220,7 @@ class DualAiOrchestratorService {
     const governanceSignals = safeArray(t.governance?.signals);
     const criticalGovernance = governanceSignals.some((s) => s.severity === 'critical');
     const pending = number(t.training?.stats?.pending, 0);
+    const frontier = t.frontier || this.frontierArchitecture.status({ telemetry: t });
 
     if (criticalGovernance || number(activeStats.unsafeShadow) > 0 || number(activeStats.consecutiveFailures) >= 3) {
       proposals.push(this.proposal('core_guard_active_learning', 'sentinel_core', 'critical', 'Ask Governance to execute safe guardrails and stop unsafe learning loops if needed.'));
@@ -223,12 +235,13 @@ class DualAiOrchestratorService {
       proposals.push(this.proposal('sentinel_24h_learning_runner', 'sentinel', 'medium', 'Maintain a bounded 24h provider learning run with manual activation and guardrails.'));
     }
     if (pending >= 10) proposals.push(this.proposal('core_training_review_backlog', 'sentinel_core', 'low', `Process pending training backlog through existing auto-review gates. Pending ${pending}.`));
+    if (frontier.maturity?.score < 80) proposals.push(this.proposal('core_frontier_alignment_review', 'sentinel_core', 'low', `Improve Dual AI architecture maturity from ${frontier.maturity.score} toward advanced state using current frontier patterns.`));
     if (!proposals.length) proposals.push(this.proposal('dual_ai_observe', 'sentinel_core', 'none', 'Both Sentinel Core and Sentinel are inside guardrails; keep observing.'));
     return proposals;
   }
 
   proposal(id, target, risk, reason) {
-    return { id, target, risk, reason, executable: id !== 'dual_ai_observe', createdAt: nowIso() };
+    return { id, target, risk, reason, executable: !['dual_ai_observe', 'core_frontier_alignment_review'].includes(id), createdAt: nowIso() };
   }
 
   async execute(proposals, telemetry) {
@@ -244,7 +257,7 @@ class DualAiOrchestratorService {
         } else if (proposal.id === 'sentinel_benchmark_repair_training') {
           result = await this.draftSentinelRepairTraining(telemetry);
         } else if (proposal.id === 'sentinel_24h_learning_runner') {
-          result = await this.activeLearning?.start?.({ durationHours: 24, intervalMinutes: 5, batchSize: 1, topics: ['Panthorium OS', 'Sentinel AI', 'least privilege', 'autonomous learning', 'release gate'], userId: 'dual-ai:sentinel-core', requestId: 'phase14-dual-ai' });
+          result = await this.activeLearning?.start?.({ durationHours: 24, intervalMinutes: 5, batchSize: 1, topics: this.frontierArchitecture.trainingTopics().slice(0, 10), userId: 'dual-ai:sentinel-core', requestId: 'phase14-dual-ai' });
         } else if (proposal.id === 'core_training_review_backlog') {
           result = await this.training?.autoProcessPending?.({ limit: 10 });
         }
@@ -260,14 +273,17 @@ class DualAiOrchestratorService {
     const providers = this.providers?.available?.() || [];
     if (!providers.length) return { ok: false, error: 'no_teacher_provider' };
     const sentinel = t.releaseGate?.evidence?.benchmark || sentinelSummary(t.lastBenchmark, this.thresholds.benchmarkScore) || { score: 0 };
+    const frontier = t.frontier || this.frontierArchitecture.status({ telemetry: t });
     const prompt = [
       'สร้าง training answer ภาษาไทยสำหรับ Sentinel ผู้ใช้งานทั่วไปของ Panthorium OS',
       'เป้าหมาย: ให้คำตอบถูกต้อง ชัดเจน ปลอดภัย ใช้ได้กับผู้ใช้ทั่วไป ไม่กล่าวอ้างเกินจริง',
       `บริบท benchmark ล่าสุด: Sentinel score ${number(sentinel.score)} จาก target ${this.thresholds.benchmarkScore}`,
-      'หัวข้อที่ต้องครอบคลุม: Panthorium OS, Sentinel AI, least privilege, autonomous learning loop, rollback, recovery, release gate, benchmark evidence',
-      'ห้ามเปิดเผย secret, ห้ามอ้างว่าสามารถ deploy/merge เอง, ห้าม bypass approval gate'
+      'หัวข้อที่ต้องครอบคลุม: Panthorium OS, Sentinel AI, Sentinel Core, least privilege, autonomous learning loop, rollback, recovery, release gate, benchmark evidence',
+      `Frontier patterns ที่ต้องสะท้อน: ${frontier.patterns.map((p) => p.label).slice(0, 6).join('; ')}`,
+      'ห้ามเปิดเผย secret, ห้ามอ้างว่าสามารถ deploy/merge เอง, ห้าม bypass approval gate',
+      'ตอบแบบผู้ใช้ทั่วไปเข้าใจง่าย และแยกหน้าที่ Sentinel Core กับ Sentinel ให้ชัดเจน'
     ].join('\n');
-    return this.training?.draftWithTeachers?.({ prompt, providerNames: providers.slice(0, 3), tags: ['phase14', 'dual-ai', 'sentinel', 'benchmark-repair'], user: { sub: 'dual-ai:sentinel-core' }, requestId: 'phase14-dual-ai' });
+    return this.training?.draftWithTeachers?.({ prompt, providerNames: providers.slice(0, 3), tags: ['phase14', 'dual-ai', 'sentinel', 'benchmark-repair', 'frontier-patterns'], user: { sub: 'dual-ai:sentinel-core' }, requestId: 'phase14-dual-ai' });
   }
 
   compactResult(result) {
@@ -289,6 +305,7 @@ class DualAiOrchestratorService {
     const critical = proposals.some((p) => p.risk === 'critical');
     const medium = proposals.some((p) => p.risk === 'medium');
     const score = Math.max(0, 100 - proposals.reduce((sum, p) => sum + (p.risk === 'critical' ? 30 : p.risk === 'medium' ? 12 : p.risk === 'low' ? 5 : 0), 0));
+    const frontier = telemetry.frontier || this.frontierArchitecture.status({ telemetry });
     return {
       ok: !critical,
       cycleId,
@@ -301,8 +318,10 @@ class DualAiOrchestratorService {
       startedAt,
       completedAt: nowIso(),
       profiles: AI_PROFILES,
-      architecturePatterns: FRONTIER_PATTERNS,
-      coreState: this.coreState(telemetry),
+      architecturePatterns: frontier.patterns,
+      frontier,
+      learningPlan: this.learningPlan(telemetry, frontier),
+      coreState: this.coreState(telemetry, frontier),
       sentinelState: this.sentinelState(telemetry),
       proposals,
       executed,
@@ -311,30 +330,42 @@ class DualAiOrchestratorService {
     };
   }
 
-  coreState(t) {
-    return { productionStatus: t.production?.status || null, governanceStatus: t.governance?.status || null, releaseGateMergeAllowed: t.releaseGate?.mergeAllowed ?? null, providerCount: t.providerCount };
+  learningPlan(t, frontier) {
+    const channels = frontier.learningChannels || this.frontierArchitecture.learningChannels();
+    return {
+      mode: this.mode,
+      cadence: `${Math.round(this.intervalMs / 60000)} minutes`,
+      sentinelCore: channels.sentinel_core,
+      sentinel: channels.sentinel,
+      loop: ['observe telemetry', 'detect drift/gaps', 'draft candidates from internal/external evidence', 'auto-review', 'shadow', 'promote only if gates pass', 'monitor and rollback if regression'],
+      activeRuntimeRule: 'Sentinel user answers use active-only knowledge; all new learning remains candidate/shadow until promoted.'
+    };
+  }
+
+  coreState(t, frontier) {
+    return { productionStatus: t.production?.status || null, governanceStatus: t.governance?.status || null, releaseGateMergeAllowed: t.releaseGate?.mergeAllowed ?? null, providerCount: t.providerCount, frontierMaturity: frontier?.maturity?.score ?? null };
   }
 
   sentinelState(t) {
     const sentinel = t.releaseGate?.evidence?.benchmark || sentinelSummary(t.lastBenchmark, this.thresholds.benchmarkScore);
-    return { benchmark: sentinel || null, activeLearningRunning: Boolean(t.activeLearning?.running), learningVersions: safeArray(t.versions).length, activeVersions: safeArray(t.versions).filter((v) => v.state === 'active').length };
+    return { benchmark: sentinel || null, activeLearningRunning: Boolean(t.activeLearning?.running), learningVersions: safeArray(t.versions).length, activeVersions: safeArray(t.versions).filter((v) => v.state === 'active').length, runtimeKnowledge: 'active_only' };
   }
 
   telemetrySummary(t) {
-    return { production: { status: t.production?.status, score: t.production?.score }, governance: { status: t.governance?.status, score: t.governance?.score, signals: safeArray(t.governance?.signals).map((s) => s.code) }, releaseGate: { mergeAllowed: t.releaseGate?.mergeAllowed, score: t.releaseGate?.score, blockers: safeArray(t.releaseGate?.blockers).map((b) => b.id) }, activeLearning: { running: Boolean(t.activeLearning?.running), status: t.activeLearning?.run?.status || null }, benchmark: this.sentinelState(t).benchmark };
+    return { production: { status: t.production?.status, score: t.production?.score }, governance: { status: t.governance?.status, score: t.governance?.score, signals: safeArray(t.governance?.signals).map((s) => s.code) }, releaseGate: { mergeAllowed: t.releaseGate?.mergeAllowed, score: t.releaseGate?.score, blockers: safeArray(t.releaseGate?.blockers).map((b) => b.id) }, activeLearning: { running: Boolean(t.activeLearning?.running), status: t.activeLearning?.run?.status || null }, benchmark: this.sentinelState(t).benchmark, frontier: t.frontier?.maturity || null };
   }
 
   async persist(report) {
     if (!this.pool) return;
     await this.pool.query(
       'INSERT INTO panthorium_dual_ai_cycles(cycle_id,mode,status,score,scope,core_state,sentinel_state,proposals,executed,report,started_at,completed_at,error) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13)',
-      [report.cycleId, report.mode, report.status, report.score, report.scope, JSON.stringify(report.coreState || {}), JSON.stringify(report.sentinelState || {}), JSON.stringify(report.proposals || []), JSON.stringify(report.executed || []), JSON.stringify(report), report.startedAt, report.completedAt || nowIso(), report.error || null]
+      [report.cycleId, report.mode, report.status, report.score, report.scope, JSON.stringify(report.coreState || {}), JSON.stringify(report.sentinelState || {}), JSON.stringify(report.proposals || []), JSON.stringify(report.executed || []), JSON.stringify(this.publicCycle(report)), report.startedAt, report.completedAt || nowIso(), report.error || null]
     ).catch((error) => this.audit?.record?.('dual_ai.snapshot_failed', { error: error.message }));
   }
 
   async history({ limit = 20 } = {}) {
     const safeLimit = clampInt(limit, 20, 1, 100);
-    if (!this.pool) return this.lastCycle ? [this.lastCycle] : [];
+    if (!this.pool) return this.lastCycle ? [this.publicCycle(this.lastCycle)] : [];
     const result = await this.pool.query('SELECT cycle_id AS "cycleId", mode, status, score, scope, core_state AS "coreState", sentinel_state AS "sentinelState", proposals, executed, started_at AS "startedAt", completed_at AS "completedAt", error FROM panthorium_dual_ai_cycles ORDER BY started_at DESC LIMIT $1', [safeLimit]);
     return result.rows;
   }
