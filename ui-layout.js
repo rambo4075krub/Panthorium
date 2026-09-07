@@ -86,16 +86,11 @@
       if (typeof camera === 'undefined' || !camera || typeof renderer === 'undefined' || !renderer) return;
       var w = Math.max(1, window.innerWidth);
       var h = Math.max(1, window.innerHeight);
-      var radius = 90;
-      var margin = 1.18;
-      var vFov = (camera.fov || 45) * Math.PI / 180;
-      var aspect = w / h;
-      var halfVFov = vFov / 2;
-      var halfHFov = Math.atan(Math.tan(halfVFov) * aspect);
-      var limitingHalfFov = Math.min(halfVFov, halfHFov);
-      var distance = (radius * margin) / Math.tan(limitingHalfFov);
-      camera.aspect = aspect;
-      camera.position.set(0, 0, distance);
+      camera.aspect = w / h;
+      // The current prototype orb has a unit radius. The previous desktop
+      // sphere used a radius of 90, which moved this camera beyond its far
+      // clipping plane shortly after boot and made the new orb disappear.
+      camera.position.set(0, 0, 4.65);
       camera.lookAt(0, 0, 0);
       camera.updateProjectionMatrix();
       renderer.setSize(w, h, false);

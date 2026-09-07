@@ -6,6 +6,7 @@ const fs = require('fs');
 const desktop = fs.readFileSync('staging-admin-desktop.js', 'utf8');
 const production = fs.readFileSync('production-intelligence-ui.js', 'utf8');
 const shell = fs.readFileSync('sentinel.html', 'utf8');
+const uiLayout = fs.readFileSync('ui-layout.js', 'utf8');
 
 assert(desktop.includes('grid-auto-flow:column'), 'staging admin desktop should wrap overflowing icons into top-to-bottom columns');
 assert(desktop.includes('overflow:visible'), 'staging admin desktop should not show the old icon scrollbar');
@@ -18,6 +19,9 @@ assert(production.includes('isStagingAdmin'), 'production intelligence UI should
 assert(production.includes('removeLegacyFloatingLaunchers'), 'production intelligence UI should remove legacy floating launchers');
 assert(!production.includes('position:fixed;right:16px;bottom:58px'), 'duplicate bottom-right Production Intelligence launcher must be removed');
 assert(!production.includes('new MutationObserver'), 'production intelligence UI must not install a whole-document MutationObserver');
+
+assert(uiLayout.includes('camera.position.set(0, 0, 4.65)'), 'layout sync must preserve the prototype orb camera position');
+assert(!uiLayout.includes('var radius = 90'), 'layout sync must not restore the removed legacy sphere camera distance');
 
 assert(shell.includes('Interactive Procedural Energy Orb'), 'desktop should use the new procedural energy orb');
 assert(shell.includes('window.innerWidth < 700 ? 11880 : 23100'), 'orb should use responsive particle counts');
