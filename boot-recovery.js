@@ -8,7 +8,7 @@
       if (window.__panthoriumEnergyOrbLoader) return;
       window.__panthoriumEnergyOrbLoader = true;
       var script = document.createElement('script');
-      script.src = '/energy-orb-ui.js?v=phase14-orb-v1';
+      script.src = '/energy-orb-ui.js?v=phase14-orb-shape-v2';
       script.defer = true;
       script.dataset.panthoriumEnergyOrb = '1';
       script.onerror = function () {
