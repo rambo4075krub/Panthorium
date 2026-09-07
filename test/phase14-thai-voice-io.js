@@ -19,8 +19,9 @@ assert(voice.includes("const THAI_LOCALE='th-TH'"), 'Thai locale must be th-TH')
 assert(voice.includes("'sentinel-core'"), 'voice layer must define Sentinel Core profile');
 assert(voice.includes('sentinel:{'), 'voice layer must define Sentinel user profile');
 assert(voice.includes('PanthoriumVoice'), 'voice layer must expose PanthoriumVoice API');
-assert(voice.includes('panthorium:voice-start'), 'voice layer must emit voice start events for orb/UI sync');
-assert(voice.includes('panthorium:voice-end'), 'voice layer must emit voice end events for orb/UI sync');
+assert(voice.includes('panthorium:voice-${type}'), 'voice layer must emit namespaced voice events');
+assert(voice.includes("emit('start'") && voice.includes("emit('end'"), 'voice layer must emit start and end events');
+assert(voice.includes("emit('user-start'") && voice.includes("emit('user-result'"), 'voice layer must emit voice input events');
 assert(voice.includes('panthorium:ai-done'), 'voice layer must listen to AI done events');
 assert(voice.includes('SpeechRecognition') && voice.includes('webkitSpeechRecognition'), 'voice input must support speech recognition fallbacks');
 assert(!voice.includes('new MutationObserver'), 'voice layer must avoid whole-document MutationObserver loops');
