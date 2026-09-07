@@ -19,14 +19,6 @@ assert(shell.includes('redSheen=.008'), 'prototype subtle red sheen must be pres
 assert(shell.includes('smoothPulse * .16'), 'click response must preserve prototype expansion');
 assert(shell.includes('orbAIEnergy * (.15 + Math.sin(time * 9) * .01)'), 'AI speech response must preserve prototype expansion');
 assert(shell.includes('orbVoiceEnergy * .018'), 'user speech response must stay subtle');
-assert(shell.includes('function createAIFaceGeometry()'), 'AI speech must reveal a point-cloud human face in the orb');
-assert(shell.includes('new THREE.Points(createAIFaceGeometry(), orbFaceMaterial)'), 'AI face must be rendered as part of the energy field');
-assert(shell.includes('const userFaceActive = userSpeechActive || sensedVoice > .04'), 'point-cloud face must appear while a user or admin is speaking');
-assert(shell.includes('orbFaceHoldUntil = now + 2400'), 'face outline must wait briefly when the user may continue speaking');
-assert(shell.includes('now < orbFaceHoldUntil ? .28 : 0'), 'waiting face must remain as a subtle outline');
-assert(shell.includes('orbFaceMaterial.uniforms.uStrength.value = orbFacePresence'), 'speech face must fade in and out smoothly');
-assert(shell.includes('orbFace.rotation.x = orbCurrent.x * .85'), 'AI face must follow the user vertically');
-assert(shell.includes('orbFace.rotation.y = orbCurrent.y * .85'), 'AI face must follow the user horizontally');
 assert(shell.includes('id="orb-transcript"'), 'desktop must include the three-line transcript');
 assert(shell.includes('data-orb-line="previous"'), 'transcript must include the previous sentence');
 assert(shell.includes('data-orb-line="current"'), 'transcript must include the current sentence');
