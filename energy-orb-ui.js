@@ -92,6 +92,7 @@ function ensureStyle(){
   style.id='panthorium-energy-orb-style';
   style.textContent=`
 #bg-canvas.panthorium-energy-orb-replaced{opacity:0!important;filter:none!important;pointer-events:none!important;}
+#orb-transcript{display:none!important;}
 #${ROOT_ID}{position:absolute;inset:0;z-index:2;overflow:hidden;pointer-events:auto;contain:layout paint;}
 #${ROOT_ID} canvas{position:absolute;inset:0;width:100%!important;height:100%!important;display:block;outline:none;}
 #${ROOT_ID} .orb-caption{position:absolute;left:50%;top:calc(50% + 132px);transform:translateX(-50%);width:min(760px,calc(100vw - 220px));min-width:min(520px,calc(100vw - 36px));display:grid;grid-template-rows:repeat(3,22px);gap:2px;font-family:Consolas,'Courier New',monospace;text-align:center;color:#dff;letter-spacing:.2px;text-shadow:0 0 9px rgba(0,255,204,.38),0 1px 3px #000;background:transparent;border:0;box-shadow:none;user-select:none;outline-offset:6px;}
