@@ -3,12 +3,30 @@
 
   var completed = false;
 
+  function loadEnergyOrb() {
+    try {
+      if (window.__panthoriumEnergyOrbLoader) return;
+      window.__panthoriumEnergyOrbLoader = true;
+      var script = document.createElement('script');
+      script.src = '/energy-orb-ui.js?v=phase14-orb-v1';
+      script.defer = true;
+      script.dataset.panthoriumEnergyOrb = '1';
+      script.onerror = function () {
+        console.warn('[Energy Orb] Failed to load desktop orb layer.');
+      };
+      document.head.appendChild(script);
+    } catch (error) {
+      console.warn('[Energy Orb]', error.message);
+    }
+  }
+
   function finishBoot(reason) {
     if (completed) return;
     try {
       if (typeof OS === 'undefined' || !OS || !OS.state) return;
       if (OS.state.booted) {
         completed = true;
+        loadEnergyOrb();
         return;
       }
 
@@ -37,6 +55,8 @@
         console.warn('[Boot Recovery] initDesktop:', error.message);
       }
 
+      loadEnergyOrb();
+
       // Phase 2 authentication owns the final login/desktop state.
       if (loginScreen) {
         loginScreen.style.display = 'flex';
@@ -55,10 +75,17 @@
     try {
       if (typeof OS !== 'undefined' && OS && OS.state && OS.state.booted) {
         completed = true;
+        loadEnergyOrb();
         return;
       }
     } catch (_) {}
     finishBoot('timeout');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', loadEnergyOrb, { once: true });
+  } else {
+    loadEnergyOrb();
   }
 
   // The native boot normally completes in about 2 seconds. Five seconds is ample
