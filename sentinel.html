@@ -133,43 +133,6 @@
             width: 100%; height: 100%;
         }
 
-        #orb-fallback {
-            position: fixed;
-            z-index: 2;
-            left: 50%; top: 47%;
-            width: min(46vw, 430px); aspect-ratio: 1;
-            transform: translate(-50%, -50%);
-            border-radius: 50%;
-            opacity: .78;
-            pointer-events: none;
-            background:
-                radial-gradient(circle at 42% 38%, rgba(220,255,255,.82) 0 1%, rgba(18,180,255,.28) 3%, transparent 9%),
-                repeating-radial-gradient(circle, rgba(78,220,255,.20) 0 1px, transparent 1px 5px),
-                radial-gradient(circle, rgba(18,140,255,.2), rgba(30,18,150,.14) 52%, transparent 72%);
-            filter: drop-shadow(0 0 22px rgba(22,170,255,.46));
-            transition: opacity .25s ease;
-            animation: orbFallbackBreathe 3.2s ease-in-out infinite;
-        }
-        body.orb-fallback-active #orb-fallback { opacity: .9; pointer-events: auto; }
-        body.orb-fallback-active #bg-canvas { visibility: hidden; }
-        body.orb-fallback-pulse #orb-fallback { animation: orbFallbackClick .68s ease-out; }
-        body.orb-fallback-ai #orb-fallback { animation: orbFallbackAI .9s ease-in-out infinite; }
-        body.orb-fallback-voice #orb-fallback { filter: drop-shadow(0 0 25px rgba(22,170,255,.5)); }
-        #boot-screen:not(.hidden) ~ #orb-fallback,
-        #login-screen.active ~ #orb-fallback { visibility: hidden; }
-        @keyframes orbFallbackBreathe {
-            0%, 100% { transform: translate(-50%, -50%) scale(.98); }
-            50% { transform: translate(-50%, -50%) scale(1.025); }
-        }
-        @keyframes orbFallbackClick {
-            0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: .86; }
-            45% { transform: translate(-50%, -50%) scale(1.16); opacity: .72; }
-        }
-        @keyframes orbFallbackAI {
-            0%, 100% { transform: translate(-50%, -50%) scale(1.04); opacity: .82; }
-            50% { transform: translate(-50%, -50%) scale(1.16); opacity: .7; }
-        }
-
         #orb-transcript {
             position: absolute;
             z-index: 8;
@@ -694,7 +657,6 @@
     </style>
 </head>
 <body>
-    <div id="orb-fallback" aria-hidden="true"></div>
     <video id="faceVideo" autoplay muted playsinline></video>
 
     <!-- BOOT -->
@@ -757,6 +719,7 @@
     <!-- External libs -->
     <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
     <script src="/vendor/three.min.js?v=r128-local"></script>
+    <script defer src="/energy-orb-ui.js?v=exact-prototype-v3"></script>
 
     <script>
     // =========================================================
@@ -1086,9 +1049,11 @@
             aiSpeechActive = true;
             aiSpeechPulse = 1;
             window.PanthoriumOrb?.setAISpeaking(true);
+            window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text } }));
         };
         u.onboundary = event => {
             aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
+            window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex: event.charIndex } }));
             let index = 0;
             for (let i = 0; i < orbTranscriptOffsets.length; i++) if (event.charIndex >= orbTranscriptOffsets[i]) index = i;
             showOrbTranscriptSentence(index);
@@ -1096,6 +1061,7 @@
         const stopSpeechMotion = () => {
             aiSpeechActive = false;
             window.PanthoriumOrb?.setAISpeaking(false);
+            window.dispatchEvent(new CustomEvent("panthorium:voice-end"));
         };
         u.onend = stopSpeechMotion;
         u.onerror = stopSpeechMotion;
@@ -1486,11 +1452,7 @@
             sm.appendChild(el);
         });
 
-        try {
-            initBackground();
-        } catch (error) {
-            activateOrbFallback(error);
-        }
+        initOrbTranscriptControls();
         // ตรวจสอบ Sentinel Core เงียบ ๆ หลังเข้า Desktop
         checkCoreStatus().then((ok) => {
             if (ok) toast("Sentinel Core ออนไลน์");
@@ -1574,15 +1536,18 @@
             recognition.interimResults = false;
             recognition.onresult = (e) => {
                 const t = e.results[0][0].transcript;
+                window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text: t } }));
                 input.value = t;
                 send();
             };
             recognition.onstart = () => {
                 userSpeechActive = true;
+                window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
                 micBtn.classList.add("listening");
             };
             recognition.onend = () => {
                 userSpeechActive = false;
+                window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
                 micBtn.classList.remove("listening");
             };
             recognition.onerror = () => {
