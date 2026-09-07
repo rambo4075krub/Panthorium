@@ -146,6 +146,14 @@ app.use("/api", createApiRouter(sentinelCore, authService, audit, aiOperations, 
 
 const frontendCandidates = [path.join(__dirname, ".."), __dirname];
 const frontendRoot = frontendCandidates.find((directory) => fs.existsSync(path.join(directory, "sentinel.html"))) || __dirname;
+app.get("/vendor/three.min.js", (req, res, next) => {
+  try {
+    res.set("Cache-Control", "public, max-age=31536000, immutable");
+    res.type("application/javascript").sendFile(path.join(__dirname, "node_modules", "three", "build", "three.min.js"));
+  } catch (error) {
+    next(error);
+  }
+});
 app.get("/sw.js", (req, res, next) => {
   try {
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");

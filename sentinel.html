@@ -133,6 +133,29 @@
             width: 100%; height: 100%;
         }
 
+        #orb-fallback {
+            position: absolute;
+            left: 50%; top: 47%;
+            width: min(46vw, 430px); aspect-ratio: 1;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            opacity: 0;
+            pointer-events: none;
+            background:
+                radial-gradient(circle at 42% 38%, rgba(220,255,255,.82) 0 1%, rgba(18,180,255,.28) 3%, transparent 9%),
+                repeating-radial-gradient(circle, rgba(78,220,255,.20) 0 1px, transparent 1px 5px),
+                radial-gradient(circle, rgba(18,140,255,.2), rgba(30,18,150,.14) 52%, transparent 72%);
+            filter: drop-shadow(0 0 22px rgba(22,170,255,.46));
+            transition: opacity .25s ease;
+            animation: orbFallbackBreathe 3.2s ease-in-out infinite;
+        }
+        #desktop.orb-fallback-active #orb-fallback { opacity: .86; }
+        #desktop.orb-fallback-active #bg-canvas { visibility: hidden; }
+        @keyframes orbFallbackBreathe {
+            0%, 100% { transform: translate(-50%, -50%) scale(.98); }
+            50% { transform: translate(-50%, -50%) scale(1.025); }
+        }
+
         #orb-transcript {
             position: absolute;
             z-index: 8;
@@ -673,6 +696,7 @@
 
     <!-- DESKTOP -->
     <div id="desktop">
+        <div id="orb-fallback" aria-hidden="true"></div>
         <canvas id="bg-canvas"></canvas>
         <section id="orb-transcript" tabindex="0" role="region" aria-label="ข้อความประกอบเสียงตอบของ AI">
             <div class="orb-transcript-line previous" data-orb-line="previous" aria-label="ประโยคก่อนหน้า"></div>
@@ -718,7 +742,7 @@
 
     <!-- External libs -->
     <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="/vendor/three.min.js?v=r128-local"></script>
 
     <script>
     // =========================================================
@@ -1446,7 +1470,11 @@
             sm.appendChild(el);
         });
 
-        initBackground();
+        try {
+            initBackground();
+        } catch (error) {
+            activateOrbFallback(error);
+        }
         // ตรวจสอบ Sentinel Core เงียบ ๆ หลังเข้า Desktop
         checkCoreStatus().then((ok) => {
             if (ok) toast("Sentinel Core ออนไลน์");
@@ -1897,8 +1925,17 @@
     let orbMicStream = null;
     let orbMicAnalyser = null;
     let orbMicData = null;
+    let orbContextLost = false;
+    let orbLastRender = 0;
     const orbTarget = { x: 0, y: 0 };
     const orbCurrent = { x: 0, y: 0 };
+
+    function activateOrbFallback(error) {
+        orbContextLost = true;
+        $("desktop")?.classList.add("orb-fallback-active");
+        if (error) console.error("[PanthoriumOrb] WebGL fallback activated:", error);
+        initOrbTranscriptControls();
+    }
 
     function createOrbRadialTexture() {
         const canvas = document.createElement("canvas");
@@ -1945,15 +1982,16 @@
 
     function initBackground() {
         const canvas = $("bg-canvas");
+        if (!window.THREE) throw new Error("Three.js failed to load");
         scene = new THREE.Scene();
         scene.fog = new THREE.FogExp2(0x01030a, .08);
         camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, .1, 100);
         camera.position.set(0, 0, 4.65);
 
-        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true, powerPreference: "high-performance" });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, window.innerWidth < 700 ? 1.2 : 1.5));
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setClearColor(0x01030a, 1);
+        renderer.setClearColor(0x01030a, 0);
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.35;
 
@@ -2000,7 +2038,7 @@
         orb = new THREE.Points(geometry, orbMaterial);
         orbGroup.add(orb);
 
-        orbCore = new THREE.Mesh(new THREE.SphereGeometry(.77, 64, 64), new THREE.ShaderMaterial({
+        orbCore = new THREE.Mesh(new THREE.SphereGeometry(.77, 40, 32), new THREE.ShaderMaterial({
             uniforms: { uTime: { value: 0 }, uPulse: { value: 0 } },
             transparent: true,
             side: THREE.BackSide,
@@ -2023,8 +2061,8 @@
         orbGroup.add(orbHalo);
 
         const starsGeometry = new THREE.BufferGeometry();
-        const stars = new Float32Array(750 * 3);
-        for (let i = 0; i < 750; i++) {
+        const stars = new Float32Array(420 * 3);
+        for (let i = 0; i < 420; i++) {
             const radius = 3 + Math.random() * 8;
             const a = Math.random() * Math.PI * 2;
             const b = Math.acos(2 * Math.random() - 1);
@@ -2043,11 +2081,15 @@
             orbPulse = 1;
             if (!orbMicPermissionAttempted) { orbMicPermissionAttempted = true; enableOrbMicrophone(); }
         });
+        canvas.addEventListener("webglcontextlost", event => {
+            event.preventDefault();
+            activateOrbFallback(new Error("WebGL context lost"));
+        }, false);
         window.addEventListener("resize", () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, window.innerWidth < 700 ? 1.2 : 1.5));
             orbMaterial.uniforms.uPixel.value = renderer.getPixelRatio();
         });
         window.addEventListener("panthorium:ai-speaking", event => { orbAIActive = Boolean(event.detail?.speaking ?? event.detail); });
@@ -2074,6 +2116,8 @@
 
     function animateBg(now = performance.now()) {
         requestAnimationFrame(animateBg);
+        if (orbContextLost || document.hidden || now - orbLastRender < 1000 / 45) return;
+        orbLastRender = now;
         const delta = Math.min((now - orbLastFrame) / 1000, .05);
         orbLastFrame = now;
         const time = now * .001;
