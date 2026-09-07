@@ -19,6 +19,11 @@ assert(shell.includes('redSheen=.008'), 'prototype subtle red sheen must be pres
 assert(shell.includes('smoothPulse * .16'), 'click response must preserve prototype expansion');
 assert(shell.includes('orbAIEnergy * (.15 + Math.sin(time * 9) * .01)'), 'AI speech response must preserve prototype expansion');
 assert(shell.includes('orbVoiceEnergy * .018'), 'user speech response must stay subtle');
+assert(shell.includes('function fitOrbViewport()'), 'orb must fit narrow smartphone viewports');
+assert(shell.includes('compact ? Math.max(4.65, compactDistance) : 4.65'), 'smartphones must move the camera back enough to keep the orb on screen');
+assert(shell.includes('white-space: normal'), 'smartphone transcript lines must wrap instead of disappearing off screen');
+assert(shell.includes('overflow-wrap: anywhere'), 'long smartphone transcript text must remain visible');
+assert(!shell.includes('createAIFaceGeometry'), 'unapproved speech-face prototype must not ship');
 assert(shell.includes('id="orb-transcript"'), 'desktop must include the three-line transcript');
 assert(shell.includes('data-orb-line="previous"'), 'transcript must include the previous sentence');
 assert(shell.includes('data-orb-line="current"'), 'transcript must include the current sentence');
