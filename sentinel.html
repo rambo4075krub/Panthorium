@@ -149,11 +149,22 @@
             transition: opacity .25s ease;
             animation: orbFallbackBreathe 3.2s ease-in-out infinite;
         }
-        #desktop.orb-fallback-active #orb-fallback { opacity: .86; }
+        #desktop.orb-fallback-active #orb-fallback { opacity: .86; pointer-events: auto; }
         #desktop.orb-fallback-active #bg-canvas { visibility: hidden; }
+        #desktop.orb-fallback-pulse #orb-fallback { animation: orbFallbackClick .68s ease-out; }
+        #desktop.orb-fallback-ai #orb-fallback { animation: orbFallbackAI .9s ease-in-out infinite; }
+        #desktop.orb-fallback-voice #orb-fallback { filter: drop-shadow(0 0 25px rgba(22,170,255,.5)); }
         @keyframes orbFallbackBreathe {
             0%, 100% { transform: translate(-50%, -50%) scale(.98); }
             50% { transform: translate(-50%, -50%) scale(1.025); }
+        }
+        @keyframes orbFallbackClick {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: .86; }
+            45% { transform: translate(-50%, -50%) scale(1.16); opacity: .72; }
+        }
+        @keyframes orbFallbackAI {
+            0%, 100% { transform: translate(-50%, -50%) scale(1.04); opacity: .82; }
+            50% { transform: translate(-50%, -50%) scale(1.16); opacity: .7; }
         }
 
         #orb-transcript {
@@ -1071,6 +1082,7 @@
         u.onstart = () => {
             aiSpeechActive = true;
             aiSpeechPulse = 1;
+            window.PanthoriumOrb?.setAISpeaking(true);
         };
         u.onboundary = event => {
             aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
@@ -1080,6 +1092,7 @@
         };
         const stopSpeechMotion = () => {
             aiSpeechActive = false;
+            window.PanthoriumOrb?.setAISpeaking(false);
         };
         u.onend = stopSpeechMotion;
         u.onerror = stopSpeechMotion;
@@ -1927,14 +1940,45 @@
     let orbMicData = null;
     let orbContextLost = false;
     let orbLastRender = 0;
+    let orbFallbackPulseTimer = 0;
+    let orbFallbackControlsReady = false;
     const orbTarget = { x: 0, y: 0 };
     const orbCurrent = { x: 0, y: 0 };
 
     function activateOrbFallback(error) {
         orbContextLost = true;
-        $("desktop")?.classList.add("orb-fallback-active");
+        const desktop = $("desktop");
+        const fallback = $("orb-fallback");
+        desktop?.classList.add("orb-fallback-active");
         if (error) console.error("[PanthoriumOrb] WebGL fallback activated:", error);
         initOrbTranscriptControls();
+        if (!orbFallbackControlsReady) {
+            orbFallbackControlsReady = true;
+            const pulse = () => {
+                desktop?.classList.remove("orb-fallback-pulse");
+                void fallback?.offsetWidth;
+                desktop?.classList.add("orb-fallback-pulse");
+                clearTimeout(orbFallbackPulseTimer);
+                orbFallbackPulseTimer = setTimeout(() => desktop?.classList.remove("orb-fallback-pulse"), 700);
+            };
+            fallback?.addEventListener("pointerdown", () => {
+                pulse();
+                if (!orbMicPermissionAttempted) { orbMicPermissionAttempted = true; enableOrbMicrophone(); }
+            });
+            window.addEventListener("panthorium:ai-speaking", event => desktop?.classList.toggle("orb-fallback-ai", Boolean(event.detail?.speaking ?? event.detail)));
+            window.addEventListener("panthorium:voice-level", event => desktop?.classList.toggle("orb-fallback-voice", Number(event.detail?.level ?? event.detail) > .04));
+            window.PanthoriumOrb = {
+                setAISpeaking(active) { desktop?.classList.toggle("orb-fallback-ai", Boolean(active)); },
+                setVoiceLevel(level) { desktop?.classList.toggle("orb-fallback-voice", Number(level) > .04); },
+                setTranscript: setOrbTranscript,
+                setCurrentSentence: showOrbTranscriptSentence,
+                previousSentence() { showOrbTranscriptSentence(orbTranscriptIndex - 1); },
+                nextSentence() { showOrbTranscriptSentence(orbTranscriptIndex + 1); },
+                enableMicrophone: enableOrbMicrophone,
+                disableMicrophone: disableOrbMicrophone,
+                pulse
+            };
+        }
     }
 
     function createOrbRadialTexture() {
