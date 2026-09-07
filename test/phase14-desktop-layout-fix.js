@@ -38,6 +38,10 @@ assert(shell.includes('data-orb-line="next"'), 'transcript should include unread
 assert(shell.includes('font-family: Consolas'), 'transcript should use Consolas');
 assert(shell.includes('setOrbTranscript(text, 0)'), 'spoken AI text should feed the transcript');
 assert(shell.includes('window.PanthoriumOrb'), 'orb should expose its integration API');
+assert(shell.includes('/vendor/three.min.js?v=r128-local'), 'orb should load Three.js locally instead of depending on a remote CDN');
+assert(shell.includes('webglcontextlost'), 'orb should handle WebGL context loss');
+assert(shell.includes('orb-fallback-active'), 'orb should retain a visible fallback when WebGL is unavailable');
+assert(shell.includes('1000 / 45'), 'orb rendering should be capped to protect lower-power GPUs');
 assert(!shell.includes('const SPHERE_RADIUS'), 'the old sphere implementation must be removed');
 assert(!shell.includes('sphereGlow = new THREE.Points'), 'the old duplicate sphere glow layer must be removed');
 assert(shell.includes('blending: THREE.AdditiveBlending'), 'orb glow should use additive blending');
