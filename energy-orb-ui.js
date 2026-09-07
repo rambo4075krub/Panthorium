@@ -1,7 +1,7 @@
 (function(){
 'use strict';
 
-const VERSION='phase14.3-energy-orb-v1';
+const VERSION='phase14.3-energy-orb-shape-lock-v2';
 const ROOT_ID='panthorium-energy-orb-root';
 const MAX_LINES=80;
 const DEFAULT_LINES=[
@@ -13,18 +13,27 @@ const DEFAULT_LINES=[
 if(typeof window==='undefined'||window.__panthoriumEnergyOrbInstalled)return;
 window.__panthoriumEnergyOrbInstalled=true;
 
+const PROTOTYPE_SHAPE={
+  count:3500,
+  reducedCount:1400,
+  radius:90,
+  camera:[220,180,220],
+  particleSize:1.25,
+  glowSize:4.2,
+  haloScale:235,
+  goldenAngle:Math.PI*(3-Math.sqrt(5))
+};
+const PALETTE_HEX={red:0xff3b30,purple:0xa855f7,blue:0x2563ff,white:0xffffff};
+
 const state={
   installed:false,
   renderer:null,
   scene:null,
   camera:null,
-  group:null,
-  particles:null,
+  sphere:null,
   glow:null,
   halo:null,
-  rings:[],
   base:null,
-  colors:null,
   frame:0,
   activity:.18,
   targetActivity:.18,
@@ -37,7 +46,9 @@ const state={
   lastStream:'',
   root:null,
   caption:null,
-  reduced:false
+  reduced:false,
+  colorFlowPhase:0,
+  previousTime:0
 };
 
 function visibleShellPath(){return /^(\/|\/admin(?:\/|\.html)?|\/sentinel\.html)$/i.test(location.pathname||'/');}
@@ -109,8 +120,7 @@ function createRoot(desktop){
   root.id=ROOT_ID;
   root.setAttribute('aria-label','Panthorium Energy Orb desktop background');
   root.innerHTML='<canvas aria-hidden="true"></canvas><div class="orb-caption" tabindex="0" role="log" aria-live="polite"></div>';
-  const first=desktop.firstChild;
-  desktop.insertBefore(root,first);
+  desktop.insertBefore(root,desktop.firstChild);
   state.caption=root.querySelector('.orb-caption');
   root.addEventListener('pointermove',onPointerMove,{passive:true});
   root.addEventListener('click',()=>pulseRelease(1));
@@ -128,120 +138,191 @@ function onPointerMove(event){
 }
 function pulseRelease(amount=.85){state.release=Math.min(1,state.release+amount);state.targetActivity=Math.max(state.targetActivity,.88);emit('release',{amount});}
 
+function organicNoise(x,y,z,t){
+  return Math.sin(x*.031+y*.024+t*1.35)*.46+Math.sin(y*.039-z*.028-t*1.08)*.34+Math.cos(z*.033+x*.021+t*.82)*.20;
+}
+function proceduralNoise(x,y,z,t){
+  return Math.sin(x*.075+y*.035+t*4.8)*.50+Math.sin(y*.092-z*.061-t*6.2)*.31+Math.cos(z*.083+x*.041+t*3.7)*.19;
+}
+function writePaletteColor(color,position,palette){
+  const value=clamp(position,0,1);
+  if(value<.31)color.lerpColors(palette.red,palette.purple,value/.31);
+  else if(value<.66)color.lerpColors(palette.purple,palette.blue,(value-.31)/.35);
+  else color.lerpColors(palette.blue,palette.white,(value-.66)/.34);
+}
+function makePrototypeHaloTexture(THREE){
+  const haloCanvas=document.createElement('canvas');
+  haloCanvas.width=haloCanvas.height=256;
+  const ctx=haloCanvas.getContext('2d');
+  const grad=ctx.createRadialGradient(128,128,8,128,128,128);
+  grad.addColorStop(0,'rgba(255, 255, 255, 0.24)');
+  grad.addColorStop(.34,'rgba(105, 66, 255, 0.16)');
+  grad.addColorStop(.68,'rgba(37, 99, 255, 0.09)');
+  grad.addColorStop(1,'rgba(255, 59, 48, 0)');
+  ctx.fillStyle=grad;
+  ctx.fillRect(0,0,256,256);
+  return new THREE.CanvasTexture(haloCanvas);
+}
+
 function initThree(root){
   if(!window.THREE||state.renderer)return false;
   state.reduced=!!(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const canvas=root.querySelector('canvas');
   const THREE=window.THREE;
   const scene=new THREE.Scene();
-  const camera=new THREE.PerspectiveCamera(52,window.innerWidth/window.innerHeight,.1,1200);
-  camera.position.z=255;
-  const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:true,powerPreference:'high-performance'});
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.7));
+  const camera=new THREE.PerspectiveCamera(45,window.innerWidth/window.innerHeight,.1,1000);
+  camera.position.set(...PROTOTYPE_SHAPE.camera);
+  camera.lookAt(0,0,0);
+  const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
   renderer.setSize(window.innerWidth,window.innerHeight,false);
-  const group=new THREE.Group();
-  group.position.y=4;
-  scene.add(group);
 
-  const count=state.reduced?640:1550;
+  const geometry=new THREE.BufferGeometry();
+  const count=state.reduced?PROTOTYPE_SHAPE.reducedCount:PROTOTYPE_SHAPE.count;
   const base=new Float32Array(count*3);
   const pos=new Float32Array(count*3);
   const colors=new Float32Array(count*3);
-  const c1=new THREE.Color(0x00ffcc),c2=new THREE.Color(0x0099ff),c3=new THREE.Color(0xffffff);
+  const palette={
+    red:new THREE.Color(PALETTE_HEX.red),
+    purple:new THREE.Color(PALETTE_HEX.purple),
+    blue:new THREE.Color(PALETTE_HEX.blue),
+    white:new THREE.Color(PALETTE_HEX.white)
+  };
+  const particleColor=new THREE.Color();
+
   for(let i=0;i<count;i++){
-    const theta=Math.random()*Math.PI*2;
-    const u=Math.random()*2-1;
-    const r=58+(Math.random()-.5)*4;
-    const s=Math.sqrt(1-u*u);
+    const y=1-(i/(count-1))*2;
+    const r=Math.sqrt(Math.max(0,1-y*y));
+    const theta=PROTOTYPE_SHAPE.goldenAngle*i;
     const o=i*3;
-    base[o]=Math.cos(theta)*s*r;base[o+1]=u*r;base[o+2]=Math.sin(theta)*s*r;
+    base[o]=Math.cos(theta)*r*PROTOTYPE_SHAPE.radius;
+    base[o+1]=y*PROTOTYPE_SHAPE.radius;
+    base[o+2]=Math.sin(theta)*r*PROTOTYPE_SHAPE.radius;
     pos[o]=base[o];pos[o+1]=base[o+1];pos[o+2]=base[o+2];
-    const mix=i%7===0?c3:(i%3===0?c2:c1);
-    colors[o]=mix.r;colors[o+1]=mix.g;colors[o+2]=mix.b;
+    writePaletteColor(particleColor,(1-y)*.5,palette);
+    const depthLight=.82+((base[o+2]/PROTOTYPE_SHAPE.radius+1)*.09);
+    colors[o]=particleColor.r*depthLight;
+    colors[o+1]=particleColor.g*depthLight;
+    colors[o+2]=particleColor.b*depthLight;
   }
-  const geometry=new THREE.BufferGeometry();
   geometry.setAttribute('position',new THREE.BufferAttribute(pos,3));
   geometry.setAttribute('color',new THREE.BufferAttribute(colors,3));
-  const particles=new THREE.Points(geometry,new THREE.PointsMaterial({size:2.65,vertexColors:true,transparent:true,opacity:.93,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true}));
-  group.add(particles);
 
-  const glow=new THREE.Points(geometry,new THREE.PointsMaterial({size:6.2,vertexColors:true,transparent:true,opacity:.09,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true}));
-  group.add(glow);
+  const sphere=new THREE.Points(geometry,new THREE.PointsMaterial({size:PROTOTYPE_SHAPE.particleSize,vertexColors:true,transparent:true,opacity:.90,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true}));
+  sphere.userData.palette=palette;
+  sphere.userData.flowColor=new THREE.Color();
+  sphere.renderOrder=2;
+  scene.add(sphere);
 
-  const core=new THREE.Mesh(new THREE.IcosahedronGeometry(38,3),new THREE.MeshBasicMaterial({color:0x00ffcc,transparent:true,opacity:.15,wireframe:true,blending:THREE.AdditiveBlending,depthWrite:false}));
-  group.add(core);
+  const glow=new THREE.Points(geometry,new THREE.PointsMaterial({size:PROTOTYPE_SHAPE.glowSize,vertexColors:true,transparent:true,opacity:.08,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true}));
+  glow.renderOrder=1;
+  scene.add(glow);
 
-  const rings=[];
-  for(let i=0;i<3;i++){
-    const ring=new THREE.Mesh(new THREE.TorusGeometry(71+i*9,.42,8,128),new THREE.MeshBasicMaterial({color:i===0?0x00ffcc:0x0099ff,transparent:true,opacity:.28-i*.05,blending:THREE.AdditiveBlending,depthWrite:false}));
-    ring.rotation.x=Math.PI/2+i*.45;
-    ring.rotation.y=i*.55;
-    group.add(ring);rings.push(ring);
-  }
+  const halo=new THREE.Sprite(new THREE.SpriteMaterial({map:makePrototypeHaloTexture(THREE),color:0xffffff,transparent:true,opacity:.21,blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false}));
+  halo.scale.set(PROTOTYPE_SHAPE.haloScale,PROTOTYPE_SHAPE.haloScale,1);
+  halo.position.z=-35;
+  halo.renderOrder=0;
+  scene.add(halo);
 
-  const haloCanvas=document.createElement('canvas');haloCanvas.width=haloCanvas.height=256;
-  const ctx=haloCanvas.getContext('2d');
-  const grad=ctx.createRadialGradient(128,128,6,128,128,128);
-  grad.addColorStop(0,'rgba(255,255,255,.34)');
-  grad.addColorStop(.25,'rgba(0,255,204,.25)');
-  grad.addColorStop(.64,'rgba(0,130,255,.12)');
-  grad.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle=grad;ctx.fillRect(0,0,256,256);
-  const halo=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(haloCanvas),transparent:true,opacity:.42,blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false}));
-  halo.scale.set(210,210,1);halo.position.z=-20;group.add(halo);
-
-  state.renderer=renderer;state.scene=scene;state.camera=camera;state.group=group;state.particles=particles;state.glow=glow;state.halo=halo;state.rings=rings;state.base=base;state.colors=colors;state.core=core;
+  state.renderer=renderer;
+  state.scene=scene;
+  state.camera=camera;
+  state.sphere=sphere;
+  state.glow=glow;
+  state.halo=halo;
+  state.base=base;
+  state.previousTime=performance.now()*.001;
   window.addEventListener('resize',resize,{passive:true});
-  resize();animate();return true;
+  resize();
+  animate();
+  return true;
 }
 function resize(){
   if(!state.renderer||!state.camera)return;
   const w=window.innerWidth||1,h=window.innerHeight||1;
-  state.camera.aspect=w/h;state.camera.updateProjectionMatrix();state.renderer.setSize(w,h,false);
-  const scale=clamp(Math.min(w,h)/780,.78,1.18);
-  if(state.group)state.group.scale.setScalar(scale);
+  state.camera.aspect=w/h;
+  state.camera.updateProjectionMatrix();
+  state.renderer.setSize(w,h,false);
 }
 function animate(){
   state.frame=requestAnimationFrame(animate);
-  if(!state.renderer||!state.scene||!state.camera)return;
+  if(!state.renderer||!state.scene||!state.camera||!state.sphere)return;
   const t=performance.now()*.001;
+  const dt=Math.min(.05,Math.max(0,t-state.previousTime));
+  state.previousTime=t;
   const voiceSpeaking=!!(window.speechSynthesis&&window.speechSynthesis.speaking);
-  const liveActivity=(state.aiSpeaking||voiceSpeaking)?.86:(state.userSpeaking?.56:.18);
-  state.targetActivity=Math.max(liveActivity,state.targetActivity*.965,state.release*.9);
-  state.activity+=(state.targetActivity-state.activity)*.075;
-  state.release*=.91;
-  state.targetActivity=Math.max(.18,state.targetActivity*.992);
-  const amp=state.reduced?1.1:2.6+state.activity*7.6;
-  const pos=state.particles.geometry.getAttribute('position');
-  const arr=pos.array;
-  for(let i=0;i<arr.length;i+=3){
-    const x=state.base[i],y=state.base[i+1],z=state.base[i+2];
-    const wave=Math.sin(t*2.1+x*.055+z*.033)+Math.cos(t*1.7+y*.064);
-    const burst=state.release*Math.sin(t*12+i*.013)*5.5;
-    const m=(wave*.42*amp+burst)/Math.max(1,Math.hypot(x,y,z));
-    arr[i]=x+x*m;arr[i+1]=y+y*m;arr[i+2]=z+z*m;
+  const aiSpeaking=state.aiSpeaking||voiceSpeaking;
+  const idle=PROTOTYPE_SHAPE.radius*.02;
+  const user=PROTOTYPE_SHAPE.radius*.005;
+  const ai=PROTOTYPE_SHAPE.radius*.10;
+  const targetNoise=aiSpeaking?ai:(state.userSpeaking?user:idle);
+  state.targetActivity=Math.max(targetNoise,state.targetActivity*.965,state.release*ai);
+  const ease=targetNoise>state.activity?.12:.035;
+  state.activity+=(targetNoise-state.activity)*ease;
+  state.release*=.88;
+  if(aiSpeaking)state.colorFlowPhase+=dt*3.2;
+
+  const positionAttribute=state.sphere.geometry.getAttribute('position');
+  const colorAttribute=state.sphere.geometry.getAttribute('color');
+  const points=positionAttribute.array;
+  const colors=colorAttribute.array;
+  const palette=state.sphere.userData.palette;
+  const flowColor=state.sphere.userData.flowColor;
+  const activityNoise=Math.max(state.activity,state.release*ai);
+
+  for(let i=0;i<points.length/3;i++){
+    const o=i*3;
+    const x=state.base[o],y=state.base[o+1],z=state.base[o+2];
+    const invRadius=1/Math.max(1,Math.hypot(x,y,z));
+    const organic=organicNoise(x,y,z,t);
+    const procedural=proceduralNoise(x,y,z,t);
+    const releaseWave=state.release*Math.sin(t*11+i*.021)*PROTOTYPE_SHAPE.radius*.018;
+    const displacement=(organic*.68+procedural*.32)*activityNoise+releaseWave;
+    points[o]=x+x*invRadius*displacement;
+    points[o+1]=y+y*invRadius*displacement;
+    points[o+2]=z+z*invRadius*displacement;
+
+    const latitude=(1-y/PROTOTYPE_SHAPE.radius)*.5;
+    const longitude=Math.atan2(z,x);
+    const poleLock=Math.sin(Math.PI*latitude);
+    const rotatingBands=(Math.sin(longitude*3-state.colorFlowPhase+latitude*Math.PI*2.4)*.075+Math.sin(longitude*7+state.colorFlowPhase*.54)*.025)*poleLock;
+    writePaletteColor(flowColor,latitude+rotatingBands,palette);
+    const shimmer=.84+(Math.sin(longitude*5-state.colorFlowPhase*1.4)+1)*.045;
+    colors[o]=flowColor.r*shimmer;
+    colors[o+1]=flowColor.g*shimmer;
+    colors[o+2]=flowColor.b*shimmer;
   }
-  pos.needsUpdate=true;
-  state.group.rotation.y+=state.reduced?.0015:.0028+state.activity*.0019;
-  state.group.rotation.x+=(state.mouse.y*.18-state.group.rotation.x)*.035;
-  state.group.rotation.z+=(state.mouse.x*.16-state.group.rotation.z)*.032;
-  if(state.glow)state.glow.material.opacity=.075+state.activity*.13+state.release*.12;
-  if(state.halo){const breathe=1+Math.sin(t*.95)*.025+state.activity*.075+state.release*.18;state.halo.scale.set(210*breathe,210*breathe,1);state.halo.material.opacity=.26+state.activity*.24;}
-  if(state.core){state.core.rotation.x-=.004+state.activity*.003;state.core.rotation.y+=.006+state.activity*.005;state.core.material.opacity=.1+state.activity*.22;}
-  state.rings.forEach((ring,i)=>{ring.rotation.z+=(i%2?-1:1)*(.004+state.activity*.006);ring.material.opacity=.16+state.activity*.24-i*.035;});
+  positionAttribute.needsUpdate=true;
+  colorAttribute.needsUpdate=true;
+
+  const pointerYaw=state.mouse.x*.06;
+  const pointerPitch=state.mouse.y*.04;
+  state.sphere.rotation.y+=.0026+pointerYaw*.012;
+  state.sphere.rotation.x+=(pointerPitch-state.sphere.rotation.x)*.018;
+  if(state.glow){
+    state.glow.rotation.copy(state.sphere.rotation);
+    const activityGlow=activityNoise/ai;
+    state.glow.material.opacity=.075+Math.sin(t*1.35)*.015+activityGlow*.035+state.release*.08;
+  }
+  if(state.halo){
+    const activityGlow=activityNoise/ai;
+    const breathe=1+Math.sin(t*.9)*.025+activityGlow*.018+state.release*.08;
+    state.halo.scale.set(PROTOTYPE_SHAPE.haloScale*breathe,PROTOTYPE_SHAPE.haloScale*breathe,1);
+    state.halo.material.opacity=.19+Math.sin(t*1.1)*.025+activityGlow*.035+state.release*.06;
+  }
   state.renderer.render(state.scene,state.camera);
 }
 
 function installEvents(){
   window.addEventListener('panthorium:ai-status',(event)=>addLine(event.detail?.text||event.detail?.message||'Sentinel Core กำลังประมวลผล'));
-  window.addEventListener('panthorium:ai-stream',(event)=>{state.aiSpeaking=true;state.targetActivity=.68;addLine(event.detail?.text||event.detail?.delta||'',{stream:true});});
-  window.addEventListener('panthorium:ai-done',(event)=>{state.aiSpeaking=false;state.targetActivity=.78;addLine(event.detail?.text||event.detail?.message||state.lastStream||'AI ตอบเสร็จแล้ว');pulseRelease(.28);});
-  window.addEventListener('panthorium:voice-start',(event)=>{state.aiSpeaking=true;state.targetActivity=.92;addLine(event.detail?.text||'AI กำลังพูดภาษาไทย');});
-  window.addEventListener('panthorium:voice-boundary',()=>{state.targetActivity=.95;state.release=Math.min(.6,state.release+.08);});
-  window.addEventListener('panthorium:voice-end',()=>{state.aiSpeaking=false;state.targetActivity=.32;});
+  window.addEventListener('panthorium:ai-stream',(event)=>{state.aiSpeaking=true;addLine(event.detail?.text||event.detail?.delta||'',{stream:true});});
+  window.addEventListener('panthorium:ai-done',(event)=>{state.aiSpeaking=false;addLine(event.detail?.text||event.detail?.message||state.lastStream||'AI ตอบเสร็จแล้ว');pulseRelease(.28);});
+  window.addEventListener('panthorium:voice-start',(event)=>{state.aiSpeaking=true;addLine(event.detail?.text||'AI กำลังพูดภาษาไทย');});
+  window.addEventListener('panthorium:voice-boundary',()=>{state.release=Math.min(.6,state.release+.08);});
+  window.addEventListener('panthorium:voice-end',()=>{state.aiSpeaking=false;});
   window.addEventListener('panthorium:voice-error',(event)=>addLine('Voice: '+(event.detail?.error||'speech error')));
-  window.addEventListener('panthorium:voice-user-start',()=>{state.userSpeaking=true;state.targetActivity=.62;addLine('กำลังฟังเสียงผู้ใช้...');});
-  window.addEventListener('panthorium:voice-user-result',(event)=>{state.userSpeaking=false;state.targetActivity=.5;addLine('คุณ: '+(event.detail?.text||''));});
+  window.addEventListener('panthorium:voice-user-start',()=>{state.userSpeaking=true;addLine('กำลังฟังเสียงผู้ใช้...');});
+  window.addEventListener('panthorium:voice-user-result',(event)=>{state.userSpeaking=false;addLine('คุณ: '+(event.detail?.text||''));});
   window.addEventListener('panthorium:voice-user-end',()=>{state.userSpeaking=false;});
 }
 function install(){
@@ -250,12 +331,10 @@ function install(){
   if(!desktop)return false;
   ensureStyle();
   const root=createRoot(desktop);
-  if(!initThree(root)){
-    addLine('THREE.js ยังไม่พร้อม · ใช้โหมดข้อความ 3 แถวชั่วคราว');
-  }
+  if(!initThree(root))addLine('THREE.js ยังไม่พร้อม · ใช้โหมดข้อความ 3 แถวชั่วคราว');
   installEvents();
   state.installed=true;
-  emit('ready',{replaced:'bg-canvas',captionRows:3});
+  emit('ready',{replaced:'bg-canvas',captionRows:3,shape:'prototype-fibonacci-sphere'});
   return true;
 }
 function tryInstall(){
@@ -272,7 +351,7 @@ function destroy(){
   state.installed=false;
 }
 
-window.PanthoriumEnergyOrb={install,tryInstall,destroy,pushText:addLine,next:()=>moveCursor(1),previous:()=>moveCursor(-1),release:pulseRelease,status:()=>({version:VERSION,installed:state.installed,lines:state.lines.length,cursor:state.cursor,activity:state.activity,replaces:'bg-canvas',captionRows:3})};
+window.PanthoriumEnergyOrb={install,tryInstall,destroy,pushText:addLine,next:()=>moveCursor(1),previous:()=>moveCursor(-1),release:pulseRelease,status:()=>({version:VERSION,installed:state.installed,lines:state.lines.length,cursor:state.cursor,activity:state.activity,replaces:'bg-canvas',captionRows:3,shape:'prototype-fibonacci-sphere'})};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',tryInstall,{once:true});else tryInstall();
 window.addEventListener('panthorium:boot-complete',tryInstall);
 window.addEventListener('panthorium:boot-recovered',tryInstall);
