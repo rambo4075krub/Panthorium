@@ -124,14 +124,17 @@
         #desktop {
             position: fixed; inset: 0;
             display: none;
-            background: #050508;
+            background: #01030a;
         }
         #desktop.active { display: block; }
 
         #bg-canvas {
             position: absolute; inset: 0;
             width: 100%; height: 100%;
+            display: block;
+            cursor: grab;
         }
+        #bg-canvas:active { cursor: grabbing; }
 
         #orb-transcript {
             position: absolute;
@@ -719,7 +722,6 @@
     <!-- External libs -->
     <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
     <script src="/vendor/three.min.js?v=r128-local"></script>
-    <script defer src="/energy-orb-ui.js?v=exact-prototype-v3"></script>
 
     <script>
     // =========================================================
@@ -1452,7 +1454,11 @@
             sm.appendChild(el);
         });
 
-        initOrbTranscriptControls();
+        try {
+            initBackground();
+        } catch (error) {
+            activateOrbFallback(error);
+        }
         // ตรวจสอบ Sentinel Core เงียบ ๆ หลังเข้า Desktop
         checkCoreStatus().then((ok) => {
             if (ok) toast("Sentinel Core ออนไลน์");
@@ -1907,7 +1913,6 @@
     let orbMicAnalyser = null;
     let orbMicData = null;
     let orbContextLost = false;
-    let orbLastRender = 0;
     let orbFallbackPulseTimer = 0;
     let orbFallbackControlsReady = false;
     const orbTarget = { x: 0, y: 0 };
@@ -2001,10 +2006,10 @@
         camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, .1, 100);
         camera.position.set(0, 0, 4.65);
 
-        renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true, powerPreference: "high-performance" });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, window.innerWidth < 700 ? 1.2 : 1.5));
+        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setClearColor(0x01030a, 0);
+        renderer.setClearColor(0x01030a, 1);
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.35;
 
@@ -2051,7 +2056,7 @@
         orb = new THREE.Points(geometry, orbMaterial);
         orbGroup.add(orb);
 
-        orbCore = new THREE.Mesh(new THREE.SphereGeometry(.77, 40, 32), new THREE.ShaderMaterial({
+        orbCore = new THREE.Mesh(new THREE.SphereGeometry(.77, 64, 64), new THREE.ShaderMaterial({
             uniforms: { uTime: { value: 0 }, uPulse: { value: 0 } },
             transparent: true,
             side: THREE.BackSide,
@@ -2074,8 +2079,8 @@
         orbGroup.add(orbHalo);
 
         const starsGeometry = new THREE.BufferGeometry();
-        const stars = new Float32Array(420 * 3);
-        for (let i = 0; i < 420; i++) {
+        const stars = new Float32Array(750 * 3);
+        for (let i = 0; i < 750; i++) {
             const radius = 3 + Math.random() * 8;
             const a = Math.random() * Math.PI * 2;
             const b = Math.acos(2 * Math.random() - 1);
@@ -2102,7 +2107,7 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, window.innerWidth < 700 ? 1.2 : 1.5));
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             orbMaterial.uniforms.uPixel.value = renderer.getPixelRatio();
         });
         window.addEventListener("panthorium:ai-speaking", event => { orbAIActive = Boolean(event.detail?.speaking ?? event.detail); });
@@ -2129,8 +2134,7 @@
 
     function animateBg(now = performance.now()) {
         requestAnimationFrame(animateBg);
-        if (orbContextLost || document.hidden || now - orbLastRender < 1000 / 45) return;
-        orbLastRender = now;
+        if (orbContextLost || document.hidden) return;
         const delta = Math.min((now - orbLastFrame) / 1000, .05);
         orbLastFrame = now;
         const time = now * .001;
