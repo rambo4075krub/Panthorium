@@ -9,16 +9,22 @@ assert(pkg.includes('14.3.0-energy-orb-desktop'), 'package version must identify
 assert(pkg.includes('node --check energy-orb-ui.js'), 'check script must validate energy-orb-ui.js');
 assert(pkg.includes('test/phase14-energy-orb-desktop.js'), 'test script must include Energy Orb desktop coverage');
 
-assert(boot.includes('/energy-orb-ui.js?v=phase14-orb-v1'), 'boot recovery must safely load the Energy Orb layer');
+assert(boot.includes('/energy-orb-ui.js?v=phase14-orb-shape-v2'), 'boot recovery must bust cache for the corrected Orb shape');
 assert(boot.includes('__panthoriumEnergyOrbLoader'), 'boot recovery must dedupe Energy Orb script injection');
 
 assert(orb.includes('PanthoriumEnergyOrb'), 'Energy Orb must expose a global control API');
 assert(orb.includes('PANTHORIUM ENERGY CORE INTERACTIVE PROTOTYPE'), 'Energy Orb must preserve the prototype identity');
 assert(orb.includes('เลื่อนเมาส์เพื่อควบคุม · คลิกเพื่อปล่อยพลังงาน'), 'Energy Orb must preserve mouse/click behavior copy');
-assert(orb.includes('window.THREE'), 'Energy Orb must use the existing Three.js runtime');
-assert(orb.includes('WebGLRenderer'), 'Energy Orb must render through WebGLRenderer');
-assert(orb.includes('IcosahedronGeometry'), 'Energy Orb must include a procedural core mesh');
-assert(orb.includes('TorusGeometry'), 'Energy Orb must include energy rings');
+assert(orb.includes('PROTOTYPE_SHAPE'), 'Energy Orb must lock the prototype shape constants');
+assert(orb.includes('count:3500'), 'prototype sphere must use the original dense point count');
+assert(orb.includes('radius:90'), 'prototype sphere must preserve the original radius');
+assert(orb.includes('camera:[220,180,220]'), 'prototype sphere must preserve the original camera angle');
+assert(orb.includes('goldenAngle:Math.PI*(3-Math.sqrt(5))'), 'prototype sphere must use golden-angle fibonacci distribution');
+assert(orb.includes('camera.lookAt(0,0,0)'), 'prototype sphere must look at the orb center');
+assert(orb.includes('new THREE.Points'), 'prototype shape must be a point-cloud sphere');
+assert(orb.includes('makePrototypeHaloTexture'), 'prototype halo must preserve the old visual glow');
+assert(!orb.includes('IcosahedronGeometry'), 'corrected shape must not add a wireframe core that distorts the prototype');
+assert(!orb.includes('TorusGeometry'), 'corrected shape must not add rings that distort the prototype');
 assert(orb.includes('bg-canvas') && orb.includes('panthorium-energy-orb-replaced'), 'Energy Orb must replace the legacy sphere canvas visually');
 assert(orb.includes("font-family:Consolas,'Courier New',monospace"), 'caption must use Consolas / command prompt font');
 assert(orb.includes('grid-template-rows:repeat(3'), 'caption must render exactly three rows');
