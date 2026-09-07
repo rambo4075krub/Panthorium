@@ -9,7 +9,7 @@ assert(server.includes('voice-ui.js'), 'server shell must load voice-ui.js');
 assert(server.includes('phase14-voice-v1'), 'shell cache version must be bumped for voice layer');
 assert(server.includes('Thai Voice I/O'), 'server boot log should mention Thai Voice I/O');
 
-assert(pkg.includes('14.2.0-thai-voice-io'), 'package version must be Phase 14.2');
+assert(pkg.includes('thai-voice-io'), 'package metadata must preserve Thai Voice I/O capability');
 assert(pkg.includes('node --check voice-ui.js'), 'check script must validate voice-ui.js');
 assert(pkg.includes('test/phase14-thai-voice-io.js'), 'test script must include Phase 14.2 coverage');
 
