@@ -20,7 +20,8 @@ assert(production.includes('removeLegacyFloatingLaunchers'), 'production intelli
 assert(!production.includes('position:fixed;right:16px;bottom:58px'), 'duplicate bottom-right Production Intelligence launcher must be removed');
 assert(!production.includes('new MutationObserver'), 'production intelligence UI must not install a whole-document MutationObserver');
 
-assert(uiLayout.includes('camera.position.set(0, 0, 4.65)'), 'layout sync must preserve the prototype orb camera position');
+assert(uiLayout.includes('compact ? Math.max(4.65, compactDistance) : 4.65'), 'layout sync must preserve desktop framing and fit smartphones');
+assert(uiLayout.includes("orbGroup.position.y = compact ? .5 : .27"), 'layout sync must reserve smartphone transcript space below the orb');
 assert(!uiLayout.includes('var radius = 90'), 'layout sync must not restore the removed legacy sphere camera distance');
 
 assert(shell.includes('Interactive Procedural Energy Orb'), 'desktop should use the new procedural energy orb');
