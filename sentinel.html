@@ -133,6 +133,50 @@
             width: 100%; height: 100%;
         }
 
+        #orb-transcript {
+            position: absolute;
+            z-index: 8;
+            left: 50%;
+            bottom: calc(var(--taskbar-h) + clamp(18px, 4vh, 40px));
+            transform: translateX(-50%);
+            width: min(920px, calc(100vw - 36px));
+            font-family: Consolas, "Lucida Console", monospace;
+            text-align: center;
+            outline: none;
+            user-select: none;
+            touch-action: pan-x;
+        }
+        .orb-transcript-line {
+            min-height: 25px;
+            padding: 2px 0;
+            overflow: hidden;
+            color: #d9f7ff;
+            font-size: clamp(14px, 1.25vw, 17px);
+            line-height: 1.45;
+            letter-spacing: .015em;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            transition: opacity .25s ease, filter .25s ease;
+        }
+        .orb-transcript-line.previous,
+        .orb-transcript-line.next { opacity: .32; filter: blur(.65px); cursor: pointer; }
+        .orb-transcript-line.previous:hover,
+        .orb-transcript-line.next:hover { opacity: .52; filter: blur(.3px); }
+        .orb-transcript-line.current {
+            opacity: .96;
+            color: #ebfcff;
+            text-shadow: 0 0 14px rgba(80,217,255,.34);
+        }
+        #orb-transcript:focus-visible .orb-transcript-line.current {
+            text-decoration: underline;
+            text-decoration-color: rgba(95,233,255,.45);
+            text-underline-offset: 5px;
+        }
+        @media (max-width: 520px) {
+            #orb-transcript { bottom: calc(var(--taskbar-h) + 12px); width: calc(100vw - 24px); }
+            .orb-transcript-line { min-height: 24px; font-size: 14px; }
+        }
+
         .desktop-icons {
             position: absolute;
             top: 20px; left: 16px;
@@ -630,6 +674,11 @@
     <!-- DESKTOP -->
     <div id="desktop">
         <canvas id="bg-canvas"></canvas>
+        <section id="orb-transcript" tabindex="0" role="region" aria-label="ข้อความประกอบเสียงตอบของ AI">
+            <div class="orb-transcript-line previous" data-orb-line="previous" aria-label="ประโยคก่อนหน้า"></div>
+            <div class="orb-transcript-line current" data-orb-line="current" aria-live="polite" aria-label="ประโยคปัจจุบัน"></div>
+            <div class="orb-transcript-line next" data-orb-line="next" aria-label="ข้อความที่เหลือซึ่งยังไม่อ่าน"></div>
+        </section>
 
         <div class="desktop-icons" id="desktop-icons">
             <!-- icons injected by JS -->
@@ -910,8 +959,80 @@
     let aiSpeechPulse = 0;
     let aiSpeechEnvelope = 0;
     let userSpeechActive = false;
+    let orbTranscriptLines = [];
+    let orbTranscriptOffsets = [];
+    let orbTranscriptIndex = 0;
+    let orbTranscriptTouchY = null;
+    let orbTranscriptLastNav = 0;
+
+    function splitOrbTranscript(text) {
+        const source = String(text || "").replace(/\s+/g, " ").trim();
+        if (!source) return [];
+        const sentences = source.match(/[^.!?…]+[.!?…]?/g)?.map(part => part.trim()).filter(Boolean) || [source];
+        if (sentences.length > 1 || source.length <= 96) return sentences;
+        const words = source.split(" ");
+        const chunks = [];
+        let chunk = "";
+        for (const word of words) {
+            if (chunk && (chunk + " " + word).length > 72) { chunks.push(chunk); chunk = word; }
+            else chunk += (chunk ? " " : "") + word;
+        }
+        if (chunk) chunks.push(chunk);
+        return chunks;
+    }
+
+    function renderOrbTranscript() {
+        const panel = $("orb-transcript");
+        if (!panel) return;
+        panel.querySelector('[data-orb-line="previous"]').textContent = orbTranscriptLines[orbTranscriptIndex - 1] || "";
+        panel.querySelector('[data-orb-line="current"]').textContent = orbTranscriptLines[orbTranscriptIndex] || "";
+        panel.querySelector('[data-orb-line="next"]').textContent = orbTranscriptLines.slice(orbTranscriptIndex + 1).join(" ");
+        panel.setAttribute("aria-label", orbTranscriptLines.length ? `ข้อความ AI ประโยคที่ ${orbTranscriptIndex + 1} จาก ${orbTranscriptLines.length}` : "ข้อความประกอบเสียงตอบของ AI");
+    }
+
+    function setOrbTranscript(sentences, index = 0) {
+        const next = Array.isArray(sentences) ? sentences.map(String).filter(Boolean) : splitOrbTranscript(sentences);
+        orbTranscriptLines = next;
+        orbTranscriptOffsets = [];
+        let offset = 0;
+        for (const sentence of next) { orbTranscriptOffsets.push(offset); offset += sentence.length + 1; }
+        orbTranscriptIndex = Math.min(Math.max(0, Number(index) || 0), Math.max(0, next.length - 1));
+        renderOrbTranscript();
+    }
+
+    function showOrbTranscriptSentence(index) {
+        orbTranscriptIndex = Math.min(Math.max(0, Number(index) || 0), Math.max(0, orbTranscriptLines.length - 1));
+        renderOrbTranscript();
+    }
+
+    function initOrbTranscriptControls() {
+        const panel = $("orb-transcript");
+        if (!panel || panel.dataset.ready) return;
+        panel.dataset.ready = "1";
+        const move = direction => showOrbTranscriptSentence(orbTranscriptIndex + direction);
+        panel.querySelector('[data-orb-line="previous"]').onclick = () => move(-1);
+        panel.querySelector('[data-orb-line="next"]').onclick = () => move(1);
+        panel.addEventListener("wheel", event => {
+            event.preventDefault();
+            const now = performance.now();
+            if (Math.abs(event.deltaY) > 4 && now - orbTranscriptLastNav > 240) { orbTranscriptLastNav = now; move(event.deltaY > 0 ? 1 : -1); }
+        }, { passive: false });
+        panel.addEventListener("keydown", event => {
+            if (["ArrowUp", "ArrowLeft", "PageUp"].includes(event.key)) { event.preventDefault(); move(-1); }
+            if (["ArrowDown", "ArrowRight", "PageDown"].includes(event.key)) { event.preventDefault(); move(1); }
+        });
+        panel.addEventListener("touchstart", event => { orbTranscriptTouchY = event.changedTouches[0].clientY; }, { passive: true });
+        panel.addEventListener("touchend", event => {
+            if (orbTranscriptTouchY === null) return;
+            const distance = orbTranscriptTouchY - event.changedTouches[0].clientY;
+            if (Math.abs(distance) > 24) move(distance > 0 ? 1 : -1);
+            orbTranscriptTouchY = null;
+        }, { passive: true });
+        renderOrbTranscript();
+    }
 
     function speak(text) {
+        setOrbTranscript(text, 0);
         if (!window.speechSynthesis) return;
         window.speechSynthesis.cancel();
         aiSpeechActive = false;
@@ -927,8 +1048,11 @@
             aiSpeechActive = true;
             aiSpeechPulse = 1;
         };
-        u.onboundary = () => {
+        u.onboundary = event => {
             aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
+            let index = 0;
+            for (let i = 0; i < orbTranscriptOffsets.length; i++) if (event.charIndex >= orbTranscriptOffsets[i]) index = i;
+            showOrbTranscriptSentence(index);
         };
         const stopSpeechMotion = () => {
             aiSpeechActive = false;
@@ -1760,219 +1884,232 @@
         createWindow("about", "เกี่ยวกับ", html, { width: 360, height: 380 });
     }
 
-    // ---------- Three.js Background ----------
-    let scene, camera, renderer, sphere, sphereGlow, sphereHalo, basePositions;
-    const COUNT = 3500;
-    const SPHERE_RADIUS = 90;
-    const NOISE_LEVEL_IDLE = SPHERE_RADIUS * 0.02;
-    const NOISE_LEVEL_USER_SPEECH = SPHERE_RADIUS * 0.005;
-    const NOISE_LEVEL_AI_SPEECH = SPHERE_RADIUS * 0.10;
-    let currentNoiseAmplitude = NOISE_LEVEL_IDLE;
-    let colorFlowPhase = 0;
-    let previousAnimationTime = performance.now() * 0.001;
+    // ---------- Interactive Procedural Energy Orb ----------
+    let scene, camera, renderer, orbGroup, orb, orbMaterial, orbCore, orbHalo;
+    let orbPulse = 0;
+    let orbLastFrame = performance.now();
+    let orbAIActive = false;
+    let orbAIEnergy = 0;
+    let orbVoiceEnergy = 0;
+    let orbExternalVoiceLevel = 0;
+    let orbMicPermissionAttempted = false;
+    let orbMicContext = null;
+    let orbMicStream = null;
+    let orbMicAnalyser = null;
+    let orbMicData = null;
+    const orbTarget = { x: 0, y: 0 };
+    const orbCurrent = { x: 0, y: 0 };
 
-    function organicNoise(x, y, z, t) {
-        return (
-            Math.sin(x * 0.031 + y * 0.024 + t * 1.35) * 0.46 +
-            Math.sin(y * 0.039 - z * 0.028 - t * 1.08) * 0.34 +
-            Math.cos(z * 0.033 + x * 0.021 + t * 0.82) * 0.20
-        );
+    function createOrbRadialTexture() {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 256;
+        const context = canvas.getContext("2d");
+        const gradient = context.createRadialGradient(128, 128, 4, 128, 128, 128);
+        gradient.addColorStop(0, "rgba(180,255,255,.9)");
+        gradient.addColorStop(.12, "rgba(30,190,255,.45)");
+        gradient.addColorStop(.42, "rgba(40,40,255,.13)");
+        gradient.addColorStop(1, "rgba(0,0,0,0)");
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, 256, 256);
+        return new THREE.CanvasTexture(canvas);
     }
 
-    function proceduralNoise(x, y, z, t) {
-        return (
-            Math.sin(x * 0.075 + y * 0.035 + t * 4.8) * 0.50 +
-            Math.sin(y * 0.092 - z * 0.061 - t * 6.2) * 0.31 +
-            Math.cos(z * 0.083 + x * 0.041 + t * 3.7) * 0.19
-        );
-    }
-
-    function writePaletteColor(color, position, palette) {
-        const value = Math.max(0, Math.min(1, position));
-        if (value < 0.31) {
-            color.lerpColors(palette.red, palette.purple, value / 0.31);
-        } else if (value < 0.66) {
-            color.lerpColors(palette.purple, palette.blue, (value - 0.31) / 0.35);
-        } else {
-            color.lerpColors(palette.blue, palette.white, (value - 0.66) / 0.34);
+    async function enableOrbMicrophone() {
+        if (orbMicStream) return true;
+        try {
+            if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
+            orbMicStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+            orbMicContext = orbMicContext || new (window.AudioContext || window.webkitAudioContext)();
+            await orbMicContext.resume();
+            orbMicAnalyser = orbMicContext.createAnalyser();
+            orbMicAnalyser.fftSize = 512;
+            orbMicAnalyser.smoothingTimeConstant = .72;
+            orbMicData = new Uint8Array(orbMicAnalyser.fftSize);
+            orbMicContext.createMediaStreamSource(orbMicStream).connect(orbMicAnalyser);
+            return true;
+        } catch {
+            orbMicStream = null;
+            orbMicAnalyser = null;
+            orbMicData = null;
+            return false;
         }
+    }
+
+    function disableOrbMicrophone() {
+        if (orbMicStream) orbMicStream.getTracks().forEach(track => track.stop());
+        orbMicStream = null;
+        orbMicAnalyser = null;
+        orbMicData = null;
+        orbVoiceEnergy = 0;
     }
 
     function initBackground() {
         const canvas = $("bg-canvas");
         scene = new THREE.Scene();
-        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(220, 180, 220);
-        camera.lookAt(0, 0, 0);
+        scene.fog = new THREE.FogExp2(0x01030a, .08);
+        camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, .1, 100);
+        camera.position.set(0, 0, 4.65);
 
-        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0x01030a, 1);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.35;
 
+        orbGroup = new THREE.Group();
+        orbGroup.position.y = .27;
+        scene.add(orbGroup);
+
+        const particleCount = window.innerWidth < 700 ? 11880 : 23100;
         const geometry = new THREE.BufferGeometry();
-        basePositions = new Float32Array(COUNT * 3);
-        const positions = new Float32Array(COUNT * 3);
-        const colors = new Float32Array(COUNT * 3);
-        const palette = {
-            red: new THREE.Color(0xff3b30),
-            purple: new THREE.Color(0xa855f7),
-            blue: new THREE.Color(0x2563ff),
-            white: new THREE.Color(0xffffff)
-        };
-        const particleColor = new THREE.Color();
-        const phi = Math.PI * (3 - Math.sqrt(5));
-
-        for (let i = 0; i < COUNT; i++) {
-            const y = 1 - (i / (COUNT - 1)) * 2;
-            const r = Math.sqrt(1 - y * y);
-            const theta = phi * i;
-            const offset = i * 3;
-            basePositions[offset] = Math.cos(theta) * r * SPHERE_RADIUS;
-            basePositions[offset + 1] = y * SPHERE_RADIUS;
-            basePositions[offset + 2] = Math.sin(theta) * r * SPHERE_RADIUS;
-            positions[offset] = basePositions[offset];
-            positions[offset + 1] = basePositions[offset + 1];
-            positions[offset + 2] = basePositions[offset + 2];
-
-            writePaletteColor(particleColor, (1 - y) * 0.5, palette);
-            const depthLight = 0.82 + ((basePositions[offset + 2] / SPHERE_RADIUS + 1) * 0.09);
-            colors[offset] = particleColor.r * depthLight;
-            colors[offset + 1] = particleColor.g * depthLight;
-            colors[offset + 2] = particleColor.b * depthLight;
+        const positions = new Float32Array(particleCount * 3);
+        const seeds = new Float32Array(particleCount);
+        const golden = Math.PI * (3 - Math.sqrt(5));
+        for (let i = 0; i < particleCount; i++) {
+            const y = 1 - (i / (particleCount - 1)) * 2;
+            const radius = Math.sqrt(1 - y * y);
+            const theta = golden * i;
+            const fuzz = (Math.random() - .5) * .022;
+            positions[i * 3] = Math.cos(theta) * (radius + fuzz);
+            positions[i * 3 + 1] = y;
+            positions[i * 3 + 2] = Math.sin(theta) * (radius + fuzz);
+            seeds[i] = Math.random();
         }
         geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-        geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+        geometry.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 1));
 
-        const material = new THREE.PointsMaterial({
-            size: 1.25,
-            vertexColors: true,
+        orbMaterial = new THREE.ShaderMaterial({
+            uniforms: { uTime: { value: 0 }, uPulse: { value: 0 }, uAI: { value: 0 }, uVoice: { value: 0 }, uPixel: { value: renderer.getPixelRatio() } },
+            vertexShader: `uniform float uTime; uniform float uPulse; uniform float uAI; uniform float uVoice; uniform float uPixel; attribute float aSeed; varying float vGlow; varying vec3 vPos;
+                void main(){ vec3 p=position; float n=sin(p.x*8.0+uTime*1.9)*sin(p.y*7.0-uTime*1.3)*cos(p.z*9.0+uTime);
+                n += .45*sin((p.x+p.y+p.z)*15.0-uTime*2.4+aSeed*6.28); float wave=uPulse*sin(length(p)*18.0-uTime*4.0);
+                float aiWave=uAI*(sin(p.y*17.0-uTime*8.0)*.035+cos(p.x*13.0+uTime*6.0)*.02);
+                float voiceWave=uVoice*sin((p.x+p.y+p.z)*19.0-uTime*10.0)*.014;
+                p += normalize(p)*(n*.075+wave*.055+aiWave+voiceWave); p += .022*vec3(sin(uTime+p.y*12.0),cos(uTime*.8+p.z*11.0),sin(uTime*1.2+p.x*10.0));
+                float pointGlow=.55+.45*n; vGlow=pointGlow-uPulse*.18; vPos=p; vec4 mv=modelViewMatrix*vec4(p,1.0); gl_Position=projectionMatrix*mv;
+                gl_PointSize=uPixel*(1.15+2.4*pow(max(pointGlow,0.0),2.0))*(8.86578/-mv.z); }`,
+            fragmentShader: `varying float vGlow; varying vec3 vPos; void main(){ vec2 q=gl_PointCoord-.5; float d=length(q); if(d>.5) discard;
+                float a=smoothstep(.5,.05,d); vec3 cyan=vec3(.03,.58,1.0), white=vec3(.7,1.0,1.0), violet=vec3(.32,.08,1.0);
+                float side=smoothstep(-1.0,1.0,vPos.x+vPos.y*.35); vec3 col=mix(violet,cyan,side); col=mix(col,white,clamp(vGlow*.75,0.0,1.0));
+                float redSheen=.008*smoothstep(.25,1.0,.5+.5*sin((vPos.x-vPos.y+vPos.z)*7.0)); col=mix(col,vec3(1.0,.04,.02),redSheen); gl_FragColor=vec4(col,a*(.21+max(vGlow,0.0)*.5)); }`,
             transparent: true,
-            opacity: 0.90,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        orb = new THREE.Points(geometry, orbMaterial);
+        orbGroup.add(orb);
+
+        orbCore = new THREE.Mesh(new THREE.SphereGeometry(.77, 64, 64), new THREE.ShaderMaterial({
+            uniforms: { uTime: { value: 0 }, uPulse: { value: 0 } },
+            transparent: true,
+            side: THREE.BackSide,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
-            sizeAttenuation: true
-        });
-        sphere = new THREE.Points(geometry, material);
-        sphere.userData.palette = palette;
-        sphere.userData.flowColor = new THREE.Color();
-        sphere.renderOrder = 2;
-        scene.add(sphere);
+            vertexShader: `varying vec3 vN; varying vec3 vP; void main(){vN=normalize(normalMatrix*normal);vP=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+            fragmentShader: `uniform float uTime;uniform float uPulse;varying vec3 vN;varying vec3 vP;void main(){float rim=pow(1.0-abs(vN.z),2.2);float bands=.5+.5*sin(vP.y*13.0+sin(vP.x*9.0+uTime)*2.0-uTime*2.0);vec3 c=mix(vec3(.02,.08,.3),vec3(.05,.72,1.),bands);c=mix(c,vec3(1.0,.04,.02),.006);gl_FragColor=vec4(c,max(.02,.08+rim*.3-uPulse*.045));}`
+        }));
+        orbGroup.add(orbCore);
 
-        const glowMaterial = new THREE.PointsMaterial({
-            size: 4.2,
-            vertexColors: true,
+        orbHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: createOrbRadialTexture(),
+            color: 0x159dff,
             transparent: true,
-            opacity: 0.08,
+            opacity: .24,
             blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            sizeAttenuation: true
+            depthWrite: false
+        }));
+        orbHalo.scale.set(3.1, 3.1, 1);
+        orbGroup.add(orbHalo);
+
+        const starsGeometry = new THREE.BufferGeometry();
+        const stars = new Float32Array(750 * 3);
+        for (let i = 0; i < 750; i++) {
+            const radius = 3 + Math.random() * 8;
+            const a = Math.random() * Math.PI * 2;
+            const b = Math.acos(2 * Math.random() - 1);
+            stars[i * 3] = radius * Math.sin(b) * Math.cos(a);
+            stars[i * 3 + 1] = radius * Math.cos(b);
+            stars[i * 3 + 2] = radius * Math.sin(b) * Math.sin(a);
+        }
+        starsGeometry.setAttribute("position", new THREE.BufferAttribute(stars, 3));
+        scene.add(new THREE.Points(starsGeometry, new THREE.PointsMaterial({ color: 0x216aa8, size: .012, transparent: true, opacity: .4, depthWrite: false })));
+
+        canvas.addEventListener("pointermove", event => {
+            orbTarget.y = (event.clientX / window.innerWidth - .5) * .72;
+            orbTarget.x = (event.clientY / window.innerHeight - .5) * .58;
         });
-        sphereGlow = new THREE.Points(geometry, glowMaterial);
-        sphereGlow.renderOrder = 1;
-        scene.add(sphereGlow);
-
-        const haloCanvas = document.createElement("canvas");
-        haloCanvas.width = haloCanvas.height = 256;
-        const haloContext = haloCanvas.getContext("2d");
-        const haloGradient = haloContext.createRadialGradient(128, 128, 8, 128, 128, 128);
-        haloGradient.addColorStop(0, "rgba(255, 255, 255, 0.24)");
-        haloGradient.addColorStop(0.34, "rgba(105, 66, 255, 0.16)");
-        haloGradient.addColorStop(0.68, "rgba(37, 99, 255, 0.09)");
-        haloGradient.addColorStop(1, "rgba(255, 59, 48, 0)");
-        haloContext.fillStyle = haloGradient;
-        haloContext.fillRect(0, 0, 256, 256);
-
-        const haloMaterial = new THREE.SpriteMaterial({
-            map: new THREE.CanvasTexture(haloCanvas),
-            color: 0xffffff,
-            transparent: true,
-            opacity: 0.21,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            depthTest: false
+        canvas.addEventListener("pointerdown", () => {
+            orbPulse = 1;
+            if (!orbMicPermissionAttempted) { orbMicPermissionAttempted = true; enableOrbMicrophone(); }
         });
-        sphereHalo = new THREE.Sprite(haloMaterial);
-        sphereHalo.scale.set(235, 235, 1);
-        sphereHalo.position.z = -35;
-        sphereHalo.renderOrder = 0;
-        scene.add(sphereHalo);
-
         window.addEventListener("resize", () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            orbMaterial.uniforms.uPixel.value = renderer.getPixelRatio();
         });
+        window.addEventListener("panthorium:ai-speaking", event => { orbAIActive = Boolean(event.detail?.speaking ?? event.detail); });
+        window.addEventListener("panthorium:voice-level", event => { orbExternalVoiceLevel = Math.min(1, Math.max(0, Number(event.detail?.level ?? event.detail) || 0)); });
+        window.addEventListener("panthorium:transcript", event => {
+            const detail = event.detail || {};
+            if (Array.isArray(detail.sentences) && detail.sentences.length) setOrbTranscript(detail.sentences, Number.isFinite(detail.index) ? detail.index : 0);
+        });
+        window.addEventListener("panthorium:transcript-index", event => showOrbTranscriptSentence(Number(event.detail?.index ?? event.detail) || 0));
 
+        initOrbTranscriptControls();
+        window.PanthoriumOrb = {
+            setAISpeaking(active) { orbAIActive = Boolean(active); },
+            setVoiceLevel(level) { orbExternalVoiceLevel = Math.min(1, Math.max(0, Number(level) || 0)); },
+            setTranscript: setOrbTranscript,
+            setCurrentSentence: showOrbTranscriptSentence,
+            previousSentence() { showOrbTranscriptSentence(orbTranscriptIndex - 1); },
+            nextSentence() { showOrbTranscriptSentence(orbTranscriptIndex + 1); },
+            enableMicrophone: enableOrbMicrophone,
+            disableMicrophone: disableOrbMicrophone
+        };
         animateBg();
     }
 
-    function animateBg() {
+    function animateBg(now = performance.now()) {
         requestAnimationFrame(animateBg);
-        const glowTime = performance.now() * 0.001;
-        const frameDelta = Math.min(0.05, Math.max(0, glowTime - previousAnimationTime));
-        previousAnimationTime = glowTime;
-        const synthesisSpeaking = Boolean(window.speechSynthesis && window.speechSynthesis.speaking);
-        const aiSpeaking = aiSpeechActive || synthesisSpeaking;
-        const targetNoiseAmplitude = aiSpeaking
-            ? NOISE_LEVEL_AI_SPEECH
-            : userSpeechActive
-                ? NOISE_LEVEL_USER_SPEECH
-                : NOISE_LEVEL_IDLE;
-        const noiseEase = targetNoiseAmplitude > currentNoiseAmplitude ? 0.12 : 0.035;
-        currentNoiseAmplitude += (targetNoiseAmplitude - currentNoiseAmplitude) * noiseEase;
-        aiSpeechEnvelope += ((aiSpeaking ? 1 : 0) - aiSpeechEnvelope) * (aiSpeaking ? 0.16 : 0.09);
-        aiSpeechPulse *= 0.88;
-        if (aiSpeaking) colorFlowPhase += frameDelta * 3.2;
+        const delta = Math.min((now - orbLastFrame) / 1000, .05);
+        orbLastFrame = now;
+        const time = now * .001;
+        orbCurrent.x += (orbTarget.x - orbCurrent.x) * .045;
+        orbCurrent.y += (orbTarget.y - orbCurrent.y) * .045;
+        orbGroup.rotation.x = orbCurrent.x;
+        orbGroup.rotation.y = orbCurrent.y + time * .075;
 
-        if (sphere) {
-            const positionAttribute = sphere.geometry.getAttribute("position");
-            const colorAttribute = sphere.geometry.getAttribute("color");
-            const points = positionAttribute.array;
-            const colors = colorAttribute.array;
-            const palette = sphere.userData.palette;
-            const flowColor = sphere.userData.flowColor;
-
-            for (let i = 0; i < COUNT; i++) {
-                const offset = i * 3;
-                const x = basePositions[offset];
-                const y = basePositions[offset + 1];
-                const z = basePositions[offset + 2];
-                const invRadius = 1 / Math.max(1, Math.hypot(x, y, z));
-                const organic = organicNoise(x, y, z, glowTime);
-                const procedural = proceduralNoise(x, y, z, glowTime);
-                const displacement = (organic * 0.68 + procedural * 0.32) * currentNoiseAmplitude;
-                points[offset] = x + x * invRadius * displacement;
-                points[offset + 1] = y + y * invRadius * displacement;
-                points[offset + 2] = z + z * invRadius * displacement;
-
-                const latitude = (1 - y / SPHERE_RADIUS) * 0.5;
-                const longitude = Math.atan2(z, x);
-                const poleLock = Math.sin(Math.PI * latitude);
-                const rotatingBands = (
-                    Math.sin(longitude * 3.0 - colorFlowPhase + latitude * Math.PI * 2.4) * 0.075 +
-                    Math.sin(longitude * 7.0 + colorFlowPhase * 0.54) * 0.025
-                ) * poleLock;
-                writePaletteColor(flowColor, latitude + rotatingBands, palette);
-                const shimmer = 0.84 + (Math.sin(longitude * 5 - colorFlowPhase * 1.4) + 1) * 0.045;
-                colors[offset] = flowColor.r * shimmer;
-                colors[offset + 1] = flowColor.g * shimmer;
-                colors[offset + 2] = flowColor.b * shimmer;
+        let sensedVoice = Math.max(orbExternalVoiceLevel, userSpeechActive ? .22 : 0);
+        if (orbMicAnalyser && orbMicData) {
+            orbMicAnalyser.getByteTimeDomainData(orbMicData);
+            let sum = 0;
+            for (let i = 0; i < orbMicData.length; i++) {
+                const sample = (orbMicData[i] - 128) / 128;
+                sum += sample * sample;
             }
-            positionAttribute.needsUpdate = true;
-            colorAttribute.needsUpdate = true;
+            const rms = Math.sqrt(sum / orbMicData.length);
+            sensedVoice = Math.max(sensedVoice, Math.min(1, Math.max(0, rms - .025) * 8));
         }
-        if (sphereGlow && sphere) {
-            sphereGlow.rotation.copy(sphere.rotation);
-            const activityGlow = currentNoiseAmplitude / NOISE_LEVEL_AI_SPEECH;
-            sphereGlow.material.opacity = 0.075 + Math.sin(glowTime * 1.35) * 0.015 + activityGlow * 0.035;
-        }
-        if (sphereHalo) {
-            const activityGlow = currentNoiseAmplitude / NOISE_LEVEL_AI_SPEECH;
-            const breathe = 1 + Math.sin(glowTime * 0.9) * 0.025 + activityGlow * 0.018;
-            sphereHalo.scale.set(235 * breathe, 235 * breathe, 1);
-            sphereHalo.material.opacity = 0.19 + Math.sin(glowTime * 1.1) * 0.025 + activityGlow * 0.035;
-        }
-        if (renderer) renderer.render(scene, camera);
+        const synthesisSpeaking = Boolean(window.speechSynthesis && window.speechSynthesis.speaking);
+        const aiTarget = orbAIActive || aiSpeechActive || synthesisSpeaking ? 1 : 0;
+        orbAIEnergy += (aiTarget - orbAIEnergy) * (1 - Math.exp(-delta * (aiTarget ? 8 : 3.5)));
+        orbVoiceEnergy += (sensedVoice - orbVoiceEnergy) * (1 - Math.exp(-delta * (sensedVoice > orbVoiceEnergy ? 14 : 5)));
+        orbPulse = Math.max(0, orbPulse - delta * 1.18);
+        const smoothPulse = orbPulse * orbPulse * (3 - 2 * orbPulse);
+
+        orbMaterial.uniforms.uTime.value = time;
+        orbMaterial.uniforms.uPulse.value = smoothPulse;
+        orbMaterial.uniforms.uAI.value = orbAIEnergy;
+        orbMaterial.uniforms.uVoice.value = orbVoiceEnergy;
+        orbCore.material.uniforms.uTime.value = time;
+        orbCore.material.uniforms.uPulse.value = smoothPulse;
+        const breathe = 1 + Math.sin(time * 1.35) * .022 + smoothPulse * .16 + orbAIEnergy * (.15 + Math.sin(time * 9) * .01) + orbVoiceEnergy * .018;
+        orbGroup.scale.setScalar(breathe);
+        orbHalo.material.opacity = Math.max(.08, .2 + Math.sin(time * 1.6) * .035 - smoothPulse * .08 + orbAIEnergy * .035 + orbVoiceEnergy * .012);
+        renderer.render(scene, camera);
     }
 
     // ---------- PWA ----------
