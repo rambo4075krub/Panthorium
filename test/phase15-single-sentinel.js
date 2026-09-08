@@ -71,7 +71,10 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('u.rate = 1.02'), 'Sentinel system-voice fallback must speak at a natural pace');
   assert(shell.includes('deepVoiceNames'), 'Sentinel must prefer a deep voice available for the response language');
   assert(shell.includes('femaleVoiceNames'), 'Sentinel must reject explicitly female Thai system voices');
-  assert(shell.includes('if (base === "th") return confirmedMale || null'), 'Thai speech must fall back to pitch-lowered audio unless a male voice is confirmed');
+  assert(shell.includes('if (base === "th" || base === "en") return confirmedMale || null'), 'Thai and English system speech must reject unconfirmed female defaults');
+  assert(shell.includes('const forceMaleNeural = chunk.lang === "th-TH" || chunk.lang === "en-US"'), 'Thai and English must prefer the server male neural voices on every device');
+  assert(shell.includes('receivedProfile !== expectedMaleProfile'), 'the client must reject a speech response that is not the expected male profile');
+  assert(api.includes('if (lang === "th-TH" || lang === "en-US") throw neuralError'), 'the server must never replace Thai or English male neural speech with an unverified source voice');
   assert(shell.includes('audio.playbackRate = 1.0'), 'neural speech must play without artificial pitch or tempo distortion');
   assert(shell.includes('ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ'), 'frontend requests must enforce Sentinel neutral Thai sentence endings');
   assert(api.includes('router.post("/speech"'), 'desktop Thai speech must use the authenticated same-origin audio proxy');

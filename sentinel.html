@@ -1118,9 +1118,9 @@
             return score(b) - score(a);
         });
         const confirmedMale = ranked.find(voice => deepVoiceNames.test(voice.name));
-        // Thai voice lists frequently contain only an unlabelled female voice.
-        // Use the pitch-lowered Sentinel fallback unless a male voice is explicit.
-        if (base === "th") return confirmedMale || null;
+        // Thai and English system voice lists may contain unlabelled female
+        // defaults. Never select an unconfirmed voice for these languages.
+        if (base === "th" || base === "en") return confirmedMale || null;
         return confirmedMale || ranked[0] || null;
     }
 
@@ -1182,6 +1182,9 @@
                         signal: controller.signal
                     });
                     if (!response.ok || settled) { finish(false); return; }
+                    const expectedMaleProfile = lang === "th-TH" ? "th-TH-NiwatNeural" : lang === "en-US" ? "en-US-GuyNeural" : "";
+                    const receivedProfile = response.headers.get("x-sentinel-voice-profile") || "";
+                    if (expectedMaleProfile && receivedProfile !== expectedMaleProfile) { finish(false); return; }
                     const blob = await response.blob();
                     if (!blob.size || settled) { finish(false); return; }
                     objectUrl = URL.createObjectURL(blob);
@@ -1276,12 +1279,13 @@
         for (const chunk of chunks) {
             if (speechRun !== activeSpeechRun) break;
             const voice = voiceForLanguage(chunk.lang, voices);
+            const forceMaleNeural = chunk.lang === "th-TH" || chunk.lang === "en-US";
             let spoken = false;
-            if (!voice && chunk.lang !== "en-US") {
+            if (forceMaleNeural) {
                 spoken = await speakRemoteChunk(chunk.text, chunk.lang);
             }
-            if (!spoken) spoken = await speakNativeChunk(chunk, voice, speechRun);
-            if (!spoken && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang);
+            if (!spoken && voice) spoken = await speakNativeChunk(chunk, voice, speechRun);
+            if (!spoken && !forceMaleNeural && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang);
             spokeAny = spokeAny || spoken;
         }
         if (speechRun === activeSpeechRun) {

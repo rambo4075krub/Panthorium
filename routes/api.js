@@ -28,12 +28,22 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     try {
       let audio;
       let voiceProfile;
-      try {
-        const neural = await synthesizeSentinelMaleVoice(text, lang);
-        audio = neural.audio;
-        voiceProfile = neural.voice;
-      } catch (neuralError) {
+      let neuralError;
+      for (let attempt = 0; attempt < 2 && !audio; attempt += 1) {
+        try {
+          const neural = await synthesizeSentinelMaleVoice(text, lang);
+          audio = neural.audio;
+          voiceProfile = neural.voice;
+        } catch (error) {
+          neuralError = error;
+        }
+      }
+      if (!audio) {
         audit.record("sentinel.neural_speech_failed", { userId: req.user.sub, lang, error: String(neuralError?.message || neuralError) });
+        // The generic source voice is not guaranteed to be male. For Thai and
+        // English fail closed so the client can use only a confirmed male
+        // system voice instead of mixing a female fallback into Sentinel.
+        if (lang === "th-TH" || lang === "en-US") throw neuralError || new Error("male_neural_speech_unavailable");
         const upstreamUrl = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${encodeURIComponent(lang)}&q=${encodeURIComponent(text)}`;
         const upstream = await fetch(upstreamUrl, { headers: { Accept: "audio/mpeg", "User-Agent": "Panthorium-Sentinel/15" }, signal: AbortSignal.timeout(12000) });
         if (!upstream.ok) throw new Error(`speech_upstream_${upstream.status}`);
