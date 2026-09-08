@@ -56,9 +56,10 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   const shell = fs.readFileSync('sentinel.html', 'utf8');
   assert(api.includes('router.post("/chat/stream"'), 'Sentinel must expose its SSE chat route');
   assert(api.includes('router.post("/sentinel/command"'), 'administrator commands must use the Sentinel route');
-  assert(shell.includes('prepareSentinelSpeech();'), 'a user gesture must prime browser speech before the AI request');
-  assert(shell.includes('setTimeout(() => start(false), 80)'), 'speech must avoid the Chromium cancel/speak race');
-  assert(shell.includes('sentinelSpeechWatchdog = setTimeout'), 'speech must retry when an utterance is silently dropped');
+  assert(shell.includes('unlockVoiceAudio();'), 'a user gesture must unlock browser audio before the AI request');
+  assert(shell.includes('await new Promise(resolve => setTimeout(resolve, 80))'), 'speech must avoid the Chromium cancel/speak race');
+  assert(shell.includes('u.onerror = async () =>'), 'speech must fall back when a native utterance fails');
+  assert(shell.includes('function initGlobalVoice()'), 'global user voice commands must remain available');
   assert(!shell.includes('callProviderLocal'), 'provider secrets and direct provider calls must remain server-side');
 
   console.log('Phase 15 Single Sentinel orchestration tests passed');
