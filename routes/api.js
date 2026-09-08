@@ -2,7 +2,7 @@ const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { randomUUID } = require("crypto");
 const { requireAuth, requirePermission } = require("../middleware/auth");
-const { transformSentinelMaleVoice } = require("../services/sentinelSpeechAudio");
+const { synthesizeSentinelMaleVoice } = require("../services/sentinelSpeechAudio");
 function validText(value, max) { return typeof value === "string" && value.trim().length > 0 && value.length <= max; }
 function validChatBody(body = {}) {
   if (!validText(body.message, 8000)) return "invalid_message";
@@ -26,20 +26,20 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     const allowedLanguages = new Set(["th-TH", "en-US", "ja-JP", "ko-KR", "ar-SA", "ru-RU", "zh-CN"]);
     if (!text || text.length > 180 || !allowedLanguages.has(lang)) return res.status(400).json({ ok: false, error: "invalid_speech_request" });
     try {
-      const upstreamUrl = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${encodeURIComponent(lang)}&q=${encodeURIComponent(text)}`;
-      const upstream = await fetch(upstreamUrl, { headers: { Accept: "audio/mpeg", "User-Agent": "Panthorium-Sentinel/15" }, signal: AbortSignal.timeout(12000) });
-      if (!upstream.ok) throw new Error(`speech_upstream_${upstream.status}`);
-      const contentType = upstream.headers.get("content-type") || "";
-      if (!contentType.toLowerCase().startsWith("audio/")) throw new Error("speech_upstream_invalid_content");
-      const sourceAudio = Buffer.from(await upstream.arrayBuffer());
-      if (!sourceAudio.length || sourceAudio.length > 1024 * 1024) throw new Error("speech_upstream_invalid_size");
-      let audio = sourceAudio;
-      let voiceProfile = "source-fallback";
+      let audio;
+      let voiceProfile;
       try {
-        audio = await transformSentinelMaleVoice(sourceAudio);
-        voiceProfile = "sentinel-male-reference-v3";
-      } catch (transformError) {
-        audit.record("sentinel.speech_transform_failed", { userId: req.user.sub, lang, error: transformError.message });
+        const neural = await synthesizeSentinelMaleVoice(text, lang);
+        audio = neural.audio;
+        voiceProfile = neural.voice;
+      } catch (neuralError) {
+        audit.record("sentinel.neural_speech_failed", { userId: req.user.sub, lang, error: String(neuralError?.message || neuralError) });
+        const upstreamUrl = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${encodeURIComponent(lang)}&q=${encodeURIComponent(text)}`;
+        const upstream = await fetch(upstreamUrl, { headers: { Accept: "audio/mpeg", "User-Agent": "Panthorium-Sentinel/15" }, signal: AbortSignal.timeout(12000) });
+        if (!upstream.ok) throw new Error(`speech_upstream_${upstream.status}`);
+        audio = Buffer.from(await upstream.arrayBuffer());
+        if (!audio.length || audio.length > 1024 * 1024) throw new Error("speech_upstream_invalid_size");
+        voiceProfile = "standard-source-fallback";
       }
       res.set({ "Content-Type": "audio/mpeg", "Cache-Control": "private, no-store", "Content-Length": String(audio.length), "X-Sentinel-Voice-Profile": voiceProfile }).send(audio);
     } catch (error) {

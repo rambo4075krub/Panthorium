@@ -1,61 +1,43 @@
-const { spawn } = require("child_process");
-const ffmpegPath = require("ffmpeg-static");
+const fs = require("fs/promises");
+const os = require("os");
+const path = require("path");
+const { EdgeTTS } = require("node-edge-tts");
 
-const SENTINEL_MALE_FILTER = [
-  "rubberband=pitch=0.50:tempo=1.16:transients=smooth:detector=soft:phase=independent:window=long",
-  "highpass=f=45",
-  "bass=g=5:f=135:w=0.7",
-  "acompressor=threshold=-18dB:ratio=2.2:attack=20:release=180:makeup=1.4"
-].join(",");
+const SENTINEL_MALE_VOICES = Object.freeze({
+  "th-TH": "th-TH-NiwatNeural",
+  "en-US": "en-US-GuyNeural",
+  "ja-JP": "ja-JP-KeitaNeural",
+  "ko-KR": "ko-KR-InJoonNeural",
+  "ar-SA": "ar-SA-HamedNeural",
+  "ru-RU": "ru-RU-DmitryNeural",
+  "zh-CN": "zh-CN-YunxiNeural"
+});
 
-function transformSentinelMaleVoice(input, { timeoutMs = 12000 } = {}) {
-  if (!Buffer.isBuffer(input) || !input.length || input.length > 1024 * 1024) {
-    return Promise.reject(new Error("invalid_speech_audio"));
+async function synthesizeSentinelMaleVoice(text, lang) {
+  const voice = SENTINEL_MALE_VOICES[lang];
+  if (!voice || typeof text !== "string" || !text.trim() || text.length > 180) {
+    throw new Error("invalid_speech_request");
   }
-  return new Promise((resolve, reject) => {
-    const child = spawn(ffmpegPath, [
-      "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-vn",
-      "-af", SENTINEL_MALE_FILTER,
-      "-map_metadata", "-1", "-codec:a", "libmp3lame", "-b:a", "96k", "-f", "mp3", "pipe:1"
-    ], { stdio: ["pipe", "pipe", "pipe"] });
-    const output = [];
-    const errors = [];
-    let outputBytes = 0;
-    let settled = false;
-    const finish = (error, value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      if (error) reject(error);
-      else resolve(value);
-    };
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish(new Error("speech_transform_timeout"));
-    }, timeoutMs);
-    child.stdout.on("data", chunk => {
-      outputBytes += chunk.length;
-      if (outputBytes > 2 * 1024 * 1024) {
-        child.kill("SIGKILL");
-        finish(new Error("speech_transform_too_large"));
-        return;
-      }
-      output.push(chunk);
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "panthorium-voice-"));
+  const audioPath = path.join(workDir, "speech.mp3");
+  try {
+    const speech = new EdgeTTS({
+      voice,
+      lang,
+      outputFormat: "audio-24khz-48kbitrate-mono-mp3",
+      rate: "+10%",
+      pitch: "default",
+      volume: "default",
+      timeout: 20000,
+      proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY
     });
-    child.stderr.on("data", chunk => { if (errors.length < 8) errors.push(chunk); });
-    child.on("error", error => finish(error));
-    child.on("close", code => {
-      const audio = Buffer.concat(output);
-      if (code !== 0 || !audio.length) {
-        const detail = Buffer.concat(errors).toString("utf8").slice(0, 240);
-        finish(new Error(detail || `speech_transform_failed_${code}`));
-        return;
-      }
-      finish(null, audio);
-    });
-    child.stdin.on("error", error => finish(error));
-    child.stdin.end(input);
-  });
+    await speech.ttsPromise(text.trim(), audioPath);
+    const audio = await fs.readFile(audioPath);
+    if (!audio.length || audio.length > 1024 * 1024) throw new Error("invalid_speech_audio");
+    return { audio, voice };
+  } finally {
+    await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
-module.exports = { SENTINEL_MALE_FILTER, transformSentinelMaleVoice };
+module.exports = { SENTINEL_MALE_VOICES, synthesizeSentinelMaleVoice };

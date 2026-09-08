@@ -4,7 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const { SentinelOrchestratorService, AI_PROFILES, FRONTIER_PATTERNS, clampMode } = require('../services/sentinelOrchestratorService');
 const { normalizeSentinelPermissions } = require('../repositories/authRepository');
-const { SENTINEL_MALE_FILTER } = require('../services/sentinelSpeechAudio');
+const { SENTINEL_MALE_VOICES } = require('../services/sentinelSpeechAudio');
 const { removeThaiPoliteParticles } = require('../services/sentinel');
 
 function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunning = false, governanceCritical = false, pending = 0, providers = ['groq', 'openai'] } = {}) {
@@ -65,14 +65,14 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('await new Promise(resolve => setTimeout(resolve, 80))'), 'speech must avoid the Chromium cancel/speak race');
   assert(shell.includes('const startWatchdog = setTimeout'), 'desktop speech must detect silently dropped Chromium utterances');
   assert(shell.includes('await speakRemoteChunk(chunk.text, chunk.lang)'), 'speech must fall back when a native utterance fails');
-  assert(SENTINEL_MALE_FILTER.includes('pitch=0.50:tempo=1.16'), 'server speech must match the supplied low-pitch reference while increasing tempo');
-  assert(SENTINEL_MALE_FILTER.includes('bass=g=5'), 'server speech must reinforce the low male register');
-  assert(shell.includes('u.pitch = 0.22'), 'Sentinel must use its low reference-matched male system-voice profile');
-  assert(shell.includes('u.rate = 1.0'), 'Sentinel system voice must speak at a natural brisk pace');
+  assert.equal(SENTINEL_MALE_VOICES['th-TH'], 'th-TH-NiwatNeural', 'Thai speech must use a standard male neural voice');
+  assert.equal(SENTINEL_MALE_VOICES['en-US'], 'en-US-GuyNeural', 'English speech must use a standard male neural voice');
+  assert(shell.includes('u.pitch = 0.9'), 'Sentinel system-voice fallback must keep a natural male pitch');
+  assert(shell.includes('u.rate = 1.02'), 'Sentinel system-voice fallback must speak at a natural pace');
   assert(shell.includes('deepVoiceNames'), 'Sentinel must prefer a deep voice available for the response language');
   assert(shell.includes('femaleVoiceNames'), 'Sentinel must reject explicitly female Thai system voices');
   assert(shell.includes('if (base === "th") return confirmedMale || null'), 'Thai speech must fall back to pitch-lowered audio unless a male voice is confirmed');
-  assert(shell.includes('audio.playbackRate = 1.05'), 'processed Thai speech must play slightly faster without lowering pitch through slowdown');
+  assert(shell.includes('audio.playbackRate = 1.0'), 'neural speech must play without artificial pitch or tempo distortion');
   assert(shell.includes('ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ'), 'frontend requests must enforce Sentinel neutral Thai sentence endings');
   assert(api.includes('router.post("/speech"'), 'desktop Thai speech must use the authenticated same-origin audio proxy');
   assert(shell.includes('base + "/api/speech"'), 'desktop speech playback must avoid cross-origin media restrictions');
