@@ -1339,7 +1339,7 @@
             // Give the listener a short, consistent boundary when a sentence
             // switches scripts. Andrew remains the same speaker on both sides.
             if (previousChunkLanguage && previousChunkLanguage !== chunk.lang) {
-                await new Promise(resolve => setTimeout(resolve, 30));
+                await new Promise(resolve => setTimeout(resolve, 15));
                 if (speechRun !== activeSpeechRun) {
                     releaseRemoteChunk(preparedRemote);
                     releasePendingRemote(chunkIndex + 1);

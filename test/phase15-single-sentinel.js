@@ -71,7 +71,7 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert.equal(SENTINEL_MALE_VOICES['th-TH'], 'en-US-AndrewMultilingualNeural', 'Thai speech must use the Andrew multilingual male neural voice');
   assert.equal(SENTINEL_MALE_VOICES['en-US'], 'en-US-AndrewMultilingualNeural', 'English speech must use the Andrew multilingual male neural voice');
   assert(shell.includes('previousChunkLanguage !== chunk.lang'), 'mixed Thai and English speech must pause at each language boundary');
-  assert(shell.includes('setTimeout(resolve, 30)'), 'mixed-language pauses must remain clear without sounding delayed');
+  assert(shell.includes('setTimeout(resolve, 15)'), 'mixed-language pauses must remain clear without sounding delayed');
   assert(shell.includes('if (last && last.lang === lang) last.text += token'), 'same-language sentences must remain in one audio request without a network gap');
   assert(shell.includes('const preparedRemotePromises = chunks.map'), 'all language chunks must preload together to eliminate network gaps');
   assert(shell.includes('audio.ontimeupdate = () => updateTranscript(false)'), 'remote Andrew audio must advance the current transcript on desktop and mobile');
