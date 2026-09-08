@@ -2,6 +2,7 @@ const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { randomUUID } = require("crypto");
 const { requireAuth, requirePermission } = require("../middleware/auth");
+const { transformSentinelMaleVoice } = require("../services/sentinelSpeechAudio");
 function validText(value, max) { return typeof value === "string" && value.trim().length > 0 && value.length <= max; }
 function validChatBody(body = {}) {
   if (!validText(body.message, 8000)) return "invalid_message";
@@ -30,9 +31,17 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       if (!upstream.ok) throw new Error(`speech_upstream_${upstream.status}`);
       const contentType = upstream.headers.get("content-type") || "";
       if (!contentType.toLowerCase().startsWith("audio/")) throw new Error("speech_upstream_invalid_content");
-      const audio = Buffer.from(await upstream.arrayBuffer());
-      if (!audio.length || audio.length > 1024 * 1024) throw new Error("speech_upstream_invalid_size");
-      res.set({ "Content-Type": contentType, "Cache-Control": "private, no-store", "Content-Length": String(audio.length) }).send(audio);
+      const sourceAudio = Buffer.from(await upstream.arrayBuffer());
+      if (!sourceAudio.length || sourceAudio.length > 1024 * 1024) throw new Error("speech_upstream_invalid_size");
+      let audio = sourceAudio;
+      let voiceProfile = "source-fallback";
+      try {
+        audio = await transformSentinelMaleVoice(sourceAudio);
+        voiceProfile = "sentinel-male-cinematic-v2";
+      } catch (transformError) {
+        audit.record("sentinel.speech_transform_failed", { userId: req.user.sub, lang, error: transformError.message });
+      }
+      res.set({ "Content-Type": "audio/mpeg", "Cache-Control": "private, no-store", "Content-Length": String(audio.length), "X-Sentinel-Voice-Profile": voiceProfile }).send(audio);
     } catch (error) {
       audit.record("sentinel.speech_failed", { userId: req.user.sub, lang, error: error.message });
       res.status(502).json({ ok: false, error: "speech_unavailable" });

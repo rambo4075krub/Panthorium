@@ -1190,13 +1190,12 @@
                     audio.src = objectUrl;
                     audio.preload = "auto";
                     audio.volume = 1;
-                    // Lower the source voice into Sentinel's original cinematic
-                    // male register. Disabling pitch preservation makes the
-                    // slower playback deepen the voice instead of only stretching it.
-                    audio.playbackRate = 0.78;
-                    if ("preservesPitch" in audio) audio.preservesPitch = false;
-                    if ("mozPreservesPitch" in audio) audio.mozPreservesPitch = false;
-                    if ("webkitPreservesPitch" in audio) audio.webkitPreservesPitch = false;
+                    // Pitch and tone are transformed server-side; keep playback
+                    // brisk here without changing the new male register.
+                    audio.playbackRate = 1.04;
+                    if ("preservesPitch" in audio) audio.preservesPitch = true;
+                    if ("mozPreservesPitch" in audio) audio.mozPreservesPitch = true;
+                    if ("webkitPreservesPitch" in audio) audio.webkitPreservesPitch = true;
                     audio.onended = () => finish(true);
                     audio.onerror = () => finish(false);
                     await audio.play();
@@ -1206,9 +1205,9 @@
     }
 
     function voiceSafeText(text) {
-        const value = String(text || "").trim();
+        const value = String(text || "").replace(/\s*(?:ครับ|ค่ะ|คะ)(?=\s|[,.!?;:…。、]|$)/g, "").trim();
         if (/ข้อความเท่านั้น|ไม่มีเสียงพูด|ไม่สามารถพูด|ไม่มีระบบเสียง/i.test(value)) {
-            return "รับทราบครับ ระบบพร้อมรับคำสั่งเสียงและตอบกลับด้วยเสียงแล้ว กรุณาพูดคำสั่งได้เลยครับ";
+            return "รับทราบ ระบบพร้อมรับคำสั่งเสียงและตอบกลับด้วยเสียงแล้ว กรุณาพูดคำสั่งได้เลย";
         }
         return value;
     }
@@ -1228,8 +1227,8 @@
             u.lang = voice?.lang || chunk.lang;
             u.voice = voice || null;
             // Sentinel voice: low, calm and deliberate, similar to a cinematic AI.
-            u.pitch = 0.32;
-            u.rate = 0.82;
+            u.pitch = 0.28;
+            u.rate = 0.96;
             u.onstart = () => { started = true; };
             u.onboundary = event => {
                 aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
@@ -1546,7 +1545,7 @@
                         "x-session-id": OS.config.sessionId
                     },
                     body: JSON.stringify({
-                        message: `ตอบด้วยภาษาของผู้ใช้และตอบกลับด้วยเสียงได้ ระบบนี้ไม่ใช่ระบบข้อความเท่านั้น ห้ามบอกว่าไม่มีเสียงพูด หากข้อความมีหลายภาษา ให้รักษาภาษาของแต่ละส่วนตามบริบท\n${prompt}`,
+                        message: `ตอบด้วยภาษาของผู้ใช้และตอบกลับด้วยเสียงได้ ระบบนี้ไม่ใช่ระบบข้อความเท่านั้น ห้ามบอกว่าไม่มีเสียงพูด หากข้อความมีหลายภาษา ให้รักษาภาษาของแต่ละส่วนตามบริบท ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ\n${prompt}`,
                         sessionId: OS.config.sessionId,
                         mode: "default"
                     }),

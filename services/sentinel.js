@@ -3,6 +3,10 @@ const { PromptManager } = require("./promptManager");
 const { ProviderManager } = require("./providerManager");
 const { AiGateway } = require("./aiGateway");
 
+function removeThaiPoliteParticles(text) {
+  return String(text || "").replace(/\s*(?:ครับ|ค่ะ|คะ)(?=\s|[,.!?;:…。、]|$)/g, "").replace(/[ \t]+\n/g, "\n").trim();
+}
+
 class Sentinel {
   constructor({ sessions, prompts, providers, gateway, conversations, training, audit } = {}) {
     this.sessions = sessions || new SessionManager();
@@ -38,12 +42,13 @@ class Sentinel {
     setImmediate(()=>this.training.captureConversation({prompt:String(message).trim(),answer:result.text,provider:result.provider,model:result.model,userId,sessionId}).catch(error=>this.audit?.record('sentinel.training_capture_failed',{userId,sessionId,error:error.message})));
   }
   voiceLanguageGuard() {
-    return "\n\nข้อกำหนดสุดท้าย: ตอบด้วยภาษาของผู้ใช้ หากข้อความมีหลายภาษา ให้คงภาษาของแต่ละส่วนตามบริบท และห้ามเปลี่ยนภาษาเองโดยไม่มีคำขอ ระบบนี้รองรับการรับฟังและตอบกลับด้วยเสียง ห้ามกล่าวว่าเป็นระบบข้อความเท่านั้นหรือไม่มีเสียงพูด";
+    return "\n\nข้อกำหนดสุดท้าย: ตอบด้วยภาษาของผู้ใช้ หากข้อความมีหลายภาษา ให้คงภาษาของแต่ละส่วนตามบริบท และห้ามเปลี่ยนภาษาเองโดยไม่มีคำขอ ระบบนี้รองรับการรับฟังและตอบกลับด้วยเสียง ห้ามกล่าวว่าเป็นระบบข้อความเท่านั้นหรือไม่มีเสียงพูด ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ";
   }
   normalizeVoiceAnswer(result) {
     if (result?.ok && /ข้อความเท่านั้น|ไม่มีเสียงพูด|ไม่สามารถพูด|ไม่มีระบบเสียง/i.test(String(result.text || ""))) {
-      result.text = "รับทราบครับ ระบบพร้อมรับคำสั่งเสียงและตอบกลับด้วยเสียงแล้ว กรุณาพูดคำสั่งได้เลยครับ";
+      result.text = "รับทราบ ระบบพร้อมรับคำสั่งเสียงและตอบกลับด้วยเสียงแล้ว กรุณาพูดคำสั่งได้เลย";
     }
+    if (result?.ok && result.text) result.text = removeThaiPoliteParticles(result.text);
     return result;
   }
   async chat({ sessionId, userId = "system", message, mode = "default", provider, model }) {
@@ -66,4 +71,4 @@ class Sentinel {
   }
   status() { return { name: "Sentinel", version: "2.3.0-auto-training", providers: this.getAvailableProviders(), sessions: this.sessions.size(), persistence: this.conversations?.pool ? "postgresql" : this.conversations ? "memory" : "legacy", training: Boolean(this.training), autoTraining: this.training?.settings?.()||null, streaming: true, uptime: process.uptime() }; }
 }
-module.exports = { Sentinel };
+module.exports = { Sentinel, removeThaiPoliteParticles };
