@@ -1,9 +1,10 @@
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { normalizeSentinelPermissions } = require("../repositories/authRepository");
 
 const ALLOWED_ROLES = new Set(["administrator", "operator", "guest"]);
-const ALLOWED_PERMISSIONS = new Set(["chat", "core:command", "settings", "system:read"]);
+const ALLOWED_PERMISSIONS = new Set(["chat", "sentinel:command", "settings", "system:read"]);
 
 function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
@@ -36,7 +37,7 @@ class AuthService {
       username: this.config.adminUsername,
       passwordHash,
       roles: ["administrator"],
-      permissions: ["chat", "core:command", "settings", "system:read"],
+      permissions: ["chat", "sentinel:command", "settings", "system:read"],
       createdAt: new Date().toISOString()
     });
   }
@@ -127,7 +128,7 @@ class AuthService {
       sub: principal.id,
       username: principal.username,
       roles: principal.roles || [],
-      permissions: principal.permissions || []
+      permissions: normalizeSentinelPermissions(principal.permissions)
     }, this.config.jwtSecret, {
       expiresIn: this.config.accessTokenTtl,
       issuer: "panthorium",
@@ -179,7 +180,7 @@ class AuthService {
       id: user.id,
       username: user.username,
       roles: user.roles || [],
-      permissions: user.permissions || []
+      permissions: normalizeSentinelPermissions(user.permissions)
     };
     return {
       principal,
@@ -204,10 +205,12 @@ class AuthService {
   }
 
   verifyAccessToken(token) {
-    return jwt.verify(token, this.config.jwtSecret, {
+    const principal = jwt.verify(token, this.config.jwtSecret, {
       issuer: "panthorium",
       audience: "panthorium-ui"
     });
+    principal.permissions = normalizeSentinelPermissions(principal.permissions);
+    return principal;
   }
 }
 

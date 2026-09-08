@@ -4,7 +4,7 @@ const { AgentAutomationService } = require('../services/agentAutomationService')
 
 (async () => {
   const policy = new AgentAutomationPolicyService();
-  const admin = { sub: 'a1', roles: ['administrator'], permissions: ['chat','system:read','settings','core:command'] };
+  const admin = { sub: 'a1', roles: ['administrator'], permissions: ['chat','system:read','settings','sentinel:command'] };
   const operator = { sub: 'o1', roles: ['operator'], permissions: ['chat','system:read'] };
   const account = { sub: 'u1', roles: [], permissions: ['chat'] };
   const guest = { sub: 'guest:1', roles: ['guest'], permissions: ['chat'] };

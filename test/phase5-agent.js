@@ -5,8 +5,8 @@ const { AgentService } = require('../services/agentService');
 (async () => {
   const events = [];
   const audit = { record: (event, data) => events.push({ event, data }) };
-  const sentinelCore = {
-    status: () => ({ name: 'Sentinel Core', version: 'test' }),
+  const sentinel = {
+    status: () => ({ name: 'Sentinel', version: 'test' }),
     providerCatalog: () => [{ provider: 'mock', configured: true }],
     async clearConversation(userId, sessionId) { events.push({ event: 'cleared', userId, sessionId }); }
   };
@@ -14,7 +14,7 @@ const { AgentService } = require('../services/agentService');
     async listSessions(userId) { return [{ sessionId: `${userId}-s1` }]; },
     async history(userId, sessionId) { return [{ role: 'user', content: `${userId}:${sessionId}` }]; }
   };
-  const tools = new ToolRegistry({ sentinelCore, conversations });
+  const tools = new ToolRegistry({ sentinel, conversations });
   const agent = new AgentService({ tools, audit });
   const user = { sub: 'u1', permissions: ['chat', 'system:read'] };
 
@@ -22,7 +22,7 @@ const { AgentService } = require('../services/agentService');
   assert(catalog.some(t => t.id === 'system.status'));
   assert(catalog.some(t => t.id === 'conversation.clear' && t.requiresConfirmation));
   const status = await agent.execute({ user, toolId: 'system.status' });
-  assert.equal(status.ok, true); assert.equal(status.output.name, 'Sentinel Core');
+  assert.equal(status.ok, true); assert.equal(status.output.name, 'Sentinel');
   const denied = await agent.execute({ user: { sub: 'u2', permissions: [] }, toolId: 'system.status' });
   assert.equal(denied.error, 'tool_permission_denied');
   const confirm = await agent.execute({ user, toolId: 'conversation.clear', args: { sessionId: 's1' } });

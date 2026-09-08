@@ -6,13 +6,13 @@ const { AgentWorkflowService } = require('../services/agentWorkflowService');
 (async () => {
   const events = [];
   const audit = { record: (event, data) => events.push({ event, data }) };
-  const sentinelCore = { status: () => ({ ok: true }), providerCatalog: () => [], async clearConversation() {} };
+  const sentinel = { status: () => ({ ok: true }), providerCatalog: () => [], async clearConversation() {} };
   const conversations = { async listSessions() { return []; }, async history() { return []; } };
   const securityResponse = { async listBlocks() { return []; }, async blockIp(ip) { return { ip }; }, async unblockIp() { return true; } };
   const aiOperations = { async overview() { return { ok: true }; } };
-  const tools = new ToolRegistry({ sentinelCore, conversations, securityResponse, aiOperations });
+  const tools = new ToolRegistry({ sentinel, conversations, securityResponse, aiOperations });
   const agent = new AgentService({ tools, audit });
-  const admin = { sub: 'admin', permissions: ['chat', 'system:read', 'core:command'] };
+  const admin = { sub: 'admin', permissions: ['chat', 'system:read', 'sentinel:command'] };
 
   assert.equal(agent.validateArgs('conversation.history', { sessionId: '../bad' }).error, 'invalid_tool_args');
   assert.equal(agent.validateArgs('conversation.history', { sessionId: 'safe.session-1', limit: 20 }).ok, true);

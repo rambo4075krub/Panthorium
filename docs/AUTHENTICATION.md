@@ -8,10 +8,10 @@ Server  -> signed JWT access token
 Browser -> keeps access token in JS memory
 Browser -> Authorization: Bearer <token> -> /api/chat
 Middleware -> verifies issuer, audience, signature, expiry, permission
-Route -> Sentinel Core
+Route -> Sentinel
 ```
 
-Guest มี `chat` และ `system:read` เท่านั้น จึงเรียก `/api/core/command` ไม่ได้
+Guest มี `chat` และ `system:read` เท่านั้น จึงเรียก `/api/sentinel/command` ไม่ได้
 
 ## Admin login flow
 

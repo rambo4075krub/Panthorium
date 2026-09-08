@@ -7,7 +7,7 @@ class AgentService {
     const permissions = new Set(user?.permissions || []);
     return this.tools.catalog().filter((tool) => {
       if (tool.permission && !permissions.has(tool.permission)) return false;
-      if ((tool.risk || 'low') === 'critical' && !permissions.has('core:command')) return false;
+      if ((tool.risk || 'low') === 'critical' && !permissions.has('sentinel:command')) return false;
       return true;
     });
   }

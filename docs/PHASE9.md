@@ -17,7 +17,7 @@ Phase 9 starts from the accepted Phase 8 production baseline `5775670d7b470c26bf
 - `IntegrationRepository`: PostgreSQL + memory fallback metadata store.
 - `IntegrationService`: validation, ownership, allowlist enforcement, secret resolution, bounded HTTP invocation.
 - `/api/integrations`: authenticated management surface for users with `settings` permission.
-- Agent tool `integration.invoke`: `core:command`, critical risk, mutating, explicit confirmation required.
+- Agent tool `integration.invoke`: `sentinel:command`, critical risk, mutating, explicit confirmation required.
 - Secret references must match `PANTHORIUM_INTEGRATION_SECRET_*`; the secret value is read from server environment only at invocation time and never returned.
 - Allowed destination hosts come from `INTEGRATION_ALLOWED_HOSTS`.
 

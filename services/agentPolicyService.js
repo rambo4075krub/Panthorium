@@ -16,7 +16,7 @@ class AgentPolicyService {
     const mutates = !!tool.mutates;
     const requiresConfirmation = !!tool.requiresConfirmation || mutates || risk === 'high' || risk === 'critical';
 
-    if (risk === 'critical' && !permissions.has('core:command')) {
+    if (risk === 'critical' && !permissions.has('sentinel:command')) {
       return { ok: false, error: 'tool_privileged_permission_required', risk };
     }
     if (requiresConfirmation && !confirmed) {

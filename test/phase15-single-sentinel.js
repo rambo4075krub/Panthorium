@@ -1,11 +1,13 @@
 'use strict';
 
 const assert = require('assert');
-const { DualAiOrchestratorService, AI_PROFILES, FRONTIER_PATTERNS, clampMode } = require('../services/dualAiOrchestratorService');
+const fs = require('fs');
+const { SentinelOrchestratorService, AI_PROFILES, FRONTIER_PATTERNS, clampMode } = require('../services/sentinelOrchestratorService');
+const { normalizeSentinelPermissions } = require('../repositories/authRepository');
 
-function buildDualAi({ benchmarkScore = 92, releaseAllowed = true, activeRunning = false, governanceCritical = false, pending = 0, providers = ['groq', 'openai'] } = {}) {
+function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunning = false, governanceCritical = false, pending = 0, providers = ['groq', 'openai'] } = {}) {
   const calls = { releaseGate: 0, training: 0, activeStart: 0, governanceExecute: 0, audit: [] };
-  const service = new DualAiOrchestratorService({
+  const service = new SentinelOrchestratorService({
     providers: { available: () => providers },
     production: { async overview() { return { ok: true, status: governanceCritical ? 'critical' : 'healthy', score: governanceCritical ? 42 : 96 }; } },
     governance: { async status(args = {}) { if (args.execute) calls.governanceExecute += 1; return { ok: true, status: governanceCritical ? 'critical' : 'healthy', score: governanceCritical ? 50 : 100, signals: governanceCritical ? [{ code: 'PRODUCTION_CRITICAL', severity: 'critical' }] : [] }; } },
@@ -22,33 +24,44 @@ function buildDualAi({ benchmarkScore = 92, releaseAllowed = true, activeRunning
 (async () => {
   assert.equal(clampMode('autopilot'), 'autopilot');
   assert.equal(clampMode('bad'), 'observe');
-  assert(AI_PROFILES.sentinel_core.boundaries.includes('no_auto_deploy'));
-  assert(AI_PROFILES.sentinel.boundaries.includes('active_only_context'));
+  assert.deepEqual(normalizeSentinelPermissions([['core', 'command'].join(':'), 'chat']), ['sentinel:command', 'chat']);
+  assert.deepEqual(Object.keys(AI_PROFILES), ['sentinel']);
+  assert(AI_PROFILES.sentinel.boundaries.includes('no_auto_deploy'));
+  assert(AI_PROFILES.sentinel.boundaries.includes('active_only_user_context'));
   assert(FRONTIER_PATTERNS.some((p) => p.id === 'agent_tools_handoffs_guardrails'));
 
-  const healthy = await buildDualAi({ activeRunning: true }).service.cycle({ execute: false });
+  const healthy = await buildSentinel({ activeRunning: true }).service.cycle({ execute: false });
   assert.equal(healthy.status, 'healthy');
-  assert(healthy.proposals.some((p) => p.id === 'dual_ai_observe'));
+  assert(healthy.proposals.some((p) => p.id === 'sentinel_control_observe'));
 
-  const low = buildDualAi({ benchmarkScore: 53, releaseAllowed: false, activeRunning: false });
+  const low = buildSentinel({ benchmarkScore: 53, releaseAllowed: false, activeRunning: false });
   const lowReport = await low.service.cycle({ execute: true });
-  assert(lowReport.proposals.some((p) => p.id === 'core_trigger_release_gate'));
+  assert(lowReport.proposals.some((p) => p.id === 'sentinel_trigger_release_gate'));
   assert(lowReport.proposals.some((p) => p.id === 'sentinel_benchmark_repair_training'));
   assert(lowReport.proposals.some((p) => p.id === 'sentinel_24h_learning_runner'));
   assert(low.calls.releaseGate >= 1);
   assert.equal(low.calls.training, 1);
   assert.equal(low.calls.activeStart, 1);
 
-  const unsafe = buildDualAi({ governanceCritical: true, activeRunning: true, benchmarkScore: 90 });
+  const unsafe = buildSentinel({ governanceCritical: true, activeRunning: true, benchmarkScore: 90 });
   const unsafeReport = await unsafe.service.cycle({ execute: true });
-  assert(unsafeReport.proposals.some((p) => p.id === 'core_guard_active_learning'));
+  assert(unsafeReport.proposals.some((p) => p.id === 'sentinel_guard_active_learning'));
   assert(unsafe.calls.governanceExecute >= 1);
   assert.equal(unsafe.calls.activeStart, 0);
 
   const modeResult = await low.service.setMode('off', { userId: 'tester' });
   assert.equal(modeResult.mode, 'off');
 
-  console.log('Phase 14 Dual AI orchestration tests passed');
+  const api = fs.readFileSync('routes/api.js', 'utf8');
+  const shell = fs.readFileSync('sentinel.html', 'utf8');
+  assert(api.includes('router.post("/chat/stream"'), 'Sentinel must expose its SSE chat route');
+  assert(api.includes('router.post("/sentinel/command"'), 'administrator commands must use the Sentinel route');
+  assert(shell.includes('prepareSentinelSpeech();'), 'a user gesture must prime browser speech before the AI request');
+  assert(shell.includes('setTimeout(() => start(false), 80)'), 'speech must avoid the Chromium cancel/speak race');
+  assert(shell.includes('sentinelSpeechWatchdog = setTimeout'), 'speech must retry when an utterance is silently dropped');
+  assert(!shell.includes('callProviderLocal'), 'provider secrets and direct provider calls must remain server-side');
+
+  console.log('Phase 15 Single Sentinel orchestration tests passed');
 })().catch((error) => {
   console.error(error);
   process.exit(1);

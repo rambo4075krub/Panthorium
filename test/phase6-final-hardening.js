@@ -16,7 +16,7 @@ const { AgentAutomationPolicyService } = require('../services/agentAutomationPol
   const policy=new AgentAutomationPolicyService();
   const service=new AgentAutomationService({repository,jobs:jobRepo,audit,policy});
 
-  const admin={sub:'u-admin',roles:['administrator'],permissions:['chat','core:command']};
+  const admin={sub:'u-admin',roles:['administrator'],permissions:['chat','sentinel:command']};
   const account={sub:'u-account',roles:[],permissions:['chat']};
   const guest={sub:'guest:1',roles:['guest'],permissions:['chat']};
 

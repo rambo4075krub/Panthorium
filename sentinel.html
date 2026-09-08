@@ -736,7 +736,7 @@
 
     <script>
     // =========================================================
-    // Panthorium OS - Core Kernel
+    // Panthorium OS - Sentinel Runtime
     // =========================================================
     const OS = {
         version: "1.1.0",
@@ -747,14 +747,12 @@
             verified: false
         },
         config: {
-            // Backend / Sentinel Core
+            // Backend / Sentinel
             backendUrl: localStorage.getItem("pt_backend_url") || window.location.origin,
             useBackend: localStorage.getItem("pt_use_backend") !== "0",
             sessionId: localStorage.getItem("pt_session_id") || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
             // Access token stays in memory only; provider secrets remain server-side.
-            accessToken: "",
-            aiPriority: ["groq", "openai", "gemini", "anthropic"],
-            keys: { groq: "", openai: "", gemini: "", anthropic: "" }
+            accessToken: ""
         },
         biometrics: {
             faceDescriptor: null,
@@ -765,7 +763,7 @@
         windows: new Map(),
         zCounter: 100,
         apps: {},
-        coreOnline: false
+        sentinelOnline: false
     };
 
     // เก็บ session ถาวร
@@ -1045,40 +1043,77 @@
         renderOrbTranscript();
     }
 
+    let sentinelSpeechRequest = 0;
+    let sentinelSpeechTimer = 0;
+    let sentinelSpeechWatchdog = 0;
+    function prepareSentinelSpeech() {
+        if (!window.speechSynthesis) return;
+        speechSynthesis.resume();
+        speechSynthesis.getVoices();
+    }
     function speak(text) {
         setOrbTranscript(text, 0);
-        if (!window.speechSynthesis) return;
-        window.speechSynthesis.cancel();
+        const content = String(text || "").trim();
+        if (!content) return false;
+        if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === "undefined") return false;
+        const requestId = ++sentinelSpeechRequest;
+        clearTimeout(sentinelSpeechTimer);
+        clearTimeout(sentinelSpeechWatchdog);
+        speechSynthesis.cancel();
         aiSpeechActive = false;
         aiSpeechPulse = 0;
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = "th-TH";
-        u.pitch = 0.6;
-        u.rate = 0.9;
-        const voices = speechSynthesis.getVoices();
-        const th = voices.find(v => v.lang.includes("th"));
-        if (th) u.voice = th;
-        u.onstart = () => {
-            aiSpeechActive = true;
-            aiSpeechPulse = 1;
-            window.PanthoriumOrb?.setAISpeaking(true);
-            window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text } }));
+
+        const start = (retried = false) => {
+            if (requestId !== sentinelSpeechRequest) return;
+            speechSynthesis.resume();
+            let started = false;
+            const utterance = new SpeechSynthesisUtterance(content);
+            utterance.lang = "th-TH";
+            utterance.pitch = 0.6;
+            utterance.rate = 0.9;
+            const thaiVoice = speechSynthesis.getVoices().find(voice => String(voice.lang).toLowerCase().startsWith("th"));
+            if (thaiVoice) utterance.voice = thaiVoice;
+            utterance.onstart = () => {
+                started = true;
+                clearTimeout(sentinelSpeechWatchdog);
+                aiSpeechActive = true;
+                aiSpeechPulse = 1;
+                window.PanthoriumOrb?.setAISpeaking(true);
+                window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text: content } }));
+            };
+            utterance.onboundary = event => {
+                aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
+                window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex: event.charIndex } }));
+                let index = 0;
+                for (let i = 0; i < orbTranscriptOffsets.length; i++) if (event.charIndex >= orbTranscriptOffsets[i]) index = i;
+                showOrbTranscriptSentence(index);
+            };
+            const stop = () => {
+                clearTimeout(sentinelSpeechWatchdog);
+                if (requestId !== sentinelSpeechRequest) return;
+                aiSpeechActive = false;
+                window.PanthoriumOrb?.setAISpeaking(false);
+                window.dispatchEvent(new CustomEvent("panthorium:voice-end"));
+            };
+            utterance.onend = stop;
+            utterance.onerror = event => {
+                stop();
+                if (!started && !retried && event.error !== "canceled" && requestId === sentinelSpeechRequest) {
+                    sentinelSpeechTimer = setTimeout(() => start(true), 180);
+                }
+            };
+            speechSynthesis.speak(utterance);
+            sentinelSpeechWatchdog = setTimeout(() => {
+                if (!started && requestId === sentinelSpeechRequest && !speechSynthesis.speaking && !retried) {
+                    speechSynthesis.cancel();
+                    start(true);
+                }
+            }, 1200);
         };
-        u.onboundary = event => {
-            aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
-            window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex: event.charIndex } }));
-            let index = 0;
-            for (let i = 0; i < orbTranscriptOffsets.length; i++) if (event.charIndex >= orbTranscriptOffsets[i]) index = i;
-            showOrbTranscriptSentence(index);
-        };
-        const stopSpeechMotion = () => {
-            aiSpeechActive = false;
-            window.PanthoriumOrb?.setAISpeaking(false);
-            window.dispatchEvent(new CustomEvent("panthorium:voice-end"));
-        };
-        u.onend = stopSpeechMotion;
-        u.onerror = stopSpeechMotion;
-        speechSynthesis.speak(u);
+
+        // Chrome may drop an utterance spoken in the same task as cancel().
+        sentinelSpeechTimer = setTimeout(() => start(false), 80);
+        return true;
     }
     if (window.speechSynthesis) {
         speechSynthesis.getVoices();
@@ -1123,23 +1158,23 @@
         return res;
     }
 
-    // ---------- AI: Sentinel Core (Backend) ----------
-    async function checkCoreStatus() {
+    // ---------- AI: Sentinel (Backend) ----------
+    async function checkSentinelStatus() {
         try {
             const base = OS.config.backendUrl.replace(/\/$/, "");
             const res = await fetch(base + "/api/health", { signal: AbortSignal.timeout(2500) });
             if (!res.ok) throw new Error("bad status");
             const data = await res.json();
-            OS.coreOnline = !!(data && data.ok);
-            return OS.coreOnline;
+            OS.sentinelOnline = !!(data && data.ok);
+            return OS.sentinelOnline;
         } catch {
-            OS.coreOnline = false;
+            OS.sentinelOnline = false;
             return false;
         }
     }
 
     async function callAI(prompt) {
-        // 1) พยายามใช้ Sentinel Core บนเซิร์ฟเวอร์ก่อน
+        // 1) พยายามใช้ Sentinel บนเซิร์ฟเวอร์ก่อน
         if (OS.config.useBackend) {
             try {
                 const base = OS.config.backendUrl.replace(/\/$/, "");
@@ -1158,154 +1193,29 @@
                 });
                 if (res.ok) {
                     const data = await res.json();
-                    OS.coreOnline = true;
+                    OS.sentinelOnline = true;
                     if (data.ok && data.text) {
                         return {
                             ok: true,
                             text: data.text,
-                            provider: data.provider ? `Core→${data.provider}` : "Sentinel Core",
-                            via: "core"
+                            provider: data.provider ? `Sentinel · ${data.provider}` : "Sentinel",
+                            via: "sentinel"
                         };
                     }
                     if (data.text) {
-                        return { ok: false, text: data.text, provider: "Sentinel Core", via: "core" };
+                        return { ok: false, text: data.text, provider: "Sentinel", via: "sentinel" };
                     }
                 }
             } catch (e) {
-                console.warn("Sentinel Core unavailable:", e.message);
-                OS.coreOnline = false;
+                console.warn("Sentinel unavailable:", e.message);
+                OS.sentinelOnline = false;
             }
         }
 
         // Provider API keys are intentionally never exposed to the browser.
-        return { ok: false, text: "Sentinel Core ไม่พร้อมใช้งาน กรุณาตรวจสอบ Backend", provider: "Sentinel Core", via: "core" };
+        return { ok: false, text: "Sentinel ไม่พร้อมใช้งาน กรุณาตรวจสอบ Backend", provider: "Sentinel", via: "sentinel" };
     }
 
-    async function callAILocal(prompt) {
-        OS.conversationHistory.push({ role: "user", content: prompt });
-        if (OS.conversationHistory.length > 12) {
-            OS.conversationHistory = OS.conversationHistory.slice(-12);
-        }
-
-        const systemPrompt = `คุณคือ Sentinel AI ผู้ช่วยอัจฉริยะของระบบปฏิบัติการ Panthorium OS
-พูดด้วยน้ำเสียงมั่นใจ สุภาพ และมีอำนาจเล็กน้อย เหมือน AI จาก Transformers
-ตอบเป็นภาษาไทย กระชับ ชัดเจน เป็นประโยชน์
-ห้ามตอบยาวเกินไป (ไม่เกิน 3-4 ประโยค เว้นแต่ถูกถามรายละเอียด)`;
-
-        for (const provider of OS.config.aiPriority) {
-            const key = OS.config.keys[provider];
-            if (!key) continue;
-            try {
-                const answer = await callProviderLocal(provider, key, systemPrompt);
-                if (answer) {
-                    OS.conversationHistory.push({ role: "assistant", content: answer });
-                    return { ok: true, text: answer, provider: provider + " (local)", via: "local" };
-                }
-            } catch (e) {
-                console.warn(provider, e.message);
-            }
-        }
-        return {
-            ok: false,
-            text: "ไม่สามารถเชื่อมต่อ AI ได้ — เปิด Backend (Sentinel Core) หรือใส่ API Key ในตั้งค่า",
-            provider: null,
-            via: "none"
-        };
-    }
-
-    async function callProviderLocal(provider, key, systemPrompt) {
-        if (provider === "groq") {
-            const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${key}`
-                },
-                body: JSON.stringify({
-                    model: "llama-3.1-8b-instant",
-                    messages: [
-                        { role: "system", content: systemPrompt },
-                        ...OS.conversationHistory
-                    ],
-                    temperature: 0.65,
-                    max_tokens: 280
-                })
-            });
-            if (!res.ok) throw new Error("Groq " + res.status);
-            const data = await res.json();
-            return data.choices[0].message.content.trim();
-        }
-
-        if (provider === "openai") {
-            const res = await fetch("https://api.openai.com/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${key}`
-                },
-                body: JSON.stringify({
-                    model: "gpt-4o-mini",
-                    messages: [
-                        { role: "system", content: systemPrompt },
-                        ...OS.conversationHistory
-                    ],
-                    temperature: 0.65,
-                    max_tokens: 280
-                })
-            });
-            if (!res.ok) throw new Error("OpenAI " + res.status);
-            const data = await res.json();
-            return data.choices[0].message.content.trim();
-        }
-
-        if (provider === "gemini") {
-            const res = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        contents: [{
-                            role: "user",
-                            parts: [{
-                                text: systemPrompt + "\n\n" +
-                                    OS.conversationHistory.map(m => `${m.role}: ${m.content}`).join("\n")
-                            }]
-                        }],
-                        generationConfig: { temperature: 0.65, maxOutputTokens: 280 }
-                    })
-                }
-            );
-            if (!res.ok) throw new Error("Gemini " + res.status);
-            const data = await res.json();
-            return data.candidates[0].content.parts[0].text.trim();
-        }
-
-        if (provider === "anthropic") {
-            const res = await fetch("https://api.anthropic.com/v1/messages", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": key,
-                    "anthropic-version": "2023-06-01"
-                },
-                body: JSON.stringify({
-                    model: "claude-3-5-haiku-20241022",
-                    max_tokens: 280,
-                    temperature: 0.65,
-                    system: systemPrompt,
-                    messages: OS.conversationHistory.map(m => ({
-                        role: m.role === "assistant" ? "assistant" : "user",
-                        content: m.content
-                    }))
-                })
-            });
-            if (!res.ok) throw new Error("Anthropic " + res.status);
-            const data = await res.json();
-            return data.content[0].text.trim();
-        }
-        return null;
-    }
 
     // ---------- Window Manager ----------
     function createWindow(id, title, contentHTML, opts = {}) {
@@ -1470,9 +1380,9 @@
         } catch (error) {
             activateOrbFallback(error);
         }
-        // ตรวจสอบ Sentinel Core เงียบ ๆ หลังเข้า Desktop
-        checkCoreStatus().then((ok) => {
-            if (ok) toast("Sentinel Core ออนไลน์");
+        // ตรวจสอบ Sentinel เงียบ ๆ หลังเข้า Desktop
+        checkSentinelStatus().then((ok) => {
+            if (ok) toast("Sentinel ออนไลน์");
         });
     }
 
@@ -1520,17 +1430,18 @@
         async function send() {
             const text = input.value.trim();
             if (!text) return;
+            prepareSentinelSpeech();
             input.value = "";
             appendMsg(text, "user");
             appendMsg("กำลังคิด...", "ai", true);
 
             const res = await callAI(text);
             // remove loading
-            const last = messages.querySelector(".msg.loading");
+            const last = messages.querySelector('.msg.loading, .msg[data-streaming="1"]');
             if (last) last.remove();
 
             appendMsg(res.text, "ai", false, res.provider);
-            speak(res.text);
+            if (res.text) speak(res.text);
         }
 
         function appendMsg(text, type, loading = false, provider = null) {
@@ -1589,13 +1500,13 @@
 
     // ---------- App: Settings ----------
     function openSettings() {
-        const coreStatus = OS.coreOnline ? "🟢 Online" : "🔴 Offline";
+        const sentinelStatus = OS.sentinelOnline ? "🟢 Online" : "🔴 Offline";
         const html = `
             <div class="app-content">
                 <div class="settings-section">
-                    <h3>🧠 Sentinel Core (Backend)</h3>
+                    <h3>🧠 Sentinel (Backend)</h3>
                     <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px;">
-                        สถานะ: <strong id="core-status-text">${coreStatus}</strong><br>
+                        สถานะ: <strong id="sentinel-status-text">${sentinelStatus}</strong><br>
                         <span style="font-size:12px;">AI หลักอยู่บนเซิร์ฟเวอร์ — API Key ไม่โผล่ฝั่งผู้ใช้</span>
                     </p>
                     <div class="setting-row">
@@ -1605,34 +1516,13 @@
                     <div class="setting-row">
                         <label>
                             <input type="checkbox" id="use-backend" ${OS.config.useBackend ? "checked" : ""} style="width:auto;margin-right:8px;">
-                            ใช้ Sentinel Core เป็นหลัก
+                            ใช้ Sentinel เป็นหลัก
                         </label>
                     </div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;">
                         <button class="btn-primary" id="save-backend">บันทึก Backend</button>
-                        <button class="btn-primary" id="test-core" style="background:rgba(0,255,204,0.2);color:var(--accent);">ทดสอบการเชื่อมต่อ</button>
+                        <button class="btn-primary" id="test-sentinel" style="background:rgba(0,255,204,0.2);color:var(--accent);">ทดสอบการเชื่อมต่อ</button>
                     </div>
-                </div>
-                <div class="settings-section">
-                    <h3>🔑 API Keys สำรอง (Local Fallback)</h3>
-                    <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">ใช้เมื่อ Backend ยังไม่พร้อมเท่านั้น</p>
-                    <div class="setting-row">
-                        <label>Groq API Key</label>
-                        <input type="password" id="key-groq" placeholder="gsk_..." value="${OS.config.keys.groq}">
-                    </div>
-                    <div class="setting-row">
-                        <label>OpenAI API Key</label>
-                        <input type="password" id="key-openai" placeholder="sk-..." value="${OS.config.keys.openai}">
-                    </div>
-                    <div class="setting-row">
-                        <label>Google Gemini API Key</label>
-                        <input type="password" id="key-gemini" placeholder="AIza..." value="${OS.config.keys.gemini}">
-                    </div>
-                    <div class="setting-row">
-                        <label>Anthropic API Key</label>
-                        <input type="password" id="key-anthropic" placeholder="sk-ant-..." value="${OS.config.keys.anthropic}">
-                    </div>
-                    <button class="btn-primary" id="save-keys">บันทึก API Keys สำรอง</button>
                 </div>
                 <div class="settings-section">
                     <h3>🛡️ Biometric (ไม่บังคับ)</h3>
@@ -1648,7 +1538,7 @@
                     <h3>ℹ️ ระบบ</h3>
                     <p style="font-size:13px;color:var(--text-dim);line-height:1.6;">
                         Panthorium OS v${OS.version}<br>
-                        สถาปัตยกรรม: Frontend + Sentinel Core Backend<br>
+                        สถาปัตยกรรม: Frontend + Sentinel Backend<br>
                         รองรับ: คอมพิวเตอร์ · แท็บเล็ต · สมาร์ทโฟน<br>
                         <strong style="color:var(--accent);">ใช้งานฟรีทันที ไม่ต้อง login</strong>
                     </p>
@@ -1665,23 +1555,15 @@
             localStorage.setItem("pt_backend_url", url);
             localStorage.setItem("pt_use_backend", use ? "1" : "0");
             toast("บันทึกการตั้งค่า Backend แล้ว");
-            checkCoreStatus();
+            checkSentinelStatus();
         };
 
-        $("test-core").onclick = async () => {
-            toast("กำลังทดสอบ Sentinel Core...");
-            const ok = await checkCoreStatus();
-            const el = $("core-status-text");
+        $("test-sentinel").onclick = async () => {
+            toast("กำลังทดสอบ Sentinel...");
+            const ok = await checkSentinelStatus();
+            const el = $("sentinel-status-text");
             if (el) el.textContent = ok ? "🟢 Online" : "🔴 Offline";
-            toast(ok ? "เชื่อมต่อ Sentinel Core สำเร็จ" : "เชื่อมต่อไม่ได้ — ตรวจ URL หรือเปิด Backend");
-        };
-
-        $("save-keys").onclick = () => {
-            ["groq", "openai", "gemini", "anthropic"].forEach(p => {
-                const el = $("key-" + p);
-                if (el) el.value = "";
-            });
-            toast("เพื่อความปลอดภัย API Keys ต้องตั้งค่าที่ Backend ผ่าน Environment Variables");
+            toast(ok ? "เชื่อมต่อ Sentinel สำเร็จ" : "เชื่อมต่อไม่ได้ — ตรวจ URL หรือเปิด Backend");
         };
 
         $("enroll-bio").onclick = async () => {
