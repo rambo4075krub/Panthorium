@@ -41,7 +41,8 @@ class SentinelCore {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message });
     const trainingContext = this.training ? await this.training.contextFor(message) : '';
-    const result = await this.gateway.complete({ systemPrompt: this.prompts.build(mode) + trainingContext, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid });
+    const languageGuard = "\n\nข้อกำหนดสุดท้าย: คำตอบที่ส่งกลับผู้ใช้ต้องเป็นภาษาไทยเท่านั้น หากคำถามเป็นภาษาอังกฤษให้แปลความเข้าใจแล้วตอบภาษาไทย เว้นแต่ผู้ใช้ระบุให้ตอบอังกฤษโดยตรง";
+    const result = await this.gateway.complete({ systemPrompt: this.prompts.build(mode) + trainingContext + languageGuard, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid });
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });
     this.captureTraining({message,result,userId,sessionId:prepared.sid});
     return result.ok ? { ...result, sessionId: prepared.sid, core: "Sentinel Core" } : result;
@@ -50,7 +51,8 @@ class SentinelCore {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message });
     const trainingContext = this.training ? await this.training.contextFor(message) : '';
-    const result = await this.gateway.stream({ systemPrompt: this.prompts.build(mode) + trainingContext, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, onDelta, onProvider });
+    const languageGuard = "\n\nข้อกำหนดสุดท้าย: คำตอบที่ส่งกลับผู้ใช้ต้องเป็นภาษาไทยเท่านั้น หากคำถามเป็นภาษาอังกฤษให้แปลความเข้าใจแล้วตอบภาษาไทย เว้นแต่ผู้ใช้ระบุให้ตอบอังกฤษโดยตรง";
+    const result = await this.gateway.stream({ systemPrompt: this.prompts.build(mode) + trainingContext + languageGuard, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, onDelta, onProvider });
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });
     this.captureTraining({message,result,userId,sessionId:prepared.sid});
     return result.ok ? { ...result, sessionId: prepared.sid, core: "Sentinel Core" } : result;
