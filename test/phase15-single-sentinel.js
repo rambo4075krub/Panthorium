@@ -77,7 +77,7 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('audio.ontimeupdate = () => updateTranscript(false)'), 'remote Andrew audio must advance the current transcript on desktop and mobile');
   assert(shell.includes('showOrbTranscriptForChar(charIndex)'), 'speech progress must move the active sentence into the center transcript row');
   assert(shell.includes('transcriptStartChar, transcriptEndChar'), 'each synthesized chunk must retain its position in the complete transcript');
-  assert(fs.readFileSync('services/sentinelSpeechAudio.js', 'utf8').includes('lang === "en-US" ? "-2%" : "+13%"'), 'Andrew must speak English slowly while keeping Thai slightly faster');
+  assert(fs.readFileSync('services/sentinelSpeechAudio.js', 'utf8').includes('lang === "en-US" ? "-2%" : "+10%"'), 'Andrew must speak English slowly while keeping Thai at the approved speed');
   assert(shell.includes('voice: voiceMode'), 'voice commands must identify the low-latency voice path');
   assert(api.includes('voiceMode: voice === true'), 'the speech flag must reach Sentinel without exposing an admin mode');
   assert(sentinelService.includes('historyLimit: voiceMode ? 12 : 40'), 'voice commands must use bounded recent context for faster processing');
