@@ -1066,8 +1066,23 @@
     }
 
     function splitSpeechByLanguage(text) {
-        const chunks = String(text || "").match(/[^.!?。！？…]+[.!?。！？…]?/g) || [String(text || "")];
-        return chunks.map(chunk => ({ text: chunk.trim(), lang: languageForText(chunk) })).filter(chunk => chunk.text);
+        const source = String(text || "").replace(/\s+/g, " ").trim();
+        if (!source) return [];
+        // Split inside a sentence when the script changes (Thai + English + 日本語, etc.).
+        // The previous implementation classified the whole sentence by its first script.
+        const tokens = source.match(/[\u0E00-\u0E7F]+|[\u3040-\u30FF]+|[\uAC00-\uD7AF]+|[\u0600-\u06FF]+|[\u0400-\u04FF]+|[\u4E00-\u9FFF]+|[A-Za-zÀ-ÿ]+|[0-9]+|[^\p{L}\p{N}]+/gu) || [source];
+        const chunks = [];
+        for (const token of tokens) {
+            if (/^[\s\p{P}\p{S}\d]+$/u.test(token) && chunks.length) {
+                chunks[chunks.length - 1].text += token;
+                continue;
+            }
+            const lang = languageForText(token);
+            const last = chunks[chunks.length - 1];
+            if (last && last.lang === lang && !/[.!?。！？…]$/.test(last.text)) last.text += token;
+            else chunks.push({ text: token, lang });
+        }
+        return chunks.map(chunk => ({ ...chunk, text: chunk.text.trim() })).filter(chunk => chunk.text);
     }
 
     function voiceForLanguage(lang, voices) {
