@@ -8,7 +8,7 @@ Browser / sentinel.html
   -> Express API
        -> Auth + Permission middleware
        -> Rate limit + Validation + Audit
-       -> Sentinel Core
+       -> Sentinel
             -> SessionManager
             -> PromptManager
             -> ProviderManager

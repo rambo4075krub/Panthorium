@@ -6,14 +6,14 @@ const { AgentService } = require('../services/agentService');
   const policy = new AgentPolicyService();
   const low = { id: 'read', permission: 'chat', risk: 'low', mutates: false, run: async () => 'ok' };
   const high = { id: 'delete', permission: 'chat', risk: 'high', mutates: true, requiresConfirmation: true, run: async () => 'deleted' };
-  const critical = { id: 'security.block_ip', permission: 'core:command', risk: 'critical', mutates: true, requiresConfirmation: true, run: async () => 'blocked' };
+  const critical = { id: 'security.block_ip', permission: 'sentinel:command', risk: 'critical', mutates: true, requiresConfirmation: true, run: async () => 'blocked' };
   const map = new Map([['read', low], ['delete', high], ['security.block_ip', critical]]);
   const tools = { get: id => map.get(id) || null, catalog: () => [...map.values()].map(({ run, ...tool }) => tool) };
   const events = [];
   const agent = new AgentService({ tools, policy, audit: { record: (event, data) => events.push({ event, data }) } });
 
   const chatUser = { sub: 'u1', permissions: ['chat'] };
-  const admin = { sub: 'admin', permissions: ['chat', 'core:command'] };
+  const admin = { sub: 'admin', permissions: ['chat', 'sentinel:command'] };
   assert.equal((await agent.execute({ user: chatUser, toolId: 'read' })).ok, true);
   assert.equal((await agent.execute({ user: chatUser, toolId: 'delete' })).error, 'confirmation_required');
   assert.equal((await agent.execute({ user: chatUser, toolId: 'delete', confirmed: true })).ok, true);

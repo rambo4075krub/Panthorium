@@ -77,6 +77,12 @@
             transition: width 0.3s ease;
         }
         .boot-status { margin-top: 16px; font-size: 12px; color: var(--text-dim); }
+        #global-voice { position: fixed; right: 18px; bottom: 68px; z-index: 10020; width: 48px; height: 48px; border: 1px solid var(--accent); border-radius: 50%; background: rgba(5,18,24,.9); color: var(--accent); font-size: 22px; cursor: pointer; box-shadow: 0 0 18px rgba(0,255,204,.25); }
+        #global-voice.listening { background: var(--danger); border-color: #ff9aaa; color: #fff; animation: pulse-mic 1s infinite; }
+        #global-voice.processing { border-color: #ffd166; color: #ffd166; }
+        #voice-status-box { display: grid; gap: 4px; padding: 8px 12px 0; pointer-events: none; }
+        .voice-status-row { min-height: 22px; padding: 3px 10px; border: 1px solid rgba(120,220,255,.18); border-radius: 6px; background: rgba(2,10,18,.72); color: #9fb5c8; font: 12px/1.3 Consolas, monospace; text-align: center; opacity: .72; }
+        .voice-status-row.active { color: var(--accent); border-color: rgba(0,255,204,.48); opacity: 1; }
 
         /* ========== LOGIN ========== */
         #login-screen {
@@ -672,6 +678,7 @@
 </head>
 <body>
     <video id="faceVideo" autoplay muted playsinline></video>
+    <button id="global-voice" type="button" aria-label="สั่งงานด้วยเสียง" title="กดเพื่อพูด">🎤</button>
 
     <!-- BOOT -->
     <div id="boot-screen">
@@ -736,7 +743,7 @@
 
     <script>
     // =========================================================
-    // Panthorium OS - Core Kernel
+    // Panthorium OS - Sentinel Runtime
     // =========================================================
     const OS = {
         version: "1.1.0",
@@ -747,14 +754,12 @@
             verified: false
         },
         config: {
-            // Backend / Sentinel Core
+            // Backend / Sentinel
             backendUrl: localStorage.getItem("pt_backend_url") || window.location.origin,
             useBackend: localStorage.getItem("pt_use_backend") !== "0",
             sessionId: localStorage.getItem("pt_session_id") || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
             // Access token stays in memory only; provider secrets remain server-side.
-            accessToken: "",
-            aiPriority: ["groq", "openai", "gemini", "anthropic"],
-            keys: { groq: "", openai: "", gemini: "", anthropic: "" }
+            accessToken: ""
         },
         biometrics: {
             faceDescriptor: null,
@@ -765,7 +770,7 @@
         windows: new Map(),
         zCounter: 100,
         apps: {},
-        coreOnline: false
+        sentinelOnline: false
     };
 
     // เก็บ session ถาวร
@@ -805,6 +810,7 @@
 
     // ---------- Boot Sequence ----------
     async function boot() {
+        if (OS.state.booted) return;
         const bar = $("boot-bar");
         const status = $("boot-status");
         const steps = [
@@ -820,8 +826,8 @@
             await new Promise(r => setTimeout(r, 220 + Math.random() * 150));
         }
         await new Promise(r => setTimeout(r, 300));
-        $("boot-screen").classList.add("hidden");
-        setTimeout(() => {
+        const finishBoot = () => {
+            if (OS.state.booted) return;
             $("boot-screen").style.display = "none";
             // เข้าสู่ระบบฟรีทันที ไม่ต้อง login
             $("login-screen").style.display = "none";
@@ -829,10 +835,24 @@
             OS.state.booted = true;
             OS.state.loggedIn = true;
             OS.state.verified = true;
-            initDesktop();
+            try { initDesktop(); } catch (error) { console.error("Desktop initialization failed", error); activateOrbFallback(error); }
+            try { initGlobalVoice(); } catch (error) { console.error("Voice initialization failed", error); }
             toast("ยินดีต้อนรับสู่ Panthorium OS");
-        }, 600);
+        };
+        $("boot-screen").classList.add("hidden");
+        setTimeout(finishBoot, 120);
+        // A failed animation/WebGL initialization must never leave the OS on boot.
+        setTimeout(() => {
+            if (!OS.state.booted) finishBoot();
+        }, 3500);
     }
+
+    window.addEventListener("error", event => {
+        if (!OS.state.booted) {
+            console.error("Boot runtime error", event.error || event.message);
+            try { boot(); } catch (_) {}
+        }
+    });
 
     // ---------- Biometrics ----------
     let faceModelsLoaded = false;
@@ -1045,40 +1065,415 @@
         renderOrbTranscript();
     }
 
-    function speak(text) {
+    function languageForText(text) {
+        const value = String(text || "");
+        if (/[฀-๿]/.test(value)) return "th-TH";
+        if (/[぀-ヿ]/.test(value)) return "ja-JP";
+        if (/[가-힯]/.test(value)) return "ko-KR";
+        if (/[؀-ۿ]/.test(value)) return "ar-SA";
+        if (/[Ѐ-ӿ]/.test(value)) return "ru-RU";
+        if (/[一-鿿]/.test(value)) return "zh-CN";
+        if (/[A-Za-zÀ-ÿ]/.test(value)) return "en-US";
+        return "en-US";
+    }
+
+    function splitSpeechByLanguage(text) {
+        const source = String(text || "").replace(/\s+/g, " ").trim();
+        if (!source) return [];
+        // Split inside a sentence when the script changes (Thai + English + 日本語, etc.).
+        // The previous implementation classified the whole sentence by its first script.
+        const tokens = source.match(/[\u0E00-\u0E7F]+|[\u3040-\u30FF]+|[\uAC00-\uD7AF]+|[\u0600-\u06FF]+|[\u0400-\u04FF]+|[\u4E00-\u9FFF]+|[A-Za-zÀ-ÿ]+|[0-9]+|[^\p{L}\p{N}]+/gu) || [source];
+        const chunks = [];
+        for (const token of tokens) {
+            if (/^[\s\p{P}\p{S}\d]+$/u.test(token) && chunks.length) {
+                chunks[chunks.length - 1].text += token;
+                continue;
+            }
+            const lang = languageForText(token);
+            const last = chunks[chunks.length - 1];
+            if (last && last.lang === lang && !/[.!?。！？…]$/.test(last.text)) last.text += token;
+            else chunks.push({ text: token, lang });
+        }
+        return chunks.map(chunk => ({ ...chunk, text: chunk.text.trim() })).filter(chunk => chunk.text).flatMap(chunk => {
+            const pieces = [];
+            let remaining = chunk.text;
+            while (remaining.length > 170) {
+                let cut = remaining.lastIndexOf(" ", 170);
+                if (cut < 80) cut = 170;
+                pieces.push({ text: remaining.slice(0, cut).trim(), lang: chunk.lang });
+                remaining = remaining.slice(cut).trim();
+            }
+            if (remaining) pieces.push({ text: remaining, lang: chunk.lang });
+            return pieces;
+        });
+    }
+
+    function voiceForLanguage(lang, voices) {
+        const base = lang.split("-")[0].toLowerCase();
+        const matching = voices.filter(v => v.lang.toLowerCase() === lang.toLowerCase() || v.lang.toLowerCase().startsWith(base + "-"));
+        const deepVoiceNames = /pattara|niwat|male|man|ชาย|david|mark|guy|daniel|aaron|arthur|oliver|thomas|alex|jorge|paul|fred|ralph/i;
+        const femaleVoiceNames = /premwadee|narisa|kanya|female|woman|หญิง|samantha|zira|susan|victoria|karen|moira|tessa|ava|allison/i;
+        const ranked = matching.filter(voice => !femaleVoiceNames.test(voice.name)).sort((a, b) => {
+            const score = voice => (voice.lang.toLowerCase() === lang.toLowerCase() ? 4 : 0) + (deepVoiceNames.test(voice.name) ? 12 : 0) + (voice.localService ? 1 : 0);
+            return score(b) - score(a);
+        });
+        const confirmedMale = ranked.find(voice => deepVoiceNames.test(voice.name));
+        // Thai voice lists frequently contain only an unlabelled female voice.
+        // Use the pitch-lowered Sentinel fallback unless a male voice is explicit.
+        if (base === "th") return confirmedMale || null;
+        return confirmedMale || ranked[0] || null;
+    }
+
+    function loadSpeechVoices() {
+        const current = speechSynthesis.getVoices();
+        if (current.length) return Promise.resolve(current);
+        return new Promise(resolve => {
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                speechSynthesis.removeEventListener("voiceschanged", finish);
+                resolve(speechSynthesis.getVoices());
+            };
+            speechSynthesis.addEventListener("voiceschanged", finish);
+            setTimeout(finish, 1200);
+        });
+    }
+
+    const voiceAudio = new Audio();
+    let voiceAudioUnlocked = false;
+    let activeSpeechRun = 0;
+    function unlockVoiceAudio() {
+        if (voiceAudioUnlocked) return;
+        voiceAudio.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAAA";
+        voiceAudio.volume = 0;
+        voiceAudio.play().then(() => { voiceAudio.pause(); voiceAudio.currentTime = 0; voiceAudioUnlocked = true; }).catch(() => {});
+    }
+
+    function speakRemoteChunk(text, lang) {
+        return new Promise(resolve => {
+            const audio = voiceAudio;
+            let settled = false;
+            let objectUrl = "";
+            const controller = new AbortController();
+            const finish = value => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                controller.abort();
+                audio.pause();
+                audio.onended = null;
+                audio.onerror = null;
+                if (objectUrl) URL.revokeObjectURL(objectUrl);
+                resolve(value);
+            };
+            const timeout = setTimeout(() => {
+                finish(false);
+            }, Math.max(12000, Math.min(30000, String(text).length * 180)));
+            (async () => {
+                try {
+                    if (!OS.config.accessToken && !(await ensureAuth())) { finish(false); return; }
+                    const base = OS.config.backendUrl.replace(/\/$/, "");
+                    const response = await fetch(base + "/api/speech", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", Authorization: `Bearer ${OS.config.accessToken}` },
+                        credentials: "include",
+                        body: JSON.stringify({ text: String(text).slice(0, 180), lang }),
+                        signal: controller.signal
+                    });
+                    if (!response.ok || settled) { finish(false); return; }
+                    const blob = await response.blob();
+                    if (!blob.size || settled) { finish(false); return; }
+                    objectUrl = URL.createObjectURL(blob);
+                    audio.pause();
+                    audio.currentTime = 0;
+                    audio.src = objectUrl;
+                    audio.preload = "auto";
+                    audio.volume = 1;
+                    // Pitch and tone are transformed server-side; keep playback
+                    // brisk here without changing the new male register.
+                    audio.playbackRate = 1.0;
+                    if ("preservesPitch" in audio) audio.preservesPitch = true;
+                    if ("mozPreservesPitch" in audio) audio.mozPreservesPitch = true;
+                    if ("webkitPreservesPitch" in audio) audio.webkitPreservesPitch = true;
+                    audio.onended = () => finish(true);
+                    audio.onerror = () => finish(false);
+                    await audio.play();
+                } catch (_) { finish(false); }
+            })();
+        });
+    }
+
+    function voiceSafeText(text) {
+        const value = String(text || "").replace(/\s*(?:ครับ|ค่ะ|คะ)(?=\s|[,.!?;:…。、]|$)/g, "").trim();
+        if (/ข้อความเท่านั้น|ไม่มีเสียงพูด|ไม่สามารถพูด|ไม่มีระบบเสียง/i.test(value)) {
+            return "รับทราบ ระบบพร้อมรับคำสั่งเสียงและตอบกลับด้วยเสียงแล้ว กรุณาพูดคำสั่งได้เลย";
+        }
+        return value;
+    }
+
+    function speakNativeChunk(chunk, voice, speechRun) {
+        return new Promise(resolve => {
+            if (!window.speechSynthesis || speechRun !== activeSpeechRun) { resolve(false); return; }
+            const u = new SpeechSynthesisUtterance(chunk.text);
+            let settled = false;
+            let started = false;
+            const finish = value => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(startWatchdog);
+                resolve(value);
+            };
+            u.lang = voice?.lang || chunk.lang;
+            u.voice = voice || null;
+            // Sentinel voice: low, calm and deliberate, similar to a cinematic AI.
+            u.pitch = 0.9;
+            u.rate = 1.02;
+            u.onstart = () => { started = true; };
+            u.onboundary = event => {
+                aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
+                window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex: event.charIndex } }));
+                let index = 0;
+                for (let i = 0; i < orbTranscriptOffsets.length; i++) if (event.charIndex >= orbTranscriptOffsets[i]) index = i;
+                showOrbTranscriptSentence(index);
+            };
+            u.onend = () => finish(true);
+            u.onerror = () => finish(false);
+            // Desktop Chromium can accept an utterance without ever starting it.
+            // Detect that silent failure so the remote audio fallback can take over.
+            const startWatchdog = setTimeout(() => {
+                if (!started) {
+                    try { window.speechSynthesis.cancel(); } catch (_) {}
+                    finish(false);
+                }
+            }, 1800);
+            try {
+                window.speechSynthesis.resume();
+                window.speechSynthesis.speak(u);
+            } catch (_) { finish(false); }
+        });
+    }
+
+    async function speak(text) {
+        text = voiceSafeText(text);
         setOrbTranscript(text, 0);
-        if (!window.speechSynthesis) return;
-        window.speechSynthesis.cancel();
-        aiSpeechActive = false;
-        aiSpeechPulse = 0;
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = "th-TH";
-        u.pitch = 0.6;
-        u.rate = 0.9;
-        const voices = speechSynthesis.getVoices();
-        const th = voices.find(v => v.lang.includes("th"));
-        if (th) u.voice = th;
-        u.onstart = () => {
-            aiSpeechActive = true;
-            aiSpeechPulse = 1;
-            window.PanthoriumOrb?.setAISpeaking(true);
-            window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text } }));
-        };
-        u.onboundary = event => {
-            aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
-            window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex: event.charIndex } }));
-            let index = 0;
-            for (let i = 0; i < orbTranscriptOffsets.length; i++) if (event.charIndex >= orbTranscriptOffsets[i]) index = i;
-            showOrbTranscriptSentence(index);
-        };
-        const stopSpeechMotion = () => {
+        const speechRun = ++activeSpeechRun;
+        const chunks = splitSpeechByLanguage(text);
+        if (!chunks.length) return false;
+        let voices = [];
+        if (window.speechSynthesis) {
+            voices = await loadSpeechVoices();
+            window.speechSynthesis.cancel();
+        }
+        voiceAudio.pause();
+        await new Promise(resolve => setTimeout(resolve, 80));
+        if (speechRun !== activeSpeechRun) return false;
+        aiSpeechActive = true;
+        aiSpeechPulse = 1;
+        window.PanthoriumOrb?.setAISpeaking(true);
+        window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text } }));
+        let spokeAny = false;
+        for (const chunk of chunks) {
+            if (speechRun !== activeSpeechRun) break;
+            const voice = voiceForLanguage(chunk.lang, voices);
+            let spoken = false;
+            if (!voice && chunk.lang !== "en-US") {
+                spoken = await speakRemoteChunk(chunk.text, chunk.lang);
+            }
+            if (!spoken) spoken = await speakNativeChunk(chunk, voice, speechRun);
+            if (!spoken && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang);
+            spokeAny = spokeAny || spoken;
+        }
+        if (speechRun === activeSpeechRun) {
             aiSpeechActive = false;
+            aiSpeechPulse = 0;
             window.PanthoriumOrb?.setAISpeaking(false);
             window.dispatchEvent(new CustomEvent("panthorium:voice-end"));
+        }
+        return spokeAny;
+    }
+
+    // Browsers may keep speech synthesis paused until the first user gesture.
+    window.addEventListener("pointerdown", () => {
+        unlockVoiceAudio();
+        try { window.speechSynthesis?.resume(); } catch (_) {}
+    }, { once: false, passive: true });
+
+    // Stream-safe speech: callers can send deltas without cutting a word or changing voices mid-sentence.
+    let streamingSpeechBuffer = "";
+    let streamingSpeechTimer = null;
+    window.addEventListener("panthorium:ai-stream-delta", event => {
+        streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
+        clearTimeout(streamingSpeechTimer);
+        streamingSpeechTimer = setTimeout(() => {
+            const match = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…])(?:\s|$)/);
+            if (match) { speak(match[1]); streamingSpeechBuffer = streamingSpeechBuffer.slice(match[1].length).trimStart(); }
+        }, 180);
+    });
+    window.addEventListener("panthorium:ai-stream-end", () => {
+        clearTimeout(streamingSpeechTimer);
+        if (streamingSpeechBuffer.trim()) speak(streamingSpeechBuffer);
+        streamingSpeechBuffer = "";
+    });
+
+    // Global voice path: accepts commands without opening Sentinel chat.
+    function initGlobalVoice() {
+        const button = $("global-voice");
+        if (!button || button.dataset.ready) return;
+        button.dataset.ready = "1";
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        let autoResume = true;
+        let voiceState = "idle";
+        let silenceTimer = null;
+        let transcriptParts = new Map();
+        let latestInterim = "";
+        const status = (kind, label) => {
+            button.classList.toggle("listening", kind === "listening");
+            button.classList.toggle("processing", kind === "processing");
+            button.textContent = kind === "listening" ? "⏹" : kind === "processing" ? "⏳" : "🎤";
+            button.title = label;
+            document.querySelectorAll("[data-voice-status]").forEach(row => row.classList.remove("active"));
+            const row = document.querySelector(`[data-voice-status="${kind === "listening" ? "listening" : kind === "processing" ? "processing" : "error"}"]`);
+            if (row) { row.classList.add("active"); row.textContent = label; }
+            if (kind !== "listening" || label !== "กำลังฟัง") toast(label, kind === "processing" ? 6000 : 2500);
         };
-        u.onend = stopSpeechMotion;
-        u.onerror = stopSpeechMotion;
-        speechSynthesis.speak(u);
+        if (!SR) {
+            status("unsupported", "ไม่รองรับคำสั่ง");
+            button.onclick = () => status("unsupported", "ไม่รองรับคำสั่ง");
+            return;
+        }
+        recognition = new SR();
+        recognition.lang = "th-TH";
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.onstart = () => {
+            voiceState = "listening";
+            transcriptParts = new Map();
+            latestInterim = "";
+            userSpeechActive = true;
+            window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
+            status("listening", "กำลังฟัง...");
+        };
+        const restartListening = () => {
+            if (!autoResume || voiceState !== "idle") return;
+            setTimeout(() => {
+                if (!autoResume || voiceState !== "idle") return;
+                try { recognition.start(); } catch { status("unresponsive", "ไม่ตอบสนอง"); }
+            }, 350);
+        };
+        const processTranscript = async text => {
+            voiceState = "processing";
+            status("processing", "กำลังประมวลผล");
+            try {
+                const res = await callAI(text);
+                if (!res || !res.ok || !res.text) {
+                    status("unresponsive", "ไม่ตอบสนอง");
+                    voiceState = "speaking";
+                    await speak("ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง");
+                    return;
+                }
+                voiceState = "speaking";
+                status("processing", "Sentinel กำลังพูด...");
+                await speak(res.text);
+                status("ready", "พร้อมใช้งาน");
+            } catch (error) {
+                console.warn("Global voice command failed", error);
+                status("unresponsive", "ไม่ตอบสนอง");
+                voiceState = "speaking";
+                await speak("ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง");
+            } finally {
+                voiceState = "idle";
+                restartListening();
+            }
+        };
+        const finishListening = () => {
+            if (voiceState !== "listening") return;
+            clearTimeout(silenceTimer);
+            voiceState = "stopping";
+            status("processing", "ฟังจบแล้ว กำลังเตรียมประมวลผล");
+            try { recognition.stop(); } catch (_) {}
+        };
+        recognition.onresult = event => {
+            if (voiceState !== "listening" && voiceState !== "stopping") return;
+            latestInterim = "";
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const result = event.results[i];
+                const value = String(result?.[0]?.transcript || "").trim();
+                if (!value) continue;
+                if (result.isFinal) transcriptParts.set(i, value);
+                else latestInterim = value;
+            }
+            if (voiceState === "listening") {
+                clearTimeout(silenceTimer);
+                // Wait for a real pause instead of treating the first final phrase as the whole command.
+                silenceTimer = setTimeout(finishListening, 1400);
+            }
+        };
+        recognition.onerror = event => {
+            userSpeechActive = false;
+            const permissionDenied = event.error === "not-allowed" || event.error === "service-not-allowed";
+            if (permissionDenied) autoResume = false;
+            if (voiceState !== "processing" && voiceState !== "speaking") voiceState = "idle";
+            status(permissionDenied ? "unsupported" : "unresponsive", permissionDenied ? "ไม่รองรับคำสั่ง" : "ไม่ตอบสนอง");
+        };
+        recognition.onend = () => {
+            clearTimeout(silenceTimer);
+            userSpeechActive = false;
+            window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
+            if (voiceState === "stopping") {
+                const text = [...transcriptParts.values()].join(" ").trim() || latestInterim.trim();
+                latestInterim = "";
+                transcriptParts.clear();
+                if (text) {
+                    window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
+                    processTranscript(text);
+                    return;
+                }
+                voiceState = "idle";
+                status("ready", "พร้อมใช้งาน");
+                restartListening();
+                return;
+            }
+            if (voiceState === "listening") voiceState = "idle";
+            restartListening();
+        };
+        button.onclick = () => {
+            unlockVoiceAudio();
+            try { window.speechSynthesis?.resume(); } catch (_) {}
+            if (voiceState === "processing" || voiceState === "speaking" || voiceState === "stopping") {
+                status("processing", voiceState === "speaking" ? "Sentinel กำลังพูด..." : "กำลังประมวลผล");
+                return;
+            }
+            if (voiceState === "listening") {
+                autoResume = false;
+                clearTimeout(silenceTimer);
+                voiceState = "idle";
+                recognition.stop();
+                status("ready", "หยุดฟังแล้ว");
+                return;
+            }
+            autoResume = true;
+            try { recognition.start(); } catch { status("unresponsive", "ไม่ตอบสนอง"); }
+        };
+        window.PanthoriumVoice = {
+            pause() {
+                autoResume = false;
+                clearTimeout(silenceTimer);
+                if (voiceState === "listening" || voiceState === "stopping") {
+                    voiceState = "idle";
+                    try { recognition.stop(); } catch (_) {}
+                }
+            },
+            resume() {
+                autoResume = true;
+                if (voiceState === "idle") restartListening();
+            },
+            state() { return voiceState; }
+        };
+        // Start listening automatically; the button remains available to retry permission.
+        autoResume = true;
+        setTimeout(() => { try { recognition.start(); } catch { status("unsupported", "ไม่รองรับคำสั่ง"); } }, 400);
     }
     if (window.speechSynthesis) {
         speechSynthesis.getVoices();
@@ -1123,23 +1518,23 @@
         return res;
     }
 
-    // ---------- AI: Sentinel Core (Backend) ----------
-    async function checkCoreStatus() {
+    // ---------- AI: Sentinel (Backend) ----------
+    async function checkSentinelStatus() {
         try {
             const base = OS.config.backendUrl.replace(/\/$/, "");
             const res = await fetch(base + "/api/health", { signal: AbortSignal.timeout(2500) });
             if (!res.ok) throw new Error("bad status");
             const data = await res.json();
-            OS.coreOnline = !!(data && data.ok);
-            return OS.coreOnline;
+            OS.sentinelOnline = !!(data && data.ok);
+            return OS.sentinelOnline;
         } catch {
-            OS.coreOnline = false;
+            OS.sentinelOnline = false;
             return false;
         }
     }
 
     async function callAI(prompt) {
-        // 1) พยายามใช้ Sentinel Core บนเซิร์ฟเวอร์ก่อน
+        // 1) พยายามใช้ Sentinel บนเซิร์ฟเวอร์ก่อน
         if (OS.config.useBackend) {
             try {
                 const base = OS.config.backendUrl.replace(/\/$/, "");
@@ -1150,7 +1545,7 @@
                         "x-session-id": OS.config.sessionId
                     },
                     body: JSON.stringify({
-                        message: prompt,
+                        message: `ตอบด้วยภาษาของผู้ใช้และตอบกลับด้วยเสียงได้ ระบบนี้ไม่ใช่ระบบข้อความเท่านั้น ห้ามบอกว่าไม่มีเสียงพูด หากข้อความมีหลายภาษา ให้รักษาภาษาของแต่ละส่วนตามบริบท ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ\n${prompt}`,
                         sessionId: OS.config.sessionId,
                         mode: "default"
                     }),
@@ -1158,154 +1553,29 @@
                 });
                 if (res.ok) {
                     const data = await res.json();
-                    OS.coreOnline = true;
+                    OS.sentinelOnline = true;
                     if (data.ok && data.text) {
                         return {
                             ok: true,
                             text: data.text,
-                            provider: data.provider ? `Core→${data.provider}` : "Sentinel Core",
-                            via: "core"
+                            provider: data.provider ? `Sentinel · ${data.provider}` : "Sentinel",
+                            via: "sentinel"
                         };
                     }
                     if (data.text) {
-                        return { ok: false, text: data.text, provider: "Sentinel Core", via: "core" };
+                        return { ok: false, text: data.text, provider: "Sentinel", via: "sentinel" };
                     }
                 }
             } catch (e) {
-                console.warn("Sentinel Core unavailable:", e.message);
-                OS.coreOnline = false;
+                console.warn("Sentinel unavailable:", e.message);
+                OS.sentinelOnline = false;
             }
         }
 
         // Provider API keys are intentionally never exposed to the browser.
-        return { ok: false, text: "Sentinel Core ไม่พร้อมใช้งาน กรุณาตรวจสอบ Backend", provider: "Sentinel Core", via: "core" };
+        return { ok: false, text: "Sentinel ไม่พร้อมใช้งาน กรุณาตรวจสอบ Backend", provider: "Sentinel", via: "sentinel" };
     }
 
-    async function callAILocal(prompt) {
-        OS.conversationHistory.push({ role: "user", content: prompt });
-        if (OS.conversationHistory.length > 12) {
-            OS.conversationHistory = OS.conversationHistory.slice(-12);
-        }
-
-        const systemPrompt = `คุณคือ Sentinel AI ผู้ช่วยอัจฉริยะของระบบปฏิบัติการ Panthorium OS
-พูดด้วยน้ำเสียงมั่นใจ สุภาพ และมีอำนาจเล็กน้อย เหมือน AI จาก Transformers
-ตอบเป็นภาษาไทย กระชับ ชัดเจน เป็นประโยชน์
-ห้ามตอบยาวเกินไป (ไม่เกิน 3-4 ประโยค เว้นแต่ถูกถามรายละเอียด)`;
-
-        for (const provider of OS.config.aiPriority) {
-            const key = OS.config.keys[provider];
-            if (!key) continue;
-            try {
-                const answer = await callProviderLocal(provider, key, systemPrompt);
-                if (answer) {
-                    OS.conversationHistory.push({ role: "assistant", content: answer });
-                    return { ok: true, text: answer, provider: provider + " (local)", via: "local" };
-                }
-            } catch (e) {
-                console.warn(provider, e.message);
-            }
-        }
-        return {
-            ok: false,
-            text: "ไม่สามารถเชื่อมต่อ AI ได้ — เปิด Backend (Sentinel Core) หรือใส่ API Key ในตั้งค่า",
-            provider: null,
-            via: "none"
-        };
-    }
-
-    async function callProviderLocal(provider, key, systemPrompt) {
-        if (provider === "groq") {
-            const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${key}`
-                },
-                body: JSON.stringify({
-                    model: "llama-3.1-8b-instant",
-                    messages: [
-                        { role: "system", content: systemPrompt },
-                        ...OS.conversationHistory
-                    ],
-                    temperature: 0.65,
-                    max_tokens: 280
-                })
-            });
-            if (!res.ok) throw new Error("Groq " + res.status);
-            const data = await res.json();
-            return data.choices[0].message.content.trim();
-        }
-
-        if (provider === "openai") {
-            const res = await fetch("https://api.openai.com/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${key}`
-                },
-                body: JSON.stringify({
-                    model: "gpt-4o-mini",
-                    messages: [
-                        { role: "system", content: systemPrompt },
-                        ...OS.conversationHistory
-                    ],
-                    temperature: 0.65,
-                    max_tokens: 280
-                })
-            });
-            if (!res.ok) throw new Error("OpenAI " + res.status);
-            const data = await res.json();
-            return data.choices[0].message.content.trim();
-        }
-
-        if (provider === "gemini") {
-            const res = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        contents: [{
-                            role: "user",
-                            parts: [{
-                                text: systemPrompt + "\n\n" +
-                                    OS.conversationHistory.map(m => `${m.role}: ${m.content}`).join("\n")
-                            }]
-                        }],
-                        generationConfig: { temperature: 0.65, maxOutputTokens: 280 }
-                    })
-                }
-            );
-            if (!res.ok) throw new Error("Gemini " + res.status);
-            const data = await res.json();
-            return data.candidates[0].content.parts[0].text.trim();
-        }
-
-        if (provider === "anthropic") {
-            const res = await fetch("https://api.anthropic.com/v1/messages", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": key,
-                    "anthropic-version": "2023-06-01"
-                },
-                body: JSON.stringify({
-                    model: "claude-3-5-haiku-20241022",
-                    max_tokens: 280,
-                    temperature: 0.65,
-                    system: systemPrompt,
-                    messages: OS.conversationHistory.map(m => ({
-                        role: m.role === "assistant" ? "assistant" : "user",
-                        content: m.content
-                    }))
-                })
-            });
-            if (!res.ok) throw new Error("Anthropic " + res.status);
-            const data = await res.json();
-            return data.content[0].text.trim();
-        }
-        return null;
-    }
 
     // ---------- Window Manager ----------
     function createWindow(id, title, contentHTML, opts = {}) {
@@ -1470,9 +1740,9 @@
         } catch (error) {
             activateOrbFallback(error);
         }
-        // ตรวจสอบ Sentinel Core เงียบ ๆ หลังเข้า Desktop
-        checkCoreStatus().then((ok) => {
-            if (ok) toast("Sentinel Core ออนไลน์");
+        // ตรวจสอบ Sentinel เงียบ ๆ หลังเข้า Desktop
+        checkSentinelStatus().then((ok) => {
+            if (ok) toast("Sentinel ออนไลน์");
         });
     }
 
@@ -1503,6 +1773,11 @@
                 <div class="chat-messages" id="chat-messages">
                     <div class="msg ai">สวัสดี ฉันคือ Sentinel AI ผู้ช่วยของ Panthorium OS<br>มีอะไรให้ช่วยไหม?</div>
                 </div>
+                <div id="voice-status-box" aria-live="polite" aria-label="สถานะคำสั่งเสียง">
+                    <div class="voice-status-row" data-voice-status="listening">กำลังฟัง</div>
+                    <div class="voice-status-row" data-voice-status="processing">กำลังประมวลผล</div>
+                    <div class="voice-status-row" data-voice-status="error">ไม่รองรับคำสั่ง / ไม่ตอบสนอง</div>
+                </div>
                 <div class="chat-input-area">
                     <button class="chat-mic" id="chat-mic" title="พูด">🎤</button>
                     <input class="chat-input" id="chat-input" placeholder="พิมพ์ข้อความหรือใช้เสียง..." />
@@ -1517,20 +1792,29 @@
         const micBtn = $("chat-mic");
         const messages = $("chat-messages");
 
-        async function send() {
+        let sendBusy = false;
+        async function send({ resumeGlobalVoice = false } = {}) {
             const text = input.value.trim();
-            if (!text) return;
+            if (!text || sendBusy) return;
+            sendBusy = true;
+            window.PanthoriumVoice?.pause();
+            unlockVoiceAudio();
+            try { window.speechSynthesis?.resume(); } catch (_) {}
             input.value = "";
             appendMsg(text, "user");
             appendMsg("กำลังคิด...", "ai", true);
+            try {
+                const res = await callAI(text);
+                // remove loading
+                const last = messages.querySelector('.msg.loading, .msg[data-streaming="1"]');
+                if (last) last.remove();
 
-            const res = await callAI(text);
-            // remove loading
-            const last = messages.querySelector(".msg.loading");
-            if (last) last.remove();
-
-            appendMsg(res.text, "ai", false, res.provider);
-            speak(res.text);
+                appendMsg(res.text, "ai", false, res.provider);
+                await speak(res.text);
+            } finally {
+                sendBusy = false;
+                if (resumeGlobalVoice) window.PanthoriumVoice?.resume();
+            }
         }
 
         function appendMsg(text, type, loading = false, provider = null) {
@@ -1546,30 +1830,60 @@
 
         // Voice
         let recognition = null;
+        let voiceSilenceTimer = null;
+        let voiceStopping = false;
+        let voiceParts = new Map();
+        let voiceInterim = "";
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (SR) {
             recognition = new SR();
             recognition.lang = "th-TH";
-            recognition.interimResults = false;
+            recognition.continuous = true;
+            recognition.interimResults = true;
             recognition.onresult = (e) => {
-                const t = e.results[0][0].transcript;
-                window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text: t } }));
-                input.value = t;
-                send();
+                voiceInterim = "";
+                for (let i = e.resultIndex; i < e.results.length; i++) {
+                    const result = e.results[i];
+                    const value = String(result?.[0]?.transcript || "").trim();
+                    if (!value) continue;
+                    if (result.isFinal) voiceParts.set(i, value);
+                    else voiceInterim = value;
+                }
+                const preview = [...voiceParts.values(), voiceInterim].filter(Boolean).join(" ").trim();
+                if (preview) input.value = preview;
+                clearTimeout(voiceSilenceTimer);
+                voiceSilenceTimer = setTimeout(() => {
+                    voiceStopping = true;
+                    try { recognition.stop(); } catch (_) {}
+                }, 1400);
             };
             recognition.onstart = () => {
+                voiceStopping = false;
+                voiceParts = new Map();
+                voiceInterim = "";
                 userSpeechActive = true;
                 window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
                 micBtn.classList.add("listening");
             };
-            recognition.onend = () => {
+            recognition.onend = async () => {
+                clearTimeout(voiceSilenceTimer);
                 userSpeechActive = false;
                 window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
                 micBtn.classList.remove("listening");
+                const text = [...voiceParts.values()].join(" ").trim() || voiceInterim.trim();
+                if (voiceStopping && text) {
+                    input.value = text;
+                    window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
+                    await send({ resumeGlobalVoice: true });
+                } else {
+                    window.PanthoriumVoice?.resume();
+                }
             };
             recognition.onerror = () => {
+                clearTimeout(voiceSilenceTimer);
                 userSpeechActive = false;
                 micBtn.classList.remove("listening");
+                window.PanthoriumVoice?.resume();
             };
         }
 
@@ -1579,9 +1893,13 @@
                 return;
             }
             if (micBtn.classList.contains("listening")) {
+                voiceStopping = true;
                 recognition.stop();
                 return;
             }
+            window.PanthoriumVoice?.pause();
+            unlockVoiceAudio();
+            try { window.speechSynthesis?.resume(); } catch (_) {}
             micBtn.classList.add("listening");
             recognition.start();
         };
@@ -1589,13 +1907,13 @@
 
     // ---------- App: Settings ----------
     function openSettings() {
-        const coreStatus = OS.coreOnline ? "🟢 Online" : "🔴 Offline";
+        const sentinelStatus = OS.sentinelOnline ? "🟢 Online" : "🔴 Offline";
         const html = `
             <div class="app-content">
                 <div class="settings-section">
-                    <h3>🧠 Sentinel Core (Backend)</h3>
+                    <h3>🧠 Sentinel (Backend)</h3>
                     <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px;">
-                        สถานะ: <strong id="core-status-text">${coreStatus}</strong><br>
+                        สถานะ: <strong id="sentinel-status-text">${sentinelStatus}</strong><br>
                         <span style="font-size:12px;">AI หลักอยู่บนเซิร์ฟเวอร์ — API Key ไม่โผล่ฝั่งผู้ใช้</span>
                     </p>
                     <div class="setting-row">
@@ -1605,34 +1923,13 @@
                     <div class="setting-row">
                         <label>
                             <input type="checkbox" id="use-backend" ${OS.config.useBackend ? "checked" : ""} style="width:auto;margin-right:8px;">
-                            ใช้ Sentinel Core เป็นหลัก
+                            ใช้ Sentinel เป็นหลัก
                         </label>
                     </div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;">
                         <button class="btn-primary" id="save-backend">บันทึก Backend</button>
-                        <button class="btn-primary" id="test-core" style="background:rgba(0,255,204,0.2);color:var(--accent);">ทดสอบการเชื่อมต่อ</button>
+                        <button class="btn-primary" id="test-sentinel" style="background:rgba(0,255,204,0.2);color:var(--accent);">ทดสอบการเชื่อมต่อ</button>
                     </div>
-                </div>
-                <div class="settings-section">
-                    <h3>🔑 API Keys สำรอง (Local Fallback)</h3>
-                    <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">ใช้เมื่อ Backend ยังไม่พร้อมเท่านั้น</p>
-                    <div class="setting-row">
-                        <label>Groq API Key</label>
-                        <input type="password" id="key-groq" placeholder="gsk_..." value="${OS.config.keys.groq}">
-                    </div>
-                    <div class="setting-row">
-                        <label>OpenAI API Key</label>
-                        <input type="password" id="key-openai" placeholder="sk-..." value="${OS.config.keys.openai}">
-                    </div>
-                    <div class="setting-row">
-                        <label>Google Gemini API Key</label>
-                        <input type="password" id="key-gemini" placeholder="AIza..." value="${OS.config.keys.gemini}">
-                    </div>
-                    <div class="setting-row">
-                        <label>Anthropic API Key</label>
-                        <input type="password" id="key-anthropic" placeholder="sk-ant-..." value="${OS.config.keys.anthropic}">
-                    </div>
-                    <button class="btn-primary" id="save-keys">บันทึก API Keys สำรอง</button>
                 </div>
                 <div class="settings-section">
                     <h3>🛡️ Biometric (ไม่บังคับ)</h3>
@@ -1648,7 +1945,7 @@
                     <h3>ℹ️ ระบบ</h3>
                     <p style="font-size:13px;color:var(--text-dim);line-height:1.6;">
                         Panthorium OS v${OS.version}<br>
-                        สถาปัตยกรรม: Frontend + Sentinel Core Backend<br>
+                        สถาปัตยกรรม: Frontend + Sentinel Backend<br>
                         รองรับ: คอมพิวเตอร์ · แท็บเล็ต · สมาร์ทโฟน<br>
                         <strong style="color:var(--accent);">ใช้งานฟรีทันที ไม่ต้อง login</strong>
                     </p>
@@ -1665,23 +1962,15 @@
             localStorage.setItem("pt_backend_url", url);
             localStorage.setItem("pt_use_backend", use ? "1" : "0");
             toast("บันทึกการตั้งค่า Backend แล้ว");
-            checkCoreStatus();
+            checkSentinelStatus();
         };
 
-        $("test-core").onclick = async () => {
-            toast("กำลังทดสอบ Sentinel Core...");
-            const ok = await checkCoreStatus();
-            const el = $("core-status-text");
+        $("test-sentinel").onclick = async () => {
+            toast("กำลังทดสอบ Sentinel...");
+            const ok = await checkSentinelStatus();
+            const el = $("sentinel-status-text");
             if (el) el.textContent = ok ? "🟢 Online" : "🔴 Offline";
-            toast(ok ? "เชื่อมต่อ Sentinel Core สำเร็จ" : "เชื่อมต่อไม่ได้ — ตรวจ URL หรือเปิด Backend");
-        };
-
-        $("save-keys").onclick = () => {
-            ["groq", "openai", "gemini", "anthropic"].forEach(p => {
-                const el = $("key-" + p);
-                if (el) el.value = "";
-            });
-            toast("เพื่อความปลอดภัย API Keys ต้องตั้งค่าที่ Backend ผ่าน Environment Variables");
+            toast(ok ? "เชื่อมต่อ Sentinel สำเร็จ" : "เชื่อมต่อไม่ได้ — ตรวจ URL หรือเปิด Backend");
         };
 
         $("enroll-bio").onclick = async () => {
@@ -2202,7 +2491,7 @@
 
     // ---------- PWA ----------
     if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("./sw.js?v=orb-display-fix-v2").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=orb-display-fix-v3-voice").catch(() => {});
     }
 
     // ---------- Start ----------

@@ -16,7 +16,7 @@ const APPS=[
   {id:'training-lab',icon:'🎓',label:'Training Lab',openers:['PanthoriumTraining.open'],launcherId:'sentinel-training-launcher'},
   {id:'production',icon:'📈',label:'Production Intelligence',openers:['PanthoriumProductionIntelligence.open'],launcherId:'phase10-production-launcher'},
   {id:'governance',icon:'🧭',label:'Governance',openers:['PanthoriumGovernance.open'],launcherId:'phase13-governance-launcher'},
-  {id:'dual-ai',icon:'♊',label:'Dual AI',openers:['PanthoriumDualAI.open']}
+  {id:'sentinel-control',icon:'🛡️',label:'Sentinel Control',openers:['PanthoriumSentinelControl.open']}
 ];
 
 let renderedFingerprint='';

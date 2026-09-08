@@ -9,7 +9,7 @@ const{IntegrationService,isPrivateAddress}=require('../services/integrationServi
  assert.equal(isPrivateAddress('198.51.100.9'),true);
  assert.equal(isPrivateAddress('203.0.113.8'),true);
  assert.equal(isPrivateAddress('1.1.1.1'),false);
- const auditEvents=[];const audit={record(event,data){auditEvents.push({event,data});}};const admin={sub:'admin-final',permissions:['settings','core:command','chat']};
+ const auditEvents=[];const audit={record(event,data){auditEvents.push({event,data});}};const admin={sub:'admin-final',permissions:['settings','sentinel:command','chat']};
  const mixedRepo=new IntegrationRepository();await mixedRepo.init();let mixedCalled=0;
  const mixed=new IntegrationService({repository:mixedRepo,audit,allowedHosts:['mixed.example.com'],resolver:async()=>[{address:'1.1.1.1',family:4},{address:'10.0.0.1',family:4}],fetcher:async()=>{mixedCalled++;throw new Error('must not call');}});
  const mixedCreated=await mixed.create({user:admin,name:'mixed',endpointUrl:'https://mixed.example.com/hook'});const mixedResult=await mixed.invoke({user:admin,integrationId:mixedCreated.integration.integrationId,payload:{}});assert.equal(mixedResult.error,'integration_private_address_blocked');assert.equal(mixedCalled,0);

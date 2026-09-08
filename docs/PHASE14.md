@@ -1,8 +1,8 @@
-# Phase 14 — Dual AI Control Plane
+# Phase 14 — Sentinel Control Plane
 
 Phase 14 establishes the two-AI architecture requested for Panthorium OS:
 
-1. **Sentinel Core** — back-office AI/control plane for administrators.
+1. **Sentinel** — back-office AI/control plane for administrators.
 2. **Sentinel** — user-facing AI for general users.
 
 The design applies current frontier-agent architecture patterns while preserving Panthorium safety controls from Phase 12 and Phase 13. It does **not** claim Panthorium is already superior to frontier AI systems; superiority must be proven by repeatable benchmark evidence.
@@ -10,7 +10,7 @@ The design applies current frontier-agent architecture patterns while preserving
 ## Architecture
 
 ```text
-Sentinel Core
+Sentinel
   ├─ observes Production Intelligence
   ├─ observes Autonomous Governance
   ├─ supervises Release Gate
@@ -48,51 +48,51 @@ References used for architecture direction:
 
 ## New backend services
 
-`services/dualAiOrchestratorService.js`
+`services/sentinelOrchestratorService.js`
 
 Responsibilities:
 
-- Define AI profiles for `sentinel_core` and `sentinel`
+- Phase 14 originally separated two profiles; Phase 15 supersedes this with one `sentinel` profile and RBAC capability contexts.
 - Maintain hard capability boundaries
-- Run periodic Dual AI cycles
+- Run periodic Sentinel Control cycles
 - Collect telemetry from production, governance, release gate, benchmark, active learning, learning versions and training stats
 - Plan safe proposals
 - Execute only bounded safe actions in `autopilot` mode
-- Store cycle history in PostgreSQL table `panthorium_dual_ai_cycles`
+- Store cycle history in PostgreSQL table `panthorium_sentinel_control_cycles`
 
 `services/frontierArchitectureService.js`
 
 Responsibilities:
 
 - Maintain a curated frontier architecture pattern catalog
-- Map each pattern to Sentinel Core and Sentinel
+- Map each pattern to Sentinel and Sentinel
 - Score architecture maturity across multiple pillars
 - Expose internal/external learning channels
 - Feed frontier topics into 24h Active Learning without bypassing gates
 
 ## New routes
 
-`routes/dualAi.js`
+`routes/sentinelControl.js`
 
 ```text
-GET  /api/dual-ai/status
-GET  /api/dual-ai/frontier
-GET  /api/dual-ai/history
-POST /api/dual-ai/cycle
-POST /api/dual-ai/mode
+GET  /api/sentinel-control/status
+GET  /api/sentinel-control/frontier
+GET  /api/sentinel-control/history
+POST /api/sentinel-control/cycle
+POST /api/sentinel-control/mode
 ```
 
 All routes require authenticated admin/settings permission.
 
 ## New UI
 
-`dual-ai-ui.js`
+`sentinel-control-ui.js`
 
-Dashboard: **♊ Dual AI Control Plane**
+Dashboard: **♊ Sentinel Control Plane**
 
 Shows:
 
-- Sentinel Core state
+- Sentinel state
 - Sentinel state
 - providers
 - mode: off / observe / autopilot
@@ -105,7 +105,7 @@ Shows:
 
 ## Safe autopilot actions
 
-Sentinel Core can automatically:
+Sentinel can automatically:
 
 - trigger governance safe guardrails
 - trigger Release Gate benchmark/repair
@@ -113,7 +113,7 @@ Sentinel Core can automatically:
 - start a bounded 24h Active Learning run with manual activation gate
 - run training auto-review backlog
 
-Sentinel Core cannot automatically:
+Sentinel cannot automatically:
 
 - merge pull requests
 - deploy Render
@@ -139,11 +139,11 @@ Recommended production rollout:
 
 ## Acceptance criteria
 
-- `/api/dual-ai/status` returns both profiles and boundaries.
-- `/api/dual-ai/frontier` returns patterns, maturity, learning channels and safety boundary.
-- Dual AI dashboard opens from staging admin desktop.
+- `/api/sentinel-control/status` returns both profiles and boundaries.
+- `/api/sentinel-control/frontier` returns patterns, maturity, learning channels and safety boundary.
+- Sentinel Control dashboard opens from staging admin desktop.
 - Observe cycle plans actions without mutation.
 - Safe execute cycle only uses existing guardrails.
-- Sentinel Core can start or supervise 24h learning without bypassing manual activation.
+- Sentinel can start or supervise 24h learning without bypassing manual activation.
 - Sentinel uses only Active learning versions as context.
 - CI green.

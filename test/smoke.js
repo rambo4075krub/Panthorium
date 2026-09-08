@@ -19,7 +19,7 @@ const { app } = require("../server");
     r = await fetch(base + "/api/auth/guest", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     const auth = await r.json();
     if (!auth.accessToken) throw new Error("guest token missing");
-    r = await fetch(base + "/api/core/status", { headers: { authorization: `Bearer ${auth.accessToken}` } });
+    r = await fetch(base + "/api/sentinel/status", { headers: { authorization: `Bearer ${auth.accessToken}` } });
     if (r.status !== 200) throw new Error("authenticated status failed");
     console.log("Smoke tests passed");
   } finally {

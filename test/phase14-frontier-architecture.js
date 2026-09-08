@@ -2,7 +2,7 @@
 
 const assert = require('assert');
 const { FrontierArchitectureService, FRONTIER_ARCHITECTURE_PATTERNS, LEARNING_CHANNELS } = require('../services/frontierArchitectureService');
-const { DualAiOrchestratorService, AI_PROFILES, FRONTIER_PATTERNS } = require('../services/dualAiOrchestratorService');
+const { SentinelOrchestratorService, AI_PROFILES, FRONTIER_PATTERNS } = require('../services/sentinelOrchestratorService');
 
 function fakeTelemetry({ benchmarkScore = 91, providers = ['groq', 'openai'], governance = 'healthy', active = true } = {}) {
   return {
@@ -25,7 +25,7 @@ function fakeTelemetry({ benchmarkScore = 91, providers = ['groq', 'openai'], go
   assert(healthy.patterns.some((p) => p.id === 'durable_execution_human_gate'));
   assert(healthy.maturity.score >= 80);
   assert.equal(healthy.safetyBoundary.noGateBypass, true);
-  assert(LEARNING_CHANNELS.sentinel_core.some((c) => c.type === 'external'));
+  assert(LEARNING_CHANNELS.sentinel.some((c) => c.type === 'external'));
   assert(LEARNING_CHANNELS.sentinel.some((c) => c.id === 'active_learning_versions'));
 
   const weak = frontier.status({ telemetry: fakeTelemetry({ benchmarkScore: 53, providers: ['groq'], governance: 'critical', active: false }) });
@@ -33,7 +33,7 @@ function fakeTelemetry({ benchmarkScore = 91, providers = ['groq', 'openai'], go
   assert(weak.recommendations.some((r) => r.id === 'stabilize_governance_first'));
   assert(weak.maturity.score < healthy.maturity.score);
 
-  const dual = new DualAiOrchestratorService({
+  const sentinelControl = new SentinelOrchestratorService({
     providers: { available: () => ['groq', 'openai'] },
     production: { async overview() { return fakeTelemetry().production; } },
     governance: { async status() { return fakeTelemetry().governance; } },
@@ -45,13 +45,14 @@ function fakeTelemetry({ benchmarkScore = 91, providers = ['groq', 'openai'], go
     frontierArchitecture: frontier,
     audit: { record() {} }
   });
-  const status = await dual.status();
+  const status = await sentinelControl.status();
   assert(status.frontier.patterns.length >= FRONTIER_ARCHITECTURE_PATTERNS.length);
-  assert.equal(status.boundaries.sentinelCannot.includes('admin_backoffice_actions'), true);
-  assert(AI_PROFILES.sentinel_core.learningChannels.includes('frontier_pattern_catalog'));
+  assert.equal(status.boundaries.neverAllowed.includes('bypass_rbac'), true);
+  assert.deepEqual(Object.keys(AI_PROFILES), ['sentinel']);
+  assert(AI_PROFILES.sentinel.learningChannels.includes('frontier_pattern_catalog'));
   assert(FRONTIER_PATTERNS.some((p) => p.id === 'continuous_24h_learning_without_gate_bypass'));
 
-  const report = await dual.cycle({ execute: false });
+  const report = await sentinelControl.cycle({ execute: false });
   assert(report.frontier.maturity.score >= 80);
   assert(report.learningPlan.loop.includes('promote only if gates pass'));
   assert.equal(report.sentinelState.runtimeKnowledge, 'active_only');

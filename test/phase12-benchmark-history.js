@@ -15,14 +15,14 @@ const providers = {
   }
 };
 
-const core = {
+const sentinel = {
   training: { async contextFor() { return '\ncontext'; } },
   prompts: { build() { return 'system prompt'; } },
-  gateway: { async complete() { return { ok: true, text: 'Sentinel answer', model: 'sentinel-core', usage: { total_tokens: 10 } }; } }
+  gateway: { async complete() { return { ok: true, text: 'Sentinel answer', model: 'sentinel-sentinel', usage: { total_tokens: 10 } }; } }
 };
 
 (async () => {
-  const service = new SentinelBenchmarkService({ core, providers, audit: { record() {} } });
+  const service = new SentinelBenchmarkService({ sentinel, providers, audit: { record() {} } });
   const result = await service.run({
     cases: [
       { prompt: 'อธิบาย Panthorium OS' },

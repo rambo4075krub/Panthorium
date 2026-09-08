@@ -30,7 +30,7 @@
     if (res.status === 401 && window.PanthoriumAuth?.refreshSession) { const ok = await window.PanthoriumAuth.refreshSession().catch(() => false); if (ok) { token = getOS()?.config?.accessToken || ''; res = await request(); } }
     if (!res.ok || !res.body) throw new Error(`stream_http_${res.status}`);
     const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; const state = { text: '' }; let meta = {}; let sawDelta = false;
-    emit('status', { text: 'กำลังเชื่อมต่อ Sentinel Core...' });
+    emit('status', { text: 'กำลังเชื่อมต่อ Sentinel...' });
     while (true) {
       const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true });
       const frames = buffer.split('\n\n'); buffer = frames.pop() || '';
@@ -38,7 +38,7 @@
         let event = 'message'; let data = null;
         for (const line of frame.split('\n')) { if (line.startsWith('event:')) event = line.slice(6).trim(); if (line.startsWith('data:')) { try { data = JSON.parse(line.slice(5).trim()); } catch (_) {} } }
         if (!data) continue;
-        if (event === 'start') emit('status', { text: 'Sentinel Core กำลังประมวลผล...' });
+        if (event === 'start') emit('status', { text: 'Sentinel กำลังประมวลผล...' });
         if (event === 'provider') { meta = { ...meta, ...data }; emit('provider', data); }
         if (event === 'delta') {
           const delta = data.delta || ''; if (!delta) continue; sawDelta = true;
@@ -50,7 +50,7 @@
       }
     }
     if (!sawDelta || !state.text) throw new Error('empty_stream');
-    return { ok: true, text: state.text, provider: meta.provider ? `Core→${meta.provider}` : 'Sentinel Core', via: 'core-stream', model: meta.model || null, usage: meta.usage || null, latencyMs: meta.latencyMs || null, streaming: meta.streaming || 'unknown' };
+    return { ok: true, text: state.text, provider: meta.provider ? `Sentinel · ${meta.provider}` : 'Sentinel', via: 'sentinel-stream', model: meta.model || null, usage: meta.usage || null, latencyMs: meta.latencyMs || null, streaming: meta.streaming || 'unknown' };
   }
   function installVisualStreaming() {
     if (window.__panthoriumStreamVisualInstalled) return; window.__panthoriumStreamVisualInstalled = true;
@@ -73,7 +73,7 @@
         const fallback = await previous(prompt);
         if (fallback?.text) {
           const state = { text: '' };
-          emit('status', { text: 'กำลังรับคำตอบจาก Sentinel Core...' });
+          emit('status', { text: 'กำลังรับคำตอบจาก Sentinel...' });
           await revealBuffered(fallback.text, state, 16);
           return { ...fallback, text: state.text, streaming: 'client-progressive-fallback' };
         }

@@ -4,7 +4,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 
-function createDualAiRouter(authService, dualAi) {
+function createSentinelControlRouter(authService, sentinelControl) {
   const router = express.Router();
   const auth = requireAuth(authService);
   const admin = [auth, requirePermission('settings')];
@@ -13,8 +13,8 @@ function createDualAiRouter(authService, dualAi) {
 
   router.get('/status', ...admin, readLimiter, async (req, res, next) => {
     try {
-      if (!dualAi) return res.status(503).json({ ok: false, error: 'dual_ai_unavailable' });
-      res.json(await dualAi.status());
+      if (!sentinelControl) return res.status(503).json({ ok: false, error: 'sentinel_control_unavailable' });
+      res.json(await sentinelControl.status());
     } catch (error) {
       next(error);
     }
@@ -22,8 +22,8 @@ function createDualAiRouter(authService, dualAi) {
 
   router.get('/frontier', ...admin, readLimiter, async (req, res, next) => {
     try {
-      if (!dualAi) return res.status(503).json({ ok: false, error: 'dual_ai_unavailable' });
-      const status = await dualAi.status();
+      if (!sentinelControl) return res.status(503).json({ ok: false, error: 'sentinel_control_unavailable' });
+      const status = await sentinelControl.status();
       res.json({ ok: true, frontier: status.frontier, architecturePatterns: status.architecturePatterns, learningChannels: status.learningChannels, boundaries: status.boundaries });
     } catch (error) {
       next(error);
@@ -32,8 +32,8 @@ function createDualAiRouter(authService, dualAi) {
 
   router.get('/history', ...admin, readLimiter, async (req, res, next) => {
     try {
-      if (!dualAi) return res.status(503).json({ ok: false, error: 'dual_ai_unavailable' });
-      res.json({ ok: true, history: await dualAi.history({ limit: req.query.limit }) });
+      if (!sentinelControl) return res.status(503).json({ ok: false, error: 'sentinel_control_unavailable' });
+      res.json({ ok: true, history: await sentinelControl.history({ limit: req.query.limit }) });
     } catch (error) {
       next(error);
     }
@@ -41,8 +41,8 @@ function createDualAiRouter(authService, dualAi) {
 
   router.post('/cycle', ...admin, writeLimiter, async (req, res, next) => {
     try {
-      if (!dualAi) return res.status(503).json({ ok: false, error: 'dual_ai_unavailable' });
-      res.json(await dualAi.cycle({ execute: req.body?.execute === true, persist: true, source: req.body?.source || 'manual-cycle', scope: req.body?.scope || 'dual-ai-manual' }));
+      if (!sentinelControl) return res.status(503).json({ ok: false, error: 'sentinel_control_unavailable' });
+      res.json(await sentinelControl.cycle({ execute: req.body?.execute === true, persist: true, source: req.body?.source || 'manual-cycle', scope: req.body?.scope || 'sentinel-control-manual' }));
     } catch (error) {
       next(error);
     }
@@ -50,8 +50,8 @@ function createDualAiRouter(authService, dualAi) {
 
   router.post('/mode', ...admin, writeLimiter, async (req, res, next) => {
     try {
-      if (!dualAi) return res.status(503).json({ ok: false, error: 'dual_ai_unavailable' });
-      res.json(await dualAi.setMode(req.body?.mode, { userId: req.user?.sub || 'administrator', requestId: req.requestId }));
+      if (!sentinelControl) return res.status(503).json({ ok: false, error: 'sentinel_control_unavailable' });
+      res.json(await sentinelControl.setMode(req.body?.mode, { userId: req.user?.sub || 'administrator', requestId: req.requestId }));
     } catch (error) {
       next(error);
     }
@@ -60,4 +60,4 @@ function createDualAiRouter(authService, dualAi) {
   return router;
 }
 
-module.exports = { createDualAiRouter };
+module.exports = { createSentinelControlRouter };

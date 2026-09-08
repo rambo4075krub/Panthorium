@@ -1,6 +1,6 @@
 (() => {
   const allowedRoles = ['administrator', 'operator', 'guest'];
-  const allowedPermissions = ['chat', 'core:command', 'settings', 'system:read'];
+  const allowedPermissions = ['chat', 'sentinel:command', 'settings', 'system:read'];
 
   function isAdmin() {
     return !!OS?.state?.user?.roles?.includes('administrator');

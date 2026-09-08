@@ -15,8 +15,7 @@ const FRONTIER_ARCHITECTURE_PATTERNS = Object.freeze([
     pillar: 'agent_runtime',
     label: 'Agents + Tools + Handoffs + Guardrails',
     principle: 'Agent workflows should expose tools explicitly, constrain handoffs, and validate inputs/outputs before state changes.',
-    sentinelCoreApplication: 'Sentinel Core plans back-office actions, delegates through existing services, and executes only guarded actions.',
-    sentinelApplication: 'Sentinel receives user-facing instructions and can only use approved context/tools for general assistance.',
+    sentinelApplication: 'Sentinel plans back-office actions only for authorized administrators and serves users through approved context and guarded tools.',
     controls: ['rbac', 'confirmation_or_gate', 'audit_trace', 'no_secret_exposure']
   },
   {
@@ -25,8 +24,7 @@ const FRONTIER_ARCHITECTURE_PATTERNS = Object.freeze([
     pillar: 'observability',
     label: 'Trace → Observe → Evaluate → Optimize',
     principle: 'Every agent run should be explainable through telemetry, tool events, guardrail decisions, and evaluation outcomes.',
-    sentinelCoreApplication: 'Dual AI cycles persist telemetry, proposals, executed actions, governance signals, and release-gate state.',
-    sentinelApplication: 'Sentinel quality is measured through benchmark history, release gate evidence, and learning version outcomes.',
+    sentinelApplication: 'Sentinel Control cycles persist telemetry, proposals, governance signals, release-gate state, benchmarks, and learning outcomes.',
     controls: ['cycle_history', 'snapshot_store', 'benchmark_evidence', 'incident_ledger']
   },
   {
@@ -35,8 +33,7 @@ const FRONTIER_ARCHITECTURE_PATTERNS = Object.freeze([
     pillar: 'tool_boundary',
     label: 'Tool / Resource / Prompt Boundary',
     principle: 'Models should connect to external systems through explicit tools/resources instead of hidden unrestricted access.',
-    sentinelCoreApplication: 'Back-office authority is represented by routes, RBAC, integration allowlists, and governance actions.',
-    sentinelApplication: 'Public Sentinel has no direct back-office resource access and only sees active, reviewed knowledge.',
+    sentinelApplication: 'Sentinel receives back-office authority only through RBAC routes and allowlists; ordinary user context sees active, reviewed knowledge only.',
     controls: ['permissioned_routes', 'resource_scoping', 'allowlist', 'active_only_context']
   },
   {
@@ -45,8 +42,7 @@ const FRONTIER_ARCHITECTURE_PATTERNS = Object.freeze([
     pillar: 'grounding',
     label: 'Grounded Tool Use + Context Circulation',
     principle: 'Tool calls should keep enough structured context to connect evidence, function results, and final answers.',
-    sentinelCoreApplication: 'Release Gate and Governance reuse benchmark, production, incident, and training telemetry before proposing actions.',
-    sentinelApplication: 'Sentinel improvement is grounded in accepted benchmark failures, reviewed examples, and active knowledge.',
+    sentinelApplication: 'Sentinel grounds proposals and improvements in release-gate, production, incident, benchmark, and reviewed learning evidence.',
     controls: ['structured_telemetry', 'evidence_first', 'benchmark_case_feedback', 'safe_context_window']
   },
   {
@@ -55,8 +51,7 @@ const FRONTIER_ARCHITECTURE_PATTERNS = Object.freeze([
     pillar: 'durability',
     label: 'Durable Execution + Human Gate',
     principle: 'Long-running agent workflows need persistence, resumption, and explicit human gates for high-impact decisions.',
-    sentinelCoreApplication: '24h loops store cycles and can resume/observe without taking destructive actions.',
-    sentinelApplication: 'Active learning keeps manual activation and cannot promote unsafe candidates directly.',
+    sentinelApplication: 'Sentinel stores resumable 24h cycles while active learning retains manual activation and blocks unsafe direct promotion.',
     controls: ['postgres_history', 'idempotent_cycles', 'manual_activation', 'resume_safe']
   },
   {
@@ -65,19 +60,17 @@ const FRONTIER_ARCHITECTURE_PATTERNS = Object.freeze([
     pillar: 'quality_gate',
     label: 'Eval → Repair → Shadow → Release Gate',
     principle: 'Quality improvement should be driven by measured failures and must pass staged gates before user impact.',
-    sentinelCoreApplication: 'Core triggers benchmark/repair and tracks release readiness instead of claiming superiority without evidence.',
-    sentinelApplication: 'Sentinel learns from failing benchmark cases through quarantine, review, shadow, promote, and monitor.',
+    sentinelApplication: 'Sentinel triggers benchmark/repair, then moves accepted failures through quarantine, review, shadow, promote, and monitor.',
     controls: ['min_benchmark_score', 'shadow_samples', 'rollback_recovery', 'release_gate_blockers']
   },
   {
-    id: 'least_privilege_multi_agent_control',
+    id: 'least_privilege_context_control',
     source: 'Enterprise agent safety pattern',
     pillar: 'least_privilege',
-    label: 'Least-Privilege Multi-Agent Control',
-    principle: 'Separate administrator agents from user-facing agents and make every capability explicit.',
-    sentinelCoreApplication: 'Core owns orchestration/governance but still cannot merge, deploy, bypass RBAC, or reveal secrets.',
-    sentinelApplication: 'Sentinel answers users and captures learning candidates, but cannot operate admin tools.',
-    controls: ['role_split', 'capability_matrix', 'negative_permissions', 'audited_actions']
+    label: 'Least-Privilege Context Control',
+    principle: 'Keep one AI identity while separating administrator and user capabilities through explicit authorization.',
+    sentinelApplication: 'Sentinel can orchestrate governance only in an authorized administrator context; user context cannot operate admin tools.',
+    controls: ['rbac_context', 'capability_matrix', 'negative_permissions', 'audited_actions']
   },
   {
     id: 'continuous_24h_learning_without_gate_bypass',
@@ -85,21 +78,18 @@ const FRONTIER_ARCHITECTURE_PATTERNS = Object.freeze([
     pillar: 'continuous_learning',
     label: 'Continuous 24h Learning without Gate Bypass',
     principle: 'Self-improvement can run continuously only when candidate creation is separated from activation.',
-    sentinelCoreApplication: 'Core supervises provider learning, detects drift, and starts safe loops under Governance.',
-    sentinelApplication: 'Sentinel benefits only from candidates that pass review/shadow/promote gates.',
+    sentinelApplication: 'Sentinel supervises provider learning and benefits only from candidates that pass review, shadow, and promotion gates.',
     controls: ['quota_guardrail', 'unsafe_counter', 'manual_activation_required', 'active_only_runtime']
   }
 ]);
 
 const LEARNING_CHANNELS = Object.freeze({
-  sentinel_core: [
+  sentinel: [
     { id: 'production_telemetry', type: 'internal', label: 'Production telemetry', evidence: 'Production Intelligence, SLO burn, capacity, provider circuits' },
     { id: 'governance_incidents', type: 'internal', label: 'Governance incidents', evidence: 'Incident ledger, runbooks, executed guardrails' },
     { id: 'release_gate_outcomes', type: 'internal', label: 'Release Gate outcomes', evidence: 'blockers, benchmark evidence, repair job state' },
     { id: 'frontier_pattern_catalog', type: 'external', label: 'Frontier architecture pattern catalog', evidence: 'curated official architecture patterns mapped to Panthorium controls' },
-    { id: 'provider_teacher_feedback', type: 'external', label: 'Provider teacher feedback', evidence: 'teacher drafts, evaluator scores, benchmark judge feedback' }
-  ],
-  sentinel: [
+    { id: 'provider_teacher_feedback', type: 'external', label: 'Provider teacher feedback', evidence: 'teacher drafts, evaluator scores, benchmark judge feedback' },
     { id: 'active_learning_versions', type: 'internal', label: 'Active learning versions', evidence: 'only promoted active versions enter user context' },
     { id: 'benchmark_failure_cases', type: 'internal', label: 'Benchmark failure cases', evidence: 'weak cases converted into training candidates' },
     { id: 'conversation_capture', type: 'internal', label: 'Conversation capture', evidence: 'sanitized examples enter training review' },
@@ -153,7 +143,7 @@ class FrontierArchitectureService {
     const lastBenchmark = releaseGate.evidence?.benchmark || benchmark.lastRun?.summary?.sentinel || null;
 
     const pillars = {
-      roleSeparation: 100,
+      permissionBoundaries: 100,
       toolBoundary: 95,
       observability: t.historyAvailable === false ? 70 : 90,
       releaseGate: releaseGate.ok === false ? 60 : 92,
@@ -186,11 +176,11 @@ class FrontierArchitectureService {
   roadmap(maturity) {
     const m = maturity || this.maturity();
     return [
-      { step: 1, title: 'Separate Core/User AI authority', status: 'done', owner: 'sentinel_core' },
-      { step: 2, title: 'Persist cycles, telemetry and incident context', status: 'done', owner: 'sentinel_core' },
+      { step: 1, title: 'Unify Sentinel identity with RBAC capability contexts', status: 'done', owner: 'sentinel' },
+      { step: 2, title: 'Persist cycles, telemetry and incident context', status: 'done', owner: 'sentinel' },
       { step: 3, title: 'Use external provider teachers only as candidate sources', status: 'done', owner: 'sentinel' },
-      { step: 4, title: 'Continuously rerank frontier patterns against production evidence', status: m.score >= 85 ? 'active' : 'needs_more_evidence', owner: 'sentinel_core' },
-      { step: 5, title: 'Expand benchmark taxonomy before claiming leadership over frontier AI', status: 'planned', owner: 'sentinel_core' }
+      { step: 4, title: 'Continuously rerank frontier patterns against production evidence', status: m.score >= 85 ? 'active' : 'needs_more_evidence', owner: 'sentinel' },
+      { step: 5, title: 'Expand benchmark taxonomy before claiming leadership over frontier AI', status: 'planned', owner: 'sentinel' }
     ];
   }
 
