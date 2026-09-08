@@ -53,13 +53,22 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert.equal(modeResult.mode, 'off');
 
   const api = fs.readFileSync('routes/api.js', 'utf8');
+  const server = fs.readFileSync('server.js', 'utf8');
   const shell = fs.readFileSync('sentinel.html', 'utf8');
   assert(api.includes('router.post("/chat/stream"'), 'Sentinel must expose its SSE chat route');
   assert(api.includes('router.post("/sentinel/command"'), 'administrator commands must use the Sentinel route');
   assert(shell.includes('unlockVoiceAudio();'), 'a user gesture must unlock browser audio before the AI request');
   assert(shell.includes('await new Promise(resolve => setTimeout(resolve, 80))'), 'speech must avoid the Chromium cancel/speak race');
-  assert(shell.includes('u.onerror = async () =>'), 'speech must fall back when a native utterance fails');
+  assert(shell.includes('const startWatchdog = setTimeout'), 'desktop speech must detect silently dropped Chromium utterances');
+  assert(shell.includes('await speakRemoteChunk(chunk.text, chunk.lang)'), 'speech must fall back when a native utterance fails');
+  assert(shell.includes('u.pitch = 0.45'), 'Sentinel must use its low cinematic voice profile');
+  assert(shell.includes('deepVoiceNames'), 'Sentinel must prefer a deep voice available for the response language');
+  assert(server.includes('mediaSrc: ["\'self\'", "blob:", "https://translate.google.com"'), 'desktop fallback speech must be allowed by the Content Security Policy');
   assert(shell.includes('function initGlobalVoice()'), 'global user voice commands must remain available');
+  assert(shell.includes('silenceTimer = setTimeout(finishListening, 1400)'), 'global recognition must wait for the user to finish speaking');
+  assert(shell.includes('voiceState = "stopping"'), 'recognition must stop before AI processing starts');
+  assert(shell.includes('await speak(res.text)'), 'AI processing must wait until speech playback really finishes');
+  assert(shell.includes('if (voiceState === "idle") restartListening()'), 'the microphone may resume only after AI speech finishes');
   assert(!shell.includes('callProviderLocal'), 'provider secrets and direct provider calls must remain server-side');
 
   console.log('Phase 15 Single Sentinel orchestration tests passed');
