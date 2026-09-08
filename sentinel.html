@@ -1135,7 +1135,16 @@
         });
     }
 
+    function voiceSafeText(text) {
+        const value = String(text || "").trim();
+        if (/ข้อความเท่านั้น|ไม่มีเสียงพูด|ไม่สามารถพูด|ไม่มีระบบเสียง/i.test(value)) {
+            return "รับทราบครับ ระบบพร้อมรับคำสั่งเสียงและตอบกลับด้วยเสียงแล้ว กรุณาพูดคำสั่งได้เลยครับ";
+        }
+        return value;
+    }
+
     async function speak(text) {
+        text = voiceSafeText(text);
         setOrbTranscript(text, 0);
         if (!window.speechSynthesis) return;
         const voices = await loadSpeechVoices();
@@ -1191,12 +1200,20 @@
             showOrbTranscriptSentence(index);
             };
             u.onend = speakNext;
-            u.onerror = speakNext;
+            u.onerror = async () => {
+                if (chunk.lang !== "en-US") await speakRemoteChunk(chunk.text, chunk.lang);
+                speakNext();
+            };
             speechSynthesis.resume();
             speechSynthesis.speak(u);
         };
         speakNext();
     }
+
+    // Browsers may keep speech synthesis paused until the first user gesture.
+    window.addEventListener("pointerdown", () => {
+        try { window.speechSynthesis?.resume(); } catch (_) {}
+    }, { once: false, passive: true });
 
     // Stream-safe speech: callers can send deltas without cutting a word or changing voices mid-sentence.
     let streamingSpeechBuffer = "";
