@@ -1124,9 +1124,21 @@
         return `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${encodeURIComponent(lang)}&q=${encodeURIComponent(String(text).slice(0, 180))}`;
     }
 
+    const voiceAudio = new Audio();
+    let voiceAudioUnlocked = false;
+    function unlockVoiceAudio() {
+        if (voiceAudioUnlocked) return;
+        voiceAudio.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAAA";
+        voiceAudio.volume = 0;
+        voiceAudio.play().then(() => { voiceAudio.pause(); voiceAudio.currentTime = 0; voiceAudioUnlocked = true; }).catch(() => {});
+    }
+
     function speakRemoteChunk(text, lang) {
         return new Promise(resolve => {
-            const audio = new Audio(remoteSpeechUrl(text, lang));
+            const audio = voiceAudio;
+            audio.pause();
+            audio.currentTime = 0;
+            audio.src = remoteSpeechUrl(text, lang);
             audio.preload = "auto";
             audio.volume = 1;
             audio.onended = () => resolve(true);
@@ -1212,6 +1224,7 @@
 
     // Browsers may keep speech synthesis paused until the first user gesture.
     window.addEventListener("pointerdown", () => {
+        unlockVoiceAudio();
         try { window.speechSynthesis?.resume(); } catch (_) {}
     }, { once: false, passive: true });
 
