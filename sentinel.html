@@ -1090,13 +1090,29 @@
         return voices.find(v => v.lang.toLowerCase() === lang.toLowerCase()) || voices.find(v => v.lang.toLowerCase().startsWith(base + "-")) || null;
     }
 
-    function speak(text) {
+    function loadSpeechVoices() {
+        const current = speechSynthesis.getVoices();
+        if (current.length) return Promise.resolve(current);
+        return new Promise(resolve => {
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                speechSynthesis.removeEventListener("voiceschanged", finish);
+                resolve(speechSynthesis.getVoices());
+            };
+            speechSynthesis.addEventListener("voiceschanged", finish);
+            setTimeout(finish, 1200);
+        });
+    }
+
+    async function speak(text) {
         setOrbTranscript(text, 0);
         if (!window.speechSynthesis) return;
+        const voices = await loadSpeechVoices();
         window.speechSynthesis.cancel();
         aiSpeechActive = false;
         aiSpeechPulse = 0;
-        const voices = speechSynthesis.getVoices();
         const chunks = splitSpeechByLanguage(text);
         let chunkIndex = 0;
         const speakNext = () => {
@@ -1112,7 +1128,12 @@
             u.pitch = 0.6;
             u.rate = 0.9;
             const voice = voiceForLanguage(chunk.lang, voices);
-            if (voice) u.voice = voice;
+            if (voice) {
+                u.voice = voice;
+                u.lang = voice.lang;
+            }
+            // Keep the requested language even when a platform has no named voice.
+            // This prevents falling back to the previously selected English voice.
             u.onstart = () => {
             aiSpeechActive = true;
             aiSpeechPulse = 1;
