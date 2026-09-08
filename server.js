@@ -164,7 +164,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "dual-ai-ui.js", "staging-admin-desktop.js", "access-shell-ui.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "voice-ui.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "dual-ai-ui.js", "staging-admin-desktop.js", "access-shell-ui.js"];
 for (const script of shellScripts) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -178,7 +178,7 @@ for (const script of shellScripts) {
 
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
-  const version = "phase14-dual-ai-v2";
+  const version = "phase14-voice-command-v1";
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
   }
@@ -230,7 +230,7 @@ async function start() {
 
   const server = app.listen(config.port, config.host, () => {
     console.log("========================================");
-    console.log("  Panthorium OS Backend · Phase 14 Dual AI Control Plane");
+    console.log("  Panthorium OS Backend · Phase 14 Voice Command Runtime");
     console.log(`  Auto training: ${config.sentinelAutoTraining ? "enabled" : "disabled"} · review threshold ${config.sentinelAutoScoreThreshold}`);
     console.log(`  Autonomous promotion: ${sentinelLearningPolicy.promotionScore} · shadow samples ${sentinelLearningPolicy.shadowMinSamples}`);
     console.log(`  Automatic recovery: enabled · max attempts ${sentinelRecovery.maxAttempts}`);
@@ -238,6 +238,7 @@ async function start() {
     console.log(`  Release Gate: requires benchmark score >= ${sentinelReleaseGate.minBenchmarkScore}`);
     console.log(`  Governance mode: ${autonomousGovernance.mode} · interval ${autonomousGovernance.intervalMs}ms · incident ledger online`);
     console.log(`  Dual AI mode: ${dualAiOrchestrator.mode} · Sentinel Core supervises Sentinel through gated frontier learning`);
+    console.log("  Voice Command Runtime: Thai STT/TTS enabled without opening chat");
     console.log(`  Benchmark Arena providers: ${sentinelCore.providers.available().join(', ') || 'none'} · persistent evidence store online`);
     console.log(`  http://localhost:${config.port}`);
     console.log("========================================");
