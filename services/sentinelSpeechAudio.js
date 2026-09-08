@@ -4,14 +4,18 @@ const path = require("path");
 const { EdgeTTS } = require("node-edge-tts");
 
 const SENTINEL_MALE_VOICES = Object.freeze({
-  "th-TH": "th-TH-NiwatNeural",
-  "en-US": "en-US-GuyNeural",
+  "th-TH": "en-US-AndrewMultilingualNeural",
+  "en-US": "en-US-AndrewMultilingualNeural",
   "ja-JP": "ja-JP-KeitaNeural",
   "ko-KR": "ko-KR-InJoonNeural",
   "ar-SA": "ar-SA-HamedNeural",
   "ru-RU": "ru-RU-DmitryNeural",
   "zh-CN": "zh-CN-YunxiNeural"
 });
+
+function applySentinelPronunciations(text) {
+  return String(text || "").replace(/\bPanthorium\s+OS\b/gi, "แพนทอเรี่ยมโอเอส");
+}
 
 async function synthesizeSentinelMaleVoice(text, lang) {
   const voice = SENTINEL_MALE_VOICES[lang];
@@ -25,13 +29,14 @@ async function synthesizeSentinelMaleVoice(text, lang) {
       voice,
       lang,
       outputFormat: "audio-24khz-48kbitrate-mono-mp3",
-      rate: "+10%",
+      // Keep Thai brisk, but let Andrew articulate English terms more clearly.
+      rate: lang === "en-US" ? "-2%" : "+10%",
       pitch: "default",
       volume: "default",
       timeout: 20000,
       proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY
     });
-    await speech.ttsPromise(text.trim(), audioPath);
+    await speech.ttsPromise(applySentinelPronunciations(text.trim()), audioPath);
     const audio = await fs.readFile(audioPath);
     if (!audio.length || audio.length > 1024 * 1024) throw new Error("invalid_speech_audio");
     return { audio, voice };
@@ -40,4 +45,4 @@ async function synthesizeSentinelMaleVoice(text, lang) {
   }
 }
 
-module.exports = { SENTINEL_MALE_VOICES, synthesizeSentinelMaleVoice };
+module.exports = { SENTINEL_MALE_VOICES, applySentinelPronunciations, synthesizeSentinelMaleVoice };

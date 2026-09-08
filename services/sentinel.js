@@ -24,11 +24,11 @@ class Sentinel {
   async clearConversation(userId, sessionId) { this.sessions.clear(`${userId}:${sessionId}`); if (this.conversations) await this.conversations.clear(userId, sessionId); }
   async conversationHistory(userId, sessionId, limit) { return this.conversations ? this.conversations.history(userId, sessionId, limit) : []; }
   async conversationSessions(userId, limit) { return this.conversations ? this.conversations.listSessions(userId, limit) : []; }
-  async prepareHistory({ sessionId, userId, message }) {
+  async prepareHistory({ sessionId, userId, message, historyLimit = 40 }) {
     const clean = String(message).trim(); const sid = sessionId || "default"; const localId = `${userId}:${sid}`;
     if (this.conversations) {
       await this.conversations.append({ userId, sessionId: sid, role: "user", content: clean });
-      return { sid, localId, history: (await this.conversations.history(userId, sid, 40)).map(({ role, content }) => ({ role, content })) };
+      return { sid, localId, history: (await this.conversations.history(userId, sid, historyLimit)).map(({ role, content }) => ({ role, content })) };
     }
     return { sid, localId, history: this.sessions.append(localId, { role: "user", content: clean }) };
   }
@@ -51,9 +51,9 @@ class Sentinel {
     if (result?.ok && result.text) result.text = removeThaiPoliteParticles(result.text);
     return result;
   }
-  async chat({ sessionId, userId = "system", message, mode = "default", provider, model }) {
+  async chat({ sessionId, userId = "system", message, mode = "default", provider, model, voiceMode = false }) {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
-    const prepared = await this.prepareHistory({ sessionId, userId, message });
+    const prepared = await this.prepareHistory({ sessionId, userId, message, historyLimit: voiceMode ? 12 : 40 });
     const trainingContext = this.training ? await this.training.contextFor(message) : '';
     const result = this.normalizeVoiceAnswer(await this.gateway.complete({ systemPrompt: this.prompts.build(mode) + trainingContext + this.voiceLanguageGuard(), history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid }));
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });

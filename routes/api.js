@@ -9,6 +9,7 @@ function validChatBody(body = {}) {
   if (body.sessionId != null && (typeof body.sessionId !== "string" || body.sessionId.length > 120)) return "invalid_session_id";
   if (body.provider != null && (typeof body.provider !== "string" || body.provider.length > 40)) return "invalid_provider";
   if (body.model != null && (typeof body.model !== "string" || body.model.length > 120)) return "invalid_model";
+  if (body.voice != null && typeof body.voice !== "boolean") return "invalid_voice_mode";
   return null;
 }
 function createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler) {
@@ -28,12 +29,22 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     try {
       let audio;
       let voiceProfile;
-      try {
-        const neural = await synthesizeSentinelMaleVoice(text, lang);
-        audio = neural.audio;
-        voiceProfile = neural.voice;
-      } catch (neuralError) {
+      let neuralError;
+      for (let attempt = 0; attempt < 2 && !audio; attempt += 1) {
+        try {
+          const neural = await synthesizeSentinelMaleVoice(text, lang);
+          audio = neural.audio;
+          voiceProfile = neural.voice;
+        } catch (error) {
+          neuralError = error;
+        }
+      }
+      if (!audio) {
         audit.record("sentinel.neural_speech_failed", { userId: req.user.sub, lang, error: String(neuralError?.message || neuralError) });
+        // The generic source voice is not guaranteed to be male. For Thai and
+        // English fail closed so the client can use only a confirmed male
+        // system voice instead of mixing a female fallback into Sentinel.
+        if (lang === "th-TH" || lang === "en-US") throw neuralError || new Error("male_neural_speech_unavailable");
         const upstreamUrl = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${encodeURIComponent(lang)}&q=${encodeURIComponent(text)}`;
         const upstream = await fetch(upstreamUrl, { headers: { Accept: "audio/mpeg", "User-Agent": "Panthorium-Sentinel/15" }, signal: AbortSignal.timeout(12000) });
         if (!upstream.ok) throw new Error(`speech_upstream_${upstream.status}`);
@@ -92,7 +103,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       if (!res.writableEnded) res.end();
     }
   });
-  router.post("/chat", auth, requirePermission("chat"), aiLimiter, async (req, res) => { try { const error = validChatBody(req.body || {}); if (error) return res.status(400).json({ ok: false, error }); const { message, sessionId, provider, model } = req.body || {}; const sid = sessionId || req.headers["x-session-id"] || randomUUID(); const result = await sentinel.chat({ sessionId: sid, userId: req.user.sub, message, mode: "default", provider: provider?.toLowerCase(), model }); audit.record("sentinel.chat", { userId: req.user.sub, sessionId: sid, provider: result.provider || null, model: result.model || null, usage: result.usage || null, latencyMs: result.latencyMs || null, ok: result.ok }); res.json({ ...result, sessionId: sid }); } catch (err) { res.status(500).json({ ok: false, error: "internal_error" }); } });
+  router.post("/chat", auth, requirePermission("chat"), aiLimiter, async (req, res) => { try { const error = validChatBody(req.body || {}); if (error) return res.status(400).json({ ok: false, error }); const { message, sessionId, provider, model, voice } = req.body || {}; const sid = sessionId || req.headers["x-session-id"] || randomUUID(); const result = await sentinel.chat({ sessionId: sid, userId: req.user.sub, message, mode: "default", provider: provider?.toLowerCase(), model, voiceMode: voice === true }); audit.record("sentinel.chat", { userId: req.user.sub, sessionId: sid, provider: result.provider || null, model: result.model || null, usage: result.usage || null, latencyMs: result.latencyMs || null, ok: result.ok }); res.json({ ...result, sessionId: sid }); } catch (err) { res.status(500).json({ ok: false, error: "internal_error" }); } });
   router.post("/sentinel/command", auth, requirePermission("sentinel:command"), aiLimiter, async (req, res) => { try { const { command, sessionId, provider, model } = req.body || {}; if (!validText(command, 8000)) return res.status(400).json({ ok: false, error: "invalid_command" }); const sid = typeof sessionId === "string" && sessionId.length <= 120 ? sessionId : randomUUID(); const result = await sentinel.chat({ sessionId: sid, userId: req.user.sub, message: command, mode: "admin", provider: provider?.toLowerCase(), model }); res.json({ ...result, sessionId: sid }); } catch (err) { res.status(500).json({ ok: false, error: "internal_error" }); } });
   router.post("/chat/clear", auth, requirePermission("chat"), async (req, res) => { const { sessionId } = req.body || {}; if (typeof sessionId === "string" && sessionId.length <= 120) await sentinel.clearConversation(req.user.sub, sessionId); res.json({ ok: true }); });
   return router;

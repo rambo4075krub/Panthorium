@@ -4,7 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const { SentinelOrchestratorService, AI_PROFILES, FRONTIER_PATTERNS, clampMode } = require('../services/sentinelOrchestratorService');
 const { normalizeSentinelPermissions } = require('../repositories/authRepository');
-const { SENTINEL_MALE_VOICES } = require('../services/sentinelSpeechAudio');
+const { SENTINEL_MALE_VOICES, applySentinelPronunciations } = require('../services/sentinelSpeechAudio');
 const { removeThaiPoliteParticles } = require('../services/sentinel');
 
 function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunning = false, governanceCritical = false, pending = 0, providers = ['groq', 'openai'] } = {}) {
@@ -33,6 +33,8 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(FRONTIER_PATTERNS.some((p) => p.id === 'agent_tools_handoffs_guardrails'));
   assert.equal(removeThaiPoliteParticles('สวัสดีครับ พร้อมทำงานแล้วค่ะ'), 'สวัสดี พร้อมทำงานแล้ว');
   assert.equal(removeThaiPoliteParticles('รับทราบค่ะ\nกำลังประมวลผลครับ'), 'รับทราบ\nกำลังประมวลผล');
+  assert.equal(applySentinelPronunciations('Panthorium OS is online'), 'แพนทอเรี่ยมโอเอส is online');
+  assert.equal(applySentinelPronunciations('panthorium   os'), 'แพนทอเรี่ยมโอเอส');
 
   const healthy = await buildSentinel({ activeRunning: true }).service.cycle({ execute: false });
   assert.equal(healthy.status, 'healthy');
@@ -57,6 +59,7 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert.equal(modeResult.mode, 'off');
 
   const api = fs.readFileSync('routes/api.js', 'utf8');
+  const sentinelService = fs.readFileSync('services/sentinel.js', 'utf8');
   const server = fs.readFileSync('server.js', 'utf8');
   const shell = fs.readFileSync('sentinel.html', 'utf8');
   assert(api.includes('router.post("/chat/stream"'), 'Sentinel must expose its SSE chat route');
@@ -64,14 +67,29 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('unlockVoiceAudio();'), 'a user gesture must unlock browser audio before the AI request');
   assert(shell.includes('await new Promise(resolve => setTimeout(resolve, 80))'), 'speech must avoid the Chromium cancel/speak race');
   assert(shell.includes('const startWatchdog = setTimeout'), 'desktop speech must detect silently dropped Chromium utterances');
-  assert(shell.includes('await speakRemoteChunk(chunk.text, chunk.lang)'), 'speech must fall back when a native utterance fails');
-  assert.equal(SENTINEL_MALE_VOICES['th-TH'], 'th-TH-NiwatNeural', 'Thai speech must use a standard male neural voice');
-  assert.equal(SENTINEL_MALE_VOICES['en-US'], 'en-US-GuyNeural', 'English speech must use a standard male neural voice');
+  assert(shell.includes('await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange)'), 'speech must fall back when a native utterance fails');
+  assert.equal(SENTINEL_MALE_VOICES['th-TH'], 'en-US-AndrewMultilingualNeural', 'Thai speech must use the Andrew multilingual male neural voice');
+  assert.equal(SENTINEL_MALE_VOICES['en-US'], 'en-US-AndrewMultilingualNeural', 'English speech must use the Andrew multilingual male neural voice');
+  assert(shell.includes('previousChunkLanguage !== chunk.lang'), 'mixed Thai and English speech must pause at each language boundary');
+  assert(shell.includes('setTimeout(resolve, 15)'), 'mixed-language pauses must remain clear without sounding delayed');
+  assert(shell.includes('if (last && last.lang === lang) last.text += token'), 'same-language sentences must remain in one audio request without a network gap');
+  assert(shell.includes('const preparedRemotePromises = chunks.map'), 'all language chunks must preload together to eliminate network gaps');
+  assert(shell.includes('audio.ontimeupdate = () => updateTranscript(false)'), 'remote Andrew audio must advance the current transcript on desktop and mobile');
+  assert(shell.includes('showOrbTranscriptForChar(charIndex)'), 'speech progress must move the active sentence into the center transcript row');
+  assert(shell.includes('transcriptStartChar, transcriptEndChar'), 'each synthesized chunk must retain its position in the complete transcript');
+  assert(fs.readFileSync('services/sentinelSpeechAudio.js', 'utf8').includes('lang === "en-US" ? "-2%" : "+10%"'), 'Andrew must speak English slowly while keeping Thai at the approved speed');
+  assert(shell.includes('voice: voiceMode'), 'voice commands must identify the low-latency voice path');
+  assert(api.includes('voiceMode: voice === true'), 'the speech flag must reach Sentinel without exposing an admin mode');
+  assert(sentinelService.includes('historyLimit: voiceMode ? 12 : 40'), 'voice commands must use bounded recent context for faster processing');
+  assert(!sentinelService.includes('โหมดสนทนาด้วยเสียง: ตอบให้ตรงคำถามและไม่เกิน 2 ประโยค'), 'voice replies must not be limited to two sentences');
   assert(shell.includes('u.pitch = 0.9'), 'Sentinel system-voice fallback must keep a natural male pitch');
   assert(shell.includes('u.rate = 1.02'), 'Sentinel system-voice fallback must speak at a natural pace');
   assert(shell.includes('deepVoiceNames'), 'Sentinel must prefer a deep voice available for the response language');
   assert(shell.includes('femaleVoiceNames'), 'Sentinel must reject explicitly female Thai system voices');
-  assert(shell.includes('if (base === "th") return confirmedMale || null'), 'Thai speech must fall back to pitch-lowered audio unless a male voice is confirmed');
+  assert(shell.includes('if (base === "th" || base === "en") return confirmedMale || null'), 'Thai and English system speech must reject unconfirmed female defaults');
+  assert(shell.includes('const usesMaleNeural = chunk => chunk?.lang === "th-TH" || chunk?.lang === "en-US"'), 'Thai and English must prefer the server male neural voices on every device');
+  assert(shell.includes('receivedProfile !== expectedMaleProfile'), 'the client must reject a speech response that is not the expected male profile');
+  assert(api.includes('if (lang === "th-TH" || lang === "en-US") throw neuralError'), 'the server must never replace Thai or English male neural speech with an unverified source voice');
   assert(shell.includes('audio.playbackRate = 1.0'), 'neural speech must play without artificial pitch or tempo distortion');
   assert(shell.includes('ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ'), 'frontend requests must enforce Sentinel neutral Thai sentence endings');
   assert(api.includes('router.post("/speech"'), 'desktop Thai speech must use the authenticated same-origin audio proxy');
@@ -80,6 +98,12 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('function initGlobalVoice()'), 'global user voice commands must remain available');
   assert(shell.includes('silenceTimer = setTimeout(finishListening, 1400)'), 'global recognition must wait for the user to finish speaking');
   assert(shell.includes('voiceState = "stopping"'), 'recognition must stop before AI processing starts');
+  assert(shell.includes('recognition.continuous = !mobileSpeech'), 'mobile speech recognition must use reliable one-command sessions');
+  assert(shell.includes('await navigator.mediaDevices.getUserMedia'), 'mobile speech must request microphone access from a direct user gesture');
+  assert(shell.includes('setTimeout(() => { try { recognition.start(); }'), 'hands-free microphone startup must remain automatic on mobile and desktop');
+  assert(shell.includes('ยังไม่ได้ยินเสียง ตรวจสอบสิทธิ์ไมโครโฟน'), 'mobile speech must report when no microphone signal reaches recognition');
+  assert(shell.includes('const shouldProcess = !discardOnEnd && !!text'), 'mobile recognition must process captured interim text when the browser ends the session');
+  assert(shell.includes('finishListening({ discard: false })'), 'tapping stop on mobile must submit the captured command instead of discarding it');
   assert(shell.includes('await speak(res.text)'), 'AI processing must wait until speech playback really finishes');
   assert(shell.includes('if (voiceState === "idle") restartListening()'), 'the microphone may resume only after AI speech finishes');
   assert(!shell.includes('callProviderLocal'), 'provider secrets and direct provider calls must remain server-side');
