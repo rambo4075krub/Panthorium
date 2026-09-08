@@ -2,9 +2,9 @@ const { spawn } = require("child_process");
 const ffmpegPath = require("ffmpeg-static");
 
 const SENTINEL_MALE_FILTER = [
-  "rubberband=pitch=0.74:tempo=1.12:transients=smooth:detector=soft:phase=independent:window=long",
-  "highpass=f=55",
-  "bass=g=5:f=170:w=0.7",
+  "rubberband=pitch=0.50:tempo=1.16:transients=smooth:detector=soft:phase=independent:window=long",
+  "highpass=f=45",
+  "bass=g=5:f=135:w=0.7",
   "acompressor=threshold=-18dB:ratio=2.2:attack=20:release=180:makeup=1.4"
 ].join(",");
 

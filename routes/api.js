@@ -37,7 +37,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       let voiceProfile = "source-fallback";
       try {
         audio = await transformSentinelMaleVoice(sourceAudio);
-        voiceProfile = "sentinel-male-cinematic-v2";
+        voiceProfile = "sentinel-male-reference-v3";
       } catch (transformError) {
         audit.record("sentinel.speech_transform_failed", { userId: req.user.sub, lang, error: transformError.message });
       }

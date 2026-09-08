@@ -1192,7 +1192,7 @@
                     audio.volume = 1;
                     // Pitch and tone are transformed server-side; keep playback
                     // brisk here without changing the new male register.
-                    audio.playbackRate = 1.04;
+                    audio.playbackRate = 1.05;
                     if ("preservesPitch" in audio) audio.preservesPitch = true;
                     if ("mozPreservesPitch" in audio) audio.mozPreservesPitch = true;
                     if ("webkitPreservesPitch" in audio) audio.webkitPreservesPitch = true;
@@ -1227,8 +1227,8 @@
             u.lang = voice?.lang || chunk.lang;
             u.voice = voice || null;
             // Sentinel voice: low, calm and deliberate, similar to a cinematic AI.
-            u.pitch = 0.28;
-            u.rate = 0.96;
+            u.pitch = 0.22;
+            u.rate = 1.0;
             u.onstart = () => { started = true; };
             u.onboundary = event => {
                 aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
