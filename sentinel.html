@@ -1039,6 +1039,14 @@
         renderOrbTranscript();
     }
 
+    function showOrbTranscriptForChar(charIndex) {
+        let sentenceIndex = 0;
+        for (let i = 0; i < orbTranscriptOffsets.length; i++) {
+            if (charIndex >= orbTranscriptOffsets[i]) sentenceIndex = i;
+        }
+        showOrbTranscriptSentence(sentenceIndex);
+    }
+
     function initOrbTranscriptControls() {
         const panel = $("orb-transcript");
         if (!panel || panel.dataset.ready) return;
@@ -1091,7 +1099,10 @@
             }
             const lang = languageForText(token);
             const last = chunks[chunks.length - 1];
-            if (last && last.lang === lang && !/[.!?。！？…]$/.test(last.text)) last.text += token;
+            // Keep consecutive sentences in the same language in one audio
+            // request. Splitting at every full stop created a long network gap
+            // even though the speaker and language had not changed.
+            if (last && last.lang === lang) last.text += token;
             else chunks.push({ text: token, lang });
         }
         return chunks.map(chunk => ({ ...chunk, text: chunk.text.trim() })).filter(chunk => chunk.text).flatMap(chunk => {
@@ -1181,7 +1192,7 @@
         if (prepared?.objectUrl) URL.revokeObjectURL(prepared.objectUrl);
     }
 
-    function playRemoteChunk(prepared, text) {
+    function playRemoteChunk(prepared, text, transcriptRange = {}) {
         return new Promise(resolve => {
             if (!prepared?.objectUrl) { resolve(false); return; }
             const audio = voiceAudio;
@@ -1193,6 +1204,7 @@
                 audio.pause();
                 audio.onended = null;
                 audio.onerror = null;
+                audio.ontimeupdate = null;
                 releaseRemoteChunk(prepared);
                 resolve(value);
             };
@@ -1210,16 +1222,27 @@
                     if ("preservesPitch" in audio) audio.preservesPitch = true;
                     if ("mozPreservesPitch" in audio) audio.mozPreservesPitch = true;
                     if ("webkitPreservesPitch" in audio) audio.webkitPreservesPitch = true;
-                    audio.onended = () => finish(true);
+                    const transcriptStartChar = Number(transcriptRange.start) || 0;
+                    const transcriptEndChar = Math.max(transcriptStartChar + 1, Number(transcriptRange.end) || transcriptStartChar + String(text).length);
+                    const updateTranscript = (complete = false) => {
+                        const progress = complete ? 1 : Number.isFinite(audio.duration) && audio.duration > 0 ? audio.currentTime / audio.duration : 0;
+                        const charIndex = Math.min(transcriptEndChar - 1, Math.floor(transcriptStartChar + (transcriptEndChar - transcriptStartChar) * progress));
+                        aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.2);
+                        showOrbTranscriptForChar(charIndex);
+                        window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex } }));
+                    };
+                    audio.ontimeupdate = () => updateTranscript(false);
+                    audio.onended = () => { updateTranscript(true); finish(true); };
                     audio.onerror = () => finish(false);
+                    updateTranscript(false);
                     await audio.play();
                 } catch (_) { finish(false); }
             })();
         });
     }
 
-    async function speakRemoteChunk(text, lang) {
-        return playRemoteChunk(await requestRemoteChunk(text, lang), text);
+    async function speakRemoteChunk(text, lang, transcriptRange) {
+        return playRemoteChunk(await requestRemoteChunk(text, lang), text, transcriptRange);
     }
 
     function voiceSafeText(text) {
@@ -1250,10 +1273,9 @@
             u.onstart = () => { started = true; };
             u.onboundary = event => {
                 aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
-                window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex: event.charIndex } }));
-                let index = 0;
-                for (let i = 0; i < orbTranscriptOffsets.length; i++) if (event.charIndex >= orbTranscriptOffsets[i]) index = i;
-                showOrbTranscriptSentence(index);
+                const charIndex = (Number(chunk.transcriptStartChar) || 0) + event.charIndex;
+                window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex } }));
+                showOrbTranscriptForChar(charIndex);
             };
             u.onend = () => finish(true);
             u.onerror = () => finish(false);
@@ -1276,7 +1298,15 @@
         text = voiceSafeText(text);
         setOrbTranscript(text, 0);
         const speechRun = ++activeSpeechRun;
-        const chunks = splitSpeechByLanguage(text);
+        const rawChunks = splitSpeechByLanguage(text);
+        let transcriptSearchOffset = 0;
+        const chunks = rawChunks.map(chunk => {
+            const found = text.indexOf(chunk.text, transcriptSearchOffset);
+            const transcriptStartChar = found >= 0 ? found : transcriptSearchOffset;
+            const transcriptEndChar = Math.min(text.length, transcriptStartChar + chunk.text.length);
+            transcriptSearchOffset = transcriptEndChar;
+            return { ...chunk, transcriptStartChar, transcriptEndChar };
+        });
         if (!chunks.length) return false;
         let voices = [];
         if (window.speechSynthesis) {
@@ -1319,12 +1349,13 @@
             const voice = voiceForLanguage(chunk.lang, voices);
             const forceMaleNeural = usesMaleNeural(chunk);
             let spoken = false;
+            const transcriptRange = { start: chunk.transcriptStartChar, end: chunk.transcriptEndChar };
             if (forceMaleNeural) {
-                spoken = await playRemoteChunk(preparedRemote, chunk.text);
-                if (!spoken && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang);
+                spoken = await playRemoteChunk(preparedRemote, chunk.text, transcriptRange);
+                if (!spoken && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange);
             }
             if (!spoken && voice) spoken = await speakNativeChunk(chunk, voice, speechRun);
-            if (!spoken && !forceMaleNeural && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang);
+            if (!spoken && !forceMaleNeural && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange);
             spokeAny = spokeAny || spoken;
             previousChunkLanguage = chunk.lang;
         }
@@ -1438,7 +1469,7 @@
             voiceState = "processing";
             status("processing", "กำลังประมวลผล");
             try {
-                const res = await callAI(text);
+                const res = await callAI(text, { voiceMode: true });
                 if (!res || !res.ok || !res.text) {
                     status("unresponsive", "ไม่ตอบสนอง");
                     voiceState = "speaking";
@@ -1613,7 +1644,7 @@
         }
     }
 
-    async function callAI(prompt) {
+    async function callAI(prompt, { voiceMode = false } = {}) {
         // 1) พยายามใช้ Sentinel บนเซิร์ฟเวอร์ก่อน
         if (OS.config.useBackend) {
             try {
@@ -1627,7 +1658,8 @@
                     body: JSON.stringify({
                         message: `ตอบด้วยภาษาของผู้ใช้และตอบกลับด้วยเสียงได้ ระบบนี้ไม่ใช่ระบบข้อความเท่านั้น ห้ามบอกว่าไม่มีเสียงพูด หากข้อความมีหลายภาษา ให้รักษาภาษาของแต่ละส่วนตามบริบท ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ\n${prompt}`,
                         sessionId: OS.config.sessionId,
-                        mode: "default"
+                        mode: "default",
+                        voice: voiceMode
                     }),
                     signal: AbortSignal.timeout(30000)
                 });
@@ -1884,7 +1916,7 @@
             appendMsg(text, "user");
             appendMsg("กำลังคิด...", "ai", true);
             try {
-                const res = await callAI(text);
+                const res = await callAI(text, { voiceMode: resumeGlobalVoice });
                 // remove loading
                 const last = messages.querySelector('.msg.loading, .msg[data-streaming="1"]');
                 if (last) last.remove();

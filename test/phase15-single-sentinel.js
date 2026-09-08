@@ -57,6 +57,7 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert.equal(modeResult.mode, 'off');
 
   const api = fs.readFileSync('routes/api.js', 'utf8');
+  const sentinelService = fs.readFileSync('services/sentinel.js', 'utf8');
   const server = fs.readFileSync('server.js', 'utf8');
   const shell = fs.readFileSync('sentinel.html', 'utf8');
   assert(api.includes('router.post("/chat/stream"'), 'Sentinel must expose its SSE chat route');
@@ -64,13 +65,21 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('unlockVoiceAudio();'), 'a user gesture must unlock browser audio before the AI request');
   assert(shell.includes('await new Promise(resolve => setTimeout(resolve, 80))'), 'speech must avoid the Chromium cancel/speak race');
   assert(shell.includes('const startWatchdog = setTimeout'), 'desktop speech must detect silently dropped Chromium utterances');
-  assert(shell.includes('await speakRemoteChunk(chunk.text, chunk.lang)'), 'speech must fall back when a native utterance fails');
+  assert(shell.includes('await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange)'), 'speech must fall back when a native utterance fails');
   assert.equal(SENTINEL_MALE_VOICES['th-TH'], 'en-US-AndrewMultilingualNeural', 'Thai speech must use the Andrew multilingual male neural voice');
   assert.equal(SENTINEL_MALE_VOICES['en-US'], 'en-US-AndrewMultilingualNeural', 'English speech must use the Andrew multilingual male neural voice');
   assert(shell.includes('previousChunkLanguage !== chunk.lang'), 'mixed Thai and English speech must pause at each language boundary');
   assert(shell.includes('setTimeout(resolve, 90)'), 'mixed-language pauses must remain clear without sounding delayed');
+  assert(shell.includes('if (last && last.lang === lang) last.text += token'), 'same-language sentences must remain in one audio request without a network gap');
   assert(shell.includes('requestRemoteChunk(nextChunk.text, nextChunk.lang)'), 'the next language chunk must preload while the current chunk is playing');
+  assert(shell.includes('audio.ontimeupdate = () => updateTranscript(false)'), 'remote Andrew audio must advance the current transcript on desktop and mobile');
+  assert(shell.includes('showOrbTranscriptForChar(charIndex)'), 'speech progress must move the active sentence into the center transcript row');
+  assert(shell.includes('transcriptStartChar, transcriptEndChar'), 'each synthesized chunk must retain its position in the complete transcript');
   assert(fs.readFileSync('services/sentinelSpeechAudio.js', 'utf8').includes('lang === "en-US" ? "+2%" : "+10%"'), 'Andrew must speak English more slowly without reducing Thai speed');
+  assert(shell.includes('voice: voiceMode'), 'voice commands must identify the low-latency voice path');
+  assert(api.includes('voiceMode: voice === true'), 'the speech flag must reach Sentinel without exposing an admin mode');
+  assert(sentinelService.includes('historyLimit: voiceMode ? 12 : 40'), 'voice commands must use bounded recent context for faster processing');
+  assert(sentinelService.includes('ไม่เกิน 2 ประโยค'), 'normal voice replies must stay concise enough to synthesize quickly');
   assert(shell.includes('u.pitch = 0.9'), 'Sentinel system-voice fallback must keep a natural male pitch');
   assert(shell.includes('u.rate = 1.02'), 'Sentinel system-voice fallback must speak at a natural pace');
   assert(shell.includes('deepVoiceNames'), 'Sentinel must prefer a deep voice available for the response language');
