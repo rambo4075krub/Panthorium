@@ -1328,6 +1328,8 @@
         let silenceTimer = null;
         let transcriptParts = new Map();
         let latestInterim = "";
+        let discardOnEnd = false;
+        let listenWatchdog = null;
         const status = (kind, label) => {
             button.classList.toggle("listening", kind === "listening");
             button.classList.toggle("processing", kind === "processing");
@@ -1345,15 +1347,41 @@
         }
         recognition = new SR();
         recognition.lang = "th-TH";
-        recognition.continuous = true;
+        // Android/iOS implementations often terminate continuous recognition
+        // without a final result event. A one-command session is more reliable
+        // on mobile; onend below still processes the latest interim transcript.
+        const mobileSpeech = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+        recognition.continuous = !mobileSpeech;
         recognition.interimResults = true;
+        const prepareMobileMicrophone = async () => {
+            if (!mobileSpeech || !navigator.mediaDevices?.getUserMedia) return true;
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                });
+                stream.getTracks().forEach(track => track.stop());
+                return true;
+            } catch (error) {
+                autoResume = false;
+                const denied = error?.name === "NotAllowedError" || error?.name === "SecurityError";
+                status("unsupported", denied ? "กรุณาอนุญาตสิทธิ์ไมโครโฟนให้เว็บไซต์" : "เปิดไมโครโฟนไม่สำเร็จ");
+                return false;
+            }
+        };
         recognition.onstart = () => {
             voiceState = "listening";
+            discardOnEnd = false;
             transcriptParts = new Map();
             latestInterim = "";
             userSpeechActive = true;
             window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
             status("listening", "กำลังฟัง...");
+            clearTimeout(listenWatchdog);
+            listenWatchdog = setTimeout(() => {
+                if (voiceState === "listening" && !transcriptParts.size && !latestInterim) {
+                    status("listening", "ยังไม่ได้ยินเสียง ตรวจสอบสิทธิ์ไมโครโฟนแล้วลองพูดอีกครั้ง");
+                }
+            }, 7000);
         };
         const restartListening = () => {
             if (!autoResume || voiceState !== "idle") return;
@@ -1387,15 +1415,17 @@
                 restartListening();
             }
         };
-        const finishListening = () => {
+        const finishListening = ({ discard = false } = {}) => {
             if (voiceState !== "listening") return;
             clearTimeout(silenceTimer);
+            discardOnEnd = discard;
             voiceState = "stopping";
-            status("processing", "ฟังจบแล้ว กำลังเตรียมประมวลผล");
+            if (!discard) status("processing", "ฟังจบแล้ว กำลังเตรียมประมวลผล");
             try { recognition.stop(); } catch (_) {}
         };
         recognition.onresult = event => {
             if (voiceState !== "listening" && voiceState !== "stopping") return;
+            clearTimeout(listenWatchdog);
             latestInterim = "";
             for (let i = event.resultIndex; i < event.results.length; i++) {
                 const result = event.results[i];
@@ -1411,6 +1441,7 @@
             }
         };
         recognition.onerror = event => {
+            clearTimeout(listenWatchdog);
             userSpeechActive = false;
             const permissionDenied = event.error === "not-allowed" || event.error === "service-not-allowed";
             if (permissionDenied) autoResume = false;
@@ -1419,17 +1450,20 @@
         };
         recognition.onend = () => {
             clearTimeout(silenceTimer);
+            clearTimeout(listenWatchdog);
             userSpeechActive = false;
             window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
+            const text = [...transcriptParts.values()].join(" ").trim() || latestInterim.trim();
+            const shouldProcess = !discardOnEnd && !!text && (voiceState === "stopping" || voiceState === "listening");
+            latestInterim = "";
+            transcriptParts.clear();
+            discardOnEnd = false;
+            if (shouldProcess) {
+                window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
+                processTranscript(text);
+                return;
+            }
             if (voiceState === "stopping") {
-                const text = [...transcriptParts.values()].join(" ").trim() || latestInterim.trim();
-                latestInterim = "";
-                transcriptParts.clear();
-                if (text) {
-                    window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
-                    processTranscript(text);
-                    return;
-                }
                 voiceState = "idle";
                 status("ready", "พร้อมใช้งาน");
                 restartListening();
@@ -1438,7 +1472,7 @@
             if (voiceState === "listening") voiceState = "idle";
             restartListening();
         };
-        button.onclick = () => {
+        button.onclick = async () => {
             unlockVoiceAudio();
             try { window.speechSynthesis?.resume(); } catch (_) {}
             if (voiceState === "processing" || voiceState === "speaking" || voiceState === "stopping") {
@@ -1447,13 +1481,13 @@
             }
             if (voiceState === "listening") {
                 autoResume = false;
-                clearTimeout(silenceTimer);
-                voiceState = "idle";
-                recognition.stop();
-                status("ready", "หยุดฟังแล้ว");
+                // A tap on the stop button means "finish this command". The
+                // previous code discarded the mobile transcript at this point.
+                finishListening({ discard: false });
                 return;
             }
             autoResume = true;
+            if (!(await prepareMobileMicrophone())) return;
             try { recognition.start(); } catch { status("unresponsive", "ไม่ตอบสนอง"); }
         };
         window.PanthoriumVoice = {
@@ -1461,7 +1495,8 @@
                 autoResume = false;
                 clearTimeout(silenceTimer);
                 if (voiceState === "listening" || voiceState === "stopping") {
-                    voiceState = "idle";
+                    discardOnEnd = true;
+                    voiceState = "stopping";
                     try { recognition.stop(); } catch (_) {}
                 }
             },
@@ -1471,9 +1506,10 @@
             },
             state() { return voiceState; }
         };
-        // Start listening automatically; the button remains available to retry permission.
+        // Keep hands-free startup on every device. If a mobile browser blocks
+        // automatic capture, tapping the microphone runs the permission warmup.
         autoResume = true;
-        setTimeout(() => { try { recognition.start(); } catch { status("unsupported", "ไม่รองรับคำสั่ง"); } }, 400);
+        setTimeout(() => { try { recognition.start(); } catch { status("unsupported", "แตะปุ่มไมโครโฟนเพื่ออนุญาตการฟัง"); } }, 400);
     }
     if (window.speechSynthesis) {
         speechSynthesis.getVoices();

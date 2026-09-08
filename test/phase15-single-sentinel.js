@@ -80,6 +80,12 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('function initGlobalVoice()'), 'global user voice commands must remain available');
   assert(shell.includes('silenceTimer = setTimeout(finishListening, 1400)'), 'global recognition must wait for the user to finish speaking');
   assert(shell.includes('voiceState = "stopping"'), 'recognition must stop before AI processing starts');
+  assert(shell.includes('recognition.continuous = !mobileSpeech'), 'mobile speech recognition must use reliable one-command sessions');
+  assert(shell.includes('await navigator.mediaDevices.getUserMedia'), 'mobile speech must request microphone access from a direct user gesture');
+  assert(shell.includes('setTimeout(() => { try { recognition.start(); }'), 'hands-free microphone startup must remain automatic on mobile and desktop');
+  assert(shell.includes('ยังไม่ได้ยินเสียง ตรวจสอบสิทธิ์ไมโครโฟน'), 'mobile speech must report when no microphone signal reaches recognition');
+  assert(shell.includes('const shouldProcess = !discardOnEnd && !!text'), 'mobile recognition must process captured interim text when the browser ends the session');
+  assert(shell.includes('finishListening({ discard: false })'), 'tapping stop on mobile must submit the captured command instead of discarding it');
   assert(shell.includes('await speak(res.text)'), 'AI processing must wait until speech playback really finishes');
   assert(shell.includes('if (voiceState === "idle") restartListening()'), 'the microphone may resume only after AI speech finishes');
   assert(!shell.includes('callProviderLocal'), 'provider secrets and direct provider calls must remain server-side');
