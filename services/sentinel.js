@@ -55,8 +55,7 @@ class Sentinel {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message, historyLimit: voiceMode ? 12 : 40 });
     const trainingContext = this.training ? await this.training.contextFor(message) : '';
-    const voicePrompt = voiceMode ? "\n\nโหมดสนทนาด้วยเสียง: ตอบให้ตรงคำถามและไม่เกิน 2 ประโยค เว้นแต่ผู้ใช้ขอรายละเอียดโดยตรง" : "";
-    const result = this.normalizeVoiceAnswer(await this.gateway.complete({ systemPrompt: this.prompts.build(mode) + trainingContext + this.voiceLanguageGuard() + voicePrompt, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid }));
+    const result = this.normalizeVoiceAnswer(await this.gateway.complete({ systemPrompt: this.prompts.build(mode) + trainingContext + this.voiceLanguageGuard(), history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid }));
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });
     this.captureTraining({message,result,userId,sessionId:prepared.sid});
     return result.ok ? { ...result, sessionId: prepared.sid, sentinel: "Sentinel" } : result;

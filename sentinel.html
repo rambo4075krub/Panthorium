@@ -1323,26 +1323,26 @@
         let spokeAny = false;
         let previousChunkLanguage = "";
         const usesMaleNeural = chunk => chunk?.lang === "th-TH" || chunk?.lang === "en-US";
-        let preparedRemotePromise = usesMaleNeural(chunks[0]) ? requestRemoteChunk(chunks[0].text, chunks[0].lang) : Promise.resolve(null);
+        // Start every neural request together. Fetching only one chunk ahead
+        // still left a long silence when a short word finished before the next
+        // network response arrived.
+        const preparedRemotePromises = chunks.map(chunk => usesMaleNeural(chunk) ? requestRemoteChunk(chunk.text, chunk.lang) : Promise.resolve(null));
+        const releasePendingRemote = startIndex => preparedRemotePromises.slice(startIndex).forEach(promise => promise.then(releaseRemoteChunk));
         for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
             const chunk = chunks[chunkIndex];
-            const preparedRemote = await preparedRemotePromise;
-            const nextChunk = chunks[chunkIndex + 1];
-            // Fetch the following language chunk while this one is playing so
-            // network latency does not become an unintended multi-second gap.
-            preparedRemotePromise = usesMaleNeural(nextChunk) ? requestRemoteChunk(nextChunk.text, nextChunk.lang) : Promise.resolve(null);
+            const preparedRemote = await preparedRemotePromises[chunkIndex];
             if (speechRun !== activeSpeechRun) {
                 releaseRemoteChunk(preparedRemote);
-                preparedRemotePromise.then(releaseRemoteChunk);
+                releasePendingRemote(chunkIndex + 1);
                 break;
             }
             // Give the listener a short, consistent boundary when a sentence
             // switches scripts. Andrew remains the same speaker on both sides.
             if (previousChunkLanguage && previousChunkLanguage !== chunk.lang) {
-                await new Promise(resolve => setTimeout(resolve, 90));
+                await new Promise(resolve => setTimeout(resolve, 30));
                 if (speechRun !== activeSpeechRun) {
                     releaseRemoteChunk(preparedRemote);
-                    preparedRemotePromise.then(releaseRemoteChunk);
+                    releasePendingRemote(chunkIndex + 1);
                     break;
                 }
             }
