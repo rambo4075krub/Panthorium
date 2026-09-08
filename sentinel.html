@@ -77,6 +77,9 @@
             transition: width 0.3s ease;
         }
         .boot-status { margin-top: 16px; font-size: 12px; color: var(--text-dim); }
+        #global-voice { position: fixed; right: 18px; bottom: 68px; z-index: 10020; width: 48px; height: 48px; border: 1px solid var(--accent); border-radius: 50%; background: rgba(5,18,24,.9); color: var(--accent); font-size: 22px; cursor: pointer; box-shadow: 0 0 18px rgba(0,255,204,.25); }
+        #global-voice.listening { background: var(--danger); border-color: #ff9aaa; color: #fff; animation: pulse-mic 1s infinite; }
+        #global-voice.processing { border-color: #ffd166; color: #ffd166; }
 
         /* ========== LOGIN ========== */
         #login-screen {
@@ -672,6 +675,7 @@
 </head>
 <body>
     <video id="faceVideo" autoplay muted playsinline></video>
+    <button id="global-voice" type="button" aria-label="สั่งงานด้วยเสียง" title="กดเพื่อพูด">🎤</button>
 
     <!-- BOOT -->
     <div id="boot-screen">
@@ -830,6 +834,7 @@
             OS.state.loggedIn = true;
             OS.state.verified = true;
             initDesktop();
+            initGlobalVoice();
             toast("ยินดีต้อนรับสู่ Panthorium OS");
         }, 600);
     }
@@ -1079,6 +1084,71 @@
         u.onend = stopSpeechMotion;
         u.onerror = stopSpeechMotion;
         speechSynthesis.speak(u);
+    }
+
+    // Global voice path: accepts commands without opening Sentinel chat.
+    function initGlobalVoice() {
+        const button = $("global-voice");
+        if (!button || button.dataset.ready) return;
+        button.dataset.ready = "1";
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        let busy = false;
+        const status = (kind, label) => {
+            button.classList.toggle("listening", kind === "listening");
+            button.classList.toggle("processing", kind === "processing");
+            button.textContent = kind === "listening" ? "⏹" : kind === "processing" ? "⏳" : "🎤";
+            button.title = label;
+            toast(label, kind === "processing" ? 6000 : 2500);
+        };
+        if (!SR) {
+            status("unsupported", "ไม่รองรับคำสั่ง");
+            button.onclick = () => status("unsupported", "ไม่รองรับคำสั่ง");
+            return;
+        }
+        recognition = new SR();
+        recognition.lang = "th-TH";
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.onstart = () => {
+            userSpeechActive = true;
+            window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
+            status("listening", "กำลังฟัง...");
+        };
+        recognition.onresult = async event => {
+            const text = String(event.results?.[0]?.[0]?.transcript || "").trim();
+            if (!text) { status("unsupported", "ไม่รองรับคำสั่ง"); return; }
+            window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
+            busy = true;
+            status("processing", "กำลังประมวลผล");
+            try {
+                const res = await callAI(text);
+                if (!res || !res.ok || !res.text) {
+                    status("unresponsive", "ไม่ตอบสนอง");
+                    speak("ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง");
+                    return;
+                }
+                speak(res.text);
+                status("ready", "พร้อมใช้งาน");
+            } catch (error) {
+                console.warn("Global voice command failed", error);
+                status("unresponsive", "ไม่ตอบสนอง");
+                speak("ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง");
+            } finally { busy = false; }
+        };
+        recognition.onerror = event => {
+            userSpeechActive = false;
+            status(event.error === "not-allowed" || event.error === "service-not-allowed" ? "unsupported" : "unresponsive", event.error === "not-allowed" || event.error === "service-not-allowed" ? "ไม่รองรับคำสั่ง" : "ไม่ตอบสนอง");
+        };
+        recognition.onend = () => {
+            userSpeechActive = false;
+            window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
+            if (!busy) status("ready", "พร้อมใช้งาน");
+        };
+        button.onclick = () => {
+            if (button.classList.contains("listening")) { recognition.stop(); return; }
+            try { recognition.start(); } catch { status("unresponsive", "ไม่ตอบสนอง"); }
+        };
     }
     if (window.speechSynthesis) {
         speechSynthesis.getVoices();
