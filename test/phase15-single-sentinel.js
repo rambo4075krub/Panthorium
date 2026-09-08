@@ -68,13 +68,15 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert.equal(SENTINEL_MALE_VOICES['th-TH'], 'en-US-AndrewMultilingualNeural', 'Thai speech must use the Andrew multilingual male neural voice');
   assert.equal(SENTINEL_MALE_VOICES['en-US'], 'en-US-AndrewMultilingualNeural', 'English speech must use the Andrew multilingual male neural voice');
   assert(shell.includes('previousChunkLanguage !== chunk.lang'), 'mixed Thai and English speech must pause at each language boundary');
-  assert(shell.includes('setTimeout(resolve, 260)'), 'mixed-language pauses must be long enough to make each language clear');
+  assert(shell.includes('setTimeout(resolve, 90)'), 'mixed-language pauses must remain clear without sounding delayed');
+  assert(shell.includes('requestRemoteChunk(nextChunk.text, nextChunk.lang)'), 'the next language chunk must preload while the current chunk is playing');
+  assert(fs.readFileSync('services/sentinelSpeechAudio.js', 'utf8').includes('lang === "en-US" ? "+2%" : "+10%"'), 'Andrew must speak English more slowly without reducing Thai speed');
   assert(shell.includes('u.pitch = 0.9'), 'Sentinel system-voice fallback must keep a natural male pitch');
   assert(shell.includes('u.rate = 1.02'), 'Sentinel system-voice fallback must speak at a natural pace');
   assert(shell.includes('deepVoiceNames'), 'Sentinel must prefer a deep voice available for the response language');
   assert(shell.includes('femaleVoiceNames'), 'Sentinel must reject explicitly female Thai system voices');
   assert(shell.includes('if (base === "th" || base === "en") return confirmedMale || null'), 'Thai and English system speech must reject unconfirmed female defaults');
-  assert(shell.includes('const forceMaleNeural = chunk.lang === "th-TH" || chunk.lang === "en-US"'), 'Thai and English must prefer the server male neural voices on every device');
+  assert(shell.includes('const usesMaleNeural = chunk => chunk?.lang === "th-TH" || chunk?.lang === "en-US"'), 'Thai and English must prefer the server male neural voices on every device');
   assert(shell.includes('receivedProfile !== expectedMaleProfile'), 'the client must reject a speech response that is not the expected male profile');
   assert(api.includes('if (lang === "th-TH" || lang === "en-US") throw neuralError'), 'the server must never replace Thai or English male neural speech with an unverified source voice');
   assert(shell.includes('audio.playbackRate = 1.0'), 'neural speech must play without artificial pitch or tempo distortion');

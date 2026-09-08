@@ -1150,47 +1150,58 @@
         voiceAudio.play().then(() => { voiceAudio.pause(); voiceAudio.currentTime = 0; voiceAudioUnlocked = true; }).catch(() => {});
     }
 
-    function speakRemoteChunk(text, lang) {
+    async function requestRemoteChunk(text, lang) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), Math.max(12000, Math.min(30000, String(text).length * 180)));
+        try {
+            if (!OS.config.accessToken && !(await ensureAuth())) return null;
+            const base = OS.config.backendUrl.replace(/\/$/, "");
+            const response = await fetch(base + "/api/speech", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${OS.config.accessToken}` },
+                credentials: "include",
+                body: JSON.stringify({ text: String(text).slice(0, 180), lang }),
+                signal: controller.signal
+            });
+            if (!response.ok) return null;
+            const expectedMaleProfile = lang === "th-TH" || lang === "en-US" ? "en-US-AndrewMultilingualNeural" : "";
+            const receivedProfile = response.headers.get("x-sentinel-voice-profile") || "";
+            if (expectedMaleProfile && receivedProfile !== expectedMaleProfile) return null;
+            const blob = await response.blob();
+            if (!blob.size) return null;
+            return { objectUrl: URL.createObjectURL(blob) };
+        } catch (_) {
+            return null;
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    function releaseRemoteChunk(prepared) {
+        if (prepared?.objectUrl) URL.revokeObjectURL(prepared.objectUrl);
+    }
+
+    function playRemoteChunk(prepared, text) {
         return new Promise(resolve => {
+            if (!prepared?.objectUrl) { resolve(false); return; }
             const audio = voiceAudio;
             let settled = false;
-            let objectUrl = "";
-            const controller = new AbortController();
             const finish = value => {
                 if (settled) return;
                 settled = true;
                 clearTimeout(timeout);
-                controller.abort();
                 audio.pause();
                 audio.onended = null;
                 audio.onerror = null;
-                if (objectUrl) URL.revokeObjectURL(objectUrl);
+                releaseRemoteChunk(prepared);
                 resolve(value);
             };
-            const timeout = setTimeout(() => {
-                finish(false);
-            }, Math.max(12000, Math.min(30000, String(text).length * 180)));
+            const timeout = setTimeout(() => finish(false), Math.max(12000, Math.min(30000, String(text).length * 180)));
             (async () => {
                 try {
-                    if (!OS.config.accessToken && !(await ensureAuth())) { finish(false); return; }
-                    const base = OS.config.backendUrl.replace(/\/$/, "");
-                    const response = await fetch(base + "/api/speech", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json", Authorization: `Bearer ${OS.config.accessToken}` },
-                        credentials: "include",
-                        body: JSON.stringify({ text: String(text).slice(0, 180), lang }),
-                        signal: controller.signal
-                    });
-                    if (!response.ok || settled) { finish(false); return; }
-                    const expectedMaleProfile = lang === "th-TH" || lang === "en-US" ? "en-US-AndrewMultilingualNeural" : "";
-                    const receivedProfile = response.headers.get("x-sentinel-voice-profile") || "";
-                    if (expectedMaleProfile && receivedProfile !== expectedMaleProfile) { finish(false); return; }
-                    const blob = await response.blob();
-                    if (!blob.size || settled) { finish(false); return; }
-                    objectUrl = URL.createObjectURL(blob);
                     audio.pause();
                     audio.currentTime = 0;
-                    audio.src = objectUrl;
+                    audio.src = prepared.objectUrl;
                     audio.preload = "auto";
                     audio.volume = 1;
                     // Pitch and tone are transformed server-side; keep playback
@@ -1205,6 +1216,10 @@
                 } catch (_) { finish(false); }
             })();
         });
+    }
+
+    async function speakRemoteChunk(text, lang) {
+        return playRemoteChunk(await requestRemoteChunk(text, lang), text);
     }
 
     function voiceSafeText(text) {
@@ -1277,19 +1292,36 @@
         window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text } }));
         let spokeAny = false;
         let previousChunkLanguage = "";
-        for (const chunk of chunks) {
-            if (speechRun !== activeSpeechRun) break;
+        const usesMaleNeural = chunk => chunk?.lang === "th-TH" || chunk?.lang === "en-US";
+        let preparedRemotePromise = usesMaleNeural(chunks[0]) ? requestRemoteChunk(chunks[0].text, chunks[0].lang) : Promise.resolve(null);
+        for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+            const chunk = chunks[chunkIndex];
+            const preparedRemote = await preparedRemotePromise;
+            const nextChunk = chunks[chunkIndex + 1];
+            // Fetch the following language chunk while this one is playing so
+            // network latency does not become an unintended multi-second gap.
+            preparedRemotePromise = usesMaleNeural(nextChunk) ? requestRemoteChunk(nextChunk.text, nextChunk.lang) : Promise.resolve(null);
+            if (speechRun !== activeSpeechRun) {
+                releaseRemoteChunk(preparedRemote);
+                preparedRemotePromise.then(releaseRemoteChunk);
+                break;
+            }
             // Give the listener a short, consistent boundary when a sentence
             // switches scripts. Andrew remains the same speaker on both sides.
             if (previousChunkLanguage && previousChunkLanguage !== chunk.lang) {
-                await new Promise(resolve => setTimeout(resolve, 260));
-                if (speechRun !== activeSpeechRun) break;
+                await new Promise(resolve => setTimeout(resolve, 90));
+                if (speechRun !== activeSpeechRun) {
+                    releaseRemoteChunk(preparedRemote);
+                    preparedRemotePromise.then(releaseRemoteChunk);
+                    break;
+                }
             }
             const voice = voiceForLanguage(chunk.lang, voices);
-            const forceMaleNeural = chunk.lang === "th-TH" || chunk.lang === "en-US";
+            const forceMaleNeural = usesMaleNeural(chunk);
             let spoken = false;
             if (forceMaleNeural) {
-                spoken = await speakRemoteChunk(chunk.text, chunk.lang);
+                spoken = await playRemoteChunk(preparedRemote, chunk.text);
+                if (!spoken && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang);
             }
             if (!spoken && voice) spoken = await speakNativeChunk(chunk, voice, speechRun);
             if (!spoken && !forceMaleNeural && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang);

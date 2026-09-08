@@ -25,7 +25,8 @@ async function synthesizeSentinelMaleVoice(text, lang) {
       voice,
       lang,
       outputFormat: "audio-24khz-48kbitrate-mono-mp3",
-      rate: "+10%",
+      // Keep Thai brisk, but let Andrew articulate English terms more clearly.
+      rate: lang === "en-US" ? "+2%" : "+10%",
       pitch: "default",
       volume: "default",
       timeout: 20000,
