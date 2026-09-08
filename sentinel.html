@@ -1053,41 +1053,87 @@
         renderOrbTranscript();
     }
 
+    function languageForText(text) {
+        const value = String(text || "");
+        if (/[฀-๿]/.test(value)) return "th-TH";
+        if (/[぀-ヿ]/.test(value)) return "ja-JP";
+        if (/[가-힯]/.test(value)) return "ko-KR";
+        if (/[؀-ۿ]/.test(value)) return "ar-SA";
+        if (/[Ѐ-ӿ]/.test(value)) return "ru-RU";
+        if (/[一-鿿]/.test(value)) return "zh-CN";
+        if (/[A-Za-zÀ-ÿ]/.test(value)) return "en-US";
+        return "en-US";
+    }
+
+    function splitSpeechByLanguage(text) {
+        const chunks = String(text || "").match(/[^.!?。！？…]+[.!?。！？…]?/g) || [String(text || "")];
+        return chunks.map(chunk => ({ text: chunk.trim(), lang: languageForText(chunk) })).filter(chunk => chunk.text);
+    }
+
+    function voiceForLanguage(lang, voices) {
+        const base = lang.split("-")[0].toLowerCase();
+        return voices.find(v => v.lang.toLowerCase() === lang.toLowerCase()) || voices.find(v => v.lang.toLowerCase().startsWith(base + "-")) || null;
+    }
+
     function speak(text) {
         setOrbTranscript(text, 0);
         if (!window.speechSynthesis) return;
         window.speechSynthesis.cancel();
         aiSpeechActive = false;
         aiSpeechPulse = 0;
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = "th-TH";
-        u.pitch = 0.6;
-        u.rate = 0.9;
         const voices = speechSynthesis.getVoices();
-        const th = voices.find(v => v.lang.includes("th"));
-        if (th) u.voice = th;
-        u.onstart = () => {
+        const chunks = splitSpeechByLanguage(text);
+        let chunkIndex = 0;
+        const speakNext = () => {
+            const chunk = chunks[chunkIndex++];
+            if (!chunk) {
+                aiSpeechActive = false;
+                window.PanthoriumOrb?.setAISpeaking(false);
+                window.dispatchEvent(new CustomEvent("panthorium:voice-end"));
+                return;
+            }
+            const u = new SpeechSynthesisUtterance(chunk.text);
+            u.lang = chunk.lang;
+            u.pitch = 0.6;
+            u.rate = 0.9;
+            const voice = voiceForLanguage(chunk.lang, voices);
+            if (voice) u.voice = voice;
+            u.onstart = () => {
             aiSpeechActive = true;
             aiSpeechPulse = 1;
             window.PanthoriumOrb?.setAISpeaking(true);
             window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text } }));
-        };
-        u.onboundary = event => {
+            };
+            u.onboundary = event => {
             aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
             window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex: event.charIndex } }));
             let index = 0;
             for (let i = 0; i < orbTranscriptOffsets.length; i++) if (event.charIndex >= orbTranscriptOffsets[i]) index = i;
             showOrbTranscriptSentence(index);
+            };
+            u.onend = speakNext;
+            u.onerror = speakNext;
+            speechSynthesis.speak(u);
         };
-        const stopSpeechMotion = () => {
-            aiSpeechActive = false;
-            window.PanthoriumOrb?.setAISpeaking(false);
-            window.dispatchEvent(new CustomEvent("panthorium:voice-end"));
-        };
-        u.onend = stopSpeechMotion;
-        u.onerror = stopSpeechMotion;
-        speechSynthesis.speak(u);
+        speakNext();
     }
+
+    // Stream-safe speech: callers can send deltas without cutting a word or changing voices mid-sentence.
+    let streamingSpeechBuffer = "";
+    let streamingSpeechTimer = null;
+    window.addEventListener("panthorium:ai-stream-delta", event => {
+        streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
+        clearTimeout(streamingSpeechTimer);
+        streamingSpeechTimer = setTimeout(() => {
+            const match = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…])(?:\s|$)/);
+            if (match) { speak(match[1]); streamingSpeechBuffer = streamingSpeechBuffer.slice(match[1].length).trimStart(); }
+        }, 180);
+    });
+    window.addEventListener("panthorium:ai-stream-end", () => {
+        clearTimeout(streamingSpeechTimer);
+        if (streamingSpeechBuffer.trim()) speak(streamingSpeechBuffer);
+        streamingSpeechBuffer = "";
+    });
 
     // Global voice path: accepts commands without opening Sentinel chat.
     function initGlobalVoice() {
@@ -1236,7 +1282,7 @@
                         "x-session-id": OS.config.sessionId
                     },
                     body: JSON.stringify({
-                        message: `ตอบเป็นภาษาไทยเสมอ ห้ามตอบภาษาอังกฤษ เว้นแต่ผู้ใช้ขอโดยตรง\n${prompt}`,
+                        message: `ตอบด้วยภาษาของผู้ใช้ และรักษาภาษาหลายภาษาในข้อความให้ถูกต้อง หากข้อความมีหลายภาษา ให้ตอบโดยคงภาษาของแต่ละส่วนตามบริบท\n${prompt}`,
                         sessionId: OS.config.sessionId,
                         mode: "default"
                     }),
