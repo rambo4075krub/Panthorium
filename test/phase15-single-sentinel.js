@@ -63,7 +63,9 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('await speakRemoteChunk(chunk.text, chunk.lang)'), 'speech must fall back when a native utterance fails');
   assert(shell.includes('u.pitch = 0.45'), 'Sentinel must use its low cinematic voice profile');
   assert(shell.includes('deepVoiceNames'), 'Sentinel must prefer a deep voice available for the response language');
-  assert(server.includes('mediaSrc: ["\'self\'", "blob:", "https://translate.google.com"'), 'desktop fallback speech must be allowed by the Content Security Policy');
+  assert(api.includes('router.post("/speech"'), 'desktop Thai speech must use the authenticated same-origin audio proxy');
+  assert(shell.includes('base + "/api/speech"'), 'desktop speech playback must avoid cross-origin media restrictions');
+  assert(server.includes('mediaSrc: ["\'self\'", "blob:"]'), 'speech media must remain restricted to same-origin and generated blobs');
   assert(shell.includes('function initGlobalVoice()'), 'global user voice commands must remain available');
   assert(shell.includes('silenceTimer = setTimeout(finishListening, 1400)'), 'global recognition must wait for the user to finish speaking');
   assert(shell.includes('voiceState = "stopping"'), 'recognition must stop before AI processing starts');
