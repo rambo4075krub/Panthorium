@@ -80,6 +80,9 @@
         #global-voice { position: fixed; right: 18px; bottom: 68px; z-index: 10020; width: 48px; height: 48px; border: 1px solid var(--accent); border-radius: 50%; background: rgba(5,18,24,.9); color: var(--accent); font-size: 22px; cursor: pointer; box-shadow: 0 0 18px rgba(0,255,204,.25); }
         #global-voice.listening { background: var(--danger); border-color: #ff9aaa; color: #fff; animation: pulse-mic 1s infinite; }
         #global-voice.processing { border-color: #ffd166; color: #ffd166; }
+        #voice-status-box { position: fixed; left: 50%; bottom: calc(var(--taskbar-h) + 12px); transform: translateX(-50%); z-index: 10019; width: min(560px, calc(100vw - 116px)); display: grid; gap: 4px; pointer-events: none; }
+        .voice-status-row { min-height: 22px; padding: 3px 10px; border: 1px solid rgba(120,220,255,.18); border-radius: 6px; background: rgba(2,10,18,.72); color: #9fb5c8; font: 12px/1.3 Consolas, monospace; text-align: center; opacity: .72; }
+        .voice-status-row.active { color: var(--accent); border-color: rgba(0,255,204,.48); opacity: 1; }
 
         /* ========== LOGIN ========== */
         #login-screen {
@@ -676,6 +679,11 @@
 <body>
     <video id="faceVideo" autoplay muted playsinline></video>
     <button id="global-voice" type="button" aria-label="สั่งงานด้วยเสียง" title="กดเพื่อพูด">🎤</button>
+    <div id="voice-status-box" aria-live="polite" aria-label="สถานะคำสั่งเสียง">
+        <div class="voice-status-row" data-voice-status="listening">กำลังฟัง</div>
+        <div class="voice-status-row" data-voice-status="processing">กำลังประมวลผล</div>
+        <div class="voice-status-row" data-voice-status="error">ไม่รองรับคำสั่ง / ไม่ตอบสนอง</div>
+    </div>
 
     <!-- BOOT -->
     <div id="boot-screen">
@@ -1094,12 +1102,16 @@
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
         let busy = false;
+        let autoResume = true;
         const status = (kind, label) => {
             button.classList.toggle("listening", kind === "listening");
             button.classList.toggle("processing", kind === "processing");
             button.textContent = kind === "listening" ? "⏹" : kind === "processing" ? "⏳" : "🎤";
             button.title = label;
-            toast(label, kind === "processing" ? 6000 : 2500);
+            document.querySelectorAll("[data-voice-status]").forEach(row => row.classList.remove("active"));
+            const row = document.querySelector(`[data-voice-status="${kind === "listening" ? "listening" : kind === "processing" ? "processing" : "error"}"]`);
+            if (row) { row.classList.add("active"); row.textContent = label; }
+            if (kind !== "listening" || label !== "กำลังฟัง") toast(label, kind === "processing" ? 6000 : 2500);
         };
         if (!SR) {
             status("unsupported", "ไม่รองรับคำสั่ง");
@@ -1108,15 +1120,17 @@
         }
         recognition = new SR();
         recognition.lang = "th-TH";
-        recognition.continuous = false;
-        recognition.interimResults = false;
+        recognition.continuous = true;
+        recognition.interimResults = true;
         recognition.onstart = () => {
             userSpeechActive = true;
             window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
             status("listening", "กำลังฟัง...");
         };
         recognition.onresult = async event => {
-            const text = String(event.results?.[0]?.[0]?.transcript || "").trim();
+            const result = event.results?.[event.results.length - 1];
+            if (!result?.isFinal) return;
+            const text = String(result?.[0]?.transcript || "").trim();
             if (!text) { status("unsupported", "ไม่รองรับคำสั่ง"); return; }
             window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
             busy = true;
@@ -1143,12 +1157,19 @@
         recognition.onend = () => {
             userSpeechActive = false;
             window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
-            if (!busy) status("ready", "พร้อมใช้งาน");
+            if (!busy && autoResume) {
+                status("listening", "กำลังฟัง");
+                setTimeout(() => { try { recognition.start(); } catch {} }, 250);
+            }
         };
         button.onclick = () => {
-            if (button.classList.contains("listening")) { recognition.stop(); return; }
+            if (button.classList.contains("listening")) { autoResume = false; recognition.stop(); return; }
+            autoResume = true;
             try { recognition.start(); } catch { status("unresponsive", "ไม่ตอบสนอง"); }
         };
+        // Start listening automatically; the button remains available to retry permission.
+        autoResume = true;
+        setTimeout(() => { try { recognition.start(); } catch { status("unsupported", "ไม่รองรับคำสั่ง"); } }, 400);
     }
     if (window.speechSynthesis) {
         speechSynthesis.getVoices();
@@ -1220,7 +1241,7 @@
                         "x-session-id": OS.config.sessionId
                     },
                     body: JSON.stringify({
-                        message: prompt,
+                        message: `ตอบเป็นภาษาไทยเสมอ ห้ามตอบภาษาอังกฤษ เว้นแต่ผู้ใช้ขอโดยตรง\n${prompt}`,
                         sessionId: OS.config.sessionId,
                         mode: "default"
                     }),
