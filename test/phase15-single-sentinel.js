@@ -61,8 +61,11 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('await new Promise(resolve => setTimeout(resolve, 80))'), 'speech must avoid the Chromium cancel/speak race');
   assert(shell.includes('const startWatchdog = setTimeout'), 'desktop speech must detect silently dropped Chromium utterances');
   assert(shell.includes('await speakRemoteChunk(chunk.text, chunk.lang)'), 'speech must fall back when a native utterance fails');
-  assert(shell.includes('u.pitch = 0.45'), 'Sentinel must use its low cinematic voice profile');
+  assert(shell.includes('u.pitch = 0.32'), 'Sentinel must use its low cinematic male voice profile');
   assert(shell.includes('deepVoiceNames'), 'Sentinel must prefer a deep voice available for the response language');
+  assert(shell.includes('femaleVoiceNames'), 'Sentinel must reject explicitly female Thai system voices');
+  assert(shell.includes('if (base === "th") return confirmedMale || null'), 'Thai speech must fall back to pitch-lowered audio unless a male voice is confirmed');
+  assert(shell.includes('audio.playbackRate = 0.78'), 'fallback Thai speech must be shifted into a lower male register');
   assert(api.includes('router.post("/speech"'), 'desktop Thai speech must use the authenticated same-origin audio proxy');
   assert(shell.includes('base + "/api/speech"'), 'desktop speech playback must avoid cross-origin media restrictions');
   assert(server.includes('mediaSrc: ["\'self\'", "blob:"]'), 'speech media must remain restricted to same-origin and generated blobs');

@@ -1111,11 +1111,17 @@
     function voiceForLanguage(lang, voices) {
         const base = lang.split("-")[0].toLowerCase();
         const matching = voices.filter(v => v.lang.toLowerCase() === lang.toLowerCase() || v.lang.toLowerCase().startsWith(base + "-"));
-        const deepVoiceNames = /pattara|niwat|male|david|mark|guy|daniel|aaron|arthur|oliver|thomas|alex|jorge|paul|fred|ralph/i;
-        return matching.sort((a, b) => {
-            const score = voice => (voice.lang.toLowerCase() === lang.toLowerCase() ? 4 : 0) + (deepVoiceNames.test(voice.name) ? 8 : 0) + (voice.localService ? 1 : 0);
+        const deepVoiceNames = /pattara|niwat|male|man|ชาย|david|mark|guy|daniel|aaron|arthur|oliver|thomas|alex|jorge|paul|fred|ralph/i;
+        const femaleVoiceNames = /premwadee|narisa|kanya|female|woman|หญิง|samantha|zira|susan|victoria|karen|moira|tessa|ava|allison/i;
+        const ranked = matching.filter(voice => !femaleVoiceNames.test(voice.name)).sort((a, b) => {
+            const score = voice => (voice.lang.toLowerCase() === lang.toLowerCase() ? 4 : 0) + (deepVoiceNames.test(voice.name) ? 12 : 0) + (voice.localService ? 1 : 0);
             return score(b) - score(a);
-        })[0] || null;
+        });
+        const confirmedMale = ranked.find(voice => deepVoiceNames.test(voice.name));
+        // Thai voice lists frequently contain only an unlabelled female voice.
+        // Use the pitch-lowered Sentinel fallback unless a male voice is explicit.
+        if (base === "th") return confirmedMale || null;
+        return confirmedMale || ranked[0] || null;
     }
 
     function loadSpeechVoices() {
@@ -1184,7 +1190,10 @@
                     audio.src = objectUrl;
                     audio.preload = "auto";
                     audio.volume = 1;
-                    audio.playbackRate = 0.9;
+                    // Lower the source voice into Sentinel's original cinematic
+                    // male register. Disabling pitch preservation makes the
+                    // slower playback deepen the voice instead of only stretching it.
+                    audio.playbackRate = 0.78;
                     if ("preservesPitch" in audio) audio.preservesPitch = false;
                     if ("mozPreservesPitch" in audio) audio.mozPreservesPitch = false;
                     if ("webkitPreservesPitch" in audio) audio.webkitPreservesPitch = false;
@@ -1219,8 +1228,8 @@
             u.lang = voice?.lang || chunk.lang;
             u.voice = voice || null;
             // Sentinel voice: low, calm and deliberate, similar to a cinematic AI.
-            u.pitch = 0.45;
-            u.rate = 0.84;
+            u.pitch = 0.32;
+            u.rate = 0.82;
             u.onstart = () => { started = true; };
             u.onboundary = event => {
                 aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
