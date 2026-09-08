@@ -4,8 +4,8 @@ const path = require("path");
 const { EdgeTTS } = require("node-edge-tts");
 
 const SENTINEL_MALE_VOICES = Object.freeze({
-  "th-TH": "th-TH-NiwatNeural",
-  "en-US": "en-US-GuyNeural",
+  "th-TH": "en-US-AndrewMultilingualNeural",
+  "en-US": "en-US-AndrewMultilingualNeural",
   "ja-JP": "ja-JP-KeitaNeural",
   "ko-KR": "ko-KR-InJoonNeural",
   "ar-SA": "ar-SA-HamedNeural",

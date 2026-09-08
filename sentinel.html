@@ -1182,7 +1182,7 @@
                         signal: controller.signal
                     });
                     if (!response.ok || settled) { finish(false); return; }
-                    const expectedMaleProfile = lang === "th-TH" ? "th-TH-NiwatNeural" : lang === "en-US" ? "en-US-GuyNeural" : "";
+                    const expectedMaleProfile = lang === "th-TH" || lang === "en-US" ? "en-US-AndrewMultilingualNeural" : "";
                     const receivedProfile = response.headers.get("x-sentinel-voice-profile") || "";
                     if (expectedMaleProfile && receivedProfile !== expectedMaleProfile) { finish(false); return; }
                     const blob = await response.blob();
@@ -1276,8 +1276,15 @@
         window.PanthoriumOrb?.setAISpeaking(true);
         window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text } }));
         let spokeAny = false;
+        let previousChunkLanguage = "";
         for (const chunk of chunks) {
             if (speechRun !== activeSpeechRun) break;
+            // Give the listener a short, consistent boundary when a sentence
+            // switches scripts. Andrew remains the same speaker on both sides.
+            if (previousChunkLanguage && previousChunkLanguage !== chunk.lang) {
+                await new Promise(resolve => setTimeout(resolve, 260));
+                if (speechRun !== activeSpeechRun) break;
+            }
             const voice = voiceForLanguage(chunk.lang, voices);
             const forceMaleNeural = chunk.lang === "th-TH" || chunk.lang === "en-US";
             let spoken = false;
@@ -1287,6 +1294,7 @@
             if (!spoken && voice) spoken = await speakNativeChunk(chunk, voice, speechRun);
             if (!spoken && !forceMaleNeural && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang);
             spokeAny = spokeAny || spoken;
+            previousChunkLanguage = chunk.lang;
         }
         if (speechRun === activeSpeechRun) {
             aiSpeechActive = false;
