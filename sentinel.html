@@ -1127,9 +1127,11 @@
     function speakRemoteChunk(text, lang) {
         return new Promise(resolve => {
             const audio = new Audio(remoteSpeechUrl(text, lang));
-            audio.onended = resolve;
-            audio.onerror = resolve;
-            audio.play().catch(resolve);
+            audio.preload = "auto";
+            audio.volume = 1;
+            audio.onended = () => resolve(true);
+            audio.onerror = () => resolve(false);
+            audio.play().then(() => {}).catch(() => resolve(false));
         });
     }
 
@@ -1166,9 +1168,12 @@
                 aiSpeechPulse = 1;
                 window.PanthoriumOrb?.setAISpeaking(true);
                 window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text: chunk.text, lang: chunk.lang, fallback: true } }));
-                await speakRemoteChunk(chunk.text, chunk.lang);
-                speakNext();
-                return;
+                const remoteOk = await speakRemoteChunk(chunk.text, chunk.lang);
+                if (remoteOk) { speakNext(); return; }
+                // Remote audio can be blocked by autoplay/CORS. Continue into
+                // the native engine instead of ending silently.
+                aiSpeechActive = false;
+                window.PanthoriumOrb?.setAISpeaking(false);
             }
             // Keep the requested language even when a platform has no named voice.
             // This prevents falling back to the previously selected English voice.
@@ -1187,6 +1192,7 @@
             };
             u.onend = speakNext;
             u.onerror = speakNext;
+            speechSynthesis.resume();
             speechSynthesis.speak(u);
         };
         speakNext();
