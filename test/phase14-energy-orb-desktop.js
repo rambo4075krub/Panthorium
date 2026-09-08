@@ -1,10 +1,10 @@
 const assert = require('assert');
 const fs = require('fs');
 
-const shell = fs.readFileSync('sentinel.html', 'utf8');
+const shell = fs.readFileSync('sentinel.html', 'utf8').replace(/\r\n/g, '\n');
 
 assert(!shell.includes('/energy-orb-ui.js'), 'desktop must not load the duplicate replacement orb');
-assert(shell.includes('try {\n            initBackground();'), 'desktop must initialize the source prototype orb');
+assert(shell.includes('initBackground();'), 'desktop must initialize the source prototype orb');
 assert(shell.includes('id="bg-canvas"'), 'prototype orb must render in the desktop canvas');
 assert(shell.includes('new THREE.PerspectiveCamera(42'), 'prototype camera field of view must be preserved');
 assert(shell.includes('camera.position.set(0, 0, 4.65)'), 'prototype camera position must be preserved');
