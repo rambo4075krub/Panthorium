@@ -41,20 +41,26 @@ class SentinelCore {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message });
     const trainingContext = this.training ? await this.training.contextFor(message) : '';
-    const languageGuard = "\n\nข้อกำหนดสุดท้าย: ตอบด้วยภาษาของผู้ใช้ หากข้อความมีหลายภาษา ให้คงภาษาของแต่ละส่วนตามบริบท และห้ามเปลี่ยนภาษาเองโดยไม่มีคำขอ";
+    const languageGuard = "\n\nข้อกำหนดสุดท้าย: ตอบด้วยภาษาของผู้ใช้ หากข้อความมีหลายภาษา ให้คงภาษาของแต่ละส่วนตามบริบท และห้ามเปลี่ยนภาษาเองโดยไม่มีคำขอ ระบบนี้รองรับการรับฟังและตอบกลับด้วยเสียง ห้ามกล่าวว่าเป็นระบบข้อความเท่านั้นหรือไม่มีเสียงพูด";
     const result = await this.gateway.complete({ systemPrompt: this.prompts.build(mode) + trainingContext + languageGuard, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid });
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });
     this.captureTraining({message,result,userId,sessionId:prepared.sid});
+    if (result.ok && /ข้อความเท่านั้น|ไม่มีเสียงพูด|ไม่สามารถพูด|ไม่มีระบบเสียง/i.test(String(result.text || ""))) {
+      result.text = "รับทราบครับ ระบบพร้อมรับคำสั่งเสียงและตอบกลับด้วยเสียงแล้ว กรุณาพูดคำสั่งได้เลยครับ";
+    }
     return result.ok ? { ...result, sessionId: prepared.sid, core: "Sentinel Core" } : result;
   }
   async streamChat({ sessionId, userId = "system", message, mode = "default", provider, model, onDelta, onProvider }) {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message });
     const trainingContext = this.training ? await this.training.contextFor(message) : '';
-    const languageGuard = "\n\nข้อกำหนดสุดท้าย: ตอบด้วยภาษาของผู้ใช้ หากข้อความมีหลายภาษา ให้คงภาษาของแต่ละส่วนตามบริบท และห้ามเปลี่ยนภาษาเองโดยไม่มีคำขอ";
+    const languageGuard = "\n\nข้อกำหนดสุดท้าย: ตอบด้วยภาษาของผู้ใช้ หากข้อความมีหลายภาษา ให้คงภาษาของแต่ละส่วนตามบริบท และห้ามเปลี่ยนภาษาเองโดยไม่มีคำขอ ระบบนี้รองรับการรับฟังและตอบกลับด้วยเสียง ห้ามกล่าวว่าเป็นระบบข้อความเท่านั้นหรือไม่มีเสียงพูด";
     const result = await this.gateway.stream({ systemPrompt: this.prompts.build(mode) + trainingContext + languageGuard, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, onDelta, onProvider });
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });
     this.captureTraining({message,result,userId,sessionId:prepared.sid});
+    if (result.ok && /ข้อความเท่านั้น|ไม่มีเสียงพูด|ไม่สามารถพูด|ไม่มีระบบเสียง/i.test(String(result.text || ""))) {
+      result.text = "รับทราบครับ ระบบพร้อมรับคำสั่งเสียงและตอบกลับด้วยเสียงแล้ว กรุณาพูดคำสั่งได้เลยครับ";
+    }
     return result.ok ? { ...result, sessionId: prepared.sid, core: "Sentinel Core" } : result;
   }
   status() { return { name: "Sentinel Core", version: "2.3.0-auto-training", providers: this.getAvailableProviders(), sessions: this.sessions.size(), persistence: this.conversations?.pool ? "postgresql" : this.conversations ? "memory" : "legacy", training: Boolean(this.training), autoTraining: this.training?.settings?.()||null, streaming: true, uptime: process.uptime() }; }
