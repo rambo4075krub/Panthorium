@@ -812,6 +812,7 @@
 
     // ---------- Boot Sequence ----------
     async function boot() {
+        if (OS.state.booted) return;
         const bar = $("boot-bar");
         const status = $("boot-status");
         const steps = [
@@ -827,8 +828,8 @@
             await new Promise(r => setTimeout(r, 220 + Math.random() * 150));
         }
         await new Promise(r => setTimeout(r, 300));
-        $("boot-screen").classList.add("hidden");
-        setTimeout(() => {
+        const finishBoot = () => {
+            if (OS.state.booted) return;
             $("boot-screen").style.display = "none";
             // เข้าสู่ระบบฟรีทันที ไม่ต้อง login
             $("login-screen").style.display = "none";
@@ -836,11 +837,24 @@
             OS.state.booted = true;
             OS.state.loggedIn = true;
             OS.state.verified = true;
-            initDesktop();
-            initGlobalVoice();
+            try { initDesktop(); } catch (error) { console.error("Desktop initialization failed", error); activateOrbFallback(error); }
+            try { initGlobalVoice(); } catch (error) { console.error("Voice initialization failed", error); }
             toast("ยินดีต้อนรับสู่ Panthorium OS");
-        }, 600);
+        };
+        $("boot-screen").classList.add("hidden");
+        setTimeout(finishBoot, 120);
+        // A failed animation/WebGL initialization must never leave the OS on boot.
+        setTimeout(() => {
+            if (!OS.state.booted) finishBoot();
+        }, 3500);
     }
+
+    window.addEventListener("error", event => {
+        if (!OS.state.booted) {
+            console.error("Boot runtime error", event.error || event.message);
+            try { boot(); } catch (_) {}
+        }
+    });
 
     // ---------- Biometrics ----------
     let faceModelsLoaded = false;
@@ -1106,7 +1120,6 @@
         });
     }
 
-
     function remoteSpeechUrl(text, lang) {
         return `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${encodeURIComponent(lang)}&q=${encodeURIComponent(String(text).slice(0, 180))}`;
     }
@@ -1146,7 +1159,18 @@
                 u.voice = voice;
                 u.lang = voice.lang;
             }
-            if (!voice && chunk.lang !== "en-US") {\n                aiSpeechActive = true;\n                aiSpeechPulse = 1;\n                window.PanthoriumOrb?.setAISpeaking(true);\n                window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text: chunk.text, lang: chunk.lang, fallback: true } }));\n                await speakRemoteChunk(chunk.text, chunk.lang);\n                speakNext();\n                return;\n            }\n            // Keep the requested language even when a platform has no named voice.
+            if (!voice && chunk.lang !== "en-US") {
+                // Chrome/Edge often expose no Thai/CJK voice. Do not let that
+                // case silently fall back to an English system voice.
+                aiSpeechActive = true;
+                aiSpeechPulse = 1;
+                window.PanthoriumOrb?.setAISpeaking(true);
+                window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text: chunk.text, lang: chunk.lang, fallback: true } }));
+                await speakRemoteChunk(chunk.text, chunk.lang);
+                speakNext();
+                return;
+            }
+            // Keep the requested language even when a platform has no named voice.
             // This prevents falling back to the previously selected English voice.
             u.onstart = () => {
             aiSpeechActive = true;
@@ -2389,7 +2413,7 @@
 
     // ---------- PWA ----------
     if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("./sw.js?v=orb-display-fix-v2").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=orb-display-fix-v3-voice").catch(() => {});
     }
 
     // ---------- Start ----------
