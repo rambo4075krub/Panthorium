@@ -1106,6 +1106,20 @@
         });
     }
 
+
+    function remoteSpeechUrl(text, lang) {
+        return `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${encodeURIComponent(lang)}&q=${encodeURIComponent(String(text).slice(0, 180))}`;
+    }
+
+    function speakRemoteChunk(text, lang) {
+        return new Promise(resolve => {
+            const audio = new Audio(remoteSpeechUrl(text, lang));
+            audio.onended = resolve;
+            audio.onerror = resolve;
+            audio.play().catch(resolve);
+        });
+    }
+
     async function speak(text) {
         setOrbTranscript(text, 0);
         if (!window.speechSynthesis) return;
@@ -1115,7 +1129,7 @@
         aiSpeechPulse = 0;
         const chunks = splitSpeechByLanguage(text);
         let chunkIndex = 0;
-        const speakNext = () => {
+        const speakNext = async () => {
             const chunk = chunks[chunkIndex++];
             if (!chunk) {
                 aiSpeechActive = false;
@@ -1132,7 +1146,7 @@
                 u.voice = voice;
                 u.lang = voice.lang;
             }
-            // Keep the requested language even when a platform has no named voice.
+            if (!voice && chunk.lang !== "en-US") {\n                aiSpeechActive = true;\n                aiSpeechPulse = 1;\n                window.PanthoriumOrb?.setAISpeaking(true);\n                window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text: chunk.text, lang: chunk.lang, fallback: true } }));\n                await speakRemoteChunk(chunk.text, chunk.lang);\n                speakNext();\n                return;\n            }\n            // Keep the requested language even when a platform has no named voice.
             // This prevents falling back to the previously selected English voice.
             u.onstart = () => {
             aiSpeechActive = true;
