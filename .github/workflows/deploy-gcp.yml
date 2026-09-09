@@ -46,11 +46,13 @@ jobs:
 
       - name: Create Artifact Registry Repository (if not exists)
         run: |
-          gcloud artifacts repositories describe ${{ env.REPOSITORY_NAME }} --location=${{ env.REGION }} || \
-          gcloud artifacts repositories create ${{ env.REPOSITORY_NAME }} \
-            --repository-format=docker \
-            --location=${{ env.REGION }} \
-            --description="Panthorium Docker Repository"
+          if ! gcloud artifacts repositories describe ${{ env.REPOSITORY_NAME }} --location=${{ env.REGION }} >/dev/null 2>&1; then
+            gcloud artifacts repositories create ${{ env.REPOSITORY_NAME }} \
+              --repository-format=docker \
+              --location=${{ env.REGION }} \
+              --description="Panthorium Docker Repository" \
+              --quiet
+          fi
 
       - name: Build & Push Docker Image
         run: |
@@ -69,4 +71,5 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --port 8787 \
-            --set-env-vars NODE_ENV=production,HOST=0.0.0.0
+            --set-env-vars NODE_ENV=production,HOST=0.0.0.0 \
+            --quiet
