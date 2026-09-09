@@ -46,13 +46,11 @@ jobs:
 
       - name: Create Artifact Registry Repository (if not exists)
         run: |
-          if ! gcloud artifacts repositories describe ${{ env.REPOSITORY_NAME }} --location=${{ env.REGION }} >/dev/null 2>&1; then
-            gcloud artifacts repositories create ${{ env.REPOSITORY_NAME }} \
-              --repository-format=docker \
-              --location=${{ env.REGION }} \
-              --description="Panthorium Docker Repository" \
-              --quiet
-          fi
+          gcloud artifacts repositories create ${{ env.REPOSITORY_NAME }} \
+            --repository-format=docker \
+            --location=${{ env.REGION }} \
+            --description="Panthorium Docker Repository" \
+            --quiet || true
 
       - name: Build & Push Docker Image
         run: |
