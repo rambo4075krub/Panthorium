@@ -33,5 +33,3 @@ steps:
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE}:latest
 
-options:
-  logging: CLOUD_LOGGING_ONLY
