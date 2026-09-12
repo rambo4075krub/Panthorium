@@ -2,7 +2,7 @@ const { randomUUID } = require('crypto');
 
 class SentinelTrainingRepository {
   constructor({ databaseUrl, databaseSslMode } = {}) {
-    if(databaseUrl){const{Pool}=require('pg');this.pool=new Pool({connectionString:databaseUrl,ssl:databaseSslMode==='disable'?false:{rejectUnauthorized:false}});}else this.pool=null;
+    if(databaseUrl){const { getDatabasePool } = require('./databasePool');this.pool=getDatabasePool({connectionString:databaseUrl,ssl:databaseSslMode==='disable'?false:{rejectUnauthorized:false}});}else this.pool=null;
     this.examples = new Map();
   }
 

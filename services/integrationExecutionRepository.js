@@ -1,7 +1,7 @@
 const { randomUUID } = require('crypto');
 class IntegrationExecutionRepository {
   constructor({ databaseUrl, databaseSslMode } = {}) { this.databaseUrl=databaseUrl;this.databaseSslMode=databaseSslMode;this.pool=null;this.memory=new Map(); }
-  async init(){if(!this.databaseUrl)return;const{Pool}=require('pg');this.pool=new Pool({connectionString:this.databaseUrl,ssl:this.databaseSslMode==='disable'?false:{rejectUnauthorized:false}});await this.pool.query(`CREATE TABLE IF NOT EXISTS panthorium_integration_executions (
+  async init(){if(!this.databaseUrl)return;const { getDatabasePool } = require('./databasePool');this.pool=getDatabasePool({connectionString:this.databaseUrl,ssl:this.databaseSslMode==='disable'?false:{rejectUnauthorized:false}});await this.pool.query(`CREATE TABLE IF NOT EXISTS panthorium_integration_executions (
     execution_id UUID PRIMARY KEY,
     integration_id UUID NOT NULL,
     owner_user_id TEXT NOT NULL,

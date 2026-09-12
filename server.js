@@ -8,6 +8,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
 const config = require("./config");
+const { closeDatabasePools } = require("./services/databasePool");
 const { createAuthRepository } = require("./repositories/authRepository");
 const { SentinelTrainingRepository } = require("./services/sentinelTrainingRepository");
 const { SentinelTrainingService } = require("./services/sentinelTrainingService");
@@ -246,10 +247,41 @@ async function start() {
   sentinelTraining.start();
   autonomousGovernance.start();
   sentinelOrchestrator.start();
-  server.on('close', () => { sentinelTraining.stop(); sentinelActiveLearning.shutdown?.(); autonomousGovernance.stop(); sentinelOrchestrator.stop(); });
+  server.on('close', stopBackgroundWorkers);
   return server;
 }
 
-if (require.main === module) start().catch((error) => { console.error("[BOOT]", error); process.exit(1); });
+function stopBackgroundWorkers() {
+  agentScheduler.stop();
+  sentinelTraining.stop();
+  sentinelActiveLearning.shutdown?.();
+  autonomousGovernance.stop();
+  sentinelOrchestrator.stop();
+}
+
+if (require.main === module) {
+  start().then((server) => {
+    let stopping = false;
+    const shutdown = () => {
+      if (stopping) return;
+      stopping = true;
+      stopBackgroundWorkers();
+      // Leave time for the platform to terminate the process if a request hangs.
+      const deadline = setTimeout(() => process.exit(1), 9000);
+      deadline.unref();
+      server.close(async () => {
+        try {
+          await closeDatabasePools();
+          clearTimeout(deadline);
+          process.exit(0);
+        } catch {
+          process.exit(1);
+        }
+      });
+    };
+    process.once('SIGTERM', shutdown);
+    process.once('SIGINT', shutdown);
+  }).catch((error) => { console.error("[BOOT]", error); process.exit(1); });
+}
 
 module.exports = { app, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };

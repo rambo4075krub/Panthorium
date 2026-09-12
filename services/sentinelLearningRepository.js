@@ -2,7 +2,7 @@ const { randomUUID } = require('crypto');
 
 class SentinelLearningRepository {
   constructor({databaseUrl,databaseSslMode}={}){
-    if(databaseUrl){const{Pool}=require('pg');this.pool=new Pool({connectionString:databaseUrl,ssl:databaseSslMode==='disable'?false:{rejectUnauthorized:false}});}else this.pool=null;
+    if(databaseUrl){const { getDatabasePool } = require('./databasePool');this.pool=getDatabasePool({connectionString:databaseUrl,ssl:databaseSslMode==='disable'?false:{rejectUnauthorized:false}});}else this.pool=null;
     this.versions=new Map();this.events=[];
   }
   async init(){if(!this.pool)return;await this.pool.query(`CREATE TABLE IF NOT EXISTS panthorium_learning_versions(

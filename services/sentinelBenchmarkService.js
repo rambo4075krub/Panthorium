@@ -9,7 +9,7 @@ function avg(items,key){if(!items.length)return 0;return Math.round(items.reduce
 function summarize(result){const leader=result?.leaderboard?.[0]||null;const sentinel=(result?.leaderboard||[]).find(x=>x.name==='Sentinel AI')||null;const sentinelRank=sentinel?((result.leaderboard||[]).findIndex(x=>x.name==='Sentinel AI')+1):null;return{winner:leader?.name||null,winnerScore:leader?.score||0,sentinelScore:sentinel?.score||0,sentinelRank,caseCount:(result?.cases||[]).length,providerCount:(result?.providers||[]).length,passed:Boolean(sentinel&&sentinelRank===1&&Number(sentinel.score||0)>=85)};}
 
 class SentinelBenchmarkService{
-  constructor({sentinel,providers,audit,databaseUrl,databaseSslMode}={}){this.sentinel=sentinel;this.providers=providers;this.audit=audit;this.lastRun=null;this.historyCache=[];if(databaseUrl){const{Pool}=require('pg');this.pool=new Pool({connectionString:databaseUrl,ssl:databaseSslMode==='disable'?false:{rejectUnauthorized:false}});}else this.pool=null;}
+  constructor({sentinel,providers,audit,databaseUrl,databaseSslMode}={}){this.sentinel=sentinel;this.providers=providers;this.audit=audit;this.lastRun=null;this.historyCache=[];if(databaseUrl){const { getDatabasePool } = require('./databasePool');this.pool=getDatabasePool({connectionString:databaseUrl,ssl:databaseSslMode==='disable'?false:{rejectUnauthorized:false}});}else this.pool=null;}
   async init(){if(!this.pool)return;await this.pool.query(`CREATE TABLE IF NOT EXISTS panthorium_benchmark_runs(
     run_id UUID PRIMARY KEY,
     started_at TIMESTAMPTZ NOT NULL,

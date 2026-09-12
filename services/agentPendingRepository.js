@@ -1,8 +1,8 @@
-const { Pool } = require('pg');
+const { getDatabasePool } = require('./databasePool');
 
 class AgentPendingRepository {
   constructor({ databaseUrl = '', databaseSslMode = 'disable' } = {}) {
-    this.pool = databaseUrl ? new Pool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } }) : null;
+    this.pool = databaseUrl ? getDatabasePool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } }) : null;
     this.memory = new Map();
   }
 

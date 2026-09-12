@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const { Pool } = require("pg");
+const { getDatabasePool } = require('../services/databasePool');
 const { JsonStore } = require("./jsonStore");
 
 const LEGACY_SENTINEL_PERMISSION = ["core", "command"].join(":");
@@ -32,7 +32,7 @@ class JsonAuthRepository {
 }
 
 class PostgresAuthRepository {
-  constructor(connectionString, sslMode = "require") { this.pool = new Pool({ connectionString, ssl: sslMode === "disable" ? false : { rejectUnauthorized: false } }); }
+  constructor(connectionString, sslMode = "require") { this.pool = getDatabasePool({ connectionString, ssl: sslMode === "disable" ? false : { rejectUnauthorized: false } }); }
   async init() {
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS panthorium_users (

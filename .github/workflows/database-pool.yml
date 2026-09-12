@@ -1,0 +1,38 @@
+name: PostgreSQL pool regression
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  database-pool:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: panthorium_test
+          POSTGRES_PASSWORD: pool-test-only
+          POSTGRES_DB: panthorium_pool_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: node test/database-pool-integration.js
+        env:
+          DATABASE_POOL_TEST_URL: postgresql://panthorium_test:pool-test-only@127.0.0.1:5432/panthorium_pool_test

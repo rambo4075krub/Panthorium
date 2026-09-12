@@ -1,7 +1,7 @@
 'use strict';
 
 const { randomUUID } = require('crypto');
-const { Pool } = require('pg');
+const { getDatabasePool } = require('./databasePool');
 
 function nowIso() { return new Date().toISOString(); }
 function safeArray(value) { return Array.isArray(value) ? value : []; }
@@ -45,7 +45,7 @@ class AutonomousGovernanceService {
     this.learning = learning || training?.learning || null;
     this.training = training;
     this.audit = audit;
-    this.pool = databaseUrl ? new Pool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } }) : null;
+    this.pool = databaseUrl ? getDatabasePool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } }) : null;
     this.mode = clampMode(mode);
     this.intervalMs = ms(intervalMs, 300000);
     this.timer = null;
