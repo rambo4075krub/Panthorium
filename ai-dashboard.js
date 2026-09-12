@@ -31,10 +31,30 @@
     const status = document.getElementById('ai-status'); if (!status) return; status.textContent = 'กำลังโหลด AI Operations...';
     try {
       const hours = document.getElementById('ai-window')?.value || '24';
-      const [providers, conversations, operations] = await Promise.all([api('/api/ai/providers'), api('/api/conversations'), api('/api/ai/operations?hours=' + encodeURIComponent(hours))]);
+      const [providers, conversations, operations, sentinelStatus] = await Promise.all([
+        api('/api/ai/providers'),
+        api('/api/conversations'),
+        api('/api/ai/operations?hours=' + encodeURIComponent(hours)),
+        api('/api/sentinel/status')
+      ]);
       const m = operations.metrics || {};
       status.textContent = `Configured ${providers.providers.filter(p => p.configured).length}/${providers.providers.length} providers · ${m.conversations || 0} conversations · ${m.persistence || '-'}`;
       document.getElementById('ai-metrics').innerHTML = [
+        card(
+          'Sentinel',
+          sentinelStatus.name || 'Sentinel',
+          `${sentinelStatus.version || '-'} · uptime ${Math.floor((sentinelStatus.uptime || 0) / 60)} นาที`
+        ),
+        card(
+          'Persistence',
+          sentinelStatus.persistence || 'ไม่ทราบสถานะ',
+          'ฐานข้อมูลหลัก'
+        ),
+        card(
+          'Auto-training',
+          sentinelStatus.autoTraining ? 'เปิดใช้งาน' : 'ปิดใช้งาน',
+          'การเรียนรู้อัตโนมัติ'
+        ),
         card('Requests', m.requests || 0, `${m.windowHours || hours}h`), card('Success rate', `${m.successRate || 0}%`), card('Total tokens', m.totalTokens || 0, `in ${m.inputTokens || 0} · out ${m.outputTokens || 0}`), card('Avg latency', `${m.avgLatencyMs || 0} ms`, `p95 ${m.p95LatencyMs || 0} ms`), card('Fallbacks', m.fallbacks || 0), card('Streams', m.streams || 0, `native ${m.nativeStreams || 0}`), card('Conversations', m.conversations || 0), card('Messages', m.messages || 0)
       ].join('');
       const opMap = new Map((m.providers || []).map(p => [p.provider, p]));
