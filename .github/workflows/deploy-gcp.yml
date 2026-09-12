@@ -52,7 +52,9 @@ jobs:
         run: |
           IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
           gcloud builds submit \
-            --tag "$IMAGE_URI" \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --config=cloudbuild.yaml \
+            --substitutions="_IMAGE_URI=$IMAGE_URI" \
             --region=${{ env.REGION }} \
             --quiet .
 
