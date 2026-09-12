@@ -11,7 +11,7 @@ not a measurement of simultaneous connections.
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `DB_POOL_MAX` | `2` | Total concurrent database clients for all modules in one process |
-| `DB_POOL_IDLE_TIMEOUT_MS` | `10000` | Close an unused client after ten seconds of CPU time availability |
+| `DB_POOL_IDLE_TIMEOUT_MS` | `10000` | Ten-second idle timeout; CPU suspension can delay timer processing |
 | `DB_POOL_CONNECTION_TIMEOUT_MS` | `5000` | Bound the wait for an available client or new connection |
 | `application_name` | `panthorium-backend` | Identify application connections in `pg_stat_activity` |
 
