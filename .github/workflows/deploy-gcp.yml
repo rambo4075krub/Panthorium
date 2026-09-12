@@ -68,5 +68,5 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --port 8787 \
-            --set-env-vars NODE_ENV=production,HOST=0.0.0.0 \
+            --update-env-vars NODE_ENV=production,HOST=0.0.0.0 \
             --quiet
