@@ -50,6 +50,7 @@ jobs:
 
       - name: Build & Push via Cloud Build
         run: |
+          gcloud auth list --filter=status:ACTIVE --format="value(account)"
           IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
           gcloud builds submit \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
