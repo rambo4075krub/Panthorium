@@ -1,4 +1,4 @@
-const { Pool } = require("pg");
+const { getDatabasePool } = require('./databasePool');
 const { isIP } = require("node:net");
 
 class SecurityResponseService {
@@ -12,7 +12,7 @@ class SecurityResponseService {
 
   async init() {
     if (!this.databaseUrl) return;
-    this.pool = new Pool({ connectionString: this.databaseUrl, ssl: this.databaseSslMode === "disable" ? false : { rejectUnauthorized: false } });
+    this.pool = getDatabasePool({ connectionString: this.databaseUrl, ssl: this.databaseSslMode === "disable" ? false : { rejectUnauthorized: false } });
     await this.pool.query(`CREATE TABLE IF NOT EXISTS panthorium_security_ip_blocks (
       ip TEXT PRIMARY KEY,
       reason TEXT NOT NULL,

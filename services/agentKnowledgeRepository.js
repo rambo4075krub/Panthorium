@@ -1,7 +1,7 @@
 const { randomUUID } = require('crypto');
-const { Pool } = require('pg');
+const { getDatabasePool } = require('./databasePool');
 class AgentKnowledgeRepository {
-  constructor({ databaseUrl, databaseSslMode } = {}) { this.pool = databaseUrl ? new Pool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } }) : null; this.docs = new Map(); this.chunks = new Map(); }
+  constructor({ databaseUrl, databaseSslMode } = {}) { this.pool = databaseUrl ? getDatabasePool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } }) : null; this.docs = new Map(); this.chunks = new Map(); }
   async init() { if (!this.pool) return; await this.pool.query(`CREATE TABLE IF NOT EXISTS panthorium_knowledge_documents (document_id UUID PRIMARY KEY,user_id TEXT NOT NULL,title TEXT NOT NULL,source TEXT,metadata JSONB NOT NULL DEFAULT '{}'::jsonb,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()); CREATE INDEX IF NOT EXISTS idx_panthorium_knowledge_user ON panthorium_knowledge_documents(user_id,created_at DESC); CREATE TABLE IF NOT EXISTS panthorium_knowledge_chunks (chunk_id UUID PRIMARY KEY,document_id UUID NOT NULL REFERENCES panthorium_knowledge_documents(document_id) ON DELETE CASCADE,user_id TEXT NOT NULL,chunk_index INTEGER NOT NULL,content TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()); CREATE INDEX IF NOT EXISTS idx_panthorium_knowledge_chunks_user ON panthorium_knowledge_chunks(user_id,document_id,chunk_index);`); }
   mapDoc(r) { return { documentId:r.document_id,userId:r.user_id,title:r.title,source:r.source,metadata:r.metadata||{},createdAt:r.created_at,updatedAt:r.updated_at }; }
   mapChunk(r) { return { chunkId:r.chunk_id,documentId:r.document_id,userId:r.user_id,chunkIndex:r.chunk_index,content:r.content,createdAt:r.created_at }; }

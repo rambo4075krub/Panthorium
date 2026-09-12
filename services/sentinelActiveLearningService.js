@@ -54,8 +54,8 @@ class SentinelActiveLearningService {
     this.session = null;
     this.memoryRuns = new Map();
     if (databaseUrl) {
-      const { Pool } = require('pg');
-      this.pool = new Pool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } });
+      const { getDatabasePool } = require('./databasePool');
+      this.pool = getDatabasePool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } });
     } else {
       this.pool = null;
     }

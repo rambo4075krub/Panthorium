@@ -1,6 +1,6 @@
 'use strict';
 
-const { Pool } = require('pg');
+const { getDatabasePool } = require('./databasePool');
 const { randomUUID } = require('crypto');
 const { FrontierArchitectureService, FRONTIER_ARCHITECTURE_PATTERNS, LEARNING_CHANNELS } = require('./frontierArchitectureService');
 
@@ -65,7 +65,7 @@ class SentinelOrchestratorService {
     this.providers = providers || sentinel?.providers;
     this.frontierArchitecture = frontierArchitecture || new FrontierArchitectureService({ benchmarkScore });
     this.audit = audit;
-    this.pool = databaseUrl ? new Pool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } }) : null;
+    this.pool = databaseUrl ? getDatabasePool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } }) : null;
     this.mode = clampMode(mode);
     this.intervalMs = clampMs(intervalMs, 300000);
     this.timer = null;

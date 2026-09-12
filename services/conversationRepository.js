@@ -1,9 +1,9 @@
-const { Pool } = require("pg");
+const { getDatabasePool } = require('./databasePool');
 
 class ConversationRepository {
   constructor({ databaseUrl, databaseSslMode } = {}) {
     this.memory = new Map();
-    this.pool = databaseUrl ? new Pool({ connectionString: databaseUrl, ssl: databaseSslMode === "disable" ? false : { rejectUnauthorized: false } }) : null;
+    this.pool = databaseUrl ? getDatabasePool({ connectionString: databaseUrl, ssl: databaseSslMode === "disable" ? false : { rejectUnauthorized: false } }) : null;
   }
   async init() {
     if (!this.pool) return;

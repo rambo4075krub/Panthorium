@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { createHash } = require("crypto");
-const { Pool } = require("pg");
+const { getDatabasePool } = require('./databasePool');
 
 class AuditService {
   constructor(options) {
@@ -17,7 +17,7 @@ class AuditService {
 
   async init() {
     if (!this.databaseUrl) return;
-    this.pool = new Pool({ connectionString: this.databaseUrl, ssl: this.databaseSslMode === "disable" ? false : { rejectUnauthorized: false } });
+    this.pool = getDatabasePool({ connectionString: this.databaseUrl, ssl: this.databaseSslMode === "disable" ? false : { rejectUnauthorized: false } });
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS panthorium_audit_events (
         id BIGSERIAL PRIMARY KEY, time TIMESTAMPTZ NOT NULL DEFAULT NOW(), event TEXT NOT NULL,
