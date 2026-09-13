@@ -43,9 +43,27 @@ function exportData(){location.href='/api/training/export.jsonl';}
 async function refreshBenchmark(){try{state.benchmark=await api('/api/training/benchmark/status');renderBenchmarkStatus();}catch(error){state.benchmark={ok:false,error:error.message};renderBenchmarkStatus();}}
 function renderBenchmarkResult(result){const root=document.getElementById('st-benchmark-result');if(!root)return;if(!result)return;const leaderboard=result.leaderboard||[];root.innerHTML=`<div class="st-card"><h3>Leaderboard</h3><table class="st-table"><thead><tr><th>Rank</th><th>Provider</th><th>Score</th><th>Wins</th><th>Latency</th></tr></thead><tbody>${leaderboard.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.provider)}</td><td>${esc(r.score)}</td><td>${esc(r.wins||0)}</td><td>${esc(r.latencyMs||0)} ms</td></tr>`).join('')}</tbody></table></div><div style="margin-top:10px">${(result.cases||[]).map((c,i)=>`<div class="st-row"><b>Case ${i+1}: ${esc(c.prompt||c.case||'')}</b><pre style="white-space:pre-wrap;font-size:11px;color:#a9c3d6">${esc(JSON.stringify(c.results||c,null,2).slice(0,2500))}</pre></div>`).join('')}</div>`;}
 async function runBenchmark(){const raw=document.getElementById('st-benchmark-cases').value;const cases=raw.split('\n').map(x=>x.trim()).filter(Boolean);if(!cases.length)return notify('กรุณาใส่โจทย์ Benchmark');const btn=document.getElementById('st-benchmark-run');btn.disabled=true;btn.textContent='กำลังรัน Benchmark...';try{const result=await api('/api/training/benchmark/run',{method:'POST',body:JSON.stringify({cases})});renderBenchmarkResult(result);state.benchmark=await api('/api/training/benchmark/status').catch(()=>state.benchmark);renderBenchmarkStatus();notify('Benchmark เสร็จแล้ว');}catch(error){document.getElementById('st-benchmark-result').innerHTML=`<div class="st-row st-bad">Benchmark ไม่สำเร็จ: ${esc(error.message)}</div>`;notify('Benchmark ไม่สำเร็จ: '+error.message);}finally{btn.disabled=false;btn.textContent='เริ่ม Benchmark จริง';}}
-function bindLauncher(){const launcher=document.getElementById('sentinel-training-launcher');if(launcher&&!launcher.dataset.trainingBound){launcher.dataset.trainingBound='1';launcher.onclick=function(event){event.preventDefault();open();try{if(typeof closeStartMenu==='function')closeStartMenu();}catch(_){};};return true;}return false;}
+function syncDesktopLauncher(){
+  const id='sentinel-learning-desktop-launcher';
+  const existing=document.getElementById(id);
+  const adminRoute=/^\/admin(?:\/|\.html)?$/.test(location.pathname);
+  const managedIcon=document.querySelector('#desktop-icons.staging-admin-desktop-v2 [data-app-id="training-lab"]');
+  if(!adminRoute||!allowed()||managedIcon){existing?.remove();return;}
+  if(existing)return;
+  if(!document.getElementById('sentinel-learning-launcher-style')){
+    const style=document.createElement('style');style.id='sentinel-learning-launcher-style';
+    style.textContent=`#${id}{position:fixed;top:max(14px,env(safe-area-inset-top));left:max(14px,env(safe-area-inset-left));z-index:30;display:flex;flex-direction:column;align-items:center;gap:5px;width:88px;min-height:68px;padding:4px;border:0;background:transparent;color:#e8f0ff;font:11px system-ui,sans-serif;cursor:pointer;text-shadow:0 1px 3px #000;outline-offset:3px}#${id} .learning-launcher-icon{font-size:32px;line-height:38px;filter:drop-shadow(0 2px 5px #000)}#${id}:hover,#${id}:focus-visible{color:#00ffcc}#${id}:focus-visible{outline:2px solid #00d9b7;border-radius:8px}@media(max-width:700px){#${id}{top:max(10px,env(safe-area-inset-top));left:max(8px,env(safe-area-inset-left));width:80px}}`;
+    document.head.appendChild(style);
+  }
+  const button=document.createElement('button');button.id=id;button.type='button';
+  button.setAttribute('aria-label','Learning Lab');button.title='เปิด Sentinel Learning Lab';
+  button.innerHTML='<span class="learning-launcher-icon" aria-hidden="true">🎓</span><span>Learning Lab</span>';
+  button.onclick=()=>{open();try{if(typeof closeStartMenu==='function')closeStartMenu();}catch(_){}};
+  document.body.appendChild(button);
+}
+function bindLauncher(){syncDesktopLauncher();const launcher=document.getElementById('sentinel-training-launcher');if(launcher&&!launcher.dataset.trainingBound){launcher.dataset.trainingBound='1';launcher.onclick=function(event){event.preventDefault();open();try{if(typeof closeStartMenu==='function')closeStartMenu();}catch(_){};};return true;}return false;}
 window.PanthoriumTraining={open,refresh:refreshAll,acceptance:{seedShadow:addRequiredShadowSamples,promote:promoteFirstShadow,recover:simulateRegression}};
-window.addEventListener('panthorium:auth-changed',function(){bindLauncher();if(document.getElementById('sentinel-training-lab'))refreshAll();});
+window.addEventListener('panthorium:auth-changed',function(){bindLauncher();if(!allowed()){document.getElementById('sentinel-training-lab')?.remove();return;}if(document.getElementById('sentinel-training-lab'))refreshAll();});
+['panthorium:apps-changed','panthorium:desktop-ready','panthorium:boot-complete'].forEach(event=>window.addEventListener(event,bindLauncher));
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bindLauncher,{once:true});else bindLauncher();
-setTimeout(bindLauncher,300);setTimeout(bindLauncher,900);setTimeout(bindLauncher,1800);
 })();

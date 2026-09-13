@@ -94,10 +94,12 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
         onProvider: (meta) => event("provider", meta),
         onDelta: (delta) => event("delta", { delta })
       });
+      audit.record("sentinel.chat_stream", { userId: req.user.sub, sessionId: sid, provider: result.provider || null, model: result.model || null, usage: result.usage || null, latencyMs: result.latencyMs || null, ok: result.ok });
       if (!result.ok) event("error", { error: result.error || "stream_failed" });
       else event("done", { sessionId: sid, provider: result.provider || null, model: result.model || null, usage: result.usage || null, latencyMs: result.latencyMs || null, streaming: result.streaming || null });
     } catch (streamError) {
       event("error", { error: "internal_error" });
+      audit.record("sentinel.chat_stream", { userId: req.user.sub, sessionId: sid, ok: false });
       audit.record("sentinel.stream_failed", { userId: req.user.sub, sessionId: sid, error: streamError.message });
     } finally {
       if (!res.writableEnded) res.end();
