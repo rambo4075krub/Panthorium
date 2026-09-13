@@ -20,7 +20,17 @@ Create GitHub environment staging:
 - Variable STAGING_GCP_PROJECT_ID
 - Variable STAGING_RUNTIME_SA: runtime account email in that project
 - Variable STAGING_SQL_INSTANCE: PROJECT:asia-southeast1:INSTANCE
-- Secret STAGING_GCP_SA_KEY: deployment account credentials
+- Variable STAGING_DEPLOY_SA: staging-deployer@panthorium-staging.iam.gserviceaccount.com
+- Variable STAGING_WIF_PROVIDER: projects/124818950958/locations/global/workloadIdentityPools/github-staging/providers/github
+
+Use Workload Identity Federation with issuer https://token.actions.githubusercontent.com.
+The provider must require repository_id 1354665126, repository_owner_id 323206227, ref refs/heads/staging, environment staging and event_name push.
+Grant roles/iam.workloadIdentityUser on the staging deployer only to that repository in the github-staging pool.
+No STAGING_GCP_SA_KEY is required.
+
+Build identity: 124818950958-compute@developer.gserviceaccount.com, explicitly selected by the workflow.
+Build source bucket: gs://panthorium-staging_cloudbuild. The deployer uploads source; the build identity reads it, writes build logs and pushes images to the staging repository.
+Temporary GitHub authentication files are excluded from source uploads and Docker build context.
 
 The connected repository tool cannot create these environment variables/secrets or provision Google Cloud resources. Never paste credentials into chat or commit them.
 Once configuration is complete, re-run the failed staging workflow.
