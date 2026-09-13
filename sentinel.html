@@ -1649,13 +1649,17 @@
         if (OS.config.useBackend) {
             try {
                 const base = OS.config.backendUrl.replace(/\/$/, "");
-                const res = await authorizedFetch(base + "/api/chat", {
+                const voiceCommand = voiceMode;
+                const res = await authorizedFetch(base + (voiceCommand ? "/api/sentinel/command" : "/api/chat"), {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
                         "x-session-id": OS.config.sessionId
                     },
-                    body: JSON.stringify({
+                    body: JSON.stringify(voiceCommand ? {
+                        command: prompt,
+                        sessionId: OS.config.sessionId
+                    } : {
                         message: `ตอบด้วยภาษาของผู้ใช้และตอบกลับด้วยเสียงได้ ระบบนี้ไม่ใช่ระบบข้อความเท่านั้น ห้ามบอกว่าไม่มีเสียงพูด หากข้อความมีหลายภาษา ให้รักษาภาษาของแต่ละส่วนตามบริบท ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ\n${prompt}`,
                         sessionId: OS.config.sessionId,
                         mode: "default",
@@ -1663,9 +1667,12 @@
                     }),
                     signal: AbortSignal.timeout(30000)
                 });
-                if (res.ok) {
+                if (res.ok || res.status === 409) {
                     const data = await res.json();
                     OS.sentinelOnline = true;
+                    if (data.voiceAction === true && data.execution?.output?.uiAction === "open_learning_lab") {
+                        window.dispatchEvent(new CustomEvent("panthorium:voice-open-learning-lab"));
+                    }
                     if (data.ok && data.text) {
                         return {
                             ok: true,
@@ -1673,6 +1680,12 @@
                             provider: data.provider ? `Sentinel · ${data.provider}` : "Sentinel",
                             via: "sentinel"
                         };
+                    }
+                    if (data.confirmationRequired) {
+                        return { ok: true, text: "คำสั่งนี้ต้องยืนยันก่อนดำเนินการ", provider: "Sentinel", via: "sentinel", confirmationRequired: true };
+                    }
+                    if (data.answer || data.execution?.output) {
+                        return { ok: true, text: data.answer || JSON.stringify(data.execution.output), provider: "Sentinel", via: "sentinel" };
                     }
                     if (data.text) {
                         return { ok: false, text: data.text, provider: "Sentinel", via: "sentinel" };
