@@ -4,9 +4,11 @@ class AiOperationsService {
   empty() { return { generatedAt: new Date().toISOString(), windowHours: 24, requests: 0, successful: 0, failed: 0, successRate: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, avgLatencyMs: 0, p95LatencyMs: 0, fallbacks: 0, streams: 0, nativeStreams: 0, providers: [], conversations: 0, messages: 0, persistence: this.conversations?.pool ? 'postgresql' : 'memory' }; }
   aggregate(entries) {
     const result = this.empty(); const providers = new Map(); const latencies = [];
-    const requestEvents = new Set(['sentinel.chat','sentinel.chat_stream','ai.gateway.complete','ai.gateway.stream_complete']);
+    const requests = entries.filter((e) => e.event === 'sentinel.chat' || e.event === 'sentinel.chat_stream');
     const completions = entries.filter((e) => e.event === 'ai.gateway.complete' || e.event === 'ai.gateway.stream_complete');
-    result.requests = entries.filter((e) => e.event === 'sentinel.chat' || e.event === 'sentinel.chat_stream').length || completions.length;
+    // Older stream routes omitted the terminal request event. Count completed
+    // requests plus known failures without double-counting their gateway event.
+    result.requests = Math.max(requests.length, completions.length + requests.filter((e) => e.ok === false).length);
     result.successful = completions.length; result.failed = entries.filter((e) => e.event === 'ai.gateway.provider_failed' || e.event === 'ai.gateway.stream_provider_failed').length;
     for (const e of completions) {
       const usage = e.usage || {}; result.inputTokens += this.num(usage.inputTokens); result.outputTokens += this.num(usage.outputTokens); result.totalTokens += this.num(usage.totalTokens);

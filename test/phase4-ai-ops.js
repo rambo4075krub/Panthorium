@@ -17,5 +17,18 @@ const { AiOperationsService } = require('../services/aiOperationsService');
   assert.equal(m.avgLatencyMs, 200); assert.equal(m.p95LatencyMs, 300); assert.equal(m.fallbacks, 1);
   assert.equal(m.streams, 1); assert.equal(m.nativeStreams, 1); assert.equal(m.conversations, 2); assert.equal(m.messages, 4);
   const groq = m.providers.find(p => p.provider === 'groq'); assert.equal(groq.requests, 1); assert.equal(groq.failures, 1); assert.equal(groq.health, 'degraded');
+  const legacyMixed = [
+    { event:'sentinel.chat', ok:true },
+    { event:'ai.gateway.complete', provider:'groq' },
+    { event:'ai.gateway.stream_complete', provider:'groq' }
+  ];
+  const mixed = service.aggregate(legacyMixed);
+  assert.equal(mixed.requests, 2); assert.equal(mixed.successRate, 100);
+  const failed = service.aggregate([...legacyMixed, { event:'sentinel.chat', ok:false }]);
+  assert.equal(failed.requests, 3); assert.equal(failed.successRate, 66.7);
+  const terminal = service.aggregate([...legacyMixed, { event:'sentinel.chat_stream', ok:true }]);
+  assert.equal(terminal.requests, 2); assert.equal(terminal.successRate, 100);
+  const streamFailure = service.aggregate([{ event:'sentinel.chat_stream', ok:false }]);
+  assert.equal(streamFailure.requests, 1); assert.equal(streamFailure.successRate, 0);
   console.log('Phase 4 AI operations tests passed');
 })().catch(e => { console.error(e); process.exit(1); });
