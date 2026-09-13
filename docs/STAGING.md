@@ -52,3 +52,9 @@ Before requesting production promotion:
 
 Only after owner acceptance merge into main; its existing production workflow deploys.
 This workflow does not configure branch protection or enforce owner acceptance automatically. Until GitHub environment/branch protection is configured, acceptance is a manual release gate.
+
+## Cloud SQL Unix socket
+
+Staging DATABASE_URL must use host=/cloudsql/panthorium-staging:asia-southeast1:panthorium-staging-db.
+The staging deployment sets DATABASE_SSL_MODE=disable for this local Unix socket; the managed Cloud SQL Auth Proxy encrypts the onward database connection.
+Do not reuse this setting for a direct TCP database connection. Global application and production TLS defaults are unchanged.

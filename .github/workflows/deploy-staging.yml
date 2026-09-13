@@ -65,7 +65,7 @@ jobs:
             --image="$IMAGE" --service-account="$RUNTIME_SA" --allow-unauthenticated \
             --port=8787 --max-instances=1 --min-instances=0 \
             --set-cloudsql-instances="$SQL_INSTANCE" \
-            --update-env-vars="NODE_ENV=production,HOST=0.0.0.0,TRUST_PROXY=1,SENTINEL_AUTO_TRAINING=0,SENTINEL_AUTO_CAPTURE=0" \
+            --update-env-vars="NODE_ENV=production,HOST=0.0.0.0,TRUST_PROXY=1,DATABASE_SSL_MODE=disable,SENTINEL_AUTO_TRAINING=0,SENTINEL_AUTO_CAPTURE=0" \
             --update-secrets="DATABASE_URL=panthorium-staging-database-url:latest,JWT_SECRET=panthorium-staging-jwt:latest,ADMIN_PASSWORD=panthorium-staging-admin-password:latest" --quiet
           URL=$(gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" --format='value(status.url)')
           gcloud run services update "$SERVICE" --project="$PROJECT" --region="$REGION" --update-env-vars="ALLOWED_ORIGINS=$URL" --quiet
