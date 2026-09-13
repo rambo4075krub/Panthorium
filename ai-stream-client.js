@@ -66,7 +66,9 @@
   function installCallAI() {
     if (typeof callAI !== 'function') return false;
     const previous = callAI; if (previous.__panthoriumStreaming) return true;
-    const wrapped = async function (prompt) {
+    const wrapped = async function (prompt, options = {}) {
+      // Voice commands must use the command endpoint. Streaming is for chat only.
+      if (options && options.voiceMode === true) return previous(prompt, options);
       try { const result = await streamCall(prompt); if (result.text) return result; }
       catch (error) {
         console.warn('[Phase4 Stream]', error.message);

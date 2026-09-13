@@ -1246,7 +1246,7 @@
     }
 
     function voiceSafeText(text) {
-        const value = String(text || "").replace(/\s*(?:ครับ|ค่ะ|คะ)(?=\s|[,.!?;:…。、]|$)/g, "").trim();
+        const value = String(text || "").replace(/^\s*เสียงตอบกลับ\s*[:：-]?\s*/u, "").replace(/\s*(?:ครับ|ค่ะ|คะ)(?=\s|[,.!?;:…。、]|$)/g, "").trim();
         if (/ข้อความเท่านั้น|ไม่มีเสียงพูด|ไม่สามารถพูด|ไม่มีระบบเสียง/i.test(value)) {
             return "รับทราบ ระบบพร้อมรับคำสั่งเสียงและตอบกลับด้วยเสียงแล้ว กรุณาพูดคำสั่งได้เลย";
         }
@@ -1629,6 +1629,29 @@
         return res;
     }
 
+    const voiceActionHandlers = {
+        open_learning_lab: () => window.PanthoriumTraining?.open?.(),
+        open_sentinel_agent: () => window.PanthoriumAgent?.open?.(),
+        open_agent_automation: () => window.PanthoriumAutomation?.open?.(),
+        open_memory_knowledge: () => window.PanthoriumMemoryKnowledge?.open?.(),
+        open_multi_agent: () => window.PanthoriumMultiAgent?.open?.(),
+        open_integrations: () => window.PanthoriumIntegrations?.open?.(),
+        open_governance: () => window.PanthoriumGovernance?.open?.(),
+        open_sentinel_control: () => window.PanthoriumSentinelControl?.open?.(),
+        open_security_dashboard: () => window.PanthoriumSecurityDashboard?.open?.(),
+        open_production_intelligence: () => window.PanthoriumProductionIntelligence?.open?.(),
+        open_ai_dashboard: () => window.PanthoriumAI?.open?.(),
+        open_settings: () => typeof openSettings === "function" && openSettings()
+    };
+    window.addEventListener("panthorium:voice-ui-action", event => {
+        const action = String(event.detail?.action || "");
+        const handler = voiceActionHandlers[action];
+        if (typeof handler === "function") {
+            try { handler(); window.dispatchEvent(new CustomEvent("panthorium:window-opened", { detail: { action } })); }
+            catch (error) { console.warn("Voice window action failed", action, error); }
+        }
+    });
+
     // ---------- AI: Sentinel (Backend) ----------
     async function checkSentinelStatus() {
         try {
@@ -1642,6 +1665,51 @@
             OS.sentinelOnline = false;
             return false;
         }
+    }
+
+    function emitVoiceUIActions(data) {
+        const seen = new Set();
+        const actions = new Set();
+        const visit = value => {
+            if (!value || typeof value !== "object" || seen.has(value)) return;
+            seen.add(value);
+            if (typeof value.uiAction === "string") actions.add(value.uiAction);
+            if (Array.isArray(value.uiActions)) value.uiActions.forEach(action => { if (typeof action === "string") actions.add(action); });
+            Object.values(value).forEach(visit);
+        };
+        visit(data);
+        actions.forEach(action => {
+            window.dispatchEvent(new CustomEvent("panthorium:voice-ui-action", { detail: { action, response: data } }));
+            if (action === "open_learning_lab") {
+                window.dispatchEvent(new CustomEvent("panthorium:voice-open-learning-lab", { detail: { response: data } }));
+            }
+        });
+        return actions;
+    }
+
+    function voiceActionText(data) {
+        const actions = [...emitVoiceUIActions(data)];
+        if (data?.confirmationRequired) return "คำสั่งนี้ต้องยืนยันก่อนดำเนินการ";
+        if (data?.answer) return String(data.answer);
+        if (actions.length) {
+            const labels = {
+                open_learning_lab: "เปิด Learning Lab แล้ว",
+                open_sentinel_agent: "เปิด Sentinel Agent แล้ว",
+                open_agent_automation: "เปิด Agent Automation แล้ว",
+                open_memory_knowledge: "เปิด Memory และ Knowledge แล้ว",
+                open_multi_agent: "เปิด Multi-Agent แล้ว",
+                open_integrations: "เปิด Integrations แล้ว",
+                open_governance: "เปิด Governance แล้ว",
+                open_sentinel_control: "เปิด Sentinel Control แล้ว",
+                open_security_dashboard: "เปิด Security Dashboard แล้ว",
+                open_production_intelligence: "เปิด Production Intelligence แล้ว",
+                open_ai_dashboard: "เปิด AI Dashboard แล้ว",
+                open_settings: "เปิด Settings แล้ว"
+            };
+            return actions.map(action => labels[action] || "ดำเนินการคำสั่งแล้ว").join(" ");
+        }
+        if (Array.isArray(data?.results) && data.results.some(item => item?.ok)) return "ดำเนินการคำสั่งแล้ว";
+        return "";
     }
 
     async function callAI(prompt, { voiceMode = false } = {}) {
@@ -1670,9 +1738,7 @@
                 if (res.ok || res.status === 409) {
                     const data = await res.json();
                     OS.sentinelOnline = true;
-                    if (data.voiceAction === true && data.execution?.output?.uiAction === "open_learning_lab") {
-                        window.dispatchEvent(new CustomEvent("panthorium:voice-open-learning-lab"));
-                    }
+                    const actionText = voiceActionText(data);
                     if (data.ok && data.text) {
                         return {
                             ok: true,
@@ -1682,10 +1748,10 @@
                         };
                     }
                     if (data.confirmationRequired) {
-                        return { ok: true, text: "คำสั่งนี้ต้องยืนยันก่อนดำเนินการ", provider: "Sentinel", via: "sentinel", confirmationRequired: true };
+                        return { ok: true, text: actionText || "คำสั่งนี้ต้องยืนยันก่อนดำเนินการ", provider: "Sentinel", via: "sentinel", confirmationRequired: true, workflowId: data.workflowId || null };
                     }
-                    if (data.answer || data.execution?.output) {
-                        return { ok: true, text: data.answer || JSON.stringify(data.execution.output), provider: "Sentinel", via: "sentinel" };
+                    if (data.answer || data.execution?.output || data.results?.length || actionText) {
+                        return { ok: true, text: actionText || data.answer || "ดำเนินการคำสั่งแล้ว", provider: "Sentinel", via: "sentinel" };
                     }
                     if (data.text) {
                         return { ok: false, text: data.text, provider: "Sentinel", via: "sentinel" };
