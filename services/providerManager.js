@@ -1,8 +1,22 @@
+const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_DEFAULT_MODEL = "openai/gpt-oss-20b";
+// Migrate the old default even when it is pinned in Cloud Run or a saved client.
+function currentGroqModel(model) {
+  const value = String(model || "").trim();
+  return !value || value === "llama-3.1-8b-instant" ? GROQ_DEFAULT_MODEL : value;
+}
+function completionOptions(url, model) {
+  if (url === GROQ_CHAT_URL && model === GROQ_DEFAULT_MODEL) {
+    // Reasoning shares the token budget. Return only the answer to chat/TTS.
+    return { max_completion_tokens: 2048, reasoning_effort: "low", include_reasoning: false };
+  }
+  return { max_tokens: 320 };
+}
 class ProviderManager {
   constructor() {
     this.keys = { groq: process.env.GROQ_API_KEY || "", openai: process.env.OPENAI_API_KEY || "", gemini: process.env.GEMINI_API_KEY || "", anthropic: process.env.ANTHROPIC_API_KEY || "" };
     this.priority = (process.env.AI_PRIORITY || "groq,openai,gemini,anthropic").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-    this.models = { groq: process.env.GROQ_MODEL || "llama-3.1-8b-instant", openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-1.5-flash", anthropic: process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-20241022" };
+    this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-1.5-flash", anthropic: process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-20241022" };
   }
   available() { return this.priority.filter((p) => this.keys[p]); }
   catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: Boolean(this.keys[provider]), priority, streaming: provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
@@ -10,12 +24,13 @@ class ProviderManager {
     const configured = this.models[provider];
     if (!configured) return null;
     if (!requestedModel) return configured;
-    return String(requestedModel).trim() === configured ? configured : null;
+    const requested = provider === "groq" ? currentGroqModel(requestedModel) : String(requestedModel).trim();
+    return requested === configured ? configured : null;
   }
   async call(provider, systemPrompt, history) { const result = await this.callDetailed(provider, systemPrompt, history); return result?.text || null; }
   async callDetailed(provider, systemPrompt, history, options = {}) {
     const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
-    if (provider === "groq") return this.callOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", key, model, systemPrompt, history);
+    if (provider === "groq") return this.callOpenAICompatible(GROQ_CHAT_URL, key, model, systemPrompt, history);
     if (provider === "openai") return this.callOpenAICompatible("https://api.openai.com/v1/chat/completions", key, model, systemPrompt, history);
     if (provider === "gemini") return this.callGemini(key, model, systemPrompt, history);
     if (provider === "anthropic") return this.callAnthropic(key, model, systemPrompt, history);
@@ -23,14 +38,14 @@ class ProviderManager {
   }
   async streamDetailed(provider, systemPrompt, history, options = {}, onDelta = () => {}) {
     const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
-    if (provider === "groq") return this.streamOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", key, model, systemPrompt, history, onDelta, false);
+    if (provider === "groq") return this.streamOpenAICompatible(GROQ_CHAT_URL, key, model, systemPrompt, history, onDelta, false);
     if (provider === "openai") return this.streamOpenAICompatible("https://api.openai.com/v1/chat/completions", key, model, systemPrompt, history, onDelta, true);
     const result = await this.callDetailed(provider, systemPrompt, history, { model });
     if (result?.text) onDelta(result.text);
     return { ...result, streaming: "buffered" };
   }
   async streamOpenAICompatible(url, key, model, systemPrompt, history, onDelta, includeUsage = false) {
-    const body = { model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, max_tokens: 320, stream: true };
+    const body = { model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, ...completionOptions(url, model), stream: true };
     if (includeUsage) body.stream_options = { include_usage: true };
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}`, Accept: "text/event-stream" }, body: JSON.stringify(body), signal: AbortSignal.timeout(45000) });
     if (!res.ok) throw new Error(`Provider HTTP ${res.status}`);
@@ -43,7 +58,8 @@ class ProviderManager {
         const line = raw.trim(); if (!line.startsWith("data:")) continue; const payload = line.slice(5).trim(); if (!payload || payload === "[DONE]") continue;
         let data; try { data = JSON.parse(payload); } catch { continue; }
         responseModel = data.model || responseModel;
-        if (data.usage) usage = { inputTokens: data.usage.prompt_tokens || 0, outputTokens: data.usage.completion_tokens || 0, totalTokens: data.usage.total_tokens || 0 };
+        const tokenUsage = data.usage || data.x_groq?.usage;
+        if (tokenUsage) usage = { inputTokens: tokenUsage.prompt_tokens || 0, outputTokens: tokenUsage.completion_tokens || 0, totalTokens: tokenUsage.total_tokens || 0 };
         const delta = data.choices?.[0]?.delta?.content || ""; if (delta) { text += delta; onDelta(delta); }
       }
     }
@@ -51,7 +67,7 @@ class ProviderManager {
     return { text: text.trim(), model: responseModel, usage, streaming: "native" };
   }
   async callOpenAICompatible(url, key, model, systemPrompt, history) {
-    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, max_tokens: 320 }), signal: AbortSignal.timeout(30000) });
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, ...completionOptions(url, model) }), signal: AbortSignal.timeout(30000) });
     if (!res.ok) throw new Error(`Provider HTTP ${res.status}`); const data = await res.json();
     return { text: data.choices?.[0]?.message?.content?.trim() || null, model: data.model || model, usage: data.usage ? { inputTokens: data.usage.prompt_tokens || 0, outputTokens: data.usage.completion_tokens || 0, totalTokens: data.usage.total_tokens || 0 } : null };
   }
