@@ -8,7 +8,7 @@ function boundedInteger(value, min, max) { const n = Number(value); return Numbe
 function validateNoArgs(args) { return plainObject(args) && Object.keys(args).length === 0 ? null : 'invalid_tool_args'; }
 
 class ToolRegistry {
-  constructor({ sentinel, conversations, securityResponse, aiOperations, integrations } = {}) {
+  constructor({ sentinel, conversations, securityResponse, aiOperations, integrations, knowledge, training } = {}) {
     this.tools = new Map();
     this.register({ id: 'system.status', description: 'Read Sentinel runtime status', permission: 'system:read', risk: 'low', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async () => sentinel.status() });
     this.register({ id: 'ai.providers', description: 'List configured AI providers and models', permission: 'chat', risk: 'low', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async () => sentinel.providerCatalog() });
@@ -30,6 +30,16 @@ class ToolRegistry {
       validateArgs: (args) => onlyKeys(args, ['sessionId', 'limit']) && SESSION_ID_RE.test(String(args.sessionId || '')) && (args.limit == null || boundedInteger(args.limit, 1, 100)) ? null : 'invalid_tool_args',
       run: async ({ userId, args }) => conversations ? conversations.history(userId, String(args.sessionId), args.limit == null ? 40 : Number(args.limit)) : []
     });
+    if (knowledge) this.register({
+      id: 'knowledge.search', description: 'Search the current user knowledge base', permission: 'chat', risk: 'low', mutates: false,
+      argsSchema: { query: 'required string max 500', limit: 'integer 1..20 (optional)' },
+      validateArgs: (args) => onlyKeys(args, ['query', 'limit']) && typeof args.query === 'string' && args.query.trim().length > 0 && args.query.length <= 500 && (args.limit == null || boundedInteger(args.limit, 1, 20)) ? null : 'invalid_tool_args',
+      run: async ({ user, args, userId }) => knowledge.search({ user: { ...user, sub: userId }, query: args.query, limit: args.limit == null ? 8 : Number(args.limit) })
+    });
+    if (training) {
+      this.register({ id: 'training.status', description: 'Read Sentinel Learning Lab status', permission: 'settings', risk: 'low', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async () => training.list({ limit: 1 }) });
+      this.register({ id: 'learning_lab.open', description: 'Open the Learning Lab in the admin interface', permission: 'settings', risk: 'low', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async () => ({ ok: true, uiAction: 'open_learning_lab' }) });
+    }
     this.register({
       id: 'conversation.clear', description: 'Delete one current-user conversation', permission: 'chat', risk: 'high', mutates: true, requiresConfirmation: true,
       argsSchema: { sessionId: 'required safe session id' },

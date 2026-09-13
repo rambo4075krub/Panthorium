@@ -91,6 +91,12 @@ const toolRegistry = new ToolRegistry({ sentinel, conversations, securityRespons
 const agentPolicy = new AgentPolicyService();
 const agentService = new AgentService({ tools: toolRegistry, audit, policy: agentPolicy });
 const agentKnowledge = new AgentKnowledgeService({ repository: agentKnowledgeRepository, audit });
+toolRegistry.register({
+  id: 'knowledge.search', description: 'Search the current user knowledge base', permission: 'chat', risk: 'low', mutates: false,
+  argsSchema: { query: 'required string max 500', limit: 'integer 1..20 (optional)' },
+  validateArgs: (args) => args && typeof args.query === 'string' && args.query.trim().length > 0 && args.query.length <= 500 && (args.limit == null || Number.isInteger(Number(args.limit)) && Number(args.limit) >= 1 && Number(args.limit) <= 20) ? null : 'invalid_tool_args',
+  run: async ({ user, args }) => agentKnowledge.search({ user, query: args.query, limit: args.limit == null ? 8 : Number(args.limit) })
+});
 const agentMemory = new AgentMemoryService({ repository: agentMemoryRepository, audit, knowledge: agentKnowledge });
 const agentPlanner = new AgentPlannerService({ agentService, gateway: sentinel.gateway, audit, memory: agentMemory });
 const agentWorkflow = new AgentWorkflowService({ agentService, gateway: sentinel.gateway, audit, runs: agentRuns, pendingStore: agentPending, memory: agentMemory });
@@ -105,6 +111,8 @@ const sentinelLearningRepository = new SentinelLearningRepository({ databaseUrl:
 const sentinelLearningPolicy = new AutonomousLearningPolicy();
 const sentinelLearning = new SentinelLearningOrchestrator({ repository: sentinelLearningRepository, trainingRepository: sentinelTrainingRepository, audit, policy: sentinelLearningPolicy });
 const sentinelTraining = new SentinelTrainingService({ repository: sentinelTrainingRepository, providers: sentinel.providers, audit, learning: sentinelLearning, autoEnabled: config.sentinelAutoTraining, autoCapture: config.sentinelAutoCapture, autoScoreThreshold: config.sentinelAutoScoreThreshold, autoIntervalMs: config.sentinelAutoIntervalMs });
+toolRegistry.register({ id: 'training.status', description: 'Read Sentinel Learning Lab status', permission: 'settings', risk: 'low', mutates: false, argsSchema: {}, run: async () => sentinelTraining.list({ limit: 1 }) });
+toolRegistry.register({ id: 'learning_lab.open', description: 'Open the Learning Lab in the admin interface', permission: 'settings', risk: 'low', mutates: false, argsSchema: {}, run: async () => ({ ok: true, uiAction: 'open_learning_lab' }) });
 const sentinelRecovery = new SentinelRecoveryService({ learning: sentinelLearning, training: sentinelTraining, trainingRepository: sentinelTrainingRepository, providers: sentinel.providers, audit, maxAttempts: Number(process.env.SENTINEL_AUTONOMOUS_RECOVERY_MAX_ATTEMPTS || 3) });
 const sentinelBenchmark = new SentinelBenchmarkService({ sentinel, providers: sentinel.providers, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const sentinelActiveLearning = new SentinelActiveLearningService({ training: sentinelTraining, learning: sentinelLearning, providers: sentinel.providers, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
