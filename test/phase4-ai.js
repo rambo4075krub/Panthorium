@@ -18,5 +18,6 @@ const { ProviderManager } = require('../services/providerManager');
   const repo = new ConversationRepository(); await repo.init(); await repo.append({ userId:'u1', sessionId:'s1', role:'user', content:'hello' }); await repo.append({ userId:'u1', sessionId:'s1', role:'assistant', content:'hi' });
   assert.equal((await repo.history('u1','s1')).length, 2); assert.equal((await repo.listSessions('u1')).length, 1); await repo.clear('u1','s1'); assert.equal((await repo.history('u1','s1')).length, 0);
   assert(events.some(e => e.event === 'ai.gateway.provider_failed')); assert(events.some(e => e.event === 'ai.gateway.complete'));
+  await require('./provider-groq')();
   console.log('Phase 4 AI tests passed');
 })().catch(e => { console.error(e); process.exit(1); });

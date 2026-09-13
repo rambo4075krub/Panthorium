@@ -63,6 +63,23 @@ worker count, or adding another service against the same database.
    REVOKE pg_use_reserved_connections FROM panthorium_app;
    ```
 
+   A `REVOKE ROLE` command tag alone does not prove the membership is gone. In
+   PostgreSQL 16+, grants can have different grantors. If the command warns
+   that membership was not granted by `cloudsqladmin`, inspect membership and
+   its actual grantor instead of repeatedly running the same `REVOKE`:
+
+   ```sql
+   SELECT pg_has_role('panthorium_app', 'pg_use_reserved_connections', 'MEMBER') AS reserved_role_member;
+   SELECT roleid::regrole AS granted_role, member::regrole AS member, grantor::regrole AS grantor FROM pg_auth_members WHERE roleid = 'pg_use_reserved_connections'::regrole AND member = 'panthorium_app'::regrole;
+   ```
+
+   `reserved_role_member = false` confirms no direct or indirect membership.
+   If true, an authorized administrator must revoke the specific grant using
+   the recorded grantor (or inspect the inherited membership path when the
+   second query is empty), then repeat the read-only verification. Do not
+   change unrelated role memberships. In an interactive terminal, submit SQL
+   separately from psql meta-commands such as `\pset` or `\q`.
+
    With `reserved_connections=0`, that role adds no reserved slots. Do not grant
    superuser or increase `max_connections` to compensate for independent pools.
 
@@ -79,4 +96,6 @@ database; it creates application tables.
 
 References: [node-postgres pool API](https://node-postgres.com/apis/pool),
 [pool sizing](https://node-postgres.com/guides/pool-sizing),
-[Cloud Run maximum instances](https://docs.cloud.google.com/run/docs/configuring/max-instances).
+[Cloud Run maximum instances](https://docs.cloud.google.com/run/docs/configuring/max-instances),
+[PostgreSQL REVOKE](https://www.postgresql.org/docs/current/sql-revoke.html),
+[role membership checks](https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-INFO-ACCESS-TABLE).
