@@ -125,12 +125,15 @@ sentinel.sentinelControl = sentinelOrchestrator;
 
 app.disable("x-powered-by");
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins], frameSrc: ["'self'"], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
+const allowElectronFileOrigin = process.env.ALLOW_ELECTRON_ORIGIN === "1";
 app.use(cors({ origin(origin, cb) {
   // Requests without an Origin header are same-origin/server-to-server calls.
-  // Browser/Electron origins must be an exact configured origin; never echo an
-  // arbitrary origin when credentials are enabled.
-  if (!origin || config.allowedOrigins.includes(origin)) return cb(null, true);
-  console.warn("[HTTP] CORS origin denied: " + String(origin).slice(0, 240));
+  // Browser origins must be an exact configured origin. Installed Electron
+  // shells may send the literal "null" origin when a local shell is loaded;
+  // allow that only when explicitly enabled by the isolated staging deploy.
+  const isAllowedElectronOrigin = allowElectronFileOrigin && origin === "null";
+  if (!origin || config.allowedOrigins.includes(origin) || isAllowedElectronOrigin) return cb(null, true);
+  console.warn("[HTTP] CORS origin denied: " + JSON.stringify(String(origin).slice(0, 240)));
   cb(new Error("CORS origin denied"));
 }, credentials: true }));
 app.use(express.json({ limit: "768kb", type: "application/json" }));
