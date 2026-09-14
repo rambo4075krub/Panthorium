@@ -1479,7 +1479,7 @@
                 );
                 // Keep command and conversation traffic separate: commands go
                 // to the tool/permission path; questions go to /api/chat.
-                const res = await callAI(text, { voiceMode: commandIntent });
+                const res = await callAI(text, { voiceMode: commandIntent, conversationalVoice: !commandIntent });
                 // A voice utterance that is not an allowlisted UI command is a
                 // normal question for Sentinel. Keep system commands silent,
                 // but route ordinary questions through the conversational AI.
@@ -1672,7 +1672,7 @@
         }
     }
 
-    async function callAI(prompt, { voiceMode = false } = {}) {
+    async function callAI(prompt, { voiceMode = false, conversationalVoice = false } = {}) {
         if (voiceMode) {
             if (!window.PanthoriumVoiceCommands) return { ok: false, text: "โมดูลคำสั่งเสียงยังโหลดไม่สำเร็จ กรุณาโหลดหน้าใหม่" };
             return window.PanthoriumVoiceCommands.execute(prompt);
@@ -1695,7 +1695,7 @@
                         message: `ตอบด้วยภาษาของผู้ใช้และตอบกลับด้วยเสียงได้ ระบบนี้ไม่ใช่ระบบข้อความเท่านั้น ห้ามบอกว่าไม่มีเสียงพูด หากข้อความมีหลายภาษา ให้รักษาภาษาของแต่ละส่วนตามบริบท ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ\n${prompt}`,
                         sessionId: OS.config.sessionId,
                         mode: "default",
-                        voice: voiceMode
+                        voice: conversationalVoice
                     }),
                     signal: AbortSignal.timeout(30000)
                 });
