@@ -1548,9 +1548,12 @@
                             window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
                             await processTranscript(text);
                         } catch (error) {
-                            console.warn("[Sentinel Electron transcription]", error);
+                            console.warn("[Sentinel transcription]", error);
                             voiceState = "idle";
-                            status("unresponsive", "ถอดเสียงไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตและไมโครโฟน");
+                            const message = error?.message === "transcription_provider_unavailable"
+                                ? "Staging ยังไม่ได้ตั้งค่า AI/Whisper provider"
+                                : "ถอดเสียงไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตและไมโครโฟน";
+                            status("unresponsive", message);
                             restartListening();
                         }
                     };
