@@ -56,6 +56,8 @@ jobs:
           service_account: ${{ env.DEPLOY_SA }}
           project_id: ${{ env.PROJECT }}
       - uses: google-github-actions/setup-gcloud@v2
+      - name: Verify staging AI provider secret
+        run: gcloud secrets describe panthorium-staging-groq-api-key --project="$PROJECT" >/dev/null
       - name: Build and deploy isolated staging
         run: |
           set -euo pipefail
