@@ -132,7 +132,7 @@ app.use((req, res, next) => {
   // requests when the isolated staging flag is enabled; normal browsers remain
   // subject to the exact CORS allowlist below.
   const userAgent = req.get("user-agent") || "";
-  if (allowElectronFileOrigin && /\\bElectron\\/\\d/i.test(userAgent) && config.allowedOrigins[0]) {
+  if (allowElectronFileOrigin && /\bElectron\/\d/i.test(userAgent) && config.allowedOrigins[0]) {
     req.headers.origin = config.allowedOrigins[0];
   }
   next();
