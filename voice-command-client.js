@@ -170,7 +170,7 @@
     // A planner answer alone is not evidence that a requested action happened.
     if (!text) text = 'ยังไม่มีการดำเนินการ กรุณาระบุชื่อหน้าต่างหรือคำสั่งที่รองรับ';
     showResult(text, data);
-    return { ok: true, text, provider: 'Sentinel', via: 'sentinel-command', uiResults: outcomes };
+    return { ok: true, text, provider: 'Sentinel', via: 'sentinel-command', uiResults: outcomes, voiceAction: Boolean(data.voiceAction || data.confirmationRequired || data.workflowId) };
   }
   async function execute(commandInput) {
     if (busy) return { ok: false, text: 'กำลังดำเนินคำสั่งก่อนหน้า กรุณารอสักครู่' };
@@ -212,7 +212,9 @@
       const data = await response.json();
       if (system()?.state?.user?.id !== userId) return failure('authentication_required');
       if (!response.ok && response.status !== 409) return await consume({ ...data, ok: false }, command);
-      return await consume(data, command);
+      const result = await consume(data, command);
+      if (confirmation) result.confirmedCommand = true;
+      return result;
     } catch (error) {
       const result = { ok: false, error: 'command_connection_failed', text: 'ไม่ได้รับผลคำสั่งจากเซิร์ฟเวอร์ กรุณาตรวจสถานะก่อนสั่งซ้ำ' };
       showResult(result.text, result);

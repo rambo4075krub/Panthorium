@@ -1499,7 +1499,7 @@
                 if (!commandIntent && res.via === "sentinel" && res.ok && res.text) {
                     voiceState = "speaking";
                     await speak(res.text);
-                } else if (res.confirmationRequired) {
+                } else if (res.confirmationRequired && !res.confirmedCommand) {
                     voiceState = "speaking";
                     status("processing", "รอการยืนยันคำสั่ง");
                     await speak(res.text);
