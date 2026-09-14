@@ -71,7 +71,7 @@ jobs:
           # Keep the Cloud Run service URL and the installed Electron staging
           # URL in the exact CORS allowlist. Local origins are limited to the
           # two documented development ports.
-          gcloud run services update "$SERVICE" --project="$PROJECT" --region="$REGION" --update-env-vars="^@^ALLOWED_ORIGINS=$URL@https://panthorium-backend-staging-124818950958.asia-southeast1.run.app@http://localhost:8787@http://127.0.0.1:8787" --quiet
+          gcloud run services update "$SERVICE" --project="$PROJECT" --region="$REGION" --update-env-vars="ALLOWED_ORIGINS=$URL" --quiet
           curl --fail --silent --show-error "$URL/api/health" | python3 -c 'import json,sys; assert json.load(sys.stdin)["ok"] is True'
           curl --fail --silent --show-error "$URL/admin" -o /dev/null
           # Verify the running revision serves the files that passed the DOM and
