@@ -1496,7 +1496,7 @@
                 }
                 // Execute voice commands silently. Speak only when an action
                 // is waiting for the user's explicit permission/confirmation.
-                if (!commandIntent && res.ok && res.text) {
+                if (!commandIntent && res.via === "sentinel" && res.ok && res.text) {
                     voiceState = "speaking";
                     await speak(res.text);
                 } else if (res.confirmationRequired) {
