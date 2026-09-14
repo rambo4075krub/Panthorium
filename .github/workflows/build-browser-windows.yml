@@ -13,9 +13,25 @@ permissions:
   contents: read
 
 jobs:
-  windows-installer:
-    runs-on: windows-latest
-    timeout-minutes: 20
+  desktop-installer:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: "--win nsis"
+            artifact_path: "dist/Panthorium-Browser-Setup-*.exe"
+            artifact_name: "Panthorium-Browser-Windows"
+          - os: macos-latest
+            target: "--mac dmg"
+            artifact_path: "dist/Panthorium-Browser-Setup-*.dmg"
+            artifact_name: "Panthorium-Browser-macOS"
+          - os: ubuntu-latest
+            target: "--linux AppImage"
+            artifact_path: "dist/Panthorium-Browser-Setup-*.AppImage"
+            artifact_name: "Panthorium-Browser-Linux"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - name: Checkout staging
         uses: actions/checkout@v4
@@ -28,16 +44,19 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Install dependencies
+      - name: Install project dependencies
         run: npm ci
 
-      - name: Build Windows installer
-        run: npm run package:win
+      - name: Install Electron runtime
+        run: npm install --no-save --package-lock=false electron@36.9.5
+
+      - name: Build desktop installer
+        run: npx --yes electron-builder@26.0.12 ${{ matrix.target }} --publish never
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: Panthorium-Browser-Windows
-          path: dist/Panthorium-Browser-Setup-*.exe
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_path }}
           if-no-files-found: error
           retention-days: 14
