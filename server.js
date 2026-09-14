@@ -126,6 +126,17 @@ sentinel.sentinelControl = sentinelOrchestrator;
 app.disable("x-powered-by");
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins], frameSrc: ["'self'"], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
 const allowElectronFileOrigin = process.env.ALLOW_ELECTRON_ORIGIN === "1";
+app.use((req, res, next) => {
+  // The installed Electron shell can report a local/custom origin even though
+  // it is the trusted Panthorium desktop client. Normalize only Electron
+  // requests when the isolated staging flag is enabled; normal browsers remain
+  // subject to the exact CORS allowlist below.
+  const userAgent = req.get("user-agent") || "";
+  if (allowElectronFileOrigin && /\\bElectron\\/\\d/i.test(userAgent) && config.allowedOrigins[0]) {
+    req.headers.origin = config.allowedOrigins[0];
+  }
+  next();
+});
 app.use(cors({ origin(origin, cb) {
   // Requests without an Origin header are same-origin/server-to-server calls.
   // Browser origins must be an exact configured origin. Installed Electron
