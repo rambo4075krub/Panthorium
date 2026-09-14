@@ -145,7 +145,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     let recognition;
     w.SpeechRecognition = class { constructor() { recognition = this; } start() { this.onstart?.(); } stop() { this.onend?.(); } };
     w.captureSpoken = text => spoken.push(text);
-    evaluate('speak = async function(text) { window.captureSpoken(text); }; initGlobalVoice();');
+    evaluate('speak = async function(text) { window.captureSpoken(text); return true; }; initGlobalVoice();');
     const globalRecognition = recognition;
     async function utter(text) {
       globalRecognition.start();

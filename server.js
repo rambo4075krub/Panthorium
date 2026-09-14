@@ -187,7 +187,7 @@ for (const script of shellScripts) {
 
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
-  const version = "voice-command-dispatch-v2";
+  const version = "voice-conversation-v3";
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
   }

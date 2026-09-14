@@ -781,7 +781,8 @@
         const el = document.getElementById("toast");
         el.textContent = msg;
         el.classList.add("show");
-        setTimeout(() => el.classList.remove("show"), duration);
+        clearTimeout(el.__voiceTimer);
+        el.__voiceTimer = setTimeout(() => el.classList.remove("show"), duration);
     }
 
     function $(id) { return document.getElementById(id); }
@@ -1153,23 +1154,41 @@
 
     const voiceAudio = new Audio();
     let voiceAudioUnlocked = false;
+    let voiceAudioUnlocking = false;
     let activeSpeechRun = 0;
     function unlockVoiceAudio() {
-        if (voiceAudioUnlocked) return;
-        voiceAudio.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAAA";
+        if (voiceAudioUnlocked || voiceAudioUnlocking || aiSpeechActive) return;
+        if (!URL.createObjectURL) return;
+        // 20ms of silent PCM. media-src already allows blob:, not data:.
+        const wav = new ArrayBuffer(44 + 320);
+        const view = new DataView(wav);
+        const label = (offset, value) => [...value].forEach((char, i) => view.setUint8(offset + i, char.charCodeAt(0)));
+        label(0, "RIFF"); view.setUint32(4, wav.byteLength - 8, true); label(8, "WAVE"); label(12, "fmt ");
+        view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+        view.setUint32(24, 8000, true); view.setUint32(28, 16000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+        label(36, "data"); view.setUint32(40, 320, true);
+        const warmupUrl = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
+        voiceAudioUnlocking = true;
+        voiceAudio.src = warmupUrl;
         voiceAudio.volume = 0;
-        voiceAudio.play().then(() => { voiceAudio.pause(); voiceAudio.currentTime = 0; voiceAudioUnlocked = true; }).catch(() => {});
+        const finish = () => {
+            // A late warmup promise must not pause a real answer already playing.
+            if (voiceAudio.src === warmupUrl) { voiceAudio.pause(); voiceAudio.currentTime = 0; }
+            voiceAudioUnlocking = false;
+            URL.revokeObjectURL(warmupUrl);
+        };
+        try { Promise.resolve(voiceAudio.play()).then(() => { voiceAudioUnlocked = true; }).catch(() => {}).finally(finish); }
+        catch (_) { finish(); }
     }
 
     async function requestRemoteChunk(text, lang) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), Math.max(12000, Math.min(30000, String(text).length * 180)));
         try {
-            if (!OS.config.accessToken && !(await ensureAuth())) return null;
             const base = OS.config.backendUrl.replace(/\/$/, "");
-            const response = await fetch(base + "/api/speech", {
+            const response = await authorizedFetch(base + "/api/speech", {
                 method: "POST",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${OS.config.accessToken}` },
+                headers: { "Content-Type": "application/json" },
                 credentials: "include",
                 body: JSON.stringify({ text: String(text).slice(0, 180), lang }),
                 signal: controller.signal
@@ -1354,9 +1373,9 @@
                 spoken = await playRemoteChunk(preparedRemote, chunk.text, transcriptRange);
                 if (!spoken && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange);
             }
-            // Always use browser speech as a guaranteed fallback. Voice
-            // discovery can be late or empty while the remote TTS is blocked.
-            if (!spoken && speechRun === activeSpeechRun) spoken = await speakNativeChunk(chunk, voice, speechRun);
+            // Native speech is a best-effort fallback, never proof of playback.
+            // Preserve the approved male voice requirement for Thai/English.
+            if (!spoken && (voice || !forceMaleNeural) && speechRun === activeSpeechRun) spoken = await speakNativeChunk(chunk, voice, speechRun);
             if (!spoken && !forceMaleNeural && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange);
             spokeAny = spokeAny || spoken;
             previousChunkLanguage = chunk.lang;
@@ -1407,7 +1426,7 @@
         let latestInterim = "";
         let discardOnEnd = false;
         let listenWatchdog = null;
-        const status = (kind, label) => {
+        const status = (kind, label, announce = true) => {
             button.classList.toggle("listening", kind === "listening");
             button.classList.toggle("processing", kind === "processing");
             button.textContent = kind === "listening" ? "⏹" : kind === "processing" ? "⏳" : "🎤";
@@ -1415,7 +1434,7 @@
             document.querySelectorAll("[data-voice-status]").forEach(row => row.classList.remove("active"));
             const row = document.querySelector(`[data-voice-status="${kind === "listening" ? "listening" : kind === "processing" ? "processing" : "error"}"]`);
             if (row) { row.classList.add("active"); row.textContent = label; }
-            if (kind !== "listening" || label !== "กำลังฟัง") toast(label, kind === "processing" ? 6000 : 2500);
+            if (announce) toast(label, kind === "processing" || kind === "unresponsive" ? 10000 : 2500);
         };
         if (!SR) {
             status("unsupported", "ไม่รองรับคำสั่ง");
@@ -1452,7 +1471,7 @@
             latestInterim = "";
             userSpeechActive = true;
             window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
-            status("listening", "กำลังฟัง...");
+            status("listening", "กำลังฟัง...", false);
             clearTimeout(listenWatchdog);
             listenWatchdog = setTimeout(() => {
                 if (voiceState === "listening" && !transcriptParts.size && !latestInterim) {
@@ -1471,47 +1490,22 @@
             voiceState = "processing";
             status("processing", "กำลังประมวลผล");
             try {
-                const rawText = String(text || '').trim();
-                const normalized = window.PanthoriumWindowCatalog?.normalize(rawText) || rawText.toLowerCase();
-                const commandIntent = Boolean(
-                    window.PanthoriumWindowCatalog?.parse(text) ||
-                    window.PanthoriumWindowCatalog?.parseFunction(text) ||
-                    /^(เปิด|ปิด|รีเฟรช|แสดงสถานะ|ตรวจสอบสถานะ|ค้นความรู้|เริ่ม|หยุด|รัน|ยืนยัน|ยกเลิก|ลบ|เปลี่ยน|อนุญาต|ปิดทุกหน้าต่าง|open\b|close\b|refresh\b|start\b|stop\b|run\b|delete\b|confirm\b|cancel\b)/i.test(rawText) ||
-                    /^(เปิด|ปิด|รีเฟรช|แสดงสถานะ|ตรวจสอบสถานะ|ค้นความรู้|เริ่ม|หยุด|รัน|ยืนยัน|ยกเลิก|ลบ|เปลี่ยน|อนุญาต|ปิดทุกหน้าต่าง|open\b|close\b|refresh\b|start\b|stop\b|run\b|delete\b|confirm\b|cancel\b)/i.test(normalized)
-                );
-                // Keep command and conversation traffic separate: commands go
-                // to the tool/permission path; questions go to /api/chat.
-                const res = await callAI(text, { voiceMode: commandIntent, conversationalVoice: !commandIntent });
-                // A voice utterance that is not an allowlisted UI command is a
-                // normal question for Sentinel. Keep system commands silent,
-                // but route ordinary questions through the conversational AI.
-                if (res?.error === "unknown_ui_action") {
-                    const answer = await callAI(text, { voiceMode: false });
-                    if (answer?.ok && answer.text) await speak(answer.text);
-                    else status("unresponsive", answer?.text || "ไม่ตอบสนอง");
-                    return;
-                }
+                const { intent, response: res } = await requestVoiceInput(text);
                 if (!res || !res.ok || !res.text) {
                     const reason = res?.text || "ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง";
                     status("unresponsive", reason);
                     return;
                 }
-                // Execute voice commands silently. Speak only when an action
-                // is waiting for the user's explicit permission/confirmation.
-                if (!commandIntent && res.via === "sentinel" && res.ok && res.text) {
+                if (voiceResponseNeedsSpeech(intent, res)) {
                     voiceState = "speaking";
-                    await speak(res.text);
-                } else if (res.confirmationRequired && !res.confirmedCommand) {
-                    voiceState = "speaking";
-                    status("processing", "รอการยืนยันคำสั่ง");
-                    await speak(res.text);
-                } else if (res.ok && !res.voiceAction && Array.isArray(res.uiResults) && res.uiResults.length === 0 && res.text) {
-                    // The backend workflow/chat answer is not a UI action.
-                    // Speak it so a spoken question receives an answer.
-                    voiceState = "speaking";
-                    await speak(res.text);
+                    status("processing", res.confirmationRequired ? res.text : "กำลังเตรียมเสียงตอบ");
+                    if (!(await speakVoiceResponse(res.text))) {
+                        status("unresponsive", voicePlaybackFailure);
+                        return;
+                    }
                 }
-                status("ready", "พร้อมใช้งาน");
+                // Keep command results/permission prompts visible in the top toast.
+                status("ready", "พร้อมใช้งาน", intent === "conversation");
             } catch (error) {
                 console.warn("Global voice command failed", error);
                 status("unresponsive", "ไม่ตอบสนอง");
@@ -1644,19 +1638,49 @@
         }
     }
 
+    let sessionRefreshInFlight = null;
     async function authorizedFetch(url, options = {}) {
+        const principal = () => OS.state.user?.id || OS.state.user?.sub || "";
+        const owner = principal();
         await ensureAuth();
         const headers = new Headers(options.headers || {});
         if (OS.config.accessToken) headers.set("Authorization", `Bearer ${OS.config.accessToken}`);
         let res = await fetch(url, { ...options, headers, credentials: "include" });
         if (res.status === 401) {
-            const refreshed = await ensureAuth(true);
+            if (principal() !== owner) throw new Error("voice_session_changed");
+            // Other in-flight audio chunks may already have refreshed the token.
+            let refreshed = Boolean(OS.config.accessToken && headers.get("Authorization") !== `Bearer ${OS.config.accessToken}`);
+            if (!refreshed && !sessionRefreshInFlight) {
+                sessionRefreshInFlight = Promise.resolve().then(() => window.PanthoriumAuth?.refreshSession
+                    ? window.PanthoriumAuth.refreshSession() : ensureAuth(true)).catch(() => false).finally(() => { sessionRefreshInFlight = null; });
+            }
+            if (!refreshed) refreshed = await sessionRefreshInFlight;
+            if (principal() !== owner) throw new Error("voice_session_changed");
             if (refreshed) {
                 headers.set("Authorization", `Bearer ${OS.config.accessToken}`);
                 res = await fetch(url, { ...options, headers, credentials: "include" });
             }
         }
+        if (principal() !== owner) throw new Error("voice_session_changed");
         return res;
+    }
+
+    async function requestVoiceInput(text) {
+        const classify = window.PanthoriumWindowCatalog?.classifyVoiceInput;
+        if (!classify) return { intent: "command", response: { ok: false, text: "โมดูลคำสั่งเสียงยังโหลดไม่สำเร็จ กรุณาโหลดหน้าใหม่" } };
+        const { kind, text: input } = classify(text);
+        const response = await callAI(input, { voiceMode: kind === "command", conversationalVoice: kind === "conversation" });
+        return { intent: kind, response };
+    }
+
+    function voiceResponseNeedsSpeech(intent, response) {
+        return Boolean(response?.ok && response.text && (intent === "conversation" || response.confirmationRequired));
+    }
+
+    const voicePlaybackFailure = "ได้รับคำตอบแล้ว แต่เล่นเสียงไม่สำเร็จ ตรวจสอบเสียงเว็บไซต์หรือบริการเสียง แล้วแตะไมโครโฟนเพื่อลองใหม่";
+    async function speakVoiceResponse(text) {
+        // The answer remains readable under the Orb even if playback is blocked.
+        try { return await speak(text); } catch (_) { return false; }
     }
 
     // ---------- AI: Sentinel (Backend) ----------
@@ -1683,45 +1707,43 @@
         if (OS.config.useBackend) {
             try {
                 const base = OS.config.backendUrl.replace(/\/$/, "");
-                const voiceCommand = voiceMode;
-                const res = await authorizedFetch(base + (voiceCommand ? "/api/sentinel/command" : "/api/chat"), {
+                const res = await authorizedFetch(base + "/api/chat", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
                         "x-session-id": OS.config.sessionId
                     },
-                    body: JSON.stringify(voiceCommand ? {
-                        command: prompt,
-                        sessionId: OS.config.sessionId
-                    } : {
+                    body: JSON.stringify({
                         message: `ตอบด้วยภาษาของผู้ใช้และตอบกลับด้วยเสียงได้ ระบบนี้ไม่ใช่ระบบข้อความเท่านั้น ห้ามบอกว่าไม่มีเสียงพูด หากข้อความมีหลายภาษา ให้รักษาภาษาของแต่ละส่วนตามบริบท ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ\n${prompt}`,
                         sessionId: OS.config.sessionId,
                         mode: "default",
-                        // Preserve the explicit low-latency voice-path marker
-                        // while keeping command routing separate from chat.
-                        // voice: voiceMode
                         voice: conversationalVoice
                     }),
                     signal: AbortSignal.timeout(30000)
                 });
-                if (res.ok || res.status === 409) {
-                    const data = await res.json();
-                    OS.sentinelOnline = true;
-                    if (data.ok && data.text) {
-                        return {
-                            ok: true,
-                            text: data.text,
-                            provider: data.provider ? `Sentinel · ${data.provider}` : "Sentinel",
-                            via: "sentinel"
-                        };
-                    }
-                    if (data.text) {
-                        return { ok: false, text: data.text, provider: "Sentinel", via: "sentinel" };
-                    }
+                const data = await res.json().catch(() => ({}));
+                OS.sentinelOnline = res.ok;
+                if (res.ok && data.ok && typeof data.text === "string" && data.text.trim()) {
+                    return {
+                        ok: true,
+                        text: data.text,
+                        provider: data.provider ? `Sentinel · ${data.provider}` : "Sentinel",
+                        via: "sentinel"
+                    };
                 }
+                const code = /^[a-z0-9_]{1,80}$/i.test(data.error || "") ? data.error : res.ok ? "empty_ai_response" : `http_${res.status}`;
+                const text = res.status === 401 ? "เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง"
+                    : res.status === 403 ? "บัญชีนี้ไม่มีสิทธิ์ถามข้อมูล AI"
+                    : res.status === 429 ? "เรียก AI เกินขีดจำกัด กรุณารอสักครู่"
+                    : typeof data.text === "string" && data.text.trim() ? data.text : "ยังไม่ได้รับคำตอบจาก AI";
+                return { ok: false, text: `${text} (${code})`, error: code, status: res.status, provider: "Sentinel", via: "sentinel" };
             } catch (e) {
                 console.warn("Sentinel unavailable:", e.message);
                 OS.sentinelOnline = false;
+                const error = e.message === "voice_session_changed" ? "voice_session_changed" : /TimeoutError|AbortError/.test(e.name) ? "chat_timeout" : "chat_network_error";
+                const text = error === "voice_session_changed" ? "บัญชีผู้ใช้เปลี่ยนแล้ว กรุณาถามใหม่"
+                    : error === "chat_timeout" ? "รอคำตอบ AI เกินเวลา กรุณาลองใหม่" : "เชื่อมต่อ AI ไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ";
+                return { ok: false, text: `${text} (${error})`, error, via: "sentinel" };
             }
         }
 
@@ -1957,19 +1979,18 @@
             appendMsg(text, "user");
             appendMsg("กำลังคิด...", "ai", true);
             try {
-                const normalizedVoiceText = window.PanthoriumWindowCatalog?.normalize(text) || text.toLowerCase();
-                const systemCommand = resumeGlobalVoice && Boolean(
-                    window.PanthoriumWindowCatalog?.parse(text) ||
-                    window.PanthoriumWindowCatalog?.parseFunction(text) ||
-                    /^(เปิด|ปิด|รีเฟรช|แสดงสถานะ|ตรวจสอบสถานะ|ค้นความรู้|เริ่ม|หยุด|รัน|ยืนยัน|ยกเลิก|ลบ|เปลี่ยน|อนุญาต|ปิดทุกหน้าต่าง|open\b|close\b|refresh\b|start\b|stop\b|run\b|delete\b|confirm\b|cancel\b)/i.test(normalizedVoiceText)
-                );
-                const res = await callAI(text, { voiceMode: systemCommand, conversationalVoice: resumeGlobalVoice && !systemCommand });
+                const { intent, response: res } = resumeGlobalVoice
+                    ? await requestVoiceInput(text) : { intent: "conversation", response: await callAI(text) };
                 // remove loading
                 const last = messages.querySelector('.msg.loading, .msg[data-streaming="1"]');
                 if (last) last.remove();
 
-                appendMsg(res.text, "ai", false, res.provider);
-                if (!resumeGlobalVoice || (!systemCommand && res.ok) || res.confirmationRequired) await speak(res.text);
+                appendMsg(res?.text || "ยังไม่ได้รับคำตอบจาก AI", "ai", false, res?.provider);
+                if (!res?.ok) toast(res?.text || "ยังไม่ได้รับคำตอบจาก AI", 10000);
+                else if (voiceResponseNeedsSpeech(intent, res) && !(await speakVoiceResponse(res.text))) toast(voicePlaybackFailure, 10000);
+            } catch (_) {
+                messages.querySelector('.msg.loading, .msg[data-streaming="1"]')?.remove();
+                toast("รับคำตอบไม่สำเร็จ กรุณาลองใหม่", 10000);
             } finally {
                 sendBusy = false;
                 if (resumeGlobalVoice) window.PanthoriumVoice?.resume();
@@ -1979,7 +2000,8 @@
         function appendMsg(text, type, loading = false, provider = null) {
             const div = document.createElement("div");
             div.className = `msg ${type}` + (loading ? " loading" : "");
-            div.innerHTML = text + (provider ? `<div class="provider">via ${provider}</div>` : "");
+            div.textContent = text;
+            if (provider) { const label = document.createElement("div"); label.className = "provider"; label.textContent = `via ${provider}`; div.appendChild(label); }
             messages.appendChild(div);
             messages.scrollTop = messages.scrollHeight;
         }
@@ -1990,7 +2012,7 @@
         // Voice
         let recognition = null;
         let voiceSilenceTimer = null;
-        let voiceStopping = false;
+        let voiceRecognitionFailed = false;
         let voiceParts = new Map();
         let voiceInterim = "";
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -2012,12 +2034,11 @@
                 if (preview) input.value = preview;
                 clearTimeout(voiceSilenceTimer);
                 voiceSilenceTimer = setTimeout(() => {
-                    voiceStopping = true;
                     try { recognition.stop(); } catch (_) {}
                 }, 1400);
             };
             recognition.onstart = () => {
-                voiceStopping = false;
+                voiceRecognitionFailed = false;
                 voiceParts = new Map();
                 voiceInterim = "";
                 userSpeechActive = true;
@@ -2030,7 +2051,9 @@
                 window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
                 micBtn.classList.remove("listening");
                 const text = [...voiceParts.values()].join(" ").trim() || voiceInterim.trim();
-                if (voiceStopping && text) {
+                voiceParts.clear();
+                voiceInterim = "";
+                if (!voiceRecognitionFailed && text) {
                     input.value = text;
                     window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
                     await send({ resumeGlobalVoice: true });
@@ -2039,6 +2062,7 @@
                 }
             };
             recognition.onerror = () => {
+                voiceRecognitionFailed = true;
                 clearTimeout(voiceSilenceTimer);
                 userSpeechActive = false;
                 micBtn.classList.remove("listening");
@@ -2052,7 +2076,6 @@
                 return;
             }
             if (micBtn.classList.contains("listening")) {
-                voiceStopping = true;
                 recognition.stop();
                 return;
             }

@@ -21,9 +21,14 @@ async function checkOrder(streamFirst) {
     await w.callAI('เปิด Learning Lab', { voiceMode: true });
     assert.equal(requests.length, 1);
     assert.equal(requests[0].options?.voiceMode, true, `voiceMode lost (${streamFirst ? 'auth wraps stream' : 'stream wraps auth'})`);
+    await w.callAI('การเรียนรู้คืออะไร', { voiceMode: false, conversationalVoice: true });
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1].options?.conversationalVoice, true, 'conversation flag survives either wrapper order');
+    assert.equal(requests[1].options?.voiceMode, false);
     w.OS.state.user.permissions = [];
     assert.equal((await w.callAI('เปิด Learning Lab', { voiceMode: true })).ok, false);
-    assert.equal(requests.length, 1, 'RBAC denial must stop the request');
+    assert.equal((await w.callAI('การเรียนรู้คืออะไร', { conversationalVoice: true })).ok, false);
+    assert.equal(requests.length, 2, 'RBAC denial must stop both voice request types');
   } finally { w.close(); }
 }
 

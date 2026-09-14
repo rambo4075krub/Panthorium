@@ -73,5 +73,14 @@
     if (rest) return null;
     return { app: target.app, operation, action: `${operation}_${target.app.key}` };
   }
-  return { apps, functionCommands, allowed, parse, parseFunction, functionFor, actionFor, normalize };
+  function classifyVoiceInput(input) {
+    const text = String(input || '').trim();
+    // Asking HOW an action works is not permission to execute it.
+    if (/(?:คืออะไร|หมายความว่า|อย่างไร|ยังไง)/u.test(text) || /^(?:อะไร|ทำไม|เพราะอะไร|how\b|what\b|why\b|when\b|where\b|explain\b)/i.test(text)) return { kind: 'conversation', text };
+    const command = text.replace(/^(?:sentinel|เซนทิเนล)[\s,，:：]+/iu, '').replace(/^(?:ช่วย|กรุณา|please\s+)/iu, '').trim();
+    const known = parse(command) || parseFunction(command);
+    const imperative = /^(?:เปิด|ปิด|รีเฟรช|แสดงสถานะ|ตรวจสอบสถานะ|ค้นความรู้|เริ่ม|หยุด|รัน|ยืนยัน|ยกเลิก|ลบ|เปลี่ยน|อนุญาต|open\b|close\b|refresh\b|start\b|stop\b|run\b|delete\b|confirm\b|cancel\b)/i.test(command);
+    return known || imperative ? { kind: 'command', text: command } : { kind: 'conversation', text };
+  }
+  return { apps, functionCommands, allowed, parse, parseFunction, functionFor, actionFor, normalize, classifyVoiceInput };
 });
