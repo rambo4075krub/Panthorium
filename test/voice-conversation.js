@@ -85,7 +85,9 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     });
     const globalMic = recognizers[0];
     // Let the shell's one-time mic startup finish before injecting transcripts.
-    await new Promise(resolve => setTimeout(resolve, 420)); w.PanthoriumVoice.pause();
+    await new Promise(resolve => setTimeout(resolve, 420));
+    assert.equal(globalMic.starts, 1, 'hands-free microphone starts once without a click');
+    w.PanthoriumVoice.pause();
     const transcript = (mic, text, final = true) => { const result = [{ transcript: text, confidence: 0.99 }]; result.isFinal = final; mic.onresult({ resultIndex: 0, results: [result] }); };
     async function utter(text, final = true) {
       globalMic.start(); transcript(globalMic, text, final); globalMic.stop();
