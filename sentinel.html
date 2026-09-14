@@ -1909,16 +1909,43 @@
     }
 
     // ---------- Apps Definition ----------
+    const BROWSER_RELEASE_URL = "https://github.com/rambo4075krub/Panthorium/releases/tag/staging";
+    const isAdminShell = /^\\/admin(?:\\/|$)/i.test(window.location.pathname);
+
+    function openBrowserDownload() {
+        const html = `
+            <div style="padding:24px;text-align:center;line-height:1.7;">
+                <div style="font-size:42px;margin-bottom:8px;">🌐</div>
+                <h2 style="margin:0 0 8px;">ติดตั้ง Panthorium Browser</h2>
+                <p style="color:var(--text-dim);font-size:13px;margin:0 0 18px;">
+                    ดาวน์โหลดตัวติดตั้งให้ตรงกับระบบปฏิบัติการของคุณ
+                </p>
+                <a href="${BROWSER_RELEASE_URL}" target="_blank" rel="noopener noreferrer"
+                   style="display:inline-block;padding:11px 18px;border-radius:10px;background:linear-gradient(135deg,#00c9b7,#159dff);color:#03101a;text-decoration:none;font-weight:700;">
+                    เปิดหน้าดาวน์โหลด
+                </a>
+                <p style="color:var(--text-dim);font-size:11px;margin:16px 0 0;">
+                    รองรับ Windows · macOS · Linux
+                </p>
+            </div>`;
+        createWindow("browser-download", "ติดตั้ง Panthorium Browser", html, { width: 440, height: 330 });
+    }
+
     const APP_LIST = [
         { id: "sentinel", name: "Sentinel AI", icon: "🤖", open: openSentinel },
-        { id: "settings", name: "ตั้งค่า", icon: "⚙️", open: openSettings }
+        { id: "settings", name: "ตั้งค่า", icon: "⚙️", open: openSettings },
+        { id: "browser-download", name: "ติดตั้ง Panthorium", icon: "🌐", visible: () => !isAdminShell, open: openBrowserDownload }
     ];
+
+    function visibleApps() {
+        return APP_LIST.filter(app => !app.visible || app.visible());
+    }
 
     function initDesktop() {
         // Desktop icons
         const desk = $("desktop-icons");
         desk.innerHTML = "";
-        APP_LIST.forEach(app => {
+        visibleApps().forEach(app => {
             const el = document.createElement("div");
             el.className = "desk-icon";
             el.innerHTML = `<div class="icon-img">${app.icon}</div><span>${app.name}</span>`;
@@ -1929,7 +1956,7 @@
         // Start menu apps
         const sm = $("sm-apps");
         sm.innerHTML = "";
-        APP_LIST.forEach(app => {
+        visibleApps().forEach(app => {
             const el = document.createElement("div");
             el.className = "sm-app";
             el.innerHTML = `<div class="ico">${app.icon}</div><span>${app.name}</span>`;
