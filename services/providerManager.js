@@ -32,6 +32,11 @@ class ProviderManager {
       { provider: "groq", key: this.keys.groq, url: "https://api.groq.com/openai/v1/audio/transcriptions", model: process.env.GROQ_TRANSCRIBE_MODEL || "whisper-large-v3-turbo" },
       { provider: "openai", key: this.keys.openai, url: "https://api.openai.com/v1/audio/transcriptions", model: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1" }
     ].filter(item => item.key);
+    if (!candidates.length) {
+      const error = new Error("transcription_provider_unavailable");
+      error.code = "transcription_provider_unavailable";
+      throw error;
+    }
     for (const item of candidates) {
       try {
         const form = new FormData();
