@@ -1470,6 +1470,15 @@
             status("processing", "กำลังประมวลผล");
             try {
                 const res = await callAI(text, { voiceMode: true });
+                // A voice utterance that is not an allowlisted UI command is a
+                // normal question for Sentinel. Keep system commands silent,
+                // but route ordinary questions through the conversational AI.
+                if (res?.error === "unknown_ui_action") {
+                    const answer = await callAI(text, { voiceMode: false });
+                    if (answer?.ok && answer.text) await speak(answer.text);
+                    else status("unresponsive", answer?.text || "ไม่ตอบสนอง");
+                    return;
+                }
                 if (!res || !res.ok || !res.text) {
                     const reason = res?.text || "ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง";
                     status("unresponsive", reason);

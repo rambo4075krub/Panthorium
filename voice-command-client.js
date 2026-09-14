@@ -120,30 +120,16 @@
     return { ok: true, action, text: `ดำเนินการ ${command.aliases[0]}` };
   }
   function showResult(text, data, confirmation) {
-    let panel = document.getElementById('sentinel-command-result');
-    if (!panel) {
-      panel = document.createElement('section'); panel.id = 'sentinel-command-result';
-      panel.setAttribute('aria-label', 'ผลคำสั่ง Sentinel');
-      panel.style.cssText = 'position:fixed;right:16px;bottom:70px;z-index:2147483000;max-width:min(440px,90vw);max-height:55vh;overflow:auto;padding:14px;background:#0b1220;color:#e2e8f0;border:1px solid #475569;border-radius:12px;font:14px system-ui;box-shadow:0 8px 32px #0008';
-      document.body.append(panel);
+    // Use the existing top toast only. A second fixed panel at the bottom
+    // overlaps the global microphone control and is not needed for voice use.
+    const toast = document.getElementById('toast');
+    if (toast) {
+      toast.textContent = confirmation ? `${text} — พูด ยืนยัน หรือ ยกเลิก` : text;
+      toast.classList.add('show');
+      clearTimeout(toast.__voiceTimer);
+      toast.__voiceTimer = setTimeout(() => toast.classList.remove('show'), confirmation ? 10000 : 3000);
     }
-    panel.replaceChildren();
-    const close = document.createElement('button'); close.textContent = '×'; close.setAttribute('aria-label', 'ปิดผลคำสั่ง'); close.style.float = 'right'; close.onclick = () => panel.remove();
-    const status = document.createElement('div'); status.setAttribute('role', 'status'); status.textContent = text;
-    panel.append(close, status);
-    if (confirmation) {
-      const summary = document.createElement('p'); summary.textContent = `${confirmation.toolId}: ${confirmation.reason || ''}`;
-      const args = document.createElement('pre'); args.style.whiteSpace = 'pre-wrap'; args.textContent = JSON.stringify(confirmation.args || {}, null, 2);
-      panel.append(summary, args);
-      for (const [label, command] of [['ยืนยันคำสั่งนี้', 'ยืนยัน'], ['ยกเลิก', 'ยกเลิก']]) {
-        const button = document.createElement('button'); button.textContent = label; button.onclick = () => execute(command); panel.append(button);
-      }
-    } else if (data?.error || data?.results?.some(item => item.ok && !item.output?.uiAction)) {
-      const details = document.createElement('details'); const label = document.createElement('summary'); label.textContent = 'รายละเอียดผลคำสั่ง';
-      const output = document.createElement('pre'); output.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere';
-      output.textContent = JSON.stringify(data.error ? { error: data.error } : data.results, null, 2).slice(0, 16000);
-      details.append(label, output); panel.append(details);
-    }
+    document.getElementById('sentinel-command-result')?.remove();
   }
   async function consume(data, command) {
     const outcomes = [];
