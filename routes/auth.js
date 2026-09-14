@@ -57,7 +57,10 @@ function createAuthRouter(authService, config, securityResponse) {
       }
       res.cookie("pt_refresh", session.refreshToken, cookieOptions);
       res.json({ ok: true, accessToken: session.accessToken, user: session.principal });
-    } catch (error) { next(error); }
+    } catch (error) {
+      console.error("[AUTH] login failed (" + req.requestId + "): " + error.message);
+      res.status(503).json({ ok: false, error: "auth_unavailable", requestId: req.requestId });
+    }
   });
 
   router.get("/me", auth, (req, res) => {
