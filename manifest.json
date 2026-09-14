@@ -1,8 +1,8 @@
 {
-  "name": "Panthorium OS",
+  "name": "Panthorium Browser",
   "short_name": "Panthorium",
-  "description": "Cross-platform AI Operating System powered by Sentinel AI",
-  "start_url": "./sentinel.html",
+  "description": "Panthorium Browser สำหรับเปิด Panthorium OS",
+  "start_url": "/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#000000",
@@ -16,6 +16,16 @@
       "purpose": "any maskable"
     }
   ],
-  "categories": ["productivity", "utilities"],
-  "screenshots": []
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
+  "screenshots": [],
+  "scope": "/",
+  "id": "/",
+  "display_override": [
+    "standalone",
+    "fullscreen"
+  ],
+  "prefer_related_applications": false
 }
