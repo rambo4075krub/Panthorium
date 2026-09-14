@@ -147,7 +147,7 @@ app.use(cors({ origin(origin, cb) {
   console.warn("[HTTP] CORS origin denied: " + JSON.stringify(String(origin).slice(0, 240)));
   cb(new Error("CORS origin denied"));
 }, credentials: true }));
-app.use(express.json({ limit: "768kb", type: "application/json" }));
+app.use(express.json({ limit: "2mb", type: "application/json" }));
 app.use(cookieParser());
 app.use(requestContext(audit));
 
