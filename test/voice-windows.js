@@ -44,8 +44,6 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
   const dom = new JSDOM(source('sentinel.html'), { url: 'https://panthorium-backend-staging.example.run.app/admin', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
   const w = dom.window;
   const context = dom.getInternalVMContext();
-  const externalPopups = new Map();
-  Object.defineProperty(w, 'open', { configurable: true, writable: true, value: (url, name, features) => { const popup = { url, name, features, closed: false, focus() {}, close() { this.closed = true; } }; externalPopups.set(name, popup); return popup; } });
   const evaluate = code => vm.runInContext(code, context);
   const load = name => evaluate(source(name));
   let client = 1;
