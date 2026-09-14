@@ -1354,7 +1354,9 @@
                 spoken = await playRemoteChunk(preparedRemote, chunk.text, transcriptRange);
                 if (!spoken && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange);
             }
-            if (!spoken && voice) spoken = await speakNativeChunk(chunk, voice, speechRun);
+            // Always use browser speech as a guaranteed fallback. Voice
+            // discovery can be late or empty while the remote TTS is blocked.
+            if (!spoken && speechRun === activeSpeechRun) spoken = await speakNativeChunk(chunk, voice, speechRun);
             if (!spoken && !forceMaleNeural && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange);
             spokeAny = spokeAny || spoken;
             previousChunkLanguage = chunk.lang;
