@@ -35,7 +35,8 @@ class ProviderManager {
     for (const item of candidates) {
       try {
         const form = new FormData();
-        form.append("file", new Blob([buffer], { type: mimeType }), "panthorium-voice.webm");
+        const extension = /mp4/i.test(mimeType) ? "mp4" : /ogg/i.test(mimeType) ? "ogg" : "webm";
+        form.append("file", new Blob([buffer], { type: mimeType }), `panthorium-voice.${extension}`);
         form.append("model", item.model);
         form.append("response_format", "json");
         if (language) form.append("language", String(language).toLowerCase().startsWith("th") ? "th" : "en");
