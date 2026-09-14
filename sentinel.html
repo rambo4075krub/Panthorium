@@ -1641,7 +1641,19 @@
         open_security_dashboard: "security",
         open_production_intelligence: "production",
         open_ai_dashboard: "ai-platform",
-        open_settings: "settings"
+        open_settings: "settings",
+        close_learning_lab: "training-lab",
+        close_sentinel_agent: "sentinel-agent",
+        close_agent_automation: "agent-automation",
+        close_memory_knowledge: "memory-knowledge",
+        close_multi_agent: "multi-agent",
+        close_integrations: "integrations",
+        close_governance: "governance",
+        close_sentinel_control: "sentinel-control",
+        close_security_dashboard: "security",
+        close_production_intelligence: "production",
+        close_ai_dashboard: "ai-platform",
+        close_settings: "settings"
     };
     const voiceActionTargets = {
         open_learning_lab: "#sentinel-training-lab",
@@ -1679,6 +1691,25 @@
             return style.display !== "none" && style.visibility !== "hidden";
         });
     }
+    function closeVoiceWindow(action) {
+        const selectors = {
+            close_learning_lab: "#sentinel-training-lab",
+            close_sentinel_agent: "#phase5-agent-ui",
+            close_agent_automation: "#agent-automation-dashboard",
+            close_memory_knowledge: "#agent-memory-dashboard",
+            close_multi_agent: "#multi-agent-dashboard",
+            close_integrations: "#integrations-dashboard",
+            close_governance: "#panthorium-governance-dashboard",
+            close_sentinel_control: "#panthorium-sentinel-control-dashboard",
+            close_security_dashboard: ".window[data-id='security-dashboard'], #security-dashboard",
+            close_production_intelligence: "#panthorium-production-intelligence",
+            close_ai_dashboard: "#ai-window, #ai-dashboard",
+            close_settings: ".window[data-id='settings'], #settings-panel"
+        };
+        const nodes = [...document.querySelectorAll(selectors[action] || "")];
+        nodes.forEach(node => { if (node.matches(".window") && typeof closeWindow === "function") closeWindow(node.dataset.id); else node.remove(); });
+        return nodes.length > 0;
+    }
     async function openVoiceWindow(action) {
         const appId = voiceActionAppIds[action];
         const manager = window.PanthoriumStagingAdminDesktop;
@@ -1715,11 +1746,16 @@
     window.addEventListener("panthorium:voice-ui-action", async event => {
         const action = String(event.detail?.action || "");
         try {
+            if (action.startsWith("close_")) {
+                if (!closeVoiceWindow(action)) throw new Error("window_not_found");
+                window.dispatchEvent(new CustomEvent("panthorium:window-closed", { detail: { action } }));
+                return;
+            }
             if (!await openVoiceWindow(action)) throw new Error("window_not_created");
             window.dispatchEvent(new CustomEvent("panthorium:window-opened", { detail: { action } }));
         } catch (error) {
             console.warn("Voice window action failed", action, error);
-            if (typeof toast === "function") toast("เปิดหน้าต่างไม่สำเร็จ: โมดูลยังไม่พร้อมหรือไม่มีสิทธิ์");
+            if (typeof toast === "function") toast(action.startsWith("close_") ? "ยังไม่มีหน้าต่างให้ปิด" : "เปิดหน้าต่างไม่สำเร็จ: โมดูลยังไม่พร้อมหรือไม่มีสิทธิ์");
         }
     });
     // ---------- AI: Sentinel (Backend) ----------

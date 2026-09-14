@@ -31,9 +31,11 @@ const directVoiceActions = [
 ];
 function findDirectVoiceAction(command) {
   const value = normalizeVoiceCommand(command);
-  const requestsOpen = value.includes("เปิด") || value.includes("open") || value.includes("launch") || value.includes("แสดง");
-  if (!requestsOpen) return null;
-  return directVoiceActions.find((item) => item.terms.some((term) => value.includes(normalizeVoiceCommand(term)))) || null;
+  const closing = value.includes("ปิด") || value.includes("close") || value.includes("ซ่อน") || value.includes("กลับ");
+  const opening = value.includes("เปิด") || value.includes("open") || value.includes("launch") || value.includes("แสดง");
+  const item = directVoiceActions.find((candidate) => candidate.terms.some((term) => value.includes(normalizeVoiceCommand(term))));
+  if (!item || (!opening && !closing)) return null;
+  return closing ? { ...item, action: item.action.replace(/^open_/, "close_"), label: item.label.replace(/^เปิด /, "ปิด ") } : item;
 }
 function hasVoicePermission(user, permission) {
   const permissions = new Set(user?.permissions || []);
