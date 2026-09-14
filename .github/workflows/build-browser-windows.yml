@@ -47,13 +47,12 @@ jobs:
       - name: Install project dependencies
         run: npm ci
 
-      - name: Install Electron runtime
-        run: npm install --no-save --package-lock=false electron@36.9.5
+      - name: Install packaging tools
+        run: npm install --no-save --package-lock=false electron@36.9.5 @resvg/resvg-js@2.6.2
 
       - name: Render Panthorium orange logo
         shell: bash
         run: |
-          npm install --no-save --package-lock=false @resvg/resvg-js@2.6.2
           node -e "const fs=require('fs'); const {Resvg}=require('@resvg/resvg-js'); const svg=fs.readFileSync('panthorium-logo.svg','utf8'); const png=new Resvg(svg,{fitTo:{mode:'width',value:512}}).render().asPng(); fs.mkdirSync('build',{recursive:true}); fs.writeFileSync('build/icon.png',png);"
 
       - name: Build desktop installer
