@@ -68,9 +68,18 @@ jobs:
           node -e "const fs=require('fs'); const {Resvg}=require('@resvg/resvg-js'); const svg=fs.readFileSync('panthorium-logo.svg','utf8'); const png=new Resvg(svg,{fitTo:{mode:'width',value:512}}).render().asPng(); fs.mkdirSync('build',{recursive:true}); fs.writeFileSync('build/icon.png',png);"
 
       - name: Build desktop installer
+        shell: bash
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npx --yes electron-builder@26.0.12 ${{ matrix.target }} --publish never
+        run: |
+          for attempt in 1 2 3; do
+            if npx --yes electron-builder@26.0.12 ${{ matrix.target }} --publish never; then
+              exit 0
+            fi
+            echo "electron-builder failed; retry $attempt/3"
+            sleep 15
+          done
+          exit 1
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
