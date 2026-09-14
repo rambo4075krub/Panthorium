@@ -13,6 +13,7 @@
     'external-tiktok': '🎵', 'external-instagram': '📷', 'external-x': '𝕏'
   };
   const popups = new Map();
+  const electron = !!window.panthoriumDesktop?.isElectron;
   const appFor = id => catalog.apps.find(app => app.id === id && app.external);
   const safeUrl = app => {
     try {
@@ -37,16 +38,10 @@
   }
 
   function launch(app, url) {
+    if (electron) return true;
     const current = popups.get(app.id);
-    if (current && !current.closed) {
-      try { current.focus(); } catch (_) {}
-      return true;
-    }
-    const popup = window.open(
-      url,
-      `panthorium-external-${app.id}`,
-      'popup=yes,width=980,height=720,resizable=yes,scrollbars=yes'
-    );
+    if (current && !current.closed) { try { current.focus(); } catch (_) {} return true; }
+    const popup = window.open(url, `panthorium-external-${app.id}`, 'popup=yes,width=980,height=720,resizable=yes,scrollbars=yes');
     if (!popup) return false;
     popups.set(app.id, popup);
     return true;
@@ -54,35 +49,38 @@
 
   function shell(app, url) {
     const icon = icons[app.id] || '🌐';
-    return `<div class="external-app-window" data-external-app="${escapeHTML(app.id)}" style="height:100%;display:flex;flex-direction:column;gap:12px;justify-content:center;align-items:center;text-align:center;padding:24px;">
-      <div style="font-size:42px;line-height:1;">${icon}</div>
-      <h2 style="margin:0;">${escapeHTML(app.label)}</h2>
-      <div data-external-status role="status" style="color:var(--text-dim);font-size:13px;">กำลังเปิดเว็บไซต์จริง…</div>
-      <button type="button" data-external-open style="padding:10px 16px;border-radius:8px;font:inherit;">เปิดเว็บไซต์จริง</button>
-      <div style="color:var(--text-dim);font-size:12px;max-width:520px;">เว็บไซต์จะเปิดในหน้าต่างเบราว์เซอร์จริงของ ${escapeHTML(app.label)} ไม่ได้ถูกฝังหรือคัดลอกเข้ามาใน Panthorium หากไม่เปิด ให้กดปุ่มอีกครั้งหรืออนุญาต popup ของเว็บไซต์นี้</div>
-      <div style="color:var(--text-dim);font-size:11px;word-break:break-all;">${escapeHTML(url)}</div>
+    const content = electron
+      ? `<webview data-external-webview src="${escapeHTML(url)}" partition="persist:panthorium-external" allowpopups style="width:100%;height:100%;border:0;background:#fff;"></webview>`
+      : `<button type="button" data-external-open style="padding:10px 16px;border-radius:8px;font:inherit;">เปิดเว็บไซต์จริง</button>`;
+    return `<div class="external-app-window" data-external-app="${escapeHTML(app.id)}" style="height:100%;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;"><span style="font-size:20px;">${icon}</span><strong>${escapeHTML(app.label)}</strong><span data-external-status role="status" style="margin-left:auto;color:var(--text-dim);font-size:12px;">${electron ? 'กำลังทำงานใน WebView' : 'กำลังเปิดเว็บไซต์จริง…'}</span></div>
+      <div data-external-content style="min-height:0;flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:12px;">${content}</div>
     </div>`;
   }
 
   function bindRoot(app, root, url) {
     const status = root.querySelector('[data-external-status]');
-    const openButton = root.querySelector('[data-external-open]');
-    if (!status || !openButton) return false;
-    const tryLaunch = () => {
-      if (launch(app, url)) {
-        status.textContent = `${app.label} เปิดอยู่ในหน้าต่างเบราว์เซอร์จริง`;
-        return true;
+    if (!status) return false;
+    const webview = root.querySelector('webview[data-external-webview]');
+    if (electron) {
+      if (!webview) return false;
+      if (webview.dataset.bound !== '1') {
+        webview.dataset.bound = '1';
+        webview.addEventListener('did-start-loading', () => { status.textContent = `${app.label} กำลังโหลด`; });
+        webview.addEventListener('did-stop-loading', () => { status.textContent = `${app.label} พร้อมใช้งาน`; });
+        webview.addEventListener('did-fail-load', event => { if (event.errorCode !== -3) status.textContent = 'โหลดเว็บไซต์ไม่สำเร็จ'; });
       }
-      status.textContent = 'เบราว์เซอร์บล็อก popup ให้กด “เปิดเว็บไซต์จริง” อีกครั้งหรืออนุญาต popup';
+      if (webview.getAttribute('src') !== url) webview.setAttribute('src', url);
+      return true;
+    }
+    const openButton = root.querySelector('[data-external-open]');
+    if (!openButton) return false;
+    const tryLaunch = () => {
+      if (launch(app, url)) { status.textContent = `${app.label} เปิดอยู่ในหน้าต่างเบราว์เซอร์จริง`; return true; }
+      status.textContent = 'เบราว์เซอร์บล็อก popup กรุณาอนุญาต popup';
       return false;
     };
     openButton.onclick = tryLaunch;
-    const closeButton = root.querySelector('.win-btn.close');
-    if (closeButton && closeButton.dataset.externalCloseBound !== '1') {
-      closeButton.dataset.externalCloseBound = '1';
-      closeButton.addEventListener('click', () => close(app.id));
-    }
-    root.dataset.externalBound = '1';
     return tryLaunch();
   }
 
@@ -100,7 +98,7 @@
     return bindRoot(app, root, url);
   }
 
-  const api = { open, close, allowedHosts: [...allowedHosts] };
+  const api = { open, close, allowedHosts: [...allowedHosts], electron };
   for (const app of catalog.apps.filter(item => item.external)) {
     const name = app.id.replace(/^external-/, '').replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
     api[`open${name[0].toUpperCase()}${name.slice(1)}`] = () => open(app.id);
