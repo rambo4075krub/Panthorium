@@ -1957,13 +1957,19 @@
             appendMsg(text, "user");
             appendMsg("กำลังคิด...", "ai", true);
             try {
-                const res = await callAI(text, { voiceMode: resumeGlobalVoice });
+                const normalizedVoiceText = window.PanthoriumWindowCatalog?.normalize(text) || text.toLowerCase();
+                const systemCommand = resumeGlobalVoice && Boolean(
+                    window.PanthoriumWindowCatalog?.parse(text) ||
+                    window.PanthoriumWindowCatalog?.parseFunction(text) ||
+                    /^(เปิด|ปิด|รีเฟรช|แสดงสถานะ|ตรวจสอบสถานะ|ค้นความรู้|เริ่ม|หยุด|รัน|ยืนยัน|ยกเลิก|ลบ|เปลี่ยน|อนุญาต|ปิดทุกหน้าต่าง|open\b|close\b|refresh\b|start\b|stop\b|run\b|delete\b|confirm\b|cancel\b)/i.test(normalizedVoiceText)
+                );
+                const res = await callAI(text, { voiceMode: systemCommand, conversationalVoice: resumeGlobalVoice && !systemCommand });
                 // remove loading
                 const last = messages.querySelector('.msg.loading, .msg[data-streaming="1"]');
                 if (last) last.remove();
 
                 appendMsg(res.text, "ai", false, res.provider);
-                if (!resumeGlobalVoice || res.confirmationRequired) await speak(res.text);
+                if (!resumeGlobalVoice || (!systemCommand && res.ok) || res.confirmationRequired) await speak(res.text);
             } finally {
                 sendBusy = false;
                 if (resumeGlobalVoice) window.PanthoriumVoice?.resume();
