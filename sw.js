@@ -1,4 +1,4 @@
-const CACHE_NAME = 'panthorium-os-v5-orb-display-fix';
+const CACHE_NAME = 'panthorium-os-v6-voice-routing-fix';
 const STATIC_ASSETS = ['./manifest.json'];
 
 self.addEventListener('install', (event) => {
