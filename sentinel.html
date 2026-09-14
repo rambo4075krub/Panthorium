@@ -8,6 +8,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-capable" content="yes">
     <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/svg+xml" href="/panthorium-logo.svg">
+    <link rel="apple-touch-icon" href="/panthorium-logo.svg">
     <title>Panthorium OS</title>
     <style>
         :root {
@@ -682,7 +684,7 @@
 
     <!-- BOOT -->
     <div id="boot-screen">
-        <div class="boot-logo"><div style="width:50px;height:50px;background:var(--accent);border-radius:50%;opacity:0.4;"></div></div>
+        <div class="boot-logo"><img src="/panthorium-logo.svg" data-panthorium-logo alt="Panthorium" style="width:100%;height:100%;object-fit:contain;"></div>
         <div class="boot-title">PANTHORIUM</div>
         <div class="boot-sub">OPERATING SYSTEM</div>
         <div class="boot-progress"><div class="boot-bar" id="boot-bar"></div></div>
@@ -711,7 +713,7 @@
         <!-- Start Menu -->
         <div id="start-menu">
             <div class="sm-header">
-                <div class="sm-avatar">🛡️</div>
+                <div class="sm-avatar"><img src="/panthorium-logo.svg" data-panthorium-logo alt="Panthorium" style="width:32px;height:32px;object-fit:contain;"></div>
                 <div>
                     <div class="sm-user">ผู้ใช้ทั่วไป</div>
                     <div class="sm-status" id="sm-status">Online · ฟรี</div>
@@ -2440,7 +2442,7 @@
     function openAbout() {
         const html = `
             <div class="about-content">
-                <div class="about-logo">🛡️</div>
+                <div class="about-logo"><img src="/panthorium-logo.svg" data-panthorium-logo alt="Panthorium" style="width:72px;height:72px;object-fit:contain;"></div>
                 <h2 style="margin-bottom:8px;">Panthorium OS</h2>
                 <p style="color:var(--text-dim);font-size:13px;margin-bottom:20px;">Version ${OS.version}</p>
                 <p style="font-size:13px;line-height:1.7;color:var(--text-dim);max-width:300px;margin:0 auto;">
