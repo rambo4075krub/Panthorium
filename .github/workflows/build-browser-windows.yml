@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   desktop-installer:
@@ -60,3 +60,24 @@ jobs:
           path: ${{ matrix.artifact_path }}
           if-no-files-found: error
           retention-days: 14
+
+  publish-staging-release:
+    needs: desktop-installer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download desktop installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Panthorium-Browser-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish staging browser release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: staging
+          name: Panthorium Browser (Staging)
+          prerelease: true
+          make_latest: false
+          files: dist/*
+          fail_on_unmatched_files: true
