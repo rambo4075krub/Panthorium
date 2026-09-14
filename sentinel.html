@@ -1429,7 +1429,7 @@
         button.dataset.ready = "1";
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         const electronVoice = Boolean(window.panthoriumDesktop?.isElectron);
-        const recorderSupported = electronVoice && Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+        const recorderSupported = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
         let recognition = null;
         let autoResume = true;
         let recognitionBlocked = false;
@@ -1522,10 +1522,13 @@
                 if (!autoResume || voiceState !== "idle" || recorder) return;
                 try {
                     recorderStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-                    const supportedMime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find(type => MediaRecorder.isTypeSupported?.(type));
-                    recorderMime = supportedMime || "audio/webm";
+                    const supportedMime = typeof MediaRecorder.isTypeSupported === "function"
+                        ? ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find(type => MediaRecorder.isTypeSupported(type))
+                        : "";
+                    recorderMime = supportedMime || "";
                     recorderChunks = [];
-                    recorder = new MediaRecorder(recorderStream, { mimeType: recorderMime });
+                    recorder = recorderMime ? new MediaRecorder(recorderStream, { mimeType: recorderMime }) : new MediaRecorder(recorderStream);
+                    recorderMime = recorder.mimeType || recorderMime || "audio/webm";
                     recorder.ondataavailable = event => { if (event.data?.size) recorderChunks.push(event.data); };
                     recorder.onerror = () => status("unresponsive", "บันทึกเสียงไม่สำเร็จ ตรวจสอบไมโครโฟนแล้วลองใหม่");
                     recorder.onstop = async () => {
