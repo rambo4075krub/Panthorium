@@ -15,7 +15,7 @@ const { JSDOM } = require('jsdom');
   const shell = await fetch(new URL('/admin', base));
   assert.equal(shell.status, 200);
   const html = await shell.text();
-  assert(html.includes('/voice-window-catalog.js?') && html.includes('/voice-command-client.js?'));
+  assert(html.includes('/voice-window-catalog.js?') && html.includes('/external-apps-ui.js?') && html.includes('/voice-command-client.js?'));
   const deployedDOM = new JSDOM(html);
   const testedDOM = new JSDOM(fs.readFileSync(path.join(__dirname, '..', 'sentinel.html'), 'utf8'));
   try {

@@ -73,7 +73,7 @@ jobs:
           curl --fail --silent --show-error "$URL/admin" -o /dev/null
           # Verify the running revision serves the files that passed the DOM and
           # routing tests, rather than treating a green health check as UI proof.
-          for asset in voice-window-catalog.js voice-command-client.js phase2-auth.js ai-stream-client.js; do
+          for asset in voice-window-catalog.js external-apps-ui.js voice-command-client.js phase2-auth.js ai-stream-client.js; do
             curl --fail --silent --show-error "$URL/$asset" -o "$RUNNER_TEMP/deployed-$asset"
             cmp "$asset" "$RUNNER_TEMP/deployed-$asset"
           done

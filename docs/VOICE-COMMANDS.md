@@ -43,6 +43,17 @@ The client checks again, invokes the actual module lifecycle, verifies visibilit
 then displays the result. A planner's prose alone is never evidence of execution.
 Account and permission changes clear cached windows and pending confirmations.
 
+## External apps
+
+The same voice window path can open these allowlisted external sites in a
+Panthorium window: `YouTube`, `Facebook`, `LINE`, `TikTok`, `Instagram`, and `X`.
+For example, say `เปิด YouTube`, `เปิด เฟซบุ๊ก`, `เปิด ไลน์`, or `ปิด TikTok`.
+Each window uses a fixed HTTPS URL, a sandboxed iframe, and the current user's
+`chat` permission. The browser may refuse to embed a site because of that site's
+own `X-Frame-Options` or `frame-ancestors` policy; in that case use the window's
+`เปิดแท็บใหม่` button. Panthorium does not bypass those policies and does not
+accept arbitrary URLs from voice transcripts or AI output.
+
 ## Other actions
 
 - `แสดงสถานะระบบ` executes `system.status` with `system:read` permission.

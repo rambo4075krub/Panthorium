@@ -77,7 +77,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     };
     const inline = [...w.document.scripts].find(script => script.textContent.includes('const OS =')).textContent;
     evaluate(inline.replace(/\n    boot\(\);/, '\n    OS.state.booted = true;'));
-    for (const file of ['phase2-auth.js', 'voice-window-catalog.js', 'voice-command-client.js', 'ai-stream-client.js']) evaluate(source(file));
+    for (const file of ['phase2-auth.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'ai-stream-client.js']) evaluate(source(file));
     await tick(); await w.PanthoriumAuth.login('admin', 'fixture'); w.PanthoriumAIStream.install();
     evaluate('initGlobalVoice();');
     w.addEventListener('panthorium:voice-start', () => {

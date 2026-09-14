@@ -73,7 +73,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     load('phase2-auth.js'); await tick();
     await w.PanthoriumAuth.login('admin', 'fixture');
     w.document.getElementById('desktop').classList.add('active');
-    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-window-catalog.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumAIStream.install();
     const command = text => w.callAI(text, { voiceMode: true });
     const isVisible = app => { const el = w.document.querySelector(app.selector); return !!el && w.getComputedStyle(el).display !== 'none'; };
@@ -84,6 +84,13 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       assert.equal(result.text, `เปิด ${app.label}`, 'on-screen result identifies the command');
       assert.equal(isVisible(app), true, `${app.label} did not appear`);
       const root = w.document.querySelector(app.selector);
+      if (app.external) {
+        const frame = root.querySelector('iframe');
+        assert(frame, `${app.label}: external iframe missing`);
+        assert.equal(frame.src, app.externalUrl, `${app.label}: fixed external URL`);
+        assert.equal(frame.getAttribute('sandbox'), 'allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation allow-scripts allow-same-origin');
+        assert(root.querySelector('[data-external-open-tab]'), `${app.label}: open-tab fallback missing`);
+      }
       assert.equal((await command(`เปิด ${app.aliases[0]}`)).ok, true);
       assert.equal(w.document.querySelectorAll(app.selector).length, 1, `${app.label}: duplicate window`);
       if (app.refresher || app.refreshButton) assert.equal((await command(`รีเฟรช ${app.aliases[0]}`)).ok, true, `${app.label} refresh`);
@@ -103,7 +110,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       await command(`ปิด ${app.aliases[0]}`);
       assert(!root.isConnected || w.getComputedStyle(root).display === 'none');
     }
-    console.log('PASS: actual 13 module windows open, focus without duplicates, close, close twice, reopen; supported refresh and minimized restore');
+    console.log(`PASS: actual ${catalog.apps.length} registered windows open, focus without duplicates, close, close twice, reopen; supported refresh and minimized restore`);
 
     // Every registered module function must be callable through the same
     // authenticated command path. Mutating/costly controls stop at approval.
