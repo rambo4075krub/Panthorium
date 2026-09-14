@@ -48,7 +48,19 @@ jobs:
         run: npm ci
 
       - name: Install packaging tools
-        run: npm install --no-save --package-lock=false electron@36.9.5 @resvg/resvg-js@2.6.2
+        shell: bash
+        run: |
+          npm config set fetch-retries 5
+          npm config set fetch-retry-mintimeout 20000
+          npm config set fetch-retry-maxtimeout 120000
+          for attempt in 1 2 3; do
+            if npm install --no-save --package-lock=false electron@36.9.5 @resvg/resvg-js@2.6.2; then
+              exit 0
+            fi
+            echo "Packaging dependency download failed; retry $attempt/3"
+            sleep 10
+          done
+          exit 1
 
       - name: Render Panthorium orange logo
         shell: bash
