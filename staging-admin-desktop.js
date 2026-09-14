@@ -44,6 +44,32 @@ function openById(appId){
   const app=APPS.find(item=>item.id===appId);
   return app ? openApp(app) : false;
 }
+const CLOSE_SELECTORS={
+  'training-lab':'#sentinel-training-lab',
+  'sentinel-agent':'#phase5-agent-ui',
+  'agent-automation':'#agent-automation-dashboard',
+  'memory-knowledge':'#agent-memory-dashboard',
+  'multi-agent':'#multi-agent-dashboard',
+  'integrations':'#integrations-dashboard',
+  'governance':'#panthorium-governance-dashboard',
+  'sentinel-control':'#panthorium-sentinel-control-dashboard',
+  'security':".window[data-id='security-dashboard'],#security-dashboard",
+  'production':'#panthorium-production-intelligence',
+  'ai-platform':'#ai-window,#ai-dashboard',
+  'settings':".window[data-id='settings'],#settings-panel"
+};
+function closeById(appId){
+  const nodes=[...document.querySelectorAll(CLOSE_SELECTORS[appId]||'')];
+  nodes.forEach(node=>{if(node.matches('.window')&&typeof closeWindow==='function')closeWindow(node.dataset.id);else node.remove();});
+  return nodes.length>0;
+}
+function handleVoiceWindowAction(event){
+  const action=String(event.detail?.action||'');
+  if(!/^open_|^close_/.test(action))return;
+  const id=action.replace(/^(open|close)_/,'').replace('learning_lab','training-lab').replace('sentinel_agent','sentinel-agent').replace('agent_automation','agent-automation').replace('memory_knowledge','memory-knowledge').replace('multi_agent','multi-agent').replace('sentinel_control','sentinel-control').replace('security_dashboard','security').replace('production_intelligence','production').replace('ai_dashboard','ai-platform');
+  if(action.startsWith('close_'))closeById(id);else openById(id);
+}
+window.addEventListener('panthorium:voice-ui-action',handleVoiceWindowAction);
 function ensureStyle(){
   if(document.getElementById('staging-admin-desktop-v2-style'))return;
   const style=document.createElement('style');style.id='staging-admin-desktop-v2-style';style.textContent=`
