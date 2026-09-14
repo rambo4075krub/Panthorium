@@ -1,4 +1,5 @@
 const { isIP } = require('node:net');
+const windowCatalog = require('../voice-window-catalog');
 
 const SESSION_ID_RE = /^[A-Za-z0-9._:-]{1,120}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -10,6 +11,19 @@ function validateNoArgs(args) { return plainObject(args) && Object.keys(args).le
 class ToolRegistry {
   constructor({ sentinel, conversations, securityResponse, aiOperations, integrations, knowledge, training } = {}) {
     this.tools = new Map();
+    for (const operation of ['open', 'close', 'refresh']) {
+      this.register({
+        id: `window.${operation}`, description: `${operation} one Panthorium function window in the user's browser`,
+        permission: 'chat', risk: 'low', mutates: false,
+        argsSchema: { appId: `required: ${windowCatalog.apps.map(app => app.id).join(', ')}` },
+        validateArgs: args => onlyKeys(args, ['appId']) && windowCatalog.apps.some(app => app.id === args.appId) ? null : 'invalid_window_id',
+        run: async ({ user, args }) => {
+          const app = windowCatalog.apps.find(item => item.id === args.appId);
+          if (!windowCatalog.allowed(app, user)) throw new Error('tool_permission_denied');
+          return { ok: true, uiAction: `${operation}_${app.key}` };
+        }
+      });
+    }
     this.register({ id: 'system.status', description: 'Read Sentinel runtime status', permission: 'system:read', risk: 'low', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async () => sentinel.status() });
     this.register({ id: 'ai.providers', description: 'List configured AI providers and models', permission: 'chat', risk: 'low', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async () => sentinel.providerCatalog() });
     this.register({

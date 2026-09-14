@@ -71,5 +71,12 @@ jobs:
           gcloud run services update "$SERVICE" --project="$PROJECT" --region="$REGION" --update-env-vars="ALLOWED_ORIGINS=$URL" --quiet
           curl --fail --silent --show-error "$URL/api/health" | python3 -c 'import json,sys; assert json.load(sys.stdin)["ok"] is True'
           curl --fail --silent --show-error "$URL/admin" -o /dev/null
+          # Verify the running revision serves the files that passed the DOM and
+          # routing tests, rather than treating a green health check as UI proof.
+          for asset in voice-window-catalog.js voice-command-client.js phase2-auth.js ai-stream-client.js; do
+            curl --fail --silent --show-error "$URL/$asset" -o "$RUNNER_TEMP/deployed-$asset"
+            cmp "$asset" "$RUNNER_TEMP/deployed-$asset"
+          done
+          STAGING_URL="$URL" node test/voice-deployed.js
           echo "Staging admin: $URL/admin" >> "$GITHUB_STEP_SUMMARY"
           echo "Commit tested: $GITHUB_SHA. Await owner voice acceptance before merging main." >> "$GITHUB_STEP_SUMMARY"

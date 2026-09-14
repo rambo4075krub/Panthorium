@@ -78,7 +78,7 @@
     if (originalCreateWindow) createWindow = function(id, title, contentHTML, opts = {}) { if (id === 'settings' && !hasPermission('settings')) return permissionDenied('settings'); if (id === 'security-dashboard' && !isAdministrator()) return permissionDenied('administrator'); return originalCreateWindow(id, title, contentHTML, opts); };
     const originalOpenSettings = typeof openSettings === 'function' ? openSettings : null;
     if (originalOpenSettings) { const guarded = function(){ if (!hasPermission('settings')) return permissionDenied('settings'); return originalOpenSettings(); }; openSettings = guarded; if (typeof APP_LIST !== 'undefined' && Array.isArray(APP_LIST)) { const app = APP_LIST.find(a => a.id === 'settings'); if (app) app.open = guarded; } }
-    const originalCallAI = typeof callAI === 'function' ? callAI : null; if (originalCallAI) callAI = async function(prompt){ if (!hasPermission('chat')) return { ok:false,text:'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat',provider:'RBAC',via:'rbac' }; return originalCallAI(prompt); };
+    const originalCallAI = typeof callAI === 'function' ? callAI : null; if (originalCallAI) callAI = async function(prompt, options = {}){ if (!hasPermission('chat')) return { ok:false,text:'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat',provider:'RBAC',via:'rbac' }; return originalCallAI(prompt, options); };
   }
   async function initializePhase2() {
     OS.state.user = null; ensureAuth = phase2EnsureAuth; for (let i=0;i<40&&!OS.state.booted;i++) await sleep(100); installPermissionGuards(); await revokeServerSession(); OS.config.accessToken=''; OS.state.user=null; OS.state.loggedIn=false; OS.state.verified=false;

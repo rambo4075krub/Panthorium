@@ -1471,20 +1471,21 @@
             try {
                 const res = await callAI(text, { voiceMode: true });
                 if (!res || !res.ok || !res.text) {
-                    status("unresponsive", "ไม่ตอบสนอง");
-                    voiceState = "speaking";
-                    await speak("ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง");
+                    const reason = res?.text || "ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง";
+                    status("unresponsive", reason);
                     return;
                 }
-                voiceState = "speaking";
-                status("processing", "Sentinel กำลังพูด...");
-                await speak(res.text);
+                // Execute voice commands silently. Speak only when an action
+                // is waiting for the user's explicit permission/confirmation.
+                if (res.confirmationRequired) {
+                    voiceState = "speaking";
+                    status("processing", "รอการยืนยันคำสั่ง");
+                    await speak(res.text);
+                }
                 status("ready", "พร้อมใช้งาน");
             } catch (error) {
                 console.warn("Global voice command failed", error);
                 status("unresponsive", "ไม่ตอบสนอง");
-                voiceState = "speaking";
-                await speak("ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง");
             } finally {
                 voiceState = "idle";
                 restartListening();
@@ -1629,135 +1630,6 @@
         return res;
     }
 
-    const voiceActionAppIds = {
-        open_learning_lab: "training-lab",
-        open_sentinel_agent: "sentinel-agent",
-        open_agent_automation: "agent-automation",
-        open_memory_knowledge: "memory-knowledge",
-        open_multi_agent: "multi-agent",
-        open_integrations: "integrations",
-        open_governance: "governance",
-        open_sentinel_control: "sentinel-control",
-        open_security_dashboard: "security",
-        open_production_intelligence: "production",
-        open_ai_dashboard: "ai-platform",
-        open_settings: "settings",
-        close_learning_lab: "training-lab",
-        close_sentinel_agent: "sentinel-agent",
-        close_agent_automation: "agent-automation",
-        close_memory_knowledge: "memory-knowledge",
-        close_multi_agent: "multi-agent",
-        close_integrations: "integrations",
-        close_governance: "governance",
-        close_sentinel_control: "sentinel-control",
-        close_security_dashboard: "security",
-        close_production_intelligence: "production",
-        close_ai_dashboard: "ai-platform",
-        close_settings: "settings"
-    };
-    const voiceActionTargets = {
-        open_learning_lab: "#sentinel-training-lab",
-        open_sentinel_agent: "#phase5-agent-ui, #sentinel-agent-dashboard, .window[data-id='sentinel-agent']",
-        open_agent_automation: "#agent-automation-dashboard",
-        open_memory_knowledge: "#agent-memory-dashboard",
-        open_multi_agent: "#multi-agent-dashboard",
-        open_integrations: "#integrations-dashboard",
-        open_governance: "#panthorium-governance-dashboard, #governance-dashboard, #governance-panel",
-        open_sentinel_control: "#panthorium-sentinel-control-dashboard, #sentinel-control-dashboard, #sentinel-control-panel",
-        open_security_dashboard: ".window[data-id='security-dashboard'], #security-dashboard",
-        open_production_intelligence: "#panthorium-production-intelligence, #production-intelligence-dashboard, #production-intelligence-panel",
-        open_ai_dashboard: "#ai-window, #ai-dashboard, .window[data-id='ai-dashboard']",
-        open_settings: ".window[data-id='settings'], #settings-panel"
-    };
-    const voiceActionHandlers = {
-        open_learning_lab: () => window.PanthoriumTraining?.open?.(),
-        open_sentinel_agent: () => window.PanthoriumAgent?.open?.(),
-        open_agent_automation: () => window.PanthoriumAutomation?.open?.(),
-        open_memory_knowledge: () => window.PanthoriumMemoryKnowledge?.open?.(),
-        open_multi_agent: () => window.PanthoriumMultiAgent?.open?.(),
-        open_integrations: () => window.PanthoriumIntegrations?.open?.(),
-        open_governance: () => window.PanthoriumGovernance?.open?.(),
-        open_sentinel_control: () => window.PanthoriumSentinelControl?.open?.(),
-        open_security_dashboard: () => window.PanthoriumSecurityDashboard?.open?.(),
-        open_production_intelligence: () => window.PanthoriumProductionIntelligence?.open?.(),
-        open_ai_dashboard: () => window.PanthoriumAI?.open?.(),
-        open_settings: () => typeof openSettings === "function" && openSettings()
-    };
-    function voiceTargetVisible(action) {
-        const selector = voiceActionTargets[action];
-        if (!selector) return false;
-        return [...document.querySelectorAll(selector)].some(node => {
-            const style = window.getComputedStyle(node);
-            return style.display !== "none" && style.visibility !== "hidden";
-        });
-    }
-    function closeVoiceWindow(action) {
-        const selectors = {
-            close_learning_lab: "#sentinel-training-lab",
-            close_sentinel_agent: "#phase5-agent-ui",
-            close_agent_automation: "#agent-automation-dashboard",
-            close_memory_knowledge: "#agent-memory-dashboard",
-            close_multi_agent: "#multi-agent-dashboard",
-            close_integrations: "#integrations-dashboard",
-            close_governance: "#panthorium-governance-dashboard",
-            close_sentinel_control: "#panthorium-sentinel-control-dashboard",
-            close_security_dashboard: ".window[data-id='security-dashboard'], #security-dashboard",
-            close_production_intelligence: "#panthorium-production-intelligence",
-            close_ai_dashboard: "#ai-window, #ai-dashboard",
-            close_settings: ".window[data-id='settings'], #settings-panel"
-        };
-        const nodes = [...document.querySelectorAll(selectors[action] || "")];
-        nodes.forEach(node => { if (node.matches(".window") && typeof closeWindow === "function") closeWindow(node.dataset.id); else node.remove(); });
-        return nodes.length > 0;
-    }
-    async function openVoiceWindow(action) {
-        const appId = voiceActionAppIds[action];
-        const manager = window.PanthoriumStagingAdminDesktop;
-        if (appId && manager && typeof manager.open === "function") {
-            manager.open(appId);
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-            if (voiceTargetVisible(action)) return true;
-        }
-        const handler = voiceActionHandlers[action];
-        if (typeof handler === "function") {
-            await Promise.resolve(handler());
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-            if (voiceTargetVisible(action)) return true;
-        }
-        const launcherIds = {
-            open_learning_lab: "sentinel-training-launcher",
-            open_sentinel_agent: "phase5-agent-launcher",
-            open_agent_automation: "phase6-automation-launcher",
-            open_memory_knowledge: "phase7-memory-launcher",
-            open_multi_agent: "phase8-multi-agent-launcher",
-            open_integrations: "phase9-integrations-launcher",
-            open_governance: "phase13-governance-launcher",
-            open_security_dashboard: "phase3-security-start",
-            open_production_intelligence: "phase10-production-launcher"
-        };
-        const launcher = document.getElementById(launcherIds[action] || "");
-        if (launcher) {
-            launcher.click();
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-            if (voiceTargetVisible(action)) return true;
-        }
-        return false;
-    }
-    window.addEventListener("panthorium:voice-ui-action", async event => {
-        const action = String(event.detail?.action || "");
-        try {
-            if (action.startsWith("close_")) {
-                if (!closeVoiceWindow(action)) throw new Error("window_not_found");
-                window.dispatchEvent(new CustomEvent("panthorium:window-closed", { detail: { action } }));
-                return;
-            }
-            if (!await openVoiceWindow(action)) throw new Error("window_not_created");
-            window.dispatchEvent(new CustomEvent("panthorium:window-opened", { detail: { action } }));
-        } catch (error) {
-            console.warn("Voice window action failed", action, error);
-            if (typeof toast === "function") toast(action.startsWith("close_") ? "ยังไม่มีหน้าต่างให้ปิด" : "เปิดหน้าต่างไม่สำเร็จ: โมดูลยังไม่พร้อมหรือไม่มีสิทธิ์");
-        }
-    });
     // ---------- AI: Sentinel (Backend) ----------
     async function checkSentinelStatus() {
         try {
@@ -1773,52 +1645,11 @@
         }
     }
 
-    function emitVoiceUIActions(data) {
-        const seen = new Set();
-        const actions = new Set();
-        const visit = value => {
-            if (!value || typeof value !== "object" || seen.has(value)) return;
-            seen.add(value);
-            if (typeof value.uiAction === "string") actions.add(value.uiAction);
-            if (Array.isArray(value.uiActions)) value.uiActions.forEach(action => { if (typeof action === "string") actions.add(action); });
-            Object.values(value).forEach(visit);
-        };
-        visit(data);
-        actions.forEach(action => {
-            window.dispatchEvent(new CustomEvent("panthorium:voice-ui-action", { detail: { action, response: data } }));
-            if (action === "open_learning_lab") {
-                window.dispatchEvent(new CustomEvent("panthorium:voice-open-learning-lab", { detail: { response: data } }));
-            }
-        });
-        return actions;
-    }
-
-    function voiceActionText(data) {
-        const actions = [...emitVoiceUIActions(data)];
-        if (data?.confirmationRequired) return "คำสั่งนี้ต้องยืนยันก่อนดำเนินการ";
-        if (data?.answer) return String(data.answer);
-        if (actions.length) {
-            const labels = {
-                open_learning_lab: "เปิด Learning Lab แล้ว",
-                open_sentinel_agent: "เปิด Sentinel Agent แล้ว",
-                open_agent_automation: "เปิด Agent Automation แล้ว",
-                open_memory_knowledge: "เปิด Memory และ Knowledge แล้ว",
-                open_multi_agent: "เปิด Multi-Agent แล้ว",
-                open_integrations: "เปิด Integrations แล้ว",
-                open_governance: "เปิด Governance แล้ว",
-                open_sentinel_control: "เปิด Sentinel Control แล้ว",
-                open_security_dashboard: "เปิด Security Dashboard แล้ว",
-                open_production_intelligence: "เปิด Production Intelligence แล้ว",
-                open_ai_dashboard: "เปิด AI Dashboard แล้ว",
-                open_settings: "เปิด Settings แล้ว"
-            };
-            return actions.map(action => labels[action] || "ดำเนินการคำสั่งแล้ว").join(" ");
-        }
-        if (Array.isArray(data?.results) && data.results.some(item => item?.ok)) return "ดำเนินการคำสั่งแล้ว";
-        return "";
-    }
-
     async function callAI(prompt, { voiceMode = false } = {}) {
+        if (voiceMode) {
+            if (!window.PanthoriumVoiceCommands) return { ok: false, text: "โมดูลคำสั่งเสียงยังโหลดไม่สำเร็จ กรุณาโหลดหน้าใหม่" };
+            return window.PanthoriumVoiceCommands.execute(prompt);
+        }
         // 1) พยายามใช้ Sentinel บนเซิร์ฟเวอร์ก่อน
         if (OS.config.useBackend) {
             try {
@@ -1844,7 +1675,6 @@
                 if (res.ok || res.status === 409) {
                     const data = await res.json();
                     OS.sentinelOnline = true;
-                    const actionText = voiceActionText(data);
                     if (data.ok && data.text) {
                         return {
                             ok: true,
@@ -1852,12 +1682,6 @@
                             provider: data.provider ? `Sentinel · ${data.provider}` : "Sentinel",
                             via: "sentinel"
                         };
-                    }
-                    if (data.confirmationRequired) {
-                        return { ok: true, text: actionText || "คำสั่งนี้ต้องยืนยันก่อนดำเนินการ", provider: "Sentinel", via: "sentinel", confirmationRequired: true, workflowId: data.workflowId || null };
-                    }
-                    if (data.answer || data.execution?.output || data.results?.length || actionText) {
-                        return { ok: true, text: actionText || data.answer || "ดำเนินการคำสั่งแล้ว", provider: "Sentinel", via: "sentinel" };
                     }
                     if (data.text) {
                         return { ok: false, text: data.text, provider: "Sentinel", via: "sentinel" };
@@ -2107,7 +1931,7 @@
                 if (last) last.remove();
 
                 appendMsg(res.text, "ai", false, res.provider);
-                await speak(res.text);
+                if (!resumeGlobalVoice || res.confirmationRequired) await speak(res.text);
             } finally {
                 sendBusy = false;
                 if (resumeGlobalVoice) window.PanthoriumVoice?.resume();

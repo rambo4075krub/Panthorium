@@ -12,35 +12,8 @@ function validChatBody(body = {}) {
   if (body.voice != null && typeof body.voice !== "boolean") return "invalid_voice_mode";
   return null;
 }
-function normalizeVoiceCommand(value) {
-  return String(value || "").toLowerCase().replace(/[\s_\-/.]+/g, "");
-}
-const directVoiceActions = [
-  { action: "open_learning_lab", permission: "settings", toolId: "learning_lab.open", terms: ["learninglab", "เลิร์นนิงแล็บ", "เลิร์นนิ่งแล็บ", "ห้องเรียนรู้"], label: "Learning Lab" },
-  { action: "open_sentinel_agent", permission: "chat", terms: ["sentinelagent", "เซนทิเนลเอเจนต์"], label: "Sentinel Agent" },
-  { action: "open_agent_automation", permission: "settings", terms: ["agentautomation", "ระบบอัตโนมัติ"], label: "Agent Automation" },
-  { action: "open_memory_knowledge", permission: "settings", terms: ["memoryknowledge", "memory", "knowledge", "หน่วยความจำ", "คลังความรู้"], label: "Memory และ Knowledge" },
-  { action: "open_multi_agent", permission: "settings", terms: ["multiagent", "มัลติเอเจนต์"], label: "Multi-Agent" },
-  { action: "open_integrations", permission: "settings", terms: ["integrations", "อินทิเกรชัน", "การเชื่อมต่อ"], label: "Integrations" },
-  { action: "open_governance", permission: "settings", terms: ["governance", "ธรรมาภิบาล"], label: "Governance" },
-  { action: "open_sentinel_control", permission: "settings", terms: ["sentinelcontrol", "ควบคุมเซนทิเนล"], label: "Sentinel Control" },
-  { action: "open_security_dashboard", permission: "settings", terms: ["securitydashboard", "แดชบอร์ดความปลอดภัย"], label: "Security Dashboard" },
-  { action: "open_production_intelligence", permission: "settings", terms: ["productionintelligence", "ข้อมูลการผลิต"], label: "Production Intelligence" },
-  { action: "open_ai_dashboard", permission: "settings", terms: ["aidashboard", "แดชบอร์ดเอไอ", "สถานะเอไอ"], label: "AI Dashboard" },
-  { action: "open_settings", permission: "settings", terms: ["settings", "ตั้งค่า", "การตั้งค่า"], label: "Settings" }
-];
-function findDirectVoiceAction(command) {
-  const value = normalizeVoiceCommand(command);
-  const closing = value.includes("ปิด") || value.includes("close") || value.includes("ซ่อน") || value.includes("กลับ");
-  const opening = value.includes("เปิด") || value.includes("open") || value.includes("launch") || value.includes("แสดง");
-  const item = directVoiceActions.find((candidate) => candidate.terms.some((term) => value.includes(normalizeVoiceCommand(term))));
-  if (!item || (!opening && !closing)) return null;
-  return closing ? { ...item, action: item.action.replace(/^open_/, "close_"), label: item.label.replace(/^เปิด /, "ปิด ") } : item;
-}
-function hasVoicePermission(user, permission) {
-  const permissions = new Set(user?.permissions || []);
-  return permissions.has(permission) || permissions.has("*");
-}
+const windowCatalog = require("../voice-window-catalog");
+function hasVoicePermission(user, permission) { return (user?.permissions || []).includes(permission); }
 
 function createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler) {
   const router = express.Router(); const auth = requireAuth(authService);
@@ -136,7 +109,45 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     }
   });
   router.post("/chat", auth, requirePermission("chat"), aiLimiter, async (req, res) => { try { const error = validChatBody(req.body || {}); if (error) return res.status(400).json({ ok: false, error }); const { message, sessionId, provider, model, voice } = req.body || {}; const sid = sessionId || req.headers["x-session-id"] || randomUUID(); const result = await sentinel.chat({ sessionId: sid, userId: req.user.sub, message, mode: "default", provider: provider?.toLowerCase(), model, voiceMode: voice === true }); audit.record("sentinel.chat", { userId: req.user.sub, sessionId: sid, provider: result.provider || null, model: result.model || null, usage: result.usage || null, latencyMs: result.latencyMs || null, ok: result.ok }); res.json({ ...result, sessionId: sid }); } catch (err) { res.status(500).json({ ok: false, error: "internal_error" }); } });
-  router.post("/sentinel/command", auth, aiLimiter, async (req, res, next) => { try { const { command, provider } = req.body || {}; if (!validText(command, 8000)) return res.status(400).json({ ok: false, error: "invalid_command" }); const direct = findDirectVoiceAction(command); if (direct) { if (!hasVoicePermission(req.user, direct.permission)) return res.status(403).json({ ok: false, error: "voice_action_permission_denied", action: direct.action }); if (direct.toolId) { const execution = await agentService.execute({ user: req.user, toolId: direct.toolId, args: {}, confirmed: false, requestId: req.requestId }); if (!execution.ok) return res.status(execution.error === "confirmation_required" ? 409 : 403).json({ ...execution, voiceAction: true, action: direct.action }); return res.json({ ok: true, workflowId: null, executed: true, completed: true, answer: `เปิด ${direct.label} แล้ว`, results: [{ toolId: direct.toolId, ok: true, output: execution.output }], voiceAction: true, action: direct.action }); } return res.json({ ok: true, workflowId: null, executed: true, completed: true, answer: `เปิด ${direct.label} แล้ว`, results: [{ toolId: direct.action, ok: true, output: { ok: true, uiAction: direct.action } }], voiceAction: true, action: direct.action }); } if (!hasVoicePermission(req.user, "sentinel:command")) return res.status(403).json({ ok: false, error: "voice_command_permission_denied" }); const result = await agentWorkflow.run({ user: req.user, request: command, preferredProvider: provider?.toLowerCase(), requestId: req.requestId }); if (result.confirmationRequired) return res.status(409).json({ ...result, voiceAction: true, message: "ต้องยืนยันก่อนดำเนินการ" }); res.status(result.ok ? 200 : 422).json({ ...result, voiceAction: true }); } catch (error) { next(error); } });
+  router.post("/sentinel/command", auth, aiLimiter, async (req, res, next) => {
+    try {
+      const { command, provider } = req.body || {};
+      if (!validText(command, 8000)) return res.status(400).json({ ok: false, error: "invalid_command" });
+      if (provider != null && !validText(provider, 40)) return res.status(400).json({ ok: false, error: "invalid_provider" });
+      const functionCommand = windowCatalog.parseFunction(command);
+      if (functionCommand) {
+        if (!windowCatalog.allowed(windowCatalog.apps.find(app => app.id === functionCommand.appId), req.user)) return res.status(403).json({ ok: false, error: 'voice_action_permission_denied', action: functionCommand.action });
+        if (functionCommand.requiresConfirmation && req.body?.confirmed !== true) return res.status(409).json({ ok: true, confirmationRequired: true, voiceAction: true, pendingAction: { action: functionCommand.action, command, reason: 'การทำงานนี้อาจใช้ทรัพยากรหรือเปลี่ยนข้อมูล', requiresConfirmation: true } });
+        return res.json({ ok: true, executed: false, completed: false, uiPending: true, voiceAction: true, results: [{ toolId: 'window.function', ok: true, output: { ok: true, uiAction: functionCommand.action } }] });
+      }
+      if (/^(ปิดทุกหน้าต่าง|ปิดหน้าต่างทั้งหมด|ปิดทั้งหมด|closeallwindows)$/.test(windowCatalog.normalize(command))) {
+        if (!hasVoicePermission(req.user, 'chat')) return res.status(403).json({ ok: false, error: 'voice_command_permission_denied' });
+        const results = windowCatalog.apps.filter(app => windowCatalog.allowed(app, req.user)).map(app => ({ toolId: 'window.close', ok: true, output: { ok: true, uiAction: `close_${app.key}` } }));
+        audit.record('sentinel.close_all_windows', { userId: req.user.sub, requestId: req.requestId });
+        return res.json({ ok: true, executed: false, completed: false, uiPending: true, action: 'close_all_windows', results });
+      }
+      const direct = windowCatalog.parse(command);
+      if (direct?.error) return res.status(422).json({ ok: false, error: direct.error });
+      if (direct) {
+        if (!windowCatalog.allowed(direct.app, req.user)) return res.status(403).json({ ok: false, error: "voice_action_permission_denied", action: direct.action });
+        const execution = await agentService.execute({ user: req.user, toolId: `window.${direct.operation}`, args: { appId: direct.app.id }, requestId: req.requestId });
+        if (!execution.ok) return res.status(403).json(execution);
+        // Only the browser can confirm a window was actually opened or closed.
+        return res.json({ ok: true, executed: false, completed: false, uiPending: true, voiceAction: true, results: [execution] });
+      }
+      const text = command.trim();
+      const statusCommand = /^(?:ขอ|ช่วย)?(?:แสดง|ตรวจ|ตรวจสอบ|เช็ค|เช็ก)?สถานะระบบ(?:หน่อย|ครับ|ค่ะ)?$/.test(windowCatalog.normalize(text)) || /^(?:show |check )?system status[.!]?$/i.test(text);
+      const search = /^(?:ค้นความรู้|ค้นหาความรู้|ค้นในคลังความรู้|search knowledge)\s+(.+)$/i.exec(text);
+      if (statusCommand || search) {
+        const execution = await agentService.execute({ user: req.user, toolId: statusCommand ? 'system.status' : 'knowledge.search', args: statusCommand ? {} : { query: search[1].trim() }, requestId: req.requestId });
+        return res.status(execution.ok ? 200 : execution.error === 'tool_permission_denied' ? 403 : 422).json({ ok: execution.ok, error: execution.error, executed: execution.ok, completed: execution.ok, results: [execution] });
+      }
+      if (!hasVoicePermission(req.user, "sentinel:command")) return res.status(403).json({ ok: false, error: "voice_command_permission_denied" });
+      const result = await agentWorkflow.run({ user: req.user, request: command, preferredProvider: provider?.toLowerCase(), requestId: req.requestId });
+      if (result.confirmationRequired) return res.status(409).json({ ...result, voiceAction: true });
+      res.status(result.ok ? 200 : 422).json({ ...result, voiceAction: true });
+    } catch (error) { next(error); }
+  });
   router.post("/chat/clear", auth, requirePermission("chat"), async (req, res) => { const { sessionId } = req.body || {}; if (typeof sessionId === "string" && sessionId.length <= 120) await sentinel.clearConversation(req.user.sub, sessionId); res.json({ ok: true }); });
   return router;
 }

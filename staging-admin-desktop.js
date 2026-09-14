@@ -32,44 +32,19 @@ function notify(message){try{if(typeof toast==='function')toast(message);else co
 function resolve(path){return String(path||'').split('.').reduce((obj,key)=>obj&&obj[key],window);}
 function openerReady(app){return (app.openers||[]).some(path=>typeof resolve(path)==='function')||!!(app.launcherId&&document.getElementById(app.launcherId));}
 function removeLegacyFloatingLaunchers(){document.querySelectorAll('[data-production-intelligence="1"]').forEach(node=>{if(!node.closest('#sm-apps'))node.remove();});}
-function openApp(app){
+async function openApp(app){
   closeMenu();
-  for(const path of app.openers||[]){const fn=resolve(path);if(typeof fn==='function'){fn();return true;}}
-  const launcher=app.launcherId?document.getElementById(app.launcherId):null;
-  if(launcher){launcher.click();return true;}
-  notify(`${app.label} ยังโหลดไม่เสร็จ กรุณารอสักครู่แล้วกดใหม่`);
-  return false;
+  const entry=window.PanthoriumWindowCatalog?.apps.find(item=>item.id===app.id);
+  const commands=window.PanthoriumVoiceCommands;
+  if(!entry||!commands){notify(`${app.label} ยังโหลดไม่เสร็จ`);return false;}
+  const result=await commands.windowAction(`open_${entry.key}`);
+  if(!result.ok)notify(result.text);
+  return result.ok;
 }
 function openById(appId){
   const app=APPS.find(item=>item.id===appId);
   return app ? openApp(app) : false;
 }
-const CLOSE_SELECTORS={
-  'training-lab':'#sentinel-training-lab',
-  'sentinel-agent':'#phase5-agent-ui',
-  'agent-automation':'#agent-automation-dashboard',
-  'memory-knowledge':'#agent-memory-dashboard',
-  'multi-agent':'#multi-agent-dashboard',
-  'integrations':'#integrations-dashboard',
-  'governance':'#panthorium-governance-dashboard',
-  'sentinel-control':'#panthorium-sentinel-control-dashboard',
-  'security':".window[data-id='security-dashboard'],#security-dashboard",
-  'production':'#panthorium-production-intelligence',
-  'ai-platform':'#ai-window,#ai-dashboard',
-  'settings':".window[data-id='settings'],#settings-panel"
-};
-function closeById(appId){
-  const nodes=[...document.querySelectorAll(CLOSE_SELECTORS[appId]||'')];
-  nodes.forEach(node=>{if(node.matches('.window')&&typeof closeWindow==='function')closeWindow(node.dataset.id);else node.remove();});
-  return nodes.length>0;
-}
-function handleVoiceWindowAction(event){
-  const action=String(event.detail?.action||'');
-  if(!/^open_|^close_/.test(action))return;
-  const id=action.replace(/^(open|close)_/,'').replace('learning_lab','training-lab').replace('sentinel_agent','sentinel-agent').replace('agent_automation','agent-automation').replace('memory_knowledge','memory-knowledge').replace('multi_agent','multi-agent').replace('sentinel_control','sentinel-control').replace('security_dashboard','security').replace('production_intelligence','production').replace('ai_dashboard','ai-platform');
-  if(action.startsWith('close_'))closeById(id);else openById(id);
-}
-window.addEventListener('panthorium:voice-ui-action',handleVoiceWindowAction);
 function ensureStyle(){
   if(document.getElementById('staging-admin-desktop-v2-style'))return;
   const style=document.createElement('style');style.id='staging-admin-desktop-v2-style';style.textContent=`
@@ -97,7 +72,7 @@ function renderDesktop(){
   if(!isTarget())return false;
   const desktop=document.getElementById('desktop-icons');if(!desktop)return false;
   ensureStyle();removeLegacyFloatingLaunchers();
-  const visibleApps=APPS.slice();
+  const visibleApps=APPS.filter(app=>window.PanthoriumWindowCatalog?.allowed(window.PanthoriumWindowCatalog.apps.find(item=>item.id===app.id), typeof OS!=='undefined'?OS.state.user:null));
   const fingerprint=visibleApps.map(app=>`${app.id}:${openerReady(app)?'ready':'pending'}`).join('|');
   desktop.className='desktop-icons staging-admin-desktop-v2';
   desktop.style.display='grid';

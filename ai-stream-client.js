@@ -72,7 +72,7 @@
       try { const result = await streamCall(prompt); if (result.text) return result; }
       catch (error) {
         console.warn('[Phase4 Stream]', error.message);
-        const fallback = await previous(prompt);
+        const fallback = await previous(prompt, options);
         if (fallback?.text) {
           const state = { text: '' };
           emit('status', { text: 'กำลังรับคำตอบจาก Sentinel...' });
