@@ -27,6 +27,30 @@ class ProviderManager {
     const requested = provider === "groq" ? currentGroqModel(requestedModel) : String(requestedModel).trim();
     return requested === configured ? configured : null;
   }
+  async transcribeAudio(buffer, mimeType = "audio/webm", language = "") {
+    const candidates = [
+      { provider: "groq", key: this.keys.groq, url: "https://api.groq.com/openai/v1/audio/transcriptions", model: process.env.GROQ_TRANSCRIBE_MODEL || "whisper-large-v3-turbo" },
+      { provider: "openai", key: this.keys.openai, url: "https://api.openai.com/v1/audio/transcriptions", model: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1" }
+    ].filter(item => item.key);
+    for (const item of candidates) {
+      try {
+        const form = new FormData();
+        form.append("file", new Blob([buffer], { type: mimeType }), "panthorium-voice.webm");
+        form.append("model", item.model);
+        form.append("response_format", "json");
+        if (language) form.append("language", String(language).toLowerCase().startsWith("th") ? "th" : "en");
+        const response = await fetch(item.url, { method: "POST", headers: { Authorization: `Bearer ${item.key}` }, body: form, signal: AbortSignal.timeout(30000) });
+        if (!response.ok) throw new Error(`Transcription HTTP ${response.status}`);
+        const data = await response.json();
+        const text = typeof data.text === "string" ? data.text.trim() : "";
+        if (!text) throw new Error("empty_transcription");
+        return { text, provider: item.provider, model: data.model || item.model };
+      } catch (error) {
+        if (item === candidates[candidates.length - 1]) throw error;
+      }
+    }
+    throw new Error("transcription_provider_unavailable");
+  }
   async call(provider, systemPrompt, history) { const result = await this.callDetailed(provider, systemPrompt, history); return result?.text || null; }
   async callDetailed(provider, systemPrompt, history, options = {}) {
     const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
