@@ -1428,6 +1428,8 @@
         if (!button || button.dataset.ready) return;
         button.dataset.ready = "1";
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const electronVoice = Boolean(window.panthoriumDesktop?.isElectron);
+        const recorderSupported = electronVoice && Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
         let recognition = null;
         let autoResume = true;
         let recognitionBlocked = false;
@@ -1447,6 +1449,151 @@
             if (row) { row.classList.add("active"); row.textContent = label; }
             if (announce) toast(label, kind === "processing" || kind === "unresponsive" ? 10000 : 2500);
         };
+        if (!SR && !recorderSupported) {
+            status("unsupported", "ไม่รองรับคำสั่ง");
+            button.onclick = () => status("unsupported", "ไม่รองรับคำสั่ง");
+            return;
+        }
+
+        if (recorderSupported) {
+            let recorder = null;
+            let recorderStream = null;
+            let recorderChunks = [];
+            let recorderMime = "audio/webm";
+            let recorderContext = null;
+            let recorderAnalyser = null;
+            let recorderData = null;
+            let recorderMonitor = null;
+            let recorderStartedAt = 0;
+            let recorderLastVoiceAt = 0;
+
+            const cleanupRecorder = () => {
+                clearTimeout(recorderMonitor);
+                recorderMonitor = null;
+                recorderAnalyser = null;
+                recorderData = null;
+                if (recorderContext) { try { recorderContext.close(); } catch (_) {} }
+                recorderContext = null;
+                recorderStream?.getTracks?.().forEach(track => track.stop());
+                recorderStream = null;
+            };
+            const toDataUrl = async blob => {
+                const bytes = new Uint8Array(await blob.arrayBuffer());
+                let binary = "";
+                const step = 0x8000;
+                for (let offset = 0; offset < bytes.length; offset += step) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + step, bytes.length)));
+                return "data:" + (blob.type || recorderMime) + ";base64," + btoa(binary);
+            };
+            const transcribeRecorderBlob = async blob => {
+                const base = OS.config.backendUrl.replace(/\/$/, "");
+                const response = await authorizedFetch(base + "/api/speech/transcribe", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ audio: await toDataUrl(blob), language: "th-TH" }),
+                    signal: AbortSignal.timeout(35000)
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok || typeof data.text !== "string" || !data.text.trim()) throw new Error(data.error || "transcription_unavailable");
+                return data.text.trim();
+            };
+            const finishRecorder = ({ discard = false } = {}) => {
+                if (!recorder || recorder.state !== "recording") return;
+                clearTimeout(recorderMonitor);
+                discardOnEnd = discard;
+                voiceState = "stopping";
+                if (!discard) status("processing", "ฟังจบแล้ว กำลังเตรียมประมวลผล");
+                try { recorder.stop(); } catch (_) { cleanupRecorder(); voiceState = "idle"; restartListening(); }
+            };
+            const monitorRecorder = () => {
+                if (!recorder || recorder.state !== "recording") return;
+                const now = performance.now();
+                if (recorderAnalyser && recorderData) {
+                    recorderAnalyser.getByteTimeDomainData(recorderData);
+                    let sum = 0;
+                    for (const value of recorderData) { const centered = (value - 128) / 128; sum += centered * centered; }
+                    if (Math.sqrt(sum / recorderData.length) > 0.025) recorderLastVoiceAt = now;
+                }
+                const quietLongEnough = recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 1400 && now - recorderStartedAt > 700;
+                if (quietLongEnough || now - recorderStartedAt > 15000) { finishRecorder({ discard: false }); return; }
+                recorderMonitor = setTimeout(monitorRecorder, 100);
+            };
+            const startRecorder = async () => {
+                if (!autoResume || voiceState !== "idle" || recorder) return;
+                try {
+                    recorderStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+                    const supportedMime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find(type => MediaRecorder.isTypeSupported?.(type));
+                    recorderMime = supportedMime || "audio/webm";
+                    recorderChunks = [];
+                    recorder = new MediaRecorder(recorderStream, { mimeType: recorderMime });
+                    recorder.ondataavailable = event => { if (event.data?.size) recorderChunks.push(event.data); };
+                    recorder.onerror = () => status("unresponsive", "บันทึกเสียงไม่สำเร็จ ตรวจสอบไมโครโฟนแล้วลองใหม่");
+                    recorder.onstop = async () => {
+                        const chunks = recorderChunks.slice();
+                        const discard = discardOnEnd;
+                        recorder = null;
+                        recorderChunks = [];
+                        cleanupRecorder();
+                        userSpeechActive = false;
+                        window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
+                        if (discard) { discardOnEnd = false; voiceState = "idle"; restartListening(); return; }
+                        if (!chunks.length) { voiceState = "idle"; status("unresponsive", "ยังไม่ได้ยินเสียง"); restartListening(); return; }
+                        voiceState = "processing";
+                        status("processing", "กำลังถอดเสียง");
+                        try {
+                            const text = await transcribeRecorderBlob(new Blob(chunks, { type: recorderMime }));
+                            window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
+                            await processTranscript(text);
+                        } catch (error) {
+                            console.warn("[Sentinel Electron transcription]", error);
+                            voiceState = "idle";
+                            status("unresponsive", "ถอดเสียงไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตและไมโครโฟน");
+                            restartListening();
+                        }
+                    };
+                    recorder.start(250);
+                    recorderStartedAt = performance.now();
+                    recorderLastVoiceAt = 0;
+                    voiceState = "listening";
+                    discardOnEnd = false;
+                    userSpeechActive = true;
+                    window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
+                    status("listening", "กำลังฟัง...", false);
+                    recorderContext = new AudioContext();
+                    const source = recorderContext.createMediaStreamSource(recorderStream);
+                    recorderAnalyser = recorderContext.createAnalyser();
+                    recorderAnalyser.fftSize = 512;
+                    recorderData = new Uint8Array(recorderAnalyser.fftSize);
+                    source.connect(recorderAnalyser);
+                    recorderMonitor = setTimeout(monitorRecorder, 100);
+                } catch (error) {
+                    cleanupRecorder();
+                    autoResume = false;
+                    recognitionBlocked = true;
+                    voiceState = "idle";
+                    const denied = error?.name === "NotAllowedError" || error?.name === "SecurityError";
+                    status("unsupported", denied ? "กรุณาอนุญาตสิทธิ์ไมโครโฟนให้ Panthorium Browser" : "เปิดไมโครโฟนไม่สำเร็จ");
+                }
+            };
+            const stopRecorder = () => finishRecorder({ discard: false });
+            window.PanthoriumVoice = {
+                pause() { autoResume = false; clearTimeout(recorderMonitor); if (voiceState === "listening") finishRecorder({ discard: true }); },
+                resume() { if (recognitionBlocked) return; autoResume = true; if (voiceState === "idle") setTimeout(startRecorder, 350); },
+                recognitionFailure() { status("unresponsive", "Electron ไม่สามารถถอดเสียงได้"); },
+                state() { return voiceState; }
+            };
+            button.onclick = async () => {
+                unlockVoiceAudio();
+                if (voiceState === "processing" || voiceState === "speaking" || voiceState === "stopping") { status("processing", "กำลังประมวลผล"); return; }
+                if (voiceState === "listening") { autoResume = false; stopRecorder(); return; }
+                recognitionBlocked = false;
+                autoResume = true;
+                await startRecorder();
+            };
+            autoResume = true;
+            setTimeout(() => { if (autoResume && !recognitionBlocked) startRecorder(); }, 400);
+            return;
+        }
+
         if (!SR) {
             status("unsupported", "ไม่รองรับคำสั่ง");
             button.onclick = () => status("unsupported", "ไม่รองรับคำสั่ง");
