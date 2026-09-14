@@ -62,6 +62,20 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     }
   });
   router.get("/agent/tools", auth, agentLimiter, (req, res) => res.json({ ok: true, tools: agentService.catalogFor(req.user) }));
+  router.post("/speech/transcribe", auth, requirePermission("chat"), speechLimiter, async (req, res) => {
+    try {
+      const value = typeof req.body?.audio === "string" ? req.body.audio : "";
+      const match = /^data:(audio\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/i.exec(value);
+      if (!match || match[2].length > 700000) return res.status(400).json({ ok: false, error: "invalid_audio" });
+      const audio = Buffer.from(match[2], "base64");
+      if (!audio.length || audio.length > 512 * 1024) return res.status(413).json({ ok: false, error: "audio_too_large" });
+      const result = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language);
+      res.json({ ok: true, text: result.text, provider: result.provider, model: result.model });
+    } catch (error) {
+      audit.record("sentinel.transcription_failed", { userId: req.user?.sub, error: error.message });
+      res.status(502).json({ ok: false, error: "transcription_unavailable" });
+    }
+  });
   router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { res.json({ ok: true, runs: await agentRuns.list(req.user.sub, Number(req.query.limit) || 30) }); } catch (error) { next(error); } });
   router.get("/agent/runs/:workflowId", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { if (!validText(req.params.workflowId, 80)) return res.status(400).json({ ok: false, error: "invalid_workflow_id" }); const run = await agentRuns.get(req.user.sub, req.params.workflowId); if (!run) return res.status(404).json({ ok: false, error: "agent_run_not_found" }); res.json({ ok: true, run }); } catch (error) { next(error); } });
   router.get("/agent/jobs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { res.json({ ok: true, jobs: await agentScheduler.list(req.user.sub, Number(req.query.limit) || 30) }); } catch (error) { next(error); } });
