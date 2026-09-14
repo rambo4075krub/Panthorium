@@ -60,6 +60,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "shortcutName": "Panthorium Browser"
-    }
+    },
+    "icon": "panthorium-logo.svg"
   }
 }
