@@ -12,6 +12,7 @@
     'external-youtube': '▶️', 'external-facebook': '📘', 'external-line': '💬',
     'external-tiktok': '🎵', 'external-instagram': '📷', 'external-x': '𝕏'
   };
+  const popups = new Map();
   const appFor = id => catalog.apps.find(app => app.id === id && app.external);
   const safeUrl = app => {
     try {
@@ -26,35 +27,80 @@
     document.querySelector(app.selector)?.focus({ preventScroll: true });
   }
 
+  function close(appId) {
+    const popup = popups.get(appId);
+    if (popup && !popup.closed) {
+      try { popup.close(); } catch (_) {}
+    }
+    popups.delete(appId);
+    return true;
+  }
+
+  function launch(app, url) {
+    const current = popups.get(app.id);
+    if (current && !current.closed) {
+      try { current.focus(); } catch (_) {}
+      return true;
+    }
+    const popup = window.open(
+      url,
+      `panthorium-external-${app.id}`,
+      'popup=yes,width=980,height=720,resizable=yes,scrollbars=yes'
+    );
+    if (!popup) return false;
+    popups.set(app.id, popup);
+    return true;
+  }
+
+  function shell(app, url) {
+    const icon = icons[app.id] || '🌐';
+    return `<div class="external-app-window" data-external-app="${escapeHTML(app.id)}" style="height:100%;display:flex;flex-direction:column;gap:12px;justify-content:center;align-items:center;text-align:center;padding:24px;">
+      <div style="font-size:42px;line-height:1;">${icon}</div>
+      <h2 style="margin:0;">${escapeHTML(app.label)}</h2>
+      <div data-external-status role="status" style="color:var(--text-dim);font-size:13px;">กำลังเปิดเว็บไซต์จริง…</div>
+      <button type="button" data-external-open style="padding:10px 16px;border-radius:8px;font:inherit;">เปิดเว็บไซต์จริง</button>
+      <div style="color:var(--text-dim);font-size:12px;max-width:520px;">เว็บไซต์จะเปิดในหน้าต่างเบราว์เซอร์จริงของ ${escapeHTML(app.label)} ไม่ได้ถูกฝังหรือคัดลอกเข้ามาใน Panthorium หากไม่เปิด ให้กดปุ่มอีกครั้งหรืออนุญาต popup ของเว็บไซต์นี้</div>
+      <div style="color:var(--text-dim);font-size:11px;word-break:break-all;">${escapeHTML(url)}</div>
+    </div>`;
+  }
+
+  function bindRoot(app, root, url) {
+    const status = root.querySelector('[data-external-status]');
+    const openButton = root.querySelector('[data-external-open]');
+    if (!status || !openButton) return false;
+    const tryLaunch = () => {
+      if (launch(app, url)) {
+        status.textContent = `${app.label} เปิดอยู่ในหน้าต่างเบราว์เซอร์จริง`;
+        return true;
+      }
+      status.textContent = 'เบราว์เซอร์บล็อก popup ให้กด “เปิดเว็บไซต์จริง” อีกครั้งหรืออนุญาต popup';
+      return false;
+    };
+    openButton.onclick = tryLaunch;
+    const closeButton = root.querySelector('.win-btn.close');
+    if (closeButton && closeButton.dataset.externalCloseBound !== '1') {
+      closeButton.dataset.externalCloseBound = '1';
+      closeButton.addEventListener('click', () => close(app.id));
+    }
+    root.dataset.externalBound = '1';
+    return tryLaunch();
+  }
+
   function open(appId) {
     const app = appFor(appId);
     const url = app && safeUrl(app);
     if (!app || !url || typeof createWindow !== 'function') return false;
     let root = document.querySelector(app.selector);
-    if (root) { root.style.display = 'flex'; focus(app); return true; }
-    const icon = icons[app.id] || '🌐';
-    const html = `<div class="external-app-window" data-external-app="${escapeHTML(app.id)}" style="height:100%;display:flex;flex-direction:column;gap:10px;min-height:0;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex:0 0 auto;"><span style="color:var(--text-dim);font-size:12px;">${icon} ${escapeHTML(app.label)} · เว็บภายนอก</span><button type="button" data-external-open-tab style="padding:6px 10px;border-radius:8px;">เปิดแท็บใหม่</button></div>
-      <div data-external-status role="status" style="color:var(--text-dim);font-size:12px;">กำลังโหลด ${escapeHTML(app.label)}…</div>
-      <iframe title="${escapeHTML(app.label)}" src="about:blank" loading="eager" referrerpolicy="no-referrer" sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation allow-scripts allow-same-origin" style="width:100%;height:100%;min-height:260px;border:1px solid rgba(255,255,255,.12);border-radius:10px;background:#fff;"></iframe>
-      <div style="color:var(--text-dim);font-size:11px;flex:0 0 auto;">บางเว็บไซต์ไม่อนุญาตให้ฝังในหน้าต่างอื่น หากไม่แสดง ให้กด “เปิดแท็บใหม่”</div>
-    </div>`;
-    createWindow(app.windowId, `${icon} ${app.label}`, html, { width: 860, height: 620 });
-    root = document.querySelector(app.selector);
+    if (!root) {
+      createWindow(app.windowId, `${icons[app.id] || '🌐'} ${app.label}`, shell(app, url), { width: 520, height: 420 });
+      root = document.querySelector(app.selector);
+    }
     if (!root) return false;
-    const frame = root.querySelector('iframe');
-    const status = root.querySelector('[data-external-status]');
-    const openTab = root.querySelector('[data-external-open-tab]');
-    if (!frame || !status || !openTab) return false;
-    frame.addEventListener('load', () => { status.textContent = `${app.label} โหลดเสร็จแล้ว หากพื้นที่ว่างให้เปิดแท็บใหม่`; });
-    frame.addEventListener('error', () => { status.textContent = `${app.label} ไม่อนุญาตให้ฝัง กดเปิดแท็บใหม่`; });
-    openTab.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
-    frame.src = url;
     focus(app);
-    return true;
+    return bindRoot(app, root, url);
   }
 
-  const api = { open, allowedHosts: [...allowedHosts] };
+  const api = { open, close, allowedHosts: [...allowedHosts] };
   for (const app of catalog.apps.filter(item => item.external)) {
     const name = app.id.replace(/^external-/, '').replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
     api[`open${name[0].toUpperCase()}${name.slice(1)}`] = () => open(app.id);

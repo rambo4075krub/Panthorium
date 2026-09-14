@@ -24,8 +24,9 @@
     function_not_available: 'ฟังก์ชันนี้ยังไม่พร้อมใช้งานในหน้าต่าง',
     workflow_not_found: 'คำสั่งที่รอยืนยันหมดอายุหรือดำเนินการไปแล้ว กรุณาสั่งใหม่',
     workflow_permission_denied: 'ไม่สามารถยืนยันคำสั่งของบัญชีอื่นได้',
-    unknown_ui_action: 'ยังไม่รองรับคำสั่งหน้าต่างนี้'
-  };
+    unknown_ui_action: 'ยังไม่รองรับคำสั่งหน้าต่างนี้',
+    external_popup_blocked: 'เบราว์เซอร์บล็อก popup กรุณากดเปิดเว็บไซต์จริงในหน้าต่าง'
+    };
   function failure(error) {
     return { ok: false, error, text: errors[error] || 'ดำเนินคำสั่งไม่สำเร็จ ตรวจรายละเอียดในผลคำสั่ง', provider: 'Sentinel', via: 'sentinel-command' };
   }
@@ -54,6 +55,7 @@
   }
   function dismiss(app) {
     const root = document.querySelector(app.selector);
+    if (app.external && typeof window.PanthoriumExternalApps?.close === 'function') window.PanthoriumExternalApps.close(app.id);
     if (!root) return;
     if (app.windowId && typeof closeWindow === 'function') closeWindow(app.windowId);
     else root.querySelector(app.closeButton)?.click();
@@ -66,23 +68,23 @@
     let root = document.querySelector(app.selector);
     try {
       if (operation === 'close') {
+        if (app.external && typeof window.PanthoriumExternalApps?.close === 'function') window.PanthoriumExternalApps.close(app.id);
         if (!visible(root)) return { ok: true, action, text: `ปิด ${app.label}`, alreadyClosed: true };
         dismiss(app);
         if (visible(document.querySelector(app.selector))) return failure('window_not_closed');
         return { ok: true, action, text: `ปิด ${app.label}` };
       }
-      if (!visible(root)) {
+      if (!visible(root) || app.external) {
         // A minimized desktop window needs its own restore lifecycle.
-        if (root && app.windowId && typeof focusWindow === 'function') focusWindow(app.windowId);
+        if (root && app.windowId && typeof focusWindow === 'function' && !app.external) focusWindow(app.windowId);
         else {
           let opener = resolve(app.opener);
           for (let attempt = 0; !opener && attempt < 40; attempt++) { await wait(50); opener = resolve(app.opener); }
           if (!opener) return failure('module_unavailable');
           if (!catalog.allowed(app, system()?.state?.user)) return failure('voice_action_permission_denied');
-          let openError = null;
-          Promise.resolve(opener()).catch(error => { openError = error; });
-          for (let attempt = 0; !visible(document.querySelector(app.selector)) && !openError && attempt < 40; attempt++) await wait(50);
-          if (openError) throw openError;
+          const opened = await opener();
+          if (opened === false) throw new Error('external_popup_blocked');
+          for (let attempt = 0; !visible(document.querySelector(app.selector)) && attempt < 40; attempt++) await wait(50);
         }
       }
       root = document.querySelector(app.selector);
@@ -100,7 +102,7 @@
       return { ok: true, action, text: `เปิด ${app.label}` };
     } catch (error) {
       console.warn('[Sentinel window]', app.id, error);
-      return failure(operation === 'close' ? 'window_not_closed' : 'window_not_created');
+      return failure(operation === 'close' ? 'window_not_closed' : error?.message === 'external_popup_blocked' ? 'external_popup_blocked' : 'window_not_created');
     }
   }
   async function functionAction(action) {

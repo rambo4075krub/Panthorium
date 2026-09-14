@@ -48,11 +48,13 @@ Account and permission changes clear cached windows and pending confirmations.
 The same voice window path can open these allowlisted external sites in a
 Panthorium window: `YouTube`, `Facebook`, `LINE`, `TikTok`, `Instagram`, and `X`.
 For example, say `เปิด YouTube`, `เปิด เฟซบุ๊ก`, `เปิด ไลน์`, or `ปิด TikTok`.
-Each window uses a fixed HTTPS URL, a sandboxed iframe, and the current user's
-`chat` permission. The browser may refuse to embed a site because of that site's
-own `X-Frame-Options` or `frame-ancestors` policy; in that case use the window's
-`เปิดแท็บใหม่` button. Panthorium does not bypass those policies and does not
-accept arbitrary URLs from voice transcripts or AI output.
+Each launcher uses a fixed HTTPS URL and the current user's `chat` permission,
+then opens the real website in a separate browser popup. It does not embed,
+copy, or proxy the external page. If the browser blocks the popup, press
+`เปิดเว็บไซต์จริง` in the Panthorium launcher window or allow popups for the
+staging site. Panthorium does not accept arbitrary URLs from voice transcripts
+or AI output. A native in-window WebView requires packaging Panthorium as a
+desktop app such as Electron or Tauri.
 
 ## Other actions
 

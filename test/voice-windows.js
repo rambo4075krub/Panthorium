@@ -85,11 +85,11 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       assert.equal(isVisible(app), true, `${app.label} did not appear`);
       const root = w.document.querySelector(app.selector);
       if (app.external) {
-        const frame = root.querySelector('iframe');
-        assert(frame, `${app.label}: external iframe missing`);
-        assert.equal(frame.src, app.externalUrl, `${app.label}: fixed external URL`);
-        assert.equal(frame.getAttribute('sandbox'), 'allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation allow-scripts allow-same-origin');
-        assert(root.querySelector('[data-external-open-tab]'), `${app.label}: open-tab fallback missing`);
+        assert.equal(root.querySelector('iframe'), null, `${app.label}: must not embed an iframe`);
+        assert(root.querySelector('[data-external-open]'), `${app.label}: real-site opener missing`);
+        const popup = externalPopups.get(`panthorium-external-${app.id}`);
+        assert(popup, `${app.label}: real browser window was not opened`);
+        assert.equal(popup.url, app.externalUrl, `${app.label}: fixed external URL`);
       }
       assert.equal((await command(`เปิด ${app.aliases[0]}`)).ok, true);
       assert.equal(w.document.querySelectorAll(app.selector).length, 1, `${app.label}: duplicate window`);
@@ -98,6 +98,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       assert.equal(closed.ok, true);
       assert.equal(closed.text, `ปิด ${app.label}`);
       assert.equal(isVisible(app), false, `${app.label} stayed open`);
+      if (app.external) assert.equal(externalPopups.get(`panthorium-external-${app.id}`)?.closed, true, `${app.label}: browser window stayed open`);
       assert.equal((await command(`ปิด ${app.aliases[0]}`)).ok, true, 'close should be idempotent');
       assert.equal((await command(`เปิด ${app.aliases[0]}`)).ok, true);
       assert.equal(isVisible(app), true, `${app.label} did not reopen`);
