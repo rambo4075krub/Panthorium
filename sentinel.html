@@ -1912,7 +1912,7 @@
 
     // ---------- Apps Definition ----------
     const BROWSER_RELEASE_URL = "https://github.com/rambo4075krub/Panthorium/releases/tag/staging";
-    const isAdminShell = /^\\/admin(?:\\/|$)/i.test(window.location.pathname);
+    const isAdminShell = /^\/admin(?:\/|$)/i.test(window.location.pathname);
     let deferredInstallPrompt = null;
 
     window.addEventListener("beforeinstallprompt", event => {
