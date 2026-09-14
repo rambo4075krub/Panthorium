@@ -61,6 +61,6 @@
       "createDesktopShortcut": true,
       "shortcutName": "Panthorium Browser"
     },
-    "icon": "panthorium-logo.svg"
+    "icon": "build/icon.png"
   }
 }
