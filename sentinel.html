@@ -1420,6 +1420,7 @@
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
         let autoResume = true;
+        let recognitionBlocked = false;
         let voiceState = "idle";
         let silenceTimer = null;
         let transcriptParts = new Map();
@@ -1480,9 +1481,9 @@
             }, 7000);
         };
         const restartListening = () => {
-            if (!autoResume || voiceState !== "idle") return;
+            if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
             setTimeout(() => {
-                if (!autoResume || voiceState !== "idle") return;
+                if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
                 try { recognition.start(); } catch { status("unresponsive", "ไม่ตอบสนอง"); }
             }, 350);
         };
@@ -1539,14 +1540,32 @@
                 silenceTimer = setTimeout(finishListening, 1400);
             }
         };
-        recognition.onerror = event => {
+        const recognitionFailure = event => {
             clearTimeout(listenWatchdog);
+            clearTimeout(silenceTimer);
             userSpeechActive = false;
             const permissionDenied = event.error === "not-allowed" || event.error === "service-not-allowed";
-            if (permissionDenied) autoResume = false;
+            const terminalFailure = permissionDenied || ["network", "audio-capture", "language-not-supported"].includes(event.error);
+            if (terminalFailure) {
+                recognitionBlocked = true;
+                autoResume = false;
+                discardOnEnd = true;
+                transcriptParts.clear();
+                latestInterim = "";
+            }
             if (voiceState !== "processing" && voiceState !== "speaking") voiceState = "idle";
-            status(permissionDenied ? "unsupported" : "unresponsive", permissionDenied ? "ไม่รองรับคำสั่ง" : "ไม่ตอบสนอง");
+            const message = event.error === "network"
+                ? (window.panthoriumDesktop?.isElectron
+                    ? "Electron เชื่อมต่อบริการรู้จำเสียงไม่ได้ (network) หยุดลองซ้ำแล้ว ใช้แชตพิมพ์ข้อความได้"
+                    : "เชื่อมต่อบริการรู้จำเสียงไม่ได้ (network) ตรวจเครือข่ายแล้วกดไมค์เพื่อลองใหม่")
+                : permissionDenied ? "ไม่ได้รับอนุญาตให้ใช้บริการรู้จำเสียง ตรวจสิทธิ์ไมโครโฟน"
+                : event.error === "audio-capture" ? "เข้าถึงไมโครโฟนไม่ได้ ตรวจอุปกรณ์แล้วกดไมค์เพื่อลองใหม่"
+                : event.error === "language-not-supported" ? "บริการรู้จำเสียงไม่รองรับภาษาที่เลือก"
+                : "ไม่ตอบสนอง";
+            console.warn('[Sentinel recognition]', event.error || 'unknown');
+            status(permissionDenied ? "unsupported" : "unresponsive", message);
         };
+        recognition.onerror = recognitionFailure;
         recognition.onend = () => {
             clearTimeout(silenceTimer);
             clearTimeout(listenWatchdog);
@@ -1585,6 +1604,7 @@
                 finishListening({ discard: false });
                 return;
             }
+            recognitionBlocked = false; // An explicit click permits one fresh attempt.
             autoResume = true;
             if (!(await prepareMobileMicrophone())) return;
             try { recognition.start(); } catch { status("unresponsive", "ไม่ตอบสนอง"); }
@@ -1600,15 +1620,17 @@
                 }
             },
             resume() {
+                if (recognitionBlocked) return;
                 autoResume = true;
                 if (voiceState === "idle") restartListening();
             },
+            recognitionFailure,
             state() { return voiceState; }
         };
         // Keep hands-free startup on every device. If a mobile browser blocks
         // automatic capture, tapping the microphone runs the permission warmup.
         autoResume = true;
-        setTimeout(() => { try { recognition.start(); } catch { status("unsupported", "แตะปุ่มไมโครโฟนเพื่ออนุญาตการฟัง"); } }, 400);
+        setTimeout(() => { if (!autoResume || recognitionBlocked) return; try { recognition.start(); } catch { status("unsupported", "แตะปุ่มไมโครโฟนเพื่ออนุญาตการฟัง"); } }, 400);
     }
     if (window.speechSynthesis) {
         speechSynthesis.getVoices();
@@ -2061,12 +2083,12 @@
                     window.PanthoriumVoice?.resume();
                 }
             };
-            recognition.onerror = () => {
+            recognition.onerror = event => {
                 voiceRecognitionFailed = true;
                 clearTimeout(voiceSilenceTimer);
                 userSpeechActive = false;
                 micBtn.classList.remove("listening");
-                window.PanthoriumVoice?.resume();
+                window.PanthoriumVoice?.recognitionFailure(event);
             };
         }
 
