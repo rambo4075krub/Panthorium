@@ -1469,10 +1469,12 @@
             voiceState = "processing";
             status("processing", "กำลังประมวลผล");
             try {
-                const normalized = window.PanthoriumWindowCatalog?.normalize(text) || String(text).trim().toLowerCase();
+                const rawText = String(text || '').trim();
+                const normalized = window.PanthoriumWindowCatalog?.normalize(rawText) || rawText.toLowerCase();
                 const commandIntent = Boolean(
                     window.PanthoriumWindowCatalog?.parse(text) ||
                     window.PanthoriumWindowCatalog?.parseFunction(text) ||
+                    /^(เปิด|ปิด|รีเฟรช|แสดงสถานะ|ตรวจสอบสถานะ|ค้นความรู้|เริ่ม|หยุด|รัน|ยืนยัน|ยกเลิก|ลบ|เปลี่ยน|อนุญาต|ปิดทุกหน้าต่าง|open\b|close\b|refresh\b|start\b|stop\b|run\b|delete\b|confirm\b|cancel\b)/i.test(rawText) ||
                     /^(เปิด|ปิด|รีเฟรช|แสดงสถานะ|ตรวจสอบสถานะ|ค้นความรู้|เริ่ม|หยุด|รัน|ยืนยัน|ยกเลิก|ลบ|เปลี่ยน|อนุญาต|ปิดทุกหน้าต่าง|open\b|close\b|refresh\b|start\b|stop\b|run\b|delete\b|confirm\b|cancel\b)/i.test(normalized)
                 );
                 // Keep command and conversation traffic separate: commands go
