@@ -2,6 +2,8 @@
 'use strict';
 
 const STAGING_HOST='panthorium-staging.onrender.com';
+const STAGING_CLOUD_RUN=/staging/i;
+const CLOUD_RUN_SUFFIX=/\.run\.app$/;
 const TARGET_PATH=/^\/admin(?:\/|\.html)?$/;
 const APPS=[
   {id:'sentinel',icon:'🤖',label:'Sentinel AI',openers:['openSentinel']},
@@ -21,7 +23,7 @@ const APPS=[
 
 let renderedFingerprint='';
 
-function isTarget(){return location.hostname===STAGING_HOST&&TARGET_PATH.test(location.pathname);}
+function isTarget(){return (location.hostname===STAGING_HOST||(STAGING_CLOUD_RUN.test(location.hostname)&&CLOUD_RUN_SUFFIX.test(location.hostname)))&&TARGET_PATH.test(location.pathname);}
 if(!isTarget())return;
 
 function auth(){return window.PanthoriumAuth||null;}
