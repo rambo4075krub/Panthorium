@@ -73,7 +73,8 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       res.json({ ok: true, text: result.text, provider: result.provider, model: result.model });
     } catch (error) {
       audit.record("sentinel.transcription_failed", { userId: req.user?.sub, error: error.message });
-      res.status(502).json({ ok: false, error: "transcription_unavailable" });
+      const code = error?.code === "transcription_provider_unavailable" ? error.code : "transcription_unavailable";
+      res.status(code === "transcription_provider_unavailable" ? 503 : 502).json({ ok: false, error: code });
     }
   });
   router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { res.json({ ok: true, runs: await agentRuns.list(req.user.sub, Number(req.query.limit) || 30) }); } catch (error) { next(error); } });
