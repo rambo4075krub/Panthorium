@@ -65,7 +65,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
   router.post("/speech/transcribe", auth, requirePermission("chat"), speechLimiter, async (req, res) => {
     try {
       const value = typeof req.body?.audio === "string" ? req.body.audio : "";
-      const match = /^data:(audio\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/i.exec(value);
+      const match = /^data:(audio\/[a-z0-9.+-]+)(?:;[^,]*)?;base64,([A-Za-z0-9+/=]+)$/i.exec(value);
       if (!match || match[2].length > 700000) return res.status(400).json({ ok: false, error: "invalid_audio" });
       const audio = Buffer.from(match[2], "base64");
       if (!audio.length || audio.length > 512 * 1024) return res.status(413).json({ ok: false, error: "audio_too_large" });
