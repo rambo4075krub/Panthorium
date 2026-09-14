@@ -2,6 +2,8 @@
 'use strict';
 
 const STAGING_HOST='panthorium-staging.onrender.com';
+const STAGING_CLOUD_RUN=/staging/i;
+const CLOUD_RUN_SUFFIX=/\.run\.app$/;
 const TARGET_PATH=/^\/admin(?:\/|\.html)?$/;
 const APPS=[
   {id:'sentinel',icon:'🤖',label:'Sentinel AI',openers:['openSentinel']},
@@ -21,7 +23,7 @@ const APPS=[
 
 let renderedFingerprint='';
 
-function isTarget(){return location.hostname===STAGING_HOST&&TARGET_PATH.test(location.pathname);}
+function isTarget(){return (location.hostname===STAGING_HOST||(STAGING_CLOUD_RUN.test(location.hostname)&&CLOUD_RUN_SUFFIX.test(location.hostname)))&&TARGET_PATH.test(location.pathname);}
 if(!isTarget())return;
 
 function auth(){return window.PanthoriumAuth||null;}
@@ -30,12 +32,18 @@ function notify(message){try{if(typeof toast==='function')toast(message);else co
 function resolve(path){return String(path||'').split('.').reduce((obj,key)=>obj&&obj[key],window);}
 function openerReady(app){return (app.openers||[]).some(path=>typeof resolve(path)==='function')||!!(app.launcherId&&document.getElementById(app.launcherId));}
 function removeLegacyFloatingLaunchers(){document.querySelectorAll('[data-production-intelligence="1"]').forEach(node=>{if(!node.closest('#sm-apps'))node.remove();});}
-function openApp(app){
+async function openApp(app){
   closeMenu();
-  for(const path of app.openers||[]){const fn=resolve(path);if(typeof fn==='function'){fn();return;}}
-  const launcher=app.launcherId?document.getElementById(app.launcherId):null;
-  if(launcher){launcher.click();return;}
-  notify(`${app.label} ยังโหลดไม่เสร็จ กรุณารอสักครู่แล้วกดใหม่`);
+  const entry=window.PanthoriumWindowCatalog?.apps.find(item=>item.id===app.id);
+  const commands=window.PanthoriumVoiceCommands;
+  if(!entry||!commands){notify(`${app.label} ยังโหลดไม่เสร็จ`);return false;}
+  const result=await commands.windowAction(`open_${entry.key}`);
+  if(!result.ok)notify(result.text);
+  return result.ok;
+}
+function openById(appId){
+  const app=APPS.find(item=>item.id===appId);
+  return app ? openApp(app) : false;
 }
 function ensureStyle(){
   if(document.getElementById('staging-admin-desktop-v2-style'))return;
@@ -64,7 +72,7 @@ function renderDesktop(){
   if(!isTarget())return false;
   const desktop=document.getElementById('desktop-icons');if(!desktop)return false;
   ensureStyle();removeLegacyFloatingLaunchers();
-  const visibleApps=APPS.slice();
+  const visibleApps=APPS.filter(app=>window.PanthoriumWindowCatalog?.allowed(window.PanthoriumWindowCatalog.apps.find(item=>item.id===app.id), typeof OS!=='undefined'?OS.state.user:null));
   const fingerprint=visibleApps.map(app=>`${app.id}:${openerReady(app)?'ready':'pending'}`).join('|');
   desktop.className='desktop-icons staging-admin-desktop-v2';
   desktop.style.display='grid';
@@ -93,5 +101,5 @@ window.addEventListener('panthorium:auth-changed',syncAfterShell);
 window.addEventListener('panthorium:apps-changed',syncAfterShell);
 window.addEventListener('panthorium:boot-complete',syncAfterShell);
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',syncAfterShell,{once:true});else syncAfterShell();
-window.PanthoriumStagingAdminDesktop={sync,render:renderDesktop,apps:APPS.slice()};
+window.PanthoriumStagingAdminDesktop={sync,render:renderDesktop,open:openById,apps:APPS.slice()};
 })();

@@ -13,7 +13,7 @@
   ];
 
   function isStagingAdmin() {
-    return location.hostname === 'panthorium-staging.onrender.com' && /^\/admin(?:\/|\.html)?$/.test(location.pathname);
+    return (location.hostname === 'panthorium-staging.onrender.com' || (/staging/i.test(location.hostname) && /\.run\.app$/.test(location.hostname))) && /^\/admin(?:\/|\.html)?$/.test(location.pathname);
   }
 
   function currentUser() {

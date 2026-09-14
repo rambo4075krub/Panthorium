@@ -173,7 +173,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "staging-admin-desktop.js", "access-shell-ui.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-window-catalog.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js"];
 for (const script of shellScripts) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -187,7 +187,7 @@ for (const script of shellScripts) {
 
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
-  const version = "phase15-single-sentinel-v1";
+  const version = "voice-conversation-v3";
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
   }

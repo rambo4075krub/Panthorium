@@ -78,7 +78,7 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('showOrbTranscriptForChar(charIndex)'), 'speech progress must move the active sentence into the center transcript row');
   assert(shell.includes('transcriptStartChar, transcriptEndChar'), 'each synthesized chunk must retain its position in the complete transcript');
   assert(fs.readFileSync('services/sentinelSpeechAudio.js', 'utf8').includes('lang === "en-US" ? "-2%" : "+10%"'), 'Andrew must speak English slowly while keeping Thai at the approved speed');
-  assert(shell.includes('voice: voiceMode'), 'voice commands must identify the low-latency voice path');
+  assert(shell.includes('voice: conversationalVoice'), 'spoken questions, not system commands, must identify the low-latency chat path');
   assert(api.includes('voiceMode: voice === true'), 'the speech flag must reach Sentinel without exposing an admin mode');
   assert(sentinelService.includes('historyLimit: voiceMode ? 12 : 40'), 'voice commands must use bounded recent context for faster processing');
   assert(!sentinelService.includes('โหมดสนทนาด้วยเสียง: ตอบให้ตรงคำถามและไม่เกิน 2 ประโยค'), 'voice replies must not be limited to two sentences');
@@ -104,7 +104,7 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('ยังไม่ได้ยินเสียง ตรวจสอบสิทธิ์ไมโครโฟน'), 'mobile speech must report when no microphone signal reaches recognition');
   assert(shell.includes('const shouldProcess = !discardOnEnd && !!text'), 'mobile recognition must process captured interim text when the browser ends the session');
   assert(shell.includes('finishListening({ discard: false })'), 'tapping stop on mobile must submit the captured command instead of discarding it');
-  assert(shell.includes('await speak(res.text)'), 'AI processing must wait until speech playback really finishes');
+  assert(shell.includes('await speakVoiceResponse(res.text)'), 'AI processing must await the shared speech completion handler');
   assert(shell.includes('if (voiceState === "idle") restartListening()'), 'the microphone may resume only after AI speech finishes');
   assert(!shell.includes('callProviderLocal'), 'provider secrets and direct provider calls must remain server-side');
 

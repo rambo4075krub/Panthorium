@@ -1,4 +1,4 @@
-const CACHE_NAME = 'panthorium-os-v5-orb-display-fix';
+const CACHE_NAME = 'panthorium-os-v6-voice-routing-fix';
 const STATIC_ASSETS = ['./manifest.json'];
 
 self.addEventListener('install', (event) => {
@@ -28,9 +28,9 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   if (request.mode === 'navigate' || request.destination === 'document' || request.destination === 'script') {
-    event.respondWith(fetch(request, { cache: 'no-store' }).catch(() => caches.match(request)));
+    event.respondWith(fetch(request, { cache: 'no-store' }).catch(async () => (await caches.match(request)) || Response.error()));
     return;
   }
 
-  event.respondWith(fetch(request).catch(() => caches.match(request)));
+  event.respondWith(fetch(request).catch(async () => (await caches.match(request)) || Response.error()));
 });
