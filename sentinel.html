@@ -745,6 +745,14 @@
     // =========================================================
     // Panthorium OS - Sentinel Runtime
     // =========================================================
+    function defaultBackendOrigin() {
+        // The installed Electron shell loads the OS from the configured remote
+        // origin. Prefer that origin over an old localStorage override so API
+        // calls stay same-origin and do not hit the staging CORS boundary.
+        if (window.panthoriumDesktop?.isElectron && /^https?:$/.test(window.location.protocol)) return window.location.origin;
+        const stored = localStorage.getItem("pt_backend_url");
+        return stored || (/^https?:$/.test(window.location.protocol) ? window.location.origin : "http://localhost:8787");
+    }
     const OS = {
         version: "1.1.0",
         state: {
@@ -755,7 +763,7 @@
         },
         config: {
             // Backend / Sentinel
-            backendUrl: localStorage.getItem("pt_backend_url") || window.location.origin,
+            backendUrl: defaultBackendOrigin(),
             useBackend: localStorage.getItem("pt_use_backend") !== "0",
             sessionId: localStorage.getItem("pt_session_id") || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
             // Access token stays in memory only; provider secrets remain server-side.

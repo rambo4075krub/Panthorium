@@ -5,6 +5,20 @@ function list(value, fallback = []) {
   return String(value).split(",").map((v) => v.trim()).filter(Boolean);
 }
 
+function normalizeOrigin(value) {
+  try {
+    const url = new URL(String(value).trim());
+    if (!['http:', 'https:'].includes(url.protocol) || url.pathname !== '/' || url.search || url.hash) return null;
+    return url.origin;
+  } catch (_) {
+    return null;
+  }
+}
+
+function origins(value, fallback = []) {
+  return [...new Set(list(value, fallback).map(normalizeOrigin).filter(Boolean))];
+}
+
 const isProduction = process.env.NODE_ENV === "production";
 const jwtSecret = process.env.JWT_SECRET || (isProduction ? "" : "dev-only-change-me-panthorium");
 if (!jwtSecret) throw new Error("JWT_SECRET is required in production");
@@ -17,7 +31,7 @@ module.exports = {
   jwtSecret,
   accessTokenTtl: process.env.ACCESS_TOKEN_TTL || "15m",
   refreshTokenDays: Number(process.env.REFRESH_TOKEN_DAYS || 30),
-  allowedOrigins: list(process.env.ALLOWED_ORIGINS, ["http://localhost:8787", "http://127.0.0.1:8787"]),
+  allowedOrigins: origins(process.env.ALLOWED_ORIGINS, ["http://localhost:8787", "http://127.0.0.1:8787"]),
   integrationAllowedHosts: list(process.env.INTEGRATION_ALLOWED_HOSTS, []),
   dataFile: process.env.DATA_FILE || path.join(__dirname, "..", "data", "panthorium.json"),
   auditFile: process.env.AUDIT_FILE || path.join(__dirname, "..", "logs", "audit.log"),

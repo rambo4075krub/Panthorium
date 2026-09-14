@@ -125,7 +125,14 @@ sentinel.sentinelControl = sentinelOrchestrator;
 
 app.disable("x-powered-by");
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins], frameSrc: ["'self'"], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
-app.use(cors({ origin(origin, cb) { if (!origin || config.allowedOrigins.includes(origin)) return cb(null, true); cb(new Error("CORS origin denied")); }, credentials: true }));
+app.use(cors({ origin(origin, cb) {
+  // Requests without an Origin header are same-origin/server-to-server calls.
+  // Browser/Electron origins must be an exact configured origin; never echo an
+  // arbitrary origin when credentials are enabled.
+  if (!origin || config.allowedOrigins.includes(origin)) return cb(null, true);
+  console.warn("[HTTP] CORS origin denied: " + String(origin).slice(0, 240));
+  cb(new Error("CORS origin denied"));
+}, credentials: true }));
 app.use(express.json({ limit: "768kb", type: "application/json" }));
 app.use(cookieParser());
 app.use(requestContext(audit));
