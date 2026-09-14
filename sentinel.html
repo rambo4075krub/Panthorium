@@ -1695,6 +1695,9 @@
                         message: `ตอบด้วยภาษาของผู้ใช้และตอบกลับด้วยเสียงได้ ระบบนี้ไม่ใช่ระบบข้อความเท่านั้น ห้ามบอกว่าไม่มีเสียงพูด หากข้อความมีหลายภาษา ให้รักษาภาษาของแต่ละส่วนตามบริบท ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ\n${prompt}`,
                         sessionId: OS.config.sessionId,
                         mode: "default",
+                        // Preserve the explicit low-latency voice-path marker
+                        // while keeping command routing separate from chat.
+                        // voice: voiceMode
                         voice: conversationalVoice
                     }),
                     signal: AbortSignal.timeout(30000)
