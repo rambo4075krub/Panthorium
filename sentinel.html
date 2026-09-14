@@ -2905,6 +2905,22 @@
         navigator.serviceWorker.register("./sw.js?v=orb-display-fix-v3-voice").catch(() => {});
     }
 
+    async function checkRemoteRelease() {
+        try {
+            const base = OS.config.backendUrl.replace(/\/$/, "");
+            const response = await fetch(base + "/api/health", { cache: "no-store", credentials: "include" });
+            if (!response.ok) return;
+            const data = await response.json();
+            const release = String(data.release || "").trim();
+            if (!release) return;
+            const previous = sessionStorage.getItem("pt_server_release");
+            sessionStorage.setItem("pt_server_release", release);
+            if (previous && previous !== release && document.visibilityState !== "hidden") location.reload();
+        } catch (_) {}
+    }
+    checkRemoteRelease();
+    window.setInterval(checkRemoteRelease, 60000);
+
     // ---------- Start ----------
     boot();
     </script>
