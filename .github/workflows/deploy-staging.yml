@@ -66,7 +66,7 @@ jobs:
             --port=8787 --max-instances=1 --min-instances=0 \
             --set-cloudsql-instances="$SQL_INSTANCE" \
             --update-env-vars="NODE_ENV=production,HOST=0.0.0.0,TRUST_PROXY=1,DATABASE_SSL_MODE=disable,ALLOW_ELECTRON_ORIGIN=1,SENTINEL_AUTO_TRAINING=0,SENTINEL_AUTO_CAPTURE=0" \
-            --update-secrets="DATABASE_URL=panthorium-staging-database-url:latest,JWT_SECRET=panthorium-staging-jwt:latest,ADMIN_PASSWORD=panthorium-staging-admin-password:latest" --quiet
+            --update-secrets="DATABASE_URL=panthorium-staging-database-url:latest,JWT_SECRET=panthorium-staging-jwt:latest,ADMIN_PASSWORD=panthorium-staging-admin-password:latest,GROQ_API_KEY=panthorium-staging-groq-api-key:latest" --quiet
           URL=$(gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" --format='value(status.url)')
           # Keep the Cloud Run service URL and the installed Electron staging
           # URL in the exact CORS allowlist. Local origins are limited to the
