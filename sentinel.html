@@ -1629,6 +1629,20 @@
         return res;
     }
 
+    const voiceActionAppIds = {
+        open_learning_lab: "training-lab",
+        open_sentinel_agent: "sentinel-agent",
+        open_agent_automation: "agent-automation",
+        open_memory_knowledge: "memory-knowledge",
+        open_multi_agent: "multi-agent",
+        open_integrations: "integrations",
+        open_governance: "governance",
+        open_sentinel_control: "sentinel-control",
+        open_security_dashboard: "security",
+        open_production_intelligence: "production",
+        open_ai_dashboard: "ai-platform",
+        open_settings: "settings"
+    };
     const voiceActionHandlers = {
         open_learning_lab: () => window.PanthoriumTraining?.open?.(),
         open_sentinel_agent: () => window.PanthoriumAgent?.open?.(),
@@ -1643,12 +1657,41 @@
         open_ai_dashboard: () => window.PanthoriumAI?.open?.(),
         open_settings: () => typeof openSettings === "function" && openSettings()
     };
-    window.addEventListener("panthorium:voice-ui-action", event => {
-        const action = String(event.detail?.action || "");
+    function openVoiceWindow(action) {
+        const appId = voiceActionAppIds[action];
+        const manager = window.PanthoriumStagingAdminDesktop;
+        if (appId && manager && typeof manager.open === "function") {
+            const opened = manager.open(appId);
+            if (opened) return true;
+        }
         const handler = voiceActionHandlers[action];
         if (typeof handler === "function") {
-            try { handler(); window.dispatchEvent(new CustomEvent("panthorium:window-opened", { detail: { action } })); }
-            catch (error) { console.warn("Voice window action failed", action, error); }
+            const result = handler();
+            if (result !== false && (typeof createWindow !== "function" || document.querySelector(".window"))) return true;
+        }
+        const launcherIds = {
+            open_learning_lab: "sentinel-training-launcher",
+            open_sentinel_agent: "phase5-agent-launcher",
+            open_agent_automation: "phase6-automation-launcher",
+            open_memory_knowledge: "phase7-memory-launcher",
+            open_multi_agent: "phase8-multi-agent-launcher",
+            open_integrations: "phase9-integrations-launcher",
+            open_governance: "phase13-governance-launcher",
+            open_security_dashboard: "phase3-security-start",
+            open_production_intelligence: "phase10-production-launcher"
+        };
+        const launcher = document.getElementById(launcherIds[action] || "");
+        if (launcher) { launcher.click(); return true; }
+        return false;
+    }
+    window.addEventListener("panthorium:voice-ui-action", event => {
+        const action = String(event.detail?.action || "");
+        try {
+            if (!openVoiceWindow(action)) throw new Error("window_not_available");
+            window.dispatchEvent(new CustomEvent("panthorium:window-opened", { detail: { action } }));
+        } catch (error) {
+            console.warn("Voice window action failed", action, error);
+            if (typeof toast === "function") toast("ยังเปิดหน้าต่างนี้ไม่ได้ กรุณาลองสั่งซ้ำ");
         }
     });
 

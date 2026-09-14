@@ -34,10 +34,15 @@ function openerReady(app){return (app.openers||[]).some(path=>typeof resolve(pat
 function removeLegacyFloatingLaunchers(){document.querySelectorAll('[data-production-intelligence="1"]').forEach(node=>{if(!node.closest('#sm-apps'))node.remove();});}
 function openApp(app){
   closeMenu();
-  for(const path of app.openers||[]){const fn=resolve(path);if(typeof fn==='function'){fn();return;}}
+  for(const path of app.openers||[]){const fn=resolve(path);if(typeof fn==='function'){fn();return true;}}
   const launcher=app.launcherId?document.getElementById(app.launcherId):null;
-  if(launcher){launcher.click();return;}
+  if(launcher){launcher.click();return true;}
   notify(`${app.label} ยังโหลดไม่เสร็จ กรุณารอสักครู่แล้วกดใหม่`);
+  return false;
+}
+function openById(appId){
+  const app=APPS.find(item=>item.id===appId);
+  return app ? openApp(app) : false;
 }
 function ensureStyle(){
   if(document.getElementById('staging-admin-desktop-v2-style'))return;
@@ -95,5 +100,5 @@ window.addEventListener('panthorium:auth-changed',syncAfterShell);
 window.addEventListener('panthorium:apps-changed',syncAfterShell);
 window.addEventListener('panthorium:boot-complete',syncAfterShell);
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',syncAfterShell,{once:true});else syncAfterShell();
-window.PanthoriumStagingAdminDesktop={sync,render:renderDesktop,apps:APPS.slice()};
+window.PanthoriumStagingAdminDesktop={sync,render:renderDesktop,open:openById,apps:APPS.slice()};
 })();
