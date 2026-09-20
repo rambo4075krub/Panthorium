@@ -19,6 +19,7 @@ jobs:
       WIF_PROVIDER: ${{ vars.STAGING_WIF_PROVIDER }}
       RUNTIME_SA: ${{ vars.STAGING_RUNTIME_SA }}
       SQL_INSTANCE: ${{ vars.STAGING_SQL_INSTANCE }}
+      OPENAI_SECRET: ${{ vars.STAGING_OPENAI_SECRET }}
       REGION: asia-southeast1
       SERVICE: panthorium-backend-staging
     steps:
@@ -28,7 +29,7 @@ jobs:
           PRODUCTION_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
         run: |
           set -euo pipefail
-          for name in PROJECT RUNTIME_SA SQL_INSTANCE DEPLOY_SA WIF_PROVIDER; do
+          for name in PROJECT RUNTIME_SA SQL_INSTANCE DEPLOY_SA WIF_PROVIDER OPENAI_SECRET; do
             if [ -z "${!name}" ]; then
               echo "::error::Missing staging configuration: $name. See docs/STAGING.md"
               exit 1
@@ -56,8 +57,11 @@ jobs:
           service_account: ${{ env.DEPLOY_SA }}
           project_id: ${{ env.PROJECT }}
       - uses: google-github-actions/setup-gcloud@v2
-      - name: Verify staging AI provider secret
-        run: gcloud secrets describe panthorium-staging-groq-api-key --project="$PROJECT" >/dev/null
+      - name: Verify staging OpenAI secret
+        run: |
+          set -euo pipefail
+          [[ "$OPENAI_SECRET" =~ ^[A-Za-z0-9_-]+$ ]]
+          gcloud secrets describe "$OPENAI_SECRET" --project="$PROJECT" >/dev/null
       - name: Build and deploy isolated staging
         run: |
           set -euo pipefail
@@ -67,8 +71,8 @@ jobs:
             --image="$IMAGE" --service-account="$RUNTIME_SA" --allow-unauthenticated \
             --port=8787 --max-instances=1 --min-instances=0 \
             --set-cloudsql-instances="$SQL_INSTANCE" \
-            --update-env-vars="NODE_ENV=production,HOST=0.0.0.0,TRUST_PROXY=1,DATABASE_SSL_MODE=disable,ALLOW_ELECTRON_ORIGIN=1,SENTINEL_AUTO_TRAINING=0,SENTINEL_AUTO_CAPTURE=0" \
-            --update-secrets="DATABASE_URL=panthorium-staging-database-url:latest,JWT_SECRET=panthorium-staging-jwt:latest,ADMIN_PASSWORD=panthorium-staging-admin-password:latest,GROQ_API_KEY=panthorium-staging-groq-api-key:latest" --quiet
+            --update-env-vars="NODE_ENV=production,HOST=0.0.0.0,TRUST_PROXY=1,DATABASE_SSL_MODE=disable,ALLOW_ELECTRON_ORIGIN=1,SENTINEL_AUTO_TRAINING=0,SENTINEL_AUTO_CAPTURE=0,AI_PRIORITY=openai" \
+            --update-secrets="DATABASE_URL=panthorium-staging-database-url:latest,JWT_SECRET=panthorium-staging-jwt:latest,ADMIN_PASSWORD=panthorium-staging-admin-password:latest,OPENAI_API_KEY=$OPENAI_SECRET:latest" --quiet
           URL=$(gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" --format='value(status.url)')
           # Keep the Cloud Run service URL and the installed Electron staging
           # URL in the exact CORS allowlist. Local origins are limited to the
