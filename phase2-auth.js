@@ -51,6 +51,12 @@
     if (!res.ok) throw new Error('guest_auth_failed'); const data = await res.json(); OS.config.accessToken = data.accessToken || ''; OS.state.user = data.user || null; updateIdentityUI(); closeForbiddenWindows(); notifyAuthChanged(); return data;
   }
   async function refreshSession() {
+    if (isGuest() && !isAdminEntry()) {
+      // Guests have no refresh cookie. Start a new identity for the next request;
+      // authorizedFetch must discard the old identity's in-flight response.
+      await guestSession();
+      return false;
+    }
     const base = OS.config.backendUrl.replace(/\/$/, ''); const res = await fetch(base + '/api/auth/refresh', { method: 'POST', credentials: 'include' }); if (!res.ok) return false;
     const data = await res.json(); OS.config.accessToken = data.accessToken || ''; OS.state.user = data.user || null; updateIdentityUI(); closeForbiddenWindows(); notifyAuthChanged(); return !!OS.config.accessToken;
   }
