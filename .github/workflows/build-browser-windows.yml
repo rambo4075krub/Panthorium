@@ -96,12 +96,20 @@ jobs:
     needs: desktop-installer
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release metadata
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
       - name: Download desktop installers
         uses: actions/download-artifact@v4
         with:
           pattern: Panthorium-Browser-*
           path: dist
           merge-multiple: true
+
+      - name: Create verified update manifests
+        run: node scripts/create-browser-update-manifests.js dist
 
       - name: Publish staging browser release
         uses: softprops/action-gh-release@v2
