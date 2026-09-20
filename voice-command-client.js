@@ -184,6 +184,7 @@
         document.getElementById('sentinel-command-result')?.remove();
         return { ok: true, text: 'ปิดผลคำสั่ง' };
       }
+      if (window.PanthoriumAuth?.ensureSession && !(await window.PanthoriumAuth.ensureSession())) return failure('authentication_required');
       const userId = system()?.state?.user?.id;
       if (!userId) return failure('authentication_required');
       if (/^(ปิด|ปิดหน้าต่าง|ปิดหน้าต่างนี้|ปิดอันนี้|closethiswindow)$/.test(normalized)) {
