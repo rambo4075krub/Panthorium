@@ -1,10 +1,10 @@
 'use strict';
 (async () => {
   const PLATFORMS = [
-    { id: 'windows', label: 'Windows', icon: '🪟', match: (n) => /\.exe$/i.test(n) || /[-_]windows([-_.]|$)/i.test(n), fileHint: '.exe' },
-    { id: 'macos', label: 'macOS', icon: '', match: (n) => /\.dmg$/i.test(n) || /[-_](macos|darwin|osx)([-_.]|$)/i.test(n), fileHint: '.dmg' },
-    { id: 'linux', label: 'Linux', icon: '🐧', match: (n) => /\.AppImage$/i.test(n) || /[-_]linux([-_.]|$)/i.test(n), fileHint: '.AppImage' },
-    { id: 'android', label: 'Android', icon: '🤖', match: (n) => /\.apk$/i.test(n) || /\.aab$/i.test(n) || /[-_]android([-_.]|$)/i.test(n), fileHint: '.apk / Play Store' },
+    { id: 'windows', label: 'Windows', icon: '🪟', match: (n) => /\.exe$/i.test(n) || /[-_]windows([-_.]|$)/i.test(n), fileHint: 'ตัวติดตั้ง .exe' },
+    { id: 'macos', label: 'macOS', icon: '', match: (n) => /\.dmg$/i.test(n) || /[-_](macos|darwin|osx)([-_.]|$)/i.test(n), fileHint: 'ตัวติดตั้ง .dmg' },
+    { id: 'linux', label: 'Linux', icon: '🐧', match: (n) => /\.AppImage$/i.test(n) || /[-_]linux([-_.]|$)/i.test(n), fileHint: 'ตัวติดตั้ง .AppImage' },
+    { id: 'android', label: 'Android', icon: '🤖', match: (n) => /\.apk$/i.test(n) || /\.aab$/i.test(n) || /[-_]android([-_.]|$)/i.test(n), fileHint: '.apk / Google Play' },
     { id: 'ios', label: 'iOS', icon: '📱', match: (n) => /\.ipa$/i.test(n) || /[-_]ios([-_.]|$)/i.test(n), fileHint: '.ipa / App Store' }
   ];
 
@@ -14,27 +14,21 @@
   const downloads = document.getElementById('downloads');
   const title = document.getElementById('title');
 
-  function versionKey(name) {
-    const nums = String(name).match(/\d+/g);
-    if (!nums || !nums.length) return [0];
-    return nums.map(Number);
+  function extractVersion(name) {
+    const m = String(name || '').match(/(\d+\.\d+\.\d+(?:\.\d+)?)/);
+    return m ? m[1] : '';
   }
 
-  function compareVersionDesc(a, b) {
-    const left = versionKey(a);
-    const right = versionKey(b);
+  function versionNewer(a, b) {
+    const left = extractVersion(a).split('.').map((n) => Number(n) || 0);
+    const right = extractVersion(b).split('.').map((n) => Number(n) || 0);
     const len = Math.max(left.length, right.length);
     for (let i = 0; i < len; i += 1) {
       const x = left[i] || 0;
       const y = right[i] || 0;
-      if (x !== y) return y - x; // newer first
+      if (x !== y) return x > y;
     }
-    return String(a).localeCompare(String(b));
-  }
-
-  function extractVersion(name) {
-    const m = String(name).match(/(\d+\.\d+\.\d+(?:\.\d+)?)/);
-    return m ? m[1] : '';
+    return false;
   }
 
   function trustedGithub(url) {
@@ -62,20 +56,21 @@
     btn.addEventListener('click', () => setEdition(btn.dataset.edition));
   });
 
+  /** One newest file per platform for the active edition. */
   function latestByPlatform(assets) {
     const map = {};
-    for (const asset of assets) {
+    for (const asset of assets || []) {
       const name = asset.name || '';
       if (!name.startsWith('Panthorium-Browser-' + edition + '-')) continue;
+      if (!trustedGithub(asset.browser_download_url)) continue;
       const platform = PLATFORMS.find((p) => p.match(name));
       if (!platform) continue;
-      if (!trustedGithub(asset.browser_download_url)) continue;
       const prev = map[platform.id];
-      if (!prev || compareVersionDesc(name, prev.name) < 0) {
+      if (!prev || versionNewer(name, prev.name)) {
         map[platform.id] = {
           ...asset,
           platformId: platform.id,
-          version: extractVersion(name) || asset.version || ''
+          version: extractVersion(name)
         };
       }
     }
@@ -89,22 +84,38 @@
     const version = asset?.version || '';
     const hasFile = Boolean(asset?.browser_download_url);
     const storeUrl = storeLinks?.[platform.id] || '';
-    el.innerHTML = `
-      <h2><span aria-hidden="true">${platform.icon}</span> ${platform.label}</h2>
-      <div class="meta">ไฟล์: ${platform.fileHint}</div>
-      <div class="ver">${hasFile ? ('v' + version) : (storeUrl ? 'ผ่านสโตร์' : 'ยังไม่พร้อม')}</div>
-      <div class="actions"></div>
-    `;
-    const actions = el.querySelector('.actions');
+
+    const h2 = document.createElement('h2');
+    h2.innerHTML = '<span aria-hidden="true">' + platform.icon + '</span> ' + platform.label;
+    el.appendChild(h2);
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = platform.fileHint;
+    el.appendChild(meta);
+
+    const ver = document.createElement('div');
+    ver.className = 'ver';
+    ver.textContent = hasFile ? ('เวอร์ชันล่าสุด v' + version) : (storeUrl ? 'พร้อมในสโตร์' : 'ยังไม่พร้อม');
+    el.appendChild(ver);
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+
     if (hasFile) {
       const a = document.createElement('a');
       a.className = 'btn primary';
       a.href = asset.browser_download_url;
       a.rel = 'noopener';
-      a.textContent = 'ดาวน์โหลดล่าสุด · ' + asset.name;
+      a.textContent = 'ดาวน์โหลด ' + platform.label;
       a.title = asset.name;
       actions.appendChild(a);
+      const file = document.createElement('div');
+      file.className = 'meta';
+      file.textContent = asset.name;
+      actions.appendChild(file);
     }
+
     if (platform.id === 'android' || platform.id === 'ios') {
       if (storeUrl) {
         const s = document.createElement('a');
@@ -118,51 +129,48 @@
         const s = document.createElement('button');
         s.type = 'button';
         s.className = 'btn ghost disabled';
-        s.textContent = platform.id === 'android' ? 'Google Play — เตรียมเผยแพร่' : 'App Store — เตรียมเผยแพร่';
+        s.textContent = platform.id === 'android' ? 'Google Play — เร็วๆ นี้' : 'App Store — เร็วๆ นี้';
         actions.appendChild(s);
       }
-      if (platform.id === 'android' || platform.id === 'ios') {
-        const pwa = document.createElement('button');
-        pwa.type = 'button';
-        pwa.className = 'btn ghost';
-        pwa.textContent = 'ติดตั้งแบบ PWA จากเบราว์เซอร์';
-        pwa.onclick = () => {
-          if (window.deferredPanthoriumInstall) {
-            window.deferredPanthoriumInstall.prompt();
-          } else {
-            alert('บนมือถือ: เปิดเมนูเบราว์เซอร์ → เพิ่มไปยังหน้าจอหลัก / Install app เพื่อติดตั้ง Panthorium แบบ PWA');
-          }
-        };
-        actions.appendChild(pwa);
-      }
+      const pwa = document.createElement('button');
+      pwa.type = 'button';
+      pwa.className = 'btn ghost';
+      pwa.textContent = 'ติดตั้งแบบ PWA จากเบราว์เซอร์';
+      pwa.onclick = () => {
+        if (window.deferredPanthoriumInstall) window.deferredPanthoriumInstall.prompt();
+        else alert('บนมือถือ: เปิดเมนูเบราว์เซอร์ → เพิ่มไปยังหน้าจอหลัก / Install app');
+      };
+      actions.appendChild(pwa);
     }
+
     if (!actions.children.length) {
       const s = document.createElement('button');
       s.type = 'button';
       s.className = 'btn ghost disabled';
-      s.textContent = 'ยังไม่มีตัวติดตั้งล่าสุด';
+      s.textContent = 'ยังไม่มีตัวติดตั้ง';
       actions.appendChild(s);
     }
+
+    el.appendChild(actions);
     return el;
   }
 
   async function render() {
     downloads.innerHTML = '';
-    status.textContent = 'กำลังตรวจตัวติดตั้งที่พร้อมดาวน์โหลด…';
+    status.textContent = 'กำลังตรวจเวอร์ชันล่าสุด…';
     try {
       const response = await fetch('/browser-releases.json', { cache: 'no-store' });
       if (!response.ok) throw new Error('release_unavailable');
       const release = await response.json();
-      const assets = release.assets || [];
-      const latest = latestByPlatform(assets);
+      const latest = latestByPlatform(release.assets || []);
       const storeLinks = release.storeLinks || {};
       for (const platform of PLATFORMS) {
         downloads.appendChild(card(platform, latest[platform.id], storeLinks));
       }
       const ready = Object.keys(latest).length;
       status.textContent = ready
-        ? `แสดงเฉพาะเวอร์ชันล่าสุดของรุ่น ${edition === 'admin' ? 'Admin' : 'User'} · พร้อม ${ready} แพลตฟอร์ม`
-        : 'ตัวติดตั้งรุ่นนี้ยังอยู่ระหว่างเตรียม กรุณากลับมาตรวจอีกครั้ง';
+        ? 'แสดงเฉพาะเวอร์ชันล่าสุด · พร้อม ' + ready + ' แพลตฟอร์ม (รุ่น ' + (edition === 'admin' ? 'Admin' : 'User') + ')'
+        : 'ตัวติดตั้งรุ่นนี้ยังอยู่ระหว่างเตรียม';
     } catch (_) {
       status.textContent = 'ตรวจรายการดาวน์โหลดไม่สำเร็จ กรุณาลองใหม่ภายหลัง';
       for (const platform of PLATFORMS) downloads.appendChild(card(platform, null, {}));

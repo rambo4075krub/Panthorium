@@ -226,6 +226,62 @@ function serveShell(req, res, next) {
   }
 }
 
+function panthoriumAssetPlatform(name) {
+  const lower = String(name || "").toLowerCase();
+  if (lower.endsWith(".exe") || /[-_]windows([-_.]|$)/.test(lower)) return "windows";
+  if (lower.endsWith(".dmg") || /[-_](macos|darwin|osx)([-_.]|$)/.test(lower)) return "macos";
+  if (lower.endsWith(".appimage") || /[-_]linux([-_.]|$)/.test(lower)) return "linux";
+  if (lower.endsWith(".apk") || lower.endsWith(".aab") || /[-_]android([-_.]|$)/.test(lower)) return "android";
+  if (lower.endsWith(".ipa") || /[-_]ios([-_.]|$)/.test(lower)) return "ios";
+  return null;
+}
+function panthoriumAssetEdition(name) {
+  const n = String(name || "");
+  if (n.startsWith("Panthorium-Browser-admin-")) return "admin";
+  if (n.startsWith("Panthorium-Browser-user-")) return "user";
+  return null;
+}
+function panthoriumAssetVersion(name) {
+  const m = String(name || "").match(/(\d+\.\d+\.\d+(?:\.\d+)?)/);
+  return m ? m[1] : "0.0.0";
+}
+function panthoriumVersionNewer(a, b) {
+  const left = panthoriumAssetVersion(a).split(".").map((n) => Number(n) || 0);
+  const right = panthoriumAssetVersion(b).split(".").map((n) => Number(n) || 0);
+  const len = Math.max(left.length, right.length);
+  for (let i = 0; i < len; i += 1) {
+    const x = left[i] || 0;
+    const y = right[i] || 0;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
+function panthoriumPreferName(name, platform) {
+  const lower = String(name || "").toLowerCase();
+  // Prefer explicit OS tag in the filename when versions are equal.
+  if (platform === "windows") return /[-_]windows([-_.]|$)/.test(lower) ? 2 : 1;
+  if (platform === "macos") return /[-_](macos|darwin|osx)([-_.]|$)/.test(lower) ? 2 : 1;
+  if (platform === "linux") return /[-_]linux([-_.]|$)/.test(lower) ? 2 : 1;
+  return 1;
+}
+function panthoriumLatestAssets(assets) {
+  // Keep only the newest installer per edition+platform.
+  const best = new Map();
+  for (const asset of assets || []) {
+    const name = asset.name || "";
+    const edition = panthoriumAssetEdition(name);
+    const platform = panthoriumAssetPlatform(name);
+    if (!edition || !platform) continue;
+    const key = edition + ":" + platform;
+    const prev = best.get(key);
+    if (!prev) { best.set(key, asset); continue; }
+    if (panthoriumVersionNewer(name, prev.name)) { best.set(key, asset); continue; }
+    if (panthoriumVersionNewer(prev.name, name)) continue;
+    if (panthoriumPreferName(name, platform) > panthoriumPreferName(prev.name, platform)) best.set(key, asset);
+  }
+  return [...best.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+}
+
 app.get("/browser-releases.json", async (req, res) => {
   try {
     const upstream = await fetch("https://api.github.com/repos/rambo4075krub/Panthorium/releases/tags/staging", {
@@ -234,25 +290,30 @@ app.get("/browser-releases.json", async (req, res) => {
     });
     if (!upstream.ok) return res.status(503).json({ error: "release_unavailable" });
     const release = await upstream.json();
-    // Optional public store URLs when native apps are published (Play / App Store).
     const storeLinks = {
       android: process.env.PLAY_STORE_URL || "",
       ios: process.env.APP_STORE_URL || ""
     };
+    const mapped = (release.assets || []).map(asset => ({
+      name: asset.name,
+      browser_download_url: asset.browser_download_url,
+      size: asset.size,
+      content_type: asset.content_type,
+      updated_at: asset.updated_at
+    }));
+    const latestOnly = req.query.all === "1" ? mapped : panthoriumLatestAssets(mapped);
     res.set("Cache-Control", "public, max-age=60").json({
       version: require("./package.json").version,
       tag: release.tag_name || "staging",
       publishedAt: release.published_at || null,
+      latestOnly: req.query.all !== "1",
       storeLinks,
-      assets: (release.assets || []).map(asset => ({
-        name: asset.name,
-        browser_download_url: asset.browser_download_url,
-        size: asset.size,
-        content_type: asset.content_type,
-        updated_at: asset.updated_at
-      }))
+      assets: latestOnly
     });
   } catch (_) { res.status(503).json({ error: "release_unavailable" }); }
+});
+app.get(["/browser", "/browser/"], (req, res) => {
+  res.redirect(302, "/browser-download.html" + (req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : ""));
 });
 app.get("/", serveShell);
 app.get("/sentinel.html", serveShell);
