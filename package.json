@@ -1,6 +1,6 @@
 {
   "name": "panthorium-backend",
-  "version": "15.0.2",
+  "version": "15.0.3",
   "description": "Panthorium OS Backend - one Sentinel identity with RBAC contexts, frontier pattern alignment, guarded 24h learning loops and responsive Orb UI",
   "main": "server.js",
   "scripts": {
