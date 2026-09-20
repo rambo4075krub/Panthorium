@@ -1486,15 +1486,29 @@
                 return "data:" + mimeType + ";base64," + btoa(binary);
             };
             const transcribeRecorderBlob = async blob => {
-                const base = OS.config.backendUrl.replace(/\/$/, "");
-                const response = await authorizedFetch(base + "/api/speech/transcribe", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ audio: await toDataUrl(blob), language: "th-TH" }),
-                    signal: AbortSignal.timeout(35000)
-                });
-                const data = await response.json().catch(() => ({}));
-                if (!response.ok || !data.ok || typeof data.text !== "string" || !data.text.trim()) throw new Error(data.error || "transcription_unavailable");
+                const audio = await toDataUrl(blob);
+                let data;
+                let statusCode;
+                if (electronVoice && typeof window.panthoriumDesktop?.transcribeAudio === "function") {
+                    if (!(await ensureAuth())) throw new Error("authentication_required");
+                    let result = await window.panthoriumDesktop.transcribeAudio(audio, "th-TH", OS.config.accessToken);
+                    if (result?.status === 401 && await ensureAuth(true)) {
+                        result = await window.panthoriumDesktop.transcribeAudio(audio, "th-TH", OS.config.accessToken);
+                    }
+                    data = result?.data || {};
+                    statusCode = Number(result?.status || 500);
+                } else {
+                    const base = OS.config.backendUrl.replace(/\/$/, "");
+                    const response = await authorizedFetch(base + "/api/speech/transcribe", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ audio, language: "th-TH" }),
+                        signal: AbortSignal.timeout(35000)
+                    });
+                    data = await response.json().catch(() => ({}));
+                    statusCode = response.status;
+                }
+                if (statusCode < 200 || statusCode >= 300 || !data.ok || typeof data.text !== "string" || !data.text.trim()) throw new Error(data.error || "transcription_unavailable");
                 return data.text.trim();
             };
             const finishRecorder = ({ discard = false } = {}) => {
@@ -1557,7 +1571,10 @@
                                 audio_too_large: "เสียงยาวเกินไป ลองพูดให้สั้นลง",
                                 authentication_required: "เซสชันยังไม่พร้อม กรุณาลองอีกครั้ง",
                                 invalid_or_expired_token: "เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง",
-                                voice_session_changed: "เริ่มเซสชันใหม่แล้ว กรุณาพูดอีกครั้ง"
+                                voice_session_changed: "เริ่มเซสชันใหม่แล้ว กรุณาพูดอีกครั้ง",
+                                electron_upload_failed: "Panthorium Browser ส่งเสียงไม่สำเร็จ กรุณาลองอีกครั้ง",
+                                transcription_timeout: "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง",
+                                untrusted_origin: "Panthorium Browser ไม่อนุญาตต้นทางนี้"
                             })[error?.message] || (error?.name === "TimeoutError" || error?.name === "AbortError"
                                 ? "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง"
                                 : "ส่งเสียงไปยังบริการถอดเสียงไม่สำเร็จ กรุณาตรวจการเชื่อมต่อ");
