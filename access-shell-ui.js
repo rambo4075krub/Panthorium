@@ -126,29 +126,30 @@
       logout.title = logout.textContent;
       logout.onclick = isGuest && !isDesktop ? () => { location.href = '/browser-download.html'; } : () => auth()?.logout?.();
     }
-    // Desktop: update button. Admin (web or desktop): always offer Admin installer download.
     if (isDesktop) {
+      // Inside the installed browser: only update controls — no installer hyperlink.
+      document.getElementById('panthorium-browser-download')?.remove();
       let update = document.getElementById('panthorium-browser-update');
       if (!update) { update = document.createElement('button'); update.id = 'panthorium-browser-update'; update.type = 'button'; update.className = 'browser-action'; update.onclick = updateBrowser; menu.appendChild(update); }
       renderUpdateStatus();
       refreshUpdateStatus();
     } else {
       document.getElementById('panthorium-browser-update')?.remove();
-    }
-    let download = document.getElementById('panthorium-browser-download');
-    if (admin()) {
-      if (!download) {
-        download = document.createElement('a');
-        download.id = 'panthorium-browser-download';
-        download.className = 'browser-action';
-        download.target = '_blank';
-        download.rel = 'noopener';
-        menu.appendChild(download);
+      let download = document.getElementById('panthorium-browser-download');
+      if (admin()) {
+        if (!download) {
+          download = document.createElement('a');
+          download.id = 'panthorium-browser-download';
+          download.className = 'browser-action';
+          download.target = '_blank';
+          download.rel = 'noopener';
+          menu.appendChild(download);
+        }
+        download.textContent = 'ดาวน์โหลด Panthorium Browser Admin';
+        download.href = '/browser-download.html?edition=admin';
+      } else if (download) {
+        download.remove();
       }
-      download.textContent = 'ดาวน์โหลด Panthorium Browser Admin';
-      download.href = '/browser-download.html?edition=admin';
-    } else if (download) {
-      download.remove();
     }
     restrictWindows();
   }
