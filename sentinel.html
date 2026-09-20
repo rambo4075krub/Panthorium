@@ -1490,7 +1490,7 @@
                 let data;
                 let statusCode;
                 if (electronVoice) {
-                    if (window.panthoriumDesktop?.bridgeVersion !== "3" || typeof window.panthoriumDesktop?.transcribeAudio !== "function") throw new Error("browser_update_required");
+                    if (Number(window.panthoriumDesktop?.bridgeVersion || 0) < 4 || typeof window.panthoriumDesktop?.transcribeAudio !== "function") throw new Error("browser_update_required");
                     if (!(await ensureAuth())) throw new Error("authentication_required");
                     let result = await window.panthoriumDesktop.transcribeAudio(audio, "th-TH", OS.config.accessToken);
                     if (result?.status === 401 && await ensureAuth(true)) {
