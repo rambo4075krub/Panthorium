@@ -19,7 +19,7 @@ jobs:
       WIF_PROVIDER: ${{ vars.STAGING_WIF_PROVIDER }}
       RUNTIME_SA: ${{ vars.STAGING_RUNTIME_SA }}
       SQL_INSTANCE: ${{ vars.STAGING_SQL_INSTANCE }}
-      OPENAI_SECRET: ${{ vars.STAGING_OPENAI_SECRET }}
+      OPENAI_SECRET: ${{ vars.STAGING_OPENAI_SECRET || 'panthorium-staging-openai-api-key' }}
       REGION: asia-southeast1
       SERVICE: panthorium-backend-staging
     steps:
