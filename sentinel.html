@@ -1489,7 +1489,8 @@
                 const audio = await toDataUrl(blob);
                 let data;
                 let statusCode;
-                if (electronVoice && typeof window.panthoriumDesktop?.transcribeAudio === "function") {
+                if (electronVoice) {
+                    if (window.panthoriumDesktop?.bridgeVersion !== "3" || typeof window.panthoriumDesktop?.transcribeAudio !== "function") throw new Error("browser_update_required");
                     if (!(await ensureAuth())) throw new Error("authentication_required");
                     let result = await window.panthoriumDesktop.transcribeAudio(audio, "th-TH", OS.config.accessToken);
                     if (result?.status === 401 && await ensureAuth(true)) {
@@ -1573,9 +1574,10 @@
                                 invalid_or_expired_token: "เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง",
                                 voice_session_changed: "เริ่มเซสชันใหม่แล้ว กรุณาพูดอีกครั้ง",
                                 electron_upload_failed: "Panthorium Browser ส่งเสียงไม่สำเร็จ กรุณาลองอีกครั้ง",
+                                browser_update_required: "Panthorium Browser รุ่นนี้เก่าเกินไป กรุณาอัปเดตเป็นรุ่นล่าสุด",
                                 transcription_timeout: "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง",
                                 untrusted_origin: "Panthorium Browser ไม่อนุญาตต้นทางนี้"
-                            })[error?.message] || (error?.name === "TimeoutError" || error?.name === "AbortError"
+                            })[String(error?.message || "").split(":")[0]] || (error?.name === "TimeoutError" || error?.name === "AbortError"
                                 ? "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง"
                                 : "ส่งเสียงไปยังบริการถอดเสียงไม่สำเร็จ กรุณาตรวจการเชื่อมต่อ");
                             status("unresponsive", message);
