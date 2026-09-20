@@ -31,7 +31,8 @@ class ProviderManager {
     const candidates = [
       { provider: "groq", key: this.keys.groq, url: "https://api.groq.com/openai/v1/audio/transcriptions", model: process.env.GROQ_TRANSCRIBE_MODEL || "whisper-large-v3-turbo" },
       { provider: "openai", key: this.keys.openai, url: "https://api.openai.com/v1/audio/transcriptions", model: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1" }
-    ].filter(item => item.key);
+    ].filter(item => item.key && this.priority.includes(item.provider))
+      .sort((a, b) => this.priority.indexOf(a.provider) - this.priority.indexOf(b.provider));
     if (!candidates.length) {
       const error = new Error("transcription_provider_unavailable");
       error.code = "transcription_provider_unavailable";
