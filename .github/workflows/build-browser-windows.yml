@@ -22,14 +22,17 @@ jobs:
         edition: [admin, user]
         include:
           - os: windows-latest
+            platform: windows
             target: "--win nsis"
             artifact_path: "dist/*.exe"
             artifact_name: "Panthorium-Browser-Windows"
           - os: macos-latest
+            platform: macos
             target: "--mac dmg"
             artifact_path: "dist/*.dmg"
             artifact_name: "Panthorium-Browser-macOS"
           - os: ubuntu-latest
+            platform: linux
             target: "--linux AppImage"
             artifact_path: "dist/*.AppImage"
             artifact_name: "Panthorium-Browser-Linux"
@@ -76,7 +79,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           for attempt in 1 2 3; do
-            if npx --yes electron-builder@26.0.12 ${{ matrix.target }} --publish never -c.appId=com.panthorium.browser.${{ matrix.edition }} -c.productName="Panthorium Browser ${{ matrix.edition }}" -c.nsis.shortcutName="Panthorium Browser ${{ matrix.edition }}" -c.extraMetadata.panthoriumEdition=${{ matrix.edition }} -c.artifactName='Panthorium-Browser-${{ matrix.edition }}-${version}-${arch}.${ext}'; then
+            if npx --yes electron-builder@26.0.12 ${{ matrix.target }} --publish never -c.appId=com.panthorium.browser.${{ matrix.edition }} -c.productName="Panthorium Browser ${{ matrix.edition }}" -c.nsis.shortcutName="Panthorium Browser ${{ matrix.edition }}" -c.extraMetadata.panthoriumEdition=${{ matrix.edition }} -c.artifactName='Panthorium-Browser-${{ matrix.edition }}-${version}-${{ matrix.platform }}-${arch}.${ext}'; then
               exit 0
             fi
             echo "electron-builder failed; retry $attempt/3"
