@@ -300,6 +300,32 @@
             box-shadow: 0 0 6px var(--success);
         }
 
+        /* Version badge — top-right */
+        #version-badge {
+            position: fixed;
+            top: max(10px, env(safe-area-inset-top, 0px));
+            right: max(12px, env(safe-area-inset-right, 0px));
+            z-index: 7500;
+            pointer-events: none;
+            user-select: none;
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.04em;
+            color: var(--text-dim);
+            background: rgba(10, 14, 22, 0.72);
+            border: 1px solid rgba(0, 255, 204, 0.18);
+            border-radius: 999px;
+            padding: 5px 12px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+            line-height: 1.2;
+            white-space: nowrap;
+        }
+        #version-badge strong {
+            color: var(--accent);
+            font-weight: 600;
+        }
+
         /* ========== START MENU ========== */
         #start-menu {
             position: fixed;
@@ -696,6 +722,7 @@
 
     <!-- DESKTOP -->
     <div id="desktop">
+        <div id="version-badge" title="เวอร์ชัน Panthorium">v<span id="version-label">…</span></div>
         <canvas id="bg-canvas"></canvas>
         <section id="orb-transcript" tabindex="0" role="region" aria-label="ข้อความประกอบเสียงตอบของ AI">
             <div class="orb-transcript-line previous" data-orb-line="previous" aria-label="ประโยคก่อนหน้า"></div>
@@ -756,7 +783,9 @@
         return stored || (/^https?:$/.test(window.location.protocol) ? window.location.origin : "http://localhost:8787");
     }
     const OS = {
+        // Web OS shell build (shown in About). Browser app version is releaseVersion.
         version: "1.1.0",
+        releaseVersion: "15.0.3",
         state: {
             booted: false,
             loggedIn: false,
@@ -806,6 +835,30 @@
     }
     setInterval(updateClock, 10000);
     updateClock();
+
+    // ---------- Version badge (top-right) ----------
+    function renderVersionBadge(version) {
+        const label = $("version-label");
+        const badge = $("version-badge");
+        if (!label || !badge) return;
+        const value = String(version || OS.releaseVersion || OS.version || "").replace(/^v/i, "");
+        label.innerHTML = `<strong>${value}</strong>`;
+        badge.title = window.panthoriumDesktop?.isElectron
+            ? `Panthorium Browser v${value}`
+            : `Panthorium OS release v${value}`;
+    }
+    renderVersionBadge(OS.releaseVersion);
+    (async () => {
+        try {
+            if (window.panthoriumDesktop?.getAppInfo) {
+                const info = await window.panthoriumDesktop.getAppInfo();
+                if (info?.version) {
+                    OS.releaseVersion = String(info.version).replace(/^v/i, "");
+                    renderVersionBadge(OS.releaseVersion);
+                }
+            }
+        } catch (_) {}
+    })();
 
     // ---------- Network Status ----------
     window.addEventListener("online", () => {
