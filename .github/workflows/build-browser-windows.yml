@@ -1,4 +1,5 @@
 name: Build Panthorium Browser
+# Electron speech bridge build: renderer-safe upload via main process
 
 on:
   push:
