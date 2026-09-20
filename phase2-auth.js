@@ -72,19 +72,32 @@
     async function submitLogin() { const btn = document.getElementById('phase2-login-btn'); btn.disabled = true; status.textContent = 'กำลังตรวจสอบสิทธิ์...'; try { await login(document.getElementById('phase2-username').value.trim(), password.value); activateDesktop(); if (typeof toast === 'function') toast('เข้าสู่ระบบสำเร็จ'); } catch (error) { console.error('[Phase2 Auth] login failed', error); const code = error.message || 'login_failed'; status.textContent = code === 'invalid_credentials' ? 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' : code === 'auth_unavailable' ? 'บริการเข้าสู่ระบบหรือฐานข้อมูล staging ยังไม่พร้อม' : code === 'cors_denied' ? 'ต้นทางของ Electron ไม่ได้รับอนุญาตจาก staging' : 'เข้าสู่ระบบไม่สำเร็จ (' + code + ')'; } finally { btn.disabled = false; password.value = ''; } }
     document.getElementById('phase2-login-btn').onclick = submitLogin; password.onkeydown = e => { if (e.key === 'Enter') submitLogin(); };
   }
-  async function phase2EnsureAuth(force = false) { if (OS.config.accessToken && !force) return true; return false; }
+  let authInFlight = null;
+  async function phase2EnsureAuth(force = false) {
+    if (OS.config.accessToken && OS.state.user && !force) return true;
+    if (authInFlight) return authInFlight;
+    authInFlight = (async () => {
+      // Never create a guest identity on the administrator entrance.
+      if (isAdminEntry()) return force ? await refreshSession() : false;
+      if (force && OS.state.user && await refreshSession()) return true;
+      await guestSession();
+      return Boolean(OS.config.accessToken && hasPermission('chat'));
+    })().catch(error => { console.error('[Phase2 Auth] session unavailable', error); return false; })
+      .finally(() => { authInFlight = null; });
+    return authInFlight;
+  }
   function installPermissionGuards() {
     const originalCreateWindow = typeof createWindow === 'function' ? createWindow : null;
     if (originalCreateWindow) createWindow = function(id, title, contentHTML, opts = {}) { if (id === 'settings' && !hasPermission('settings')) return permissionDenied('settings'); if (id === 'security-dashboard' && !isAdministrator()) return permissionDenied('administrator'); return originalCreateWindow(id, title, contentHTML, opts); };
     const originalOpenSettings = typeof openSettings === 'function' ? openSettings : null;
     if (originalOpenSettings) { const guarded = function(){ if (!hasPermission('settings')) return permissionDenied('settings'); return originalOpenSettings(); }; openSettings = guarded; if (typeof APP_LIST !== 'undefined' && Array.isArray(APP_LIST)) { const app = APP_LIST.find(a => a.id === 'settings'); if (app) app.open = guarded; } }
-    const originalCallAI = typeof callAI === 'function' ? callAI : null; if (originalCallAI) callAI = async function(prompt, options = {}){ if (!hasPermission('chat')) return { ok:false,text:'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat',provider:'RBAC',via:'rbac' }; return originalCallAI(prompt, options); };
+    const originalCallAI = typeof callAI === 'function' ? callAI : null; if (originalCallAI) callAI = async function(prompt, options = {}){ if (!(await phase2EnsureAuth())) return { ok:false,text:'เชื่อมต่อเซสชันไม่สำเร็จ กรุณาลองอีกครั้ง',provider:'Auth',via:'auth' }; if (!hasPermission('chat')) return { ok:false,text:'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat',provider:'RBAC',via:'rbac' }; return originalCallAI(prompt, options); };
   }
   async function initializePhase2() {
     OS.state.user = null; ensureAuth = phase2EnsureAuth; for (let i=0;i<40&&!OS.state.booted;i++) await sleep(100); installPermissionGuards(); await revokeServerSession(); OS.config.accessToken=''; OS.state.user=null; OS.state.loggedIn=false; OS.state.verified=false;
     if (isAdminEntry()) { showLogin(); return; }
-    try { await guestSession(); activateDesktop(); } catch (error) { console.error('[Phase2 Auth] guest entry failed', error); }
+    try { if (await phase2EnsureAuth()) activateDesktop(); } catch (error) { console.error('[Phase2 Auth] guest entry failed', error); }
   }
-  window.PanthoriumAuth = { login, logout, refreshSession, guestSession, fetchIdentity, hasPermission, isAdministrator, isGuest, isAdminEntry };
+  window.PanthoriumAuth = { ensureSession: phase2EnsureAuth, login, logout, refreshSession, guestSession, fetchIdentity, hasPermission, isAdministrator, isGuest, isAdminEntry };
   initializePhase2().catch(error => console.error('[Phase2 Auth]', error));
 })();
