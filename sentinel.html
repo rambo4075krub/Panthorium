@@ -1541,10 +1541,11 @@
             }
         };
 
-        // Prefer Web Speech API when available (Chrome / Edge / Electron / Safari).
-        // MediaRecorder + server Whisper is the fallback for browsers without SR.
-        // This keeps voice usable even when /api/speech/transcribe is down.
-        if (recorderSupported && !SR) {
+        // Electron: Chromium SpeechRecognition almost always fails with "network"
+        // (Google cloud STT is not available like in Chrome). Prefer MediaRecorder
+        // + /api/speech/transcribe (Whisper via backend / Electron bridge).
+        // Regular browsers: prefer Web Speech API when available.
+        if (recorderSupported && (!SR || electronVoice)) {
             let recorder = null;
             let recorderStream = null;
             let recorderChunks = [];
@@ -2401,14 +2402,145 @@
         sendBtn.onclick = send;
         input.onkeydown = (e) => { if (e.key === "Enter") send(); };
 
-        // Voice
+        // Voice — Electron uses MediaRecorder + server STT; browsers use Web Speech API
         let recognition = null;
         let voiceSilenceTimer = null;
         let voiceRecognitionFailed = false;
         let voiceParts = new Map();
         let voiceInterim = "";
+        let chatRecorder = null;
+        let chatRecorderStream = null;
+        let chatRecorderChunks = [];
+        let chatRecorderMime = "audio/webm";
+        let chatRecorderMonitor = null;
+        let chatRecorderStartedAt = 0;
+        let chatRecorderLastVoiceAt = 0;
+        let chatRecorderContext = null;
+        let chatRecorderAnalyser = null;
+        let chatRecorderData = null;
+        const chatElectron = Boolean(window.panthoriumDesktop?.isElectron);
+        const chatRecorderOk = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SR) {
+
+        const cleanupChatRecorder = () => {
+            clearTimeout(chatRecorderMonitor);
+            chatRecorderMonitor = null;
+            if (chatRecorderContext) { try { chatRecorderContext.close(); } catch (_) {} }
+            chatRecorderContext = null;
+            chatRecorderAnalyser = null;
+            chatRecorderData = null;
+            chatRecorderStream?.getTracks?.().forEach(t => t.stop());
+            chatRecorderStream = null;
+        };
+
+        const transcribeChatBlob = async blob => {
+            const bytes = new Uint8Array(await blob.arrayBuffer());
+            let binary = "";
+            const step = 0x8000;
+            for (let offset = 0; offset < bytes.length; offset += step) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + step, bytes.length)));
+            const mimeType = String(blob.type || chatRecorderMime).split(";")[0] || "audio/webm";
+            const audio = "data:" + mimeType + ";base64," + btoa(binary);
+            const base = OS.config.backendUrl.replace(/\/$/, "");
+            const post = async () => {
+                const response = await authorizedFetch(base + "/api/speech/transcribe", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ audio, language: "th-TH" }),
+                    signal: AbortSignal.timeout(35000),
+                    cache: "no-store"
+                });
+                return { data: await response.json().catch(() => ({})), statusCode: response.status };
+            };
+            let data, statusCode;
+            if (chatElectron && typeof window.panthoriumDesktop?.transcribeAudio === "function") {
+                if (!(await ensureAuth())) throw new Error("authentication_required");
+                try {
+                    let result = await window.panthoriumDesktop.transcribeAudio(audio, "th-TH", OS.config.accessToken);
+                    if (result?.status === 401 && await ensureAuth(true)) {
+                        result = await window.panthoriumDesktop.transcribeAudio(audio, "th-TH", OS.config.accessToken);
+                    }
+                    data = result?.data || {};
+                    statusCode = Number(result?.status || 500);
+                } catch (_) {
+                    ({ data, statusCode } = await post());
+                }
+            } else {
+                ({ data, statusCode } = await post());
+            }
+            if (statusCode < 200 || statusCode >= 300 || !data.ok || typeof data.text !== "string" || !data.text.trim()) {
+                throw new Error(data.error || "transcription_unavailable");
+            }
+            return data.text.trim();
+        };
+
+        const startChatRecorder = async () => {
+            chatRecorderStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+            const supportedMime = typeof MediaRecorder.isTypeSupported === "function"
+                ? ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find(type => MediaRecorder.isTypeSupported(type))
+                : "";
+            chatRecorderMime = supportedMime || "";
+            chatRecorderChunks = [];
+            chatRecorder = chatRecorderMime ? new MediaRecorder(chatRecorderStream, { mimeType: chatRecorderMime }) : new MediaRecorder(chatRecorderStream);
+            chatRecorderMime = chatRecorder.mimeType || chatRecorderMime || "audio/webm";
+            chatRecorder.ondataavailable = event => { if (event.data?.size) chatRecorderChunks.push(event.data); };
+            chatRecorder.onstop = async () => {
+                const chunks = chatRecorderChunks.slice();
+                chatRecorder = null;
+                chatRecorderChunks = [];
+                cleanupChatRecorder();
+                userSpeechActive = false;
+                window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
+                micBtn.classList.remove("listening");
+                if (!chunks.length) {
+                    toast("ยังไม่ได้ยินเสียง");
+                    window.PanthoriumVoice?.resume();
+                    return;
+                }
+                toast("กำลังถอดเสียง...", 4000);
+                try {
+                    const text = await transcribeChatBlob(new Blob(chunks, { type: chatRecorderMime }));
+                    input.value = text;
+                    window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
+                    await send({ resumeGlobalVoice: true });
+                } catch (error) {
+                    console.warn("[Sentinel chat transcription]", error);
+                    toast("ถอดเสียงไม่สำเร็จ กรุณาลองใหม่หรือพิมพ์ข้อความ");
+                    window.PanthoriumVoice?.resume();
+                }
+            };
+            chatRecorder.start(250);
+            chatRecorderStartedAt = performance.now();
+            chatRecorderLastVoiceAt = 0;
+            userSpeechActive = true;
+            window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
+            micBtn.classList.add("listening");
+            try {
+                chatRecorderContext = new AudioContext();
+                const source = chatRecorderContext.createMediaStreamSource(chatRecorderStream);
+                chatRecorderAnalyser = chatRecorderContext.createAnalyser();
+                chatRecorderAnalyser.fftSize = 512;
+                chatRecorderData = new Uint8Array(chatRecorderAnalyser.fftSize);
+                source.connect(chatRecorderAnalyser);
+            } catch (_) {}
+            const monitor = () => {
+                if (!chatRecorder || chatRecorder.state !== "recording") return;
+                const now = performance.now();
+                if (chatRecorderAnalyser && chatRecorderData) {
+                    chatRecorderAnalyser.getByteTimeDomainData(chatRecorderData);
+                    let sum = 0;
+                    for (const value of chatRecorderData) { const c = (value - 128) / 128; sum += c * c; }
+                    if (Math.sqrt(sum / chatRecorderData.length) > 0.025) chatRecorderLastVoiceAt = now;
+                }
+                if ((chatRecorderLastVoiceAt > 0 && now - chatRecorderLastVoiceAt > 1400 && now - chatRecorderStartedAt > 700) || now - chatRecorderStartedAt > 15000) {
+                    try { chatRecorder.stop(); } catch (_) {}
+                    return;
+                }
+                chatRecorderMonitor = setTimeout(monitor, 100);
+            };
+            chatRecorderMonitor = setTimeout(monitor, 100);
+        };
+
+        if (SR && !chatElectron) {
             recognition = new SR();
             recognition.lang = "th-TH";
             recognition.continuous = true;
@@ -2465,8 +2597,6 @@
                 } else if (code === "aborted") {
                     window.PanthoriumVoice?.resume();
                 } else if (typeof window.PanthoriumVoice?.recognitionFailure === "function") {
-                    // Route through the global handler so Electron network latch
-                    // and toast wording stay consistent with hands-free mode.
                     window.PanthoriumVoice.recognitionFailure(event);
                 } else if (code === "not-allowed" || code === "service-not-allowed") {
                     toast("กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์");
@@ -2478,7 +2608,26 @@
             };
         }
 
-        micBtn.onclick = () => {
+        micBtn.onclick = async () => {
+            // Electron / recorder path
+            if (chatElectron && chatRecorderOk) {
+                if (chatRecorder && chatRecorder.state === "recording") {
+                    try { chatRecorder.stop(); } catch (_) {}
+                    return;
+                }
+                window.PanthoriumVoice?.pause();
+                unlockVoiceAudio();
+                try {
+                    await startChatRecorder();
+                } catch (error) {
+                    cleanupChatRecorder();
+                    micBtn.classList.remove("listening");
+                    const denied = error?.name === "NotAllowedError" || error?.name === "SecurityError";
+                    toast(denied ? "กรุณาอนุญาตไมโครโฟนให้ Panthorium Browser" : "เปิดไมโครโฟนไม่สำเร็จ");
+                    window.PanthoriumVoice?.resume();
+                }
+                return;
+            }
             if (!recognition) {
                 toast("เบราว์เซอร์นี้ไม่รองรับการรู้จำเสียง (แนะนำ Chrome, Edge หรือ Panthorium Browser)");
                 return;
