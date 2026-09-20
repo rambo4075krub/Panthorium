@@ -17,18 +17,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        edition: [admin, user]
         include:
           - os: windows-latest
             target: "--win nsis"
-            artifact_path: "dist/Panthorium-Browser-Setup-*.exe"
+            artifact_path: "dist/*.exe"
             artifact_name: "Panthorium-Browser-Windows"
           - os: macos-latest
             target: "--mac dmg"
-            artifact_path: "dist/Panthorium-Browser-Setup-*.dmg"
+            artifact_path: "dist/*.dmg"
             artifact_name: "Panthorium-Browser-macOS"
           - os: ubuntu-latest
             target: "--linux AppImage"
-            artifact_path: "dist/Panthorium-Browser-Setup-*.AppImage"
+            artifact_path: "dist/*.AppImage"
             artifact_name: "Panthorium-Browser-Linux"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -36,7 +38,7 @@ jobs:
       - name: Checkout staging
         uses: actions/checkout@v4
         with:
-          ref: staging
+          ref: ${{ github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -73,7 +75,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           for attempt in 1 2 3; do
-            if npx --yes electron-builder@26.0.12 ${{ matrix.target }} --publish never; then
+            if npx --yes electron-builder@26.0.12 ${{ matrix.target }} --publish never -c.appId=com.panthorium.browser.${{ matrix.edition }} -c.productName="Panthorium Browser ${{ matrix.edition }}" -c.nsis.shortcutName="Panthorium Browser ${{ matrix.edition }}" -c.extraMetadata.panthoriumEdition=${{ matrix.edition }} -c.artifactName='Panthorium-Browser-${{ matrix.edition }}-${version}-${arch}.${ext}'; then
               exit 0
             fi
             echo "electron-builder failed; retry $attempt/3"
@@ -84,7 +86,7 @@ jobs:
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
+          name: ${{ matrix.artifact_name }}-${{ matrix.edition }}
           path: ${{ matrix.artifact_path }}
           if-no-files-found: error
           retention-days: 14
