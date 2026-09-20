@@ -1,11 +1,11 @@
 'use strict';
 (async () => {
   const PLATFORMS = [
-    { id: 'windows', label: 'Windows', icon: '🪟', match: (n) => /\.exe$/i.test(n) || /[-_]windows([-_.]|$)/i.test(n), fileHint: 'ตัวติดตั้ง .exe' },
-    { id: 'macos', label: 'macOS', icon: '', match: (n) => /\.dmg$/i.test(n) || /[-_](macos|darwin|osx)([-_.]|$)/i.test(n), fileHint: 'ตัวติดตั้ง .dmg' },
-    { id: 'linux', label: 'Linux', icon: '🐧', match: (n) => /\.AppImage$/i.test(n) || /[-_]linux([-_.]|$)/i.test(n), fileHint: 'ตัวติดตั้ง .AppImage' },
-    { id: 'android', label: 'Android', icon: '🤖', match: (n) => /\.apk$/i.test(n) || /\.aab$/i.test(n) || /[-_]android([-_.]|$)/i.test(n), fileHint: '.apk / Google Play' },
-    { id: 'ios', label: 'iOS', icon: '📱', match: (n) => /\.ipa$/i.test(n) || /[-_]ios([-_.]|$)/i.test(n), fileHint: '.ipa / App Store' }
+    { id: 'windows', label: 'Windows', labelTh: 'วินโดวส์', icon: '🪟', match: (n) => /\.exe$/i.test(n) || /[-_]windows([-_.]|$)/i.test(n), ext: 'exe', fileHint: 'ไฟล์ .exe สำหรับ Windows' },
+    { id: 'macos', label: 'macOS', labelTh: 'แมค', icon: '', match: (n) => /\.dmg$/i.test(n) || /[-_](macos|darwin|osx)([-_.]|$)/i.test(n), ext: 'dmg', fileHint: 'ไฟล์ .dmg สำหรับ macOS' },
+    { id: 'linux', label: 'Linux', labelTh: 'ลินุกซ์', icon: '🐧', match: (n) => /\.AppImage$/i.test(n) || /[-_]linux([-_.]|$)/i.test(n), ext: 'AppImage', fileHint: 'ไฟล์ .AppImage สำหรับ Linux' },
+    { id: 'android', label: 'Android', labelTh: 'แอนดรอยด์', icon: '🤖', match: (n) => /\.apk$/i.test(n) || /\.aab$/i.test(n) || /[-_]android([-_.]|$)/i.test(n), ext: 'apk', fileHint: 'ไฟล์ .apk / Google Play' },
+    { id: 'ios', label: 'iOS', labelTh: 'ไอโอเอส', icon: '📱', match: (n) => /\.ipa$/i.test(n) || /[-_]ios([-_.]|$)/i.test(n), ext: 'ipa', fileHint: 'ไฟล์ .ipa / App Store' }
   ];
 
   const params = new URLSearchParams(location.search);
@@ -19,6 +19,27 @@
     return m ? m[1] : '';
   }
 
+  function extractArch(name) {
+    const n = String(name || '').toLowerCase();
+    if (/arm64|aarch64/.test(n)) return 'arm64';
+    if (/x86_64|x64|amd64/.test(n)) return 'x64';
+    if (/ia32|x86(?!_)/.test(n)) return 'x86';
+    return 'x64';
+  }
+
+  function extractExt(name, fallback) {
+    const m = String(name || '').match(/\.([A-Za-z0-9]+)$/);
+    return m ? m[1] : fallback;
+  }
+
+  /** Always show OS name in the filename so users pick the right file. */
+  function labeledFileName(platform, asset) {
+    const version = asset.version || extractVersion(asset.name) || 'latest';
+    const arch = extractArch(asset.name);
+    const ext = extractExt(asset.name, platform.ext);
+    return 'Panthorium-Browser-' + edition + '-' + version + '-' + platform.id + '-' + arch + '.' + ext;
+  }
+
   function versionNewer(a, b) {
     const left = extractVersion(a).split('.').map((n) => Number(n) || 0);
     const right = extractVersion(b).split('.').map((n) => Number(n) || 0);
@@ -29,6 +50,14 @@
       if (x !== y) return x > y;
     }
     return false;
+  }
+
+  function preferOsTagged(name, platformId) {
+    const lower = String(name || '').toLowerCase();
+    if (platformId === 'windows') return /[-_]windows([-_.]|$)/.test(lower) ? 2 : 1;
+    if (platformId === 'macos') return /[-_](macos|darwin|osx)([-_.]|$)/.test(lower) ? 2 : 1;
+    if (platformId === 'linux') return /[-_]linux([-_.]|$)/.test(lower) ? 2 : 1;
+    return 1;
   }
 
   function trustedGithub(url) {
@@ -56,7 +85,6 @@
     btn.addEventListener('click', () => setEdition(btn.dataset.edition));
   });
 
-  /** One newest file per platform for the active edition. */
   function latestByPlatform(assets) {
     const map = {};
     for (const asset of assets || []) {
@@ -66,12 +94,17 @@
       const platform = PLATFORMS.find((p) => p.match(name));
       if (!platform) continue;
       const prev = map[platform.id];
-      if (!prev || versionNewer(name, prev.name)) {
-        map[platform.id] = {
-          ...asset,
-          platformId: platform.id,
-          version: extractVersion(name)
-        };
+      if (!prev) {
+        map[platform.id] = { ...asset, platformId: platform.id, version: extractVersion(name) };
+        continue;
+      }
+      if (versionNewer(name, prev.name)) {
+        map[platform.id] = { ...asset, platformId: platform.id, version: extractVersion(name) };
+        continue;
+      }
+      if (versionNewer(prev.name, name)) continue;
+      if (preferOsTagged(name, platform.id) > preferOsTagged(prev.name, platform.id)) {
+        map[platform.id] = { ...asset, platformId: platform.id, version: extractVersion(name) };
       }
     }
     return map;
@@ -81,39 +114,51 @@
     const el = document.createElement('article');
     el.className = 'card';
     el.dataset.platform = platform.id;
-    const version = asset?.version || '';
-    const hasFile = Boolean(asset?.browser_download_url);
-    const storeUrl = storeLinks?.[platform.id] || '';
 
     const h2 = document.createElement('h2');
     h2.innerHTML = '<span aria-hidden="true">' + platform.icon + '</span> ' + platform.label;
     el.appendChild(h2);
+
+    const osLine = document.createElement('div');
+    osLine.className = 'meta';
+    osLine.textContent = 'ระบบปฏิบัติการ: ' + platform.label + ' (' + platform.labelTh + ')';
+    el.appendChild(osLine);
 
     const meta = document.createElement('div');
     meta.className = 'meta';
     meta.textContent = platform.fileHint;
     el.appendChild(meta);
 
-    const ver = document.createElement('div');
-    ver.className = 'ver';
-    ver.textContent = hasFile ? ('เวอร์ชันล่าสุด v' + version) : (storeUrl ? 'พร้อมในสโตร์' : 'ยังไม่พร้อม');
-    el.appendChild(ver);
-
     const actions = document.createElement('div');
     actions.className = 'actions';
+    const hasFile = Boolean(asset?.browser_download_url);
+    const storeUrl = storeLinks?.[platform.id] || '';
 
     if (hasFile) {
+      const ver = document.createElement('div');
+      ver.className = 'ver';
+      ver.textContent = 'เวอร์ชันล่าสุด v' + (asset.version || extractVersion(asset.name));
+      el.appendChild(ver);
+
       const a = document.createElement('a');
       a.className = 'btn primary';
       a.href = asset.browser_download_url;
       a.rel = 'noopener';
-      a.textContent = 'ดาวน์โหลด ' + platform.label;
-      a.title = asset.name;
+      a.setAttribute('download', labeledFileName(platform, asset));
+      a.textContent = 'ดาวน์โหลดสำหรับ ' + platform.label;
+      a.title = labeledFileName(platform, asset);
       actions.appendChild(a);
+
       const file = document.createElement('div');
       file.className = 'meta';
-      file.textContent = asset.name;
+      file.style.wordBreak = 'break-all';
+      file.textContent = labeledFileName(platform, asset);
       actions.appendChild(file);
+    } else {
+      const ver = document.createElement('div');
+      ver.className = 'ver';
+      ver.textContent = storeUrl ? 'พร้อมในสโตร์' : 'ยังไม่พร้อม';
+      el.appendChild(ver);
     }
 
     if (platform.id === 'android' || platform.id === 'ios') {
@@ -169,7 +214,7 @@
       }
       const ready = Object.keys(latest).length;
       status.textContent = ready
-        ? 'แสดงเฉพาะเวอร์ชันล่าสุด · พร้อม ' + ready + ' แพลตฟอร์ม (รุ่น ' + (edition === 'admin' ? 'Admin' : 'User') + ')'
+        ? 'เลือกตามระบบปฏิบัติการ · แสดงเฉพาะเวอร์ชันล่าสุด (' + ready + ' แพลตฟอร์ม)'
         : 'ตัวติดตั้งรุ่นนี้ยังอยู่ระหว่างเตรียม';
     } catch (_) {
       status.textContent = 'ตรวจรายการดาวน์โหลดไม่สำเร็จ กรุณาลองใหม่ภายหลัง';

@@ -302,13 +302,25 @@ app.get("/browser-releases.json", async (req, res) => {
       updated_at: asset.updated_at
     }));
     const latestOnly = req.query.all === "1" ? mapped : panthoriumLatestAssets(mapped);
+    const withLabels = latestOnly.map((asset) => {
+      const platform = panthoriumAssetPlatform(asset.name);
+      const edition = panthoriumAssetEdition(asset.name);
+      const version = panthoriumAssetVersion(asset.name);
+      const lower = String(asset.name || "").toLowerCase();
+      const arch = /arm64|aarch64/.test(lower) ? "arm64" : /x86_64|x64|amd64/.test(lower) ? "x64" : "x64";
+      const ext = (String(asset.name).match(/\.([A-Za-z0-9]+)$/) || [,""])[1];
+      const displayName = platform && edition
+        ? "Panthorium-Browser-" + edition + "-" + version + "-" + platform + "-" + arch + "." + ext
+        : asset.name;
+      return { ...asset, platform, edition, version, displayName };
+    });
     res.set("Cache-Control", "public, max-age=60").json({
       version: require("./package.json").version,
       tag: release.tag_name || "staging",
       publishedAt: release.published_at || null,
       latestOnly: req.query.all !== "1",
       storeLinks,
-      assets: latestOnly
+      assets: withLabels
     });
   } catch (_) { res.status(503).json({ error: "release_unavailable" }); }
 });
