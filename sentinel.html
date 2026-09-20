@@ -2003,9 +2003,15 @@
             } catch (e) {
                 console.warn("Sentinel unavailable:", e.message);
                 OS.sentinelOnline = false;
-                const error = e.message === "voice_session_changed" ? "voice_session_changed" : /TimeoutError|AbortError/.test(e.name) ? "chat_timeout" : "chat_network_error";
+                const msg = String(e && e.message || "");
+                const error = msg === "voice_session_changed" ? "voice_session_changed"
+                    : msg === "authentication_required" ? "authentication_required"
+                    : /TimeoutError|AbortError/.test(e.name || "") || /aborted|timeout/i.test(msg) ? "chat_timeout"
+                    : "chat_network_error";
                 const text = error === "voice_session_changed" ? "บัญชีผู้ใช้เปลี่ยนแล้ว กรุณาถามใหม่"
-                    : error === "chat_timeout" ? "รอคำตอบ AI เกินเวลา กรุณาลองใหม่" : "เชื่อมต่อ AI ไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ";
+                    : error === "authentication_required" ? "ยังเข้าสู่ระบบไม่ได้ — ตรวจ Backend หรือลองโหลดหน้าใหม่"
+                    : error === "chat_timeout" ? "รอคำตอบ AI เกินเวลา กรุณาลองใหม่"
+                    : "เชื่อมต่อ AI ไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ";
                 return { ok: false, text: `${text} (${error})`, error, via: "sentinel" };
             }
         }
@@ -2294,12 +2300,18 @@
                 const last = messages.querySelector('.msg.loading, .msg[data-streaming="1"]');
                 if (last) last.remove();
 
-                appendMsg(res?.text || "ยังไม่ได้รับคำตอบจาก AI", "ai", false, res?.provider);
-                if (!res?.ok) toast(res?.text || "ยังไม่ได้รับคำตอบจาก AI", 10000);
+                const reply = (res && res.text && String(res.text).trim()) || "ยังไม่ได้รับคำตอบจาก AI";
+                appendMsg(reply, "ai", false, res?.provider);
+                if (!res?.ok) toast(reply, 10000);
                 else if (voiceResponseNeedsSpeech(intent, res) && !(await speakVoiceResponse(res.text))) toast(voicePlaybackFailure, 10000);
-            } catch (_) {
+            } catch (err) {
                 messages.querySelector('.msg.loading, .msg[data-streaming="1"]')?.remove();
-                toast("รับคำตอบไม่สำเร็จ กรุณาลองใหม่", 10000);
+                const reason = err && err.message === "authentication_required"
+                    ? "ยังเข้าสู่ระบบไม่ได้ — ตรวจ Backend หรือลองโหลดหน้าใหม่"
+                    : "รับคำตอบไม่สำเร็จ กรุณาลองใหม่";
+                appendMsg(reason, "ai");
+                toast(reason, 10000);
+                console.warn("send() failed:", err);
             } finally {
                 sendBusy = false;
                 if (resumeGlobalVoice) window.PanthoriumVoice?.resume();
