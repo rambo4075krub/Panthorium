@@ -2220,7 +2220,12 @@
     }
 
     // ---------- Apps Definition ----------
-    const BROWSER_RELEASE_URL = "https://github.com/rambo4075krub/Panthorium/releases/tag/staging";
+    const BROWSER_RELEASE_URL = "/browser-download.html";
+    function browserDownloadUrl() {
+        const isAdmin = window.PanthoriumAuth?.isAdministrator?.() === true
+            || (typeof OS !== "undefined" && Array.isArray(OS.state?.user?.roles) && OS.state.user.roles.includes("admin"));
+        return BROWSER_RELEASE_URL + (isAdmin ? "?edition=admin" : "?edition=user");
+    }
     const isAdminShell = /^\/admin(?:\/|$)/i.test(window.location.pathname);
     let deferredInstallPrompt = null;
 
@@ -2246,7 +2251,7 @@
         if (isMobileDevice()) {
             const installAction = deferredInstallPrompt
                 ? `<button onclick="window.PanthoriumPWAInstall()" style="padding:11px 18px;border:0;border-radius:10px;background:linear-gradient(135deg,#00c9b7,#159dff);color:#03101a;font-weight:700;cursor:pointer;">ติดตั้งบนอุปกรณ์นี้</button>`
-                : `<a href="${BROWSER_RELEASE_URL}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:11px 18px;border-radius:10px;background:linear-gradient(135deg,#00c9b7,#159dff);color:#03101a;text-decoration:none;font-weight:700;">เปิด Panthorium</a>`;
+                : `<a href="${browserDownloadUrl()}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:11px 18px;border-radius:10px;background:linear-gradient(135deg,#00c9b7,#159dff);color:#03101a;text-decoration:none;font-weight:700;">เปิด Panthorium</a>`;
             const html = `
                 <div style="padding:24px;text-align:center;line-height:1.7;">
                     <div style="font-size:42px;margin-bottom:8px;">🌐</div>
@@ -2258,7 +2263,7 @@
             createWindow("browser-download", "ติดตั้ง Panthorium", html, { width: 440, height: 360 });
             return;
         }
-        window.open(BROWSER_RELEASE_URL, "_blank", "noopener,noreferrer");
+        window.open(browserDownloadUrl(), "_blank", "noopener,noreferrer");
     }
 
     const APP_LIST = [

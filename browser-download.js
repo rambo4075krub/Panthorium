@@ -9,7 +9,15 @@
   ];
 
   const params = new URLSearchParams(location.search);
-  let edition = params.get('edition') === 'admin' ? 'admin' : 'user';
+  function detectEdition() {
+    if (params.get('edition') === 'admin') return 'admin';
+    if (params.get('edition') === 'user') return 'user';
+    try {
+      if (/\/admin\b/i.test(document.referrer || '')) return 'admin';
+    } catch (_) {}
+    return 'user';
+  }
+  let edition = detectEdition();
   const status = document.getElementById('status');
   const downloads = document.getElementById('downloads');
   const title = document.getElementById('title');
