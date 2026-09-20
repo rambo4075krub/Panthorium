@@ -1816,6 +1816,7 @@
             if (!res.ok) throw new Error("guest auth failed");
             const data = await res.json();
             OS.config.accessToken = data.accessToken || "";
+            OS.state.user = data.user || null;
             return !!OS.config.accessToken;
         } catch (e) {
             console.warn("Authentication unavailable:", e.message);
@@ -1827,8 +1828,8 @@
     let sessionRefreshInFlight = null;
     async function authorizedFetch(url, options = {}) {
         const principal = () => OS.state.user?.id || OS.state.user?.sub || "";
+        if (!(await ensureAuth())) throw new Error("authentication_required");
         const owner = principal();
-        await ensureAuth();
         const headers = new Headers(options.headers || {});
         if (OS.config.accessToken) headers.set("Authorization", `Bearer ${OS.config.accessToken}`);
         let res = await fetch(url, { ...options, headers, credentials: "include" });
