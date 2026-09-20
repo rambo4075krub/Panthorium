@@ -2459,11 +2459,22 @@
                 userSpeechActive = false;
                 micBtn.classList.remove("listening");
                 const code = event?.error || "";
-                if (code === "no-speech") toast("ยังไม่ได้ยินเสียง พูดอีกครั้งได้");
-                else if (code === "not-allowed" || code === "service-not-allowed") toast("กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์");
-                else if (code === "network") toast("รู้จำเสียงต้องใช้อินเทอร์เน็ต — ตรวจการเชื่อมต่อ");
-                else if (code !== "aborted") window.PanthoriumVoice?.recognitionFailure(event);
-                else window.PanthoriumVoice?.resume();
+                if (code === "no-speech") {
+                    toast("ยังไม่ได้ยินเสียง พูดอีกครั้งได้");
+                    window.PanthoriumVoice?.resume();
+                } else if (code === "aborted") {
+                    window.PanthoriumVoice?.resume();
+                } else if (typeof window.PanthoriumVoice?.recognitionFailure === "function") {
+                    // Route through the global handler so Electron network latch
+                    // and toast wording stay consistent with hands-free mode.
+                    window.PanthoriumVoice.recognitionFailure(event);
+                } else if (code === "not-allowed" || code === "service-not-allowed") {
+                    toast("กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์");
+                } else if (code === "network") {
+                    toast("รู้จำเสียงต้องใช้อินเทอร์เน็ต — ตรวจการเชื่อมต่อ");
+                } else {
+                    toast("รู้จำเสียงไม่สำเร็จ ลองใหม่");
+                }
             };
         }
 
