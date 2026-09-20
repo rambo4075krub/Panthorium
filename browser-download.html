@@ -1,1 +1,61 @@
-<!doctype html><html lang="th"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ดาวน์โหลด Panthorium Browser</title><style>body{background:#080d15;color:#edf3fb;font:18px system-ui;max-width:720px;margin:60px auto;padding:24px}img{width:80px}a{color:#59dfcf;display:block;margin:20px 0}p{line-height:1.7}</style><img src="/panthorium-logo.svg" alt="Panthorium"><h1>ดาวน์โหลด Panthorium Browser</h1><p id="status">กำลังตรวจตัวติดตั้งที่พร้อมดาวน์โหลด…</p><div id="downloads"></div><p>รุ่น Admin ต้องเข้าสู่ระบบด้วยบัญชีที่มีสิทธิ์ผู้ดูแล รุ่น User เปิดหน้าผู้ใช้ทั่วไป แต่ละรุ่นเก็บ session แยกกัน</p><p>ตัวติดตั้งหน้านี้สำหรับ Windows, macOS และ Linux เท่านั้น</p><script src="/browser-download.js"></script></html>
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#00ffcc">
+  <title>ดาวน์โหลด Panthorium Browser</title>
+  <link rel="manifest" href="/manifest.json">
+  <style>
+    :root { --bg:#080d15; --card:#101826; --line:rgba(255,255,255,.08); --text:#edf3fb; --dim:#8b9bb4; --accent:#59dfcf; --accent2:#00ffcc; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:radial-gradient(1200px 600px at 50% -10%, #122033 0%, var(--bg) 55%); color:var(--text); font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif; min-height:100vh; }
+    .wrap { max-width:980px; margin:0 auto; padding:40px 20px 80px; }
+    header { display:flex; gap:16px; align-items:center; margin-bottom:28px; }
+    header img { width:64px; height:64px; }
+    h1 { margin:0; font-size:28px; font-weight:600; letter-spacing:.02em; }
+    .sub { color:var(--dim); margin:6px 0 0; }
+    .badge { display:inline-flex; align-items:center; gap:6px; margin-top:10px; padding:4px 10px; border-radius:999px; border:1px solid rgba(89,223,207,.35); color:var(--accent); font-size:12px; letter-spacing:.04em; }
+    .tabs { display:flex; gap:8px; flex-wrap:wrap; margin:24px 0 18px; }
+    .tab { border:1px solid var(--line); background:transparent; color:var(--text); border-radius:10px; padding:8px 14px; cursor:pointer; }
+    .tab.active { background:rgba(89,223,207,.12); border-color:rgba(89,223,207,.4); color:var(--accent2); }
+    #status { color:var(--dim); margin:0 0 18px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:14px; }
+    .card { background:rgba(16,24,38,.92); border:1px solid var(--line); border-radius:16px; padding:18px; display:flex; flex-direction:column; gap:10px; min-height:180px; }
+    .card h2 { margin:0; font-size:18px; display:flex; align-items:center; gap:8px; }
+    .card .meta { color:var(--dim); font-size:13px; }
+    .card .ver { font-variant-numeric:tabular-nums; color:var(--accent2); font-weight:500; }
+    .card .actions { margin-top:auto; display:flex; flex-direction:column; gap:8px; }
+    a.btn, button.btn { appearance:none; border:none; border-radius:10px; padding:11px 14px; font:inherit; cursor:pointer; text-decoration:none; text-align:center; }
+    a.btn.primary, button.btn.primary { background:linear-gradient(90deg,#00ffcc,#00aaff); color:#041018; font-weight:600; }
+    a.btn.ghost, button.btn.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
+    a.btn.disabled, button.btn.disabled { opacity:.45; pointer-events:none; }
+    .note { margin-top:28px; color:var(--dim); font-size:14px; line-height:1.7; }
+    .note strong { color:var(--text); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <img src="/panthorium-logo.svg" alt="Panthorium">
+      <div>
+        <h1 id="title">ดาวน์โหลด Panthorium Browser</h1>
+        <p class="sub">เลือกระบบปฏิบัติการ — แสดงเฉพาะเวอร์ชันล่าสุด</p>
+        <div class="badge">Latest only · Windows · macOS · Linux · Android · iOS</div>
+      </div>
+    </header>
+    <div class="tabs" id="edition-tabs">
+      <button type="button" class="tab active" data-edition="user">User</button>
+      <button type="button" class="tab" data-edition="admin">Admin</button>
+    </div>
+    <p id="status">กำลังตรวจตัวติดตั้งที่พร้อมดาวน์โหลด…</p>
+    <div class="grid" id="downloads"></div>
+    <div class="note">
+      <p><strong>เดสก์ท็อป:</strong> ดาวน์โหลดตัวติดตั้งล่าสุดสำหรับ Windows (.exe), macOS (.dmg) และ Linux (.AppImage)</p>
+      <p><strong>สมาร์ทโฟน:</strong> ใช้ PWA ติดตั้งจากเบราว์เซอร์ได้ทันที หรือรอแพ็กเกจ native สำหรับ Google Play / App Store (ต้องมีบัญชีนักพัฒนาและผ่านการรีวิวของสโตร์)</p>
+      <p>รุ่น Admin ต้องเข้าสู่ระบบด้วยบัญชีผู้ดูแล · รุ่น User สำหรับผู้ใช้ทั่วไป · session แยกกัน</p>
+    </div>
+  </div>
+  <script src="/browser-download.js"></script>
+</body>
+</html>

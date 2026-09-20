@@ -234,9 +234,24 @@ app.get("/browser-releases.json", async (req, res) => {
     });
     if (!upstream.ok) return res.status(503).json({ error: "release_unavailable" });
     const release = await upstream.json();
-    res.set("Cache-Control", "public, max-age=60").json({ assets: (release.assets || []).map(asset => ({
-      name: asset.name, browser_download_url: asset.browser_download_url
-    })) });
+    // Optional public store URLs when native apps are published (Play / App Store).
+    const storeLinks = {
+      android: process.env.PLAY_STORE_URL || "",
+      ios: process.env.APP_STORE_URL || ""
+    };
+    res.set("Cache-Control", "public, max-age=60").json({
+      version: require("./package.json").version,
+      tag: release.tag_name || "staging",
+      publishedAt: release.published_at || null,
+      storeLinks,
+      assets: (release.assets || []).map(asset => ({
+        name: asset.name,
+        browser_download_url: asset.browser_download_url,
+        size: asset.size,
+        content_type: asset.content_type,
+        updated_at: asset.updated_at
+      }))
+    });
   } catch (_) { res.status(503).json({ error: "release_unavailable" }); }
 });
 app.get("/", serveShell);

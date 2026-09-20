@@ -7,9 +7,12 @@ const directory=path.resolve(process.argv[2]||'dist');
 const releaseBase='https://github.com/rambo4075krub/Panthorium/releases/download/staging/';
 
 function detectPlatform(name){
-  if(name.endsWith('.exe'))return 'windows';
-  if(name.endsWith('.dmg'))return 'macos';
-  if(name.endsWith('.AppImage'))return 'linux';
+  const lower=String(name||'').toLowerCase();
+  if(lower.endsWith('.exe')||/[-_]windows([-_.]|$)/.test(lower))return 'windows';
+  if(lower.endsWith('.dmg')||/[-_](macos|darwin|osx)([-_.]|$)/.test(lower))return 'macos';
+  if(lower.endsWith('.appimage')||/[-_]linux([-_.]|$)/.test(lower))return 'linux';
+  if(lower.endsWith('.apk')||lower.endsWith('.aab')||/[-_]android([-_.]|$)/.test(lower))return 'android';
+  if(lower.endsWith('.ipa')||/[-_]ios([-_.]|$)/.test(lower))return 'ios';
   return null;
 }
 

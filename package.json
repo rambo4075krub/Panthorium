@@ -34,7 +34,7 @@
   "build": {
     "appId": "com.panthorium.browser",
     "productName": "Panthorium Browser",
-    "artifactName": "Panthorium-Browser-Setup-${version}.${ext}",
+    "artifactName": "Panthorium-Browser-${version}-${os}-${arch}.${ext}",
     "asar": true,
     "files": [
       "electron/**/*",

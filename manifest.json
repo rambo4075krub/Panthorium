@@ -1,7 +1,7 @@
 {
   "name": "Panthorium Browser",
   "short_name": "Panthorium",
-  "description": "Panthorium Browser สำหรับเปิด Panthorium OS",
+  "description": "Panthorium Browser สำหรับ Windows, macOS, Linux, Android และ iOS",
   "start_url": "/",
   "display": "standalone",
   "orientation": "any",
@@ -18,7 +18,8 @@
   ],
   "categories": [
     "productivity",
-    "utilities"
+    "utilities",
+    "browsers"
   ],
   "screenshots": [],
   "scope": "/",
@@ -27,5 +28,6 @@
     "standalone",
     "fullscreen"
   ],
-  "prefer_related_applications": false
+  "prefer_related_applications": false,
+  "related_applications": []
 }
