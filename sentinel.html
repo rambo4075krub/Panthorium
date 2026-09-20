@@ -1550,9 +1550,17 @@
                         } catch (error) {
                             console.warn("[Sentinel transcription]", error);
                             voiceState = "idle";
-                            const message = error?.message === "transcription_provider_unavailable"
-                                ? "Staging ยังไม่ได้ตั้งค่า AI/Whisper provider"
-                                : "ถอดเสียงไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตและไมโครโฟน";
+                            const message = ({
+                                transcription_provider_unavailable: "บริการถอดเสียงยังไม่ได้เชื่อมต่อผู้ให้บริการ AI",
+                                transcription_unavailable: "บริการถอดเสียงตอบกลับผิดพลาด กรุณาลองอีกครั้ง",
+                                invalid_audio: "รูปแบบหรือขนาดเสียงไม่ถูกต้อง ลองพูดให้สั้นลง",
+                                audio_too_large: "เสียงยาวเกินไป ลองพูดให้สั้นลง",
+                                authentication_required: "เซสชันยังไม่พร้อม กรุณาลองอีกครั้ง",
+                                invalid_or_expired_token: "เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง",
+                                voice_session_changed: "เริ่มเซสชันใหม่แล้ว กรุณาพูดอีกครั้ง"
+                            })[error?.message] || (error?.name === "TimeoutError" || error?.name === "AbortError"
+                                ? "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง"
+                                : "ส่งเสียงไปยังบริการถอดเสียงไม่สำเร็จ กรุณาตรวจการเชื่อมต่อ");
                             status("unresponsive", message);
                             restartListening();
                         }
