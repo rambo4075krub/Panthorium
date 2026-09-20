@@ -7,5 +7,6 @@ contextBridge.exposeInMainWorld('panthoriumDesktop',Object.freeze({
   bridgeVersion:'5',
   transcribeAudio:(audio,language,token)=>ipcRenderer.invoke('panthorium:transcribe',{audio,language,token}),
   getAppInfo:()=>ipcRenderer.invoke('panthorium:app-info'),
+  getUpdateStatus:()=>ipcRenderer.invoke('panthorium:update-status'),
   checkForUpdates:()=>ipcRenderer.invoke('panthorium:check-updates')
 }));

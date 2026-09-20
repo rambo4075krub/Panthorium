@@ -27,8 +27,9 @@
     { id: 'external-instagram', key: 'external_instagram', label: 'Instagram', permission: 'chat', aliases: ['Instagram', 'อินสตาแกรม', 'ไอจี'], selector: '.window[data-id="external-instagram"]', opener: 'PanthoriumExternalApps.openInstagram', windowId: 'external-instagram', external: true, externalUrl: 'https://www.instagram.com/' },
     { id: 'external-x', key: 'external_x', label: 'X', permission: 'chat', aliases: ['X', 'Twitter', 'ทวิตเตอร์'], selector: '.window[data-id="external-x"]', opener: 'PanthoriumExternalApps.openX', windowId: 'external-x', external: true, externalUrl: 'https://x.com/' }
   ];
+  const guestRestrictedIds = new Set(['settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control']);
   function allowed(app, user) {
-    return !!app && (user?.permissions || []).includes(app.permission) && (!app.role || (user?.roles || []).includes(app.role));
+    return !!app && !((user?.roles || []).includes('guest') && guestRestrictedIds.has(app.id)) && (user?.permissions || []).includes(app.permission) && (!app.role || (user?.roles || []).includes(app.role));
   }
   const normalize = text => String(text || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
   const aliases = apps.flatMap(app => app.aliases.map(alias => ({ app, alias: normalize(alias) }))).sort((a, b) => b.alias.length - a.alias.length);

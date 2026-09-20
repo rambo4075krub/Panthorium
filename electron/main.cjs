@@ -48,14 +48,19 @@ function installVoiceBridge(){
     try{return await postTranscription({audio,language,token});}
     catch(error){return {status:502,data:{ok:false,error:error.message==='transcription_timeout'?'transcription_timeout':('electron_upload_failed:'+String(error.code||error.message||'network').slice(0,80))}};}
   });
-  ipcMain.handle('panthorium:app-info',()=>({
+  ipcMain.handle('panthorium:app-info',event=> trustedOrigin(event.senderFrame?.url||event.sender.getURL()) ? ({
     version:app.getVersion(),
     edition:EDITION,
     platform:process.platform,
     packaged:app.isPackaged,
     productName:PRODUCT_NAME
-  }));
-  ipcMain.handle('panthorium:check-updates',async()=>{
+  }) : ({ok:false,error:'untrusted_origin'}));
+  ipcMain.handle('panthorium:update-status',async event=>{
+    if(!trustedOrigin(event.senderFrame?.url||event.sender.getURL())) return {ok:false,error:'untrusted_origin'};
+    return checkForUpdates({checkOnly:true});
+  });
+  ipcMain.handle('panthorium:check-updates',async event=>{
+    if(!trustedOrigin(event.senderFrame?.url||event.sender.getURL())) return {ok:false,error:'untrusted_origin'};
     try{return await checkForUpdates({manual:true});}
     catch(error){return {ok:false,error:String(error.message||error)};}
   });
@@ -126,14 +131,16 @@ async function checkForUpdates(options={}){
     const remote=String(manifest.version||'');
     if(!remote)throw new Error('manifest_missing_version');
     if(!newerVersion(current,remote)){
-      if(manual){
+      if(manual&&!options.checkOnly){
         await dialog.showMessageBox({type:'info',title:PRODUCT_NAME,message:'คุณใช้รุ่นล่าสุดแล้ว',detail:'เวอร์ชันปัจจุบัน '+current});
       }
-      return {ok:true,upToDate:true,current,remote};
+      return {ok:true,upToDate:true,available:false,current,remote};
     }
     const asset=manifest?.assets?.[platform];
     if(!asset||!asset.url||!asset.sha256||!asset.name)throw new Error('manifest_missing_'+platform);
     if(!trustedUpdateUrl(asset.url))throw new Error('untrusted_update_url');
+    // Rendering the Start Menu must never download an installer or open a dialog.
+    if(options.checkOnly)return {ok:true,upToDate:false,available:true,current,remote,platform};
     const binaryResponse=await net.fetch(asset.url,{cache:'no-store'});
     if(!binaryResponse.ok)throw new Error('update_http_'+binaryResponse.status);
     const expected=Number(binaryResponse.headers.get('content-length')||asset.size||0);
@@ -172,7 +179,7 @@ async function checkForUpdates(options={}){
     return {ok:true,deferred:true,current,remote,platform};
   }catch(error){
     console.warn('[Panthorium Update]',error.message);
-    if(manual){
+    if(manual&&!options.checkOnly){
       await dialog.showMessageBox({
         type:'warning',
         title:PRODUCT_NAME,

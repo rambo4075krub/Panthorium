@@ -721,7 +721,7 @@
 
     <!-- DESKTOP -->
     <div id="desktop">
-        <div id="version-badge" aria-label="เวอร์ชัน">15.0.3</div>
+        <div id="version-badge" aria-label="เวอร์ชัน">15.0.4</div>
         <canvas id="bg-canvas"></canvas>
         <section id="orb-transcript" tabindex="0" role="region" aria-label="ข้อความประกอบเสียงตอบของ AI">
             <div class="orb-transcript-line previous" data-orb-line="previous" aria-label="ประโยคก่อนหน้า"></div>
@@ -784,7 +784,7 @@
     const OS = {
         // Web OS shell build (shown in About). Browser app version is releaseVersion.
         version: "1.1.0",
-        releaseVersion: "15.0.3",
+        releaseVersion: "15.0.4",
         state: {
             booted: false,
             loggedIn: false,
@@ -2263,8 +2263,7 @@
 
     const APP_LIST = [
         { id: "sentinel", name: "Sentinel AI", icon: "🤖", open: openSentinel },
-        { id: "settings", name: "ตั้งค่า", icon: "⚙️", open: openSettings },
-        { id: "browser-download", name: "ติดตั้ง Panthorium", icon: "🌐", visible: () => !isAdminShell, open: openBrowserDownload }
+        { id: "settings", name: "ตั้งค่า", icon: "⚙️", open: openSettings }
     ];
 
     function visibleApps() {

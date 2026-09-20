@@ -2,6 +2,7 @@ const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { randomUUID } = require("crypto");
 const { requireAuth, requirePermission } = require("../middleware/auth");
+const { denyGuest } = require("../middleware/guestAccess");
 const { synthesizeSentinelMaleVoice } = require("../services/sentinelSpeechAudio");
 function validText(value, max) { return typeof value === "string" && value.trim().length > 0 && value.length <= max; }
 function validChatBody(body = {}) {
@@ -17,6 +18,7 @@ function hasVoicePermission(user, permission) { return (user?.permissions || [])
 
 function createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler) {
   const router = express.Router(); const auth = requireAuth(authService);
+  router.use(['/ai', '/agent'], auth, denyGuest);
   const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
   const speechLimiter = rateLimit({ windowMs: 60 * 1000, limit: 90, standardHeaders: true, legacyHeaders: false });
   const agentLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
@@ -153,6 +155,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       const text = command.trim();
       const statusCommand = /^(?:ขอ|ช่วย)?(?:แสดง|ตรวจ|ตรวจสอบ|เช็ค|เช็ก)?สถานะระบบ(?:หน่อย|ครับ|ค่ะ)?$/.test(windowCatalog.normalize(text)) || /^(?:show |check )?system status[.!]?$/i.test(text);
       const search = /^(?:ค้นความรู้|ค้นหาความรู้|ค้นในคลังความรู้|search knowledge)\s+(.+)$/i.exec(text);
+      if (search && req.user.roles?.includes('guest')) return res.status(403).json({ ok: false, error: 'voice_action_permission_denied' });
       if (statusCommand || search) {
         const execution = await agentService.execute({ user: req.user, toolId: statusCommand ? 'system.status' : 'knowledge.search', args: statusCommand ? {} : { query: search[1].trim() }, requestId: req.requestId });
         return res.status(execution.ok ? 200 : execution.error === 'tool_permission_denied' ? 403 : 422).json({ ok: execution.ok, error: execution.error, executed: execution.ok, completed: execution.ok, results: [execution] });

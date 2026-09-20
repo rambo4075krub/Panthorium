@@ -28,7 +28,7 @@ const { JSDOM } = require('jsdom');
   assert.equal(sessionResponse.status, 200);
   const session = await sessionResponse.json();
   assert(session.accessToken);
-  for (const [command, expected] of [['เปิด AI Platform', 'open_ai_dashboard'], ['ปิด AI Platform', 'close_ai_dashboard']]) {
+  for (const [command, expected] of [['เปิด Sentinel AI', 'open_sentinel'], ['ปิด Sentinel AI', 'close_sentinel']]) {
     const response = await post('/api/sentinel/command', { command }, session.accessToken);
     assert.equal(response.status, 200, command);
     const data = await response.json();
@@ -39,5 +39,6 @@ const { JSDOM } = require('jsdom');
   const forbidden = await post('/api/sentinel/command', { command: 'เปิด Learning Lab' }, session.accessToken);
   assert.equal(forbidden.status, 403);
   assert.equal((await forbidden.json()).error, 'voice_action_permission_denied');
+  assert.equal((await post('/api/sentinel/command', { command: 'เปิด AI Platform' }, session.accessToken)).status, 403);
   console.log('Staging: tested inline voice runtime matches; command assets loaded; unauthenticated denied; guest open/close instructions correct; administrator window denied. Live AI/TTS/audio acceptance is still required.');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });
