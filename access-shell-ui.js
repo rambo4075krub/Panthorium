@@ -9,6 +9,11 @@ function stagingAdmin(){return location.hostname==='panthorium-staging.onrender.
 function sync(){
  const menu=document.getElementById('start-menu'); if(!menu)return;
  const isGuest=guest();
+ let download=document.getElementById('panthorium-browser-download');
+ if(!download){download=document.createElement('a');download.id='panthorium-browser-download';download.style.cssText='display:block;padding:12px;color:inherit';menu.appendChild(download);}
+ download.textContent=admin()?'ดาวน์โหลด Panthorium Browser Admin':'ดาวน์โหลด Panthorium Browser User';
+ download.href='/browser-download.html'+(admin()?'?edition=admin':'');
+ download.target='_blank';download.rel='noopener';
  BACKOFFICE_IDS.forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=isGuest?'none':'';});
  menu.querySelectorAll('button').forEach(btn=>{const text=(btn.textContent||'').trim();if(BACKOFFICE_WORDS.some(word=>text.includes(word)))btn.style.display=isGuest?'none':'';});
  const settingsQuick=document.getElementById('btn-settings-quick');if(settingsQuick)settingsQuick.style.display=(isGuest||stagingAdmin())?'none':'';
