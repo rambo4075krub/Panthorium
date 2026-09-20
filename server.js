@@ -225,6 +225,19 @@ function serveShell(req, res, next) {
   }
 }
 
+app.get("/browser-releases.json", async (req, res) => {
+  try {
+    const upstream = await fetch("https://api.github.com/repos/rambo4075krub/Panthorium/releases/tags/staging", {
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "Panthorium-Browser-Downloads" },
+      signal: AbortSignal.timeout(10000)
+    });
+    if (!upstream.ok) return res.status(503).json({ error: "release_unavailable" });
+    const release = await upstream.json();
+    res.set("Cache-Control", "public, max-age=60").json({ assets: (release.assets || []).map(asset => ({
+      name: asset.name, browser_download_url: asset.browser_download_url
+    })) });
+  } catch (_) { res.status(503).json({ error: "release_unavailable" }); }
+});
 app.get("/", serveShell);
 app.get("/sentinel.html", serveShell);
 app.get("/admin", serveShell);
