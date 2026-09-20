@@ -1487,29 +1487,78 @@
             };
             const transcribeRecorderBlob = async blob => {
                 const audio = await toDataUrl(blob);
-                let data;
-                let statusCode;
-                if (electronVoice) {
-                    if (Number(window.panthoriumDesktop?.bridgeVersion || 0) < 4 || typeof window.panthoriumDesktop?.transcribeAudio !== "function") throw new Error("browser_update_required");
-                    if (!(await ensureAuth())) throw new Error("authentication_required");
-                    let result = await window.panthoriumDesktop.transcribeAudio(audio, "th-TH", OS.config.accessToken);
-                    if (result?.status === 401 && await ensureAuth(true)) {
-                        result = await window.panthoriumDesktop.transcribeAudio(audio, "th-TH", OS.config.accessToken);
-                    }
-                    data = result?.data || {};
-                    statusCode = Number(result?.status || 500);
-                } else {
+                const transcribeDirect = async () => {
                     const base = OS.config.backendUrl.replace(/\/$/, "");
                     const response = await authorizedFetch(base + "/api/speech/transcribe", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ audio, language: "th-TH" }),
-                        signal: AbortSignal.timeout(35000)
+                        signal: AbortSignal.timeout(35000),
+                        cache: "no-store"
                     });
-                    data = await response.json().catch(() => ({}));
-                    statusCode = response.status;
+                    return {
+                        data: await response.json().catch(() => ({})),
+                        statusCode: response.status
+                    };
+                };
+
+                let data;
+                let statusCode;
+
+                if (electronVoice) {
+                    if (
+                        Number(window.panthoriumDesktop?.bridgeVersion || 0) < 4 ||
+                        typeof window.panthoriumDesktop?.transcribeAudio !== "function"
+                    ) throw new Error("browser_update_required");
+
+                    if (!(await ensureAuth())) throw new Error("authentication_required");
+
+                    try {
+                        let result = await window.panthoriumDesktop.transcribeAudio(
+                            audio,
+                            "th-TH",
+                            OS.config.accessToken
+                        );
+
+                        if (result?.status === 401 && await ensureAuth(true)) {
+                            result = await window.panthoriumDesktop.transcribeAudio(
+                                audio,
+                                "th-TH",
+                                OS.config.accessToken
+                            );
+                        }
+
+                        const bridgeError = String(result?.data?.error || "");
+
+                        if (
+                            !result ||
+                            bridgeError.startsWith("electron_upload_failed") ||
+                            bridgeError === "invalid_server_response"
+                        ) {
+                            throw new Error(bridgeError || "electron_bridge_empty");
+                        }
+
+                        data = result.data || {};
+                        statusCode = Number(result.status || 500);
+                    } catch (bridgeError) {
+                        console.warn(
+                            "[Sentinel transcription bridge fallback]",
+                            bridgeError?.message || bridgeError
+                        );
+                        ({ data, statusCode } = await transcribeDirect());
+                    }
+                } else {
+                    ({ data, statusCode } = await transcribeDirect());
                 }
-                if (statusCode < 200 || statusCode >= 300 || !data.ok || typeof data.text !== "string" || !data.text.trim()) throw new Error(data.error || "transcription_unavailable");
+
+                if (
+                    statusCode < 200 ||
+                    statusCode >= 300 ||
+                    !data.ok ||
+                    typeof data.text !== "string" ||
+                    !data.text.trim()
+                ) throw new Error(data.error || "transcription_unavailable");
+
                 return data.text.trim();
             };
             const finishRecorder = ({ discard = false } = {}) => {
