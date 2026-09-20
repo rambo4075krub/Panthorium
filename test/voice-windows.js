@@ -44,6 +44,8 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
   const dom = new JSDOM(source('sentinel.html'), { url: 'https://panthorium-backend-staging.example.run.app/admin', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
   const w = dom.window;
   const context = dom.getInternalVMContext();
+  const externalPopups = new Map();
+  Object.defineProperty(w, 'open', { configurable: true, writable: true, value: (url, name, features) => { const popup = { url, name, features, closed: false, focus() {}, close() { this.closed = true; } }; externalPopups.set(name, popup); return popup; } });
   const evaluate = code => vm.runInContext(code, context);
   const load = name => evaluate(source(name));
   let client = 1;
@@ -73,7 +75,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     load('phase2-auth.js'); await tick();
     await w.PanthoriumAuth.login('admin', 'fixture');
     w.document.getElementById('desktop').classList.add('active');
-    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-window-catalog.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumAIStream.install();
     const command = text => w.callAI(text, { voiceMode: true });
     const isVisible = app => { const el = w.document.querySelector(app.selector); return !!el && w.getComputedStyle(el).display !== 'none'; };
@@ -84,6 +86,13 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       assert.equal(result.text, `เปิด ${app.label}`, 'on-screen result identifies the command');
       assert.equal(isVisible(app), true, `${app.label} did not appear`);
       const root = w.document.querySelector(app.selector);
+      if (app.external) {
+        assert.equal(root.querySelector('iframe'), null, `${app.label}: must not embed an iframe`);
+        assert(root.querySelector('[data-external-open]'), `${app.label}: real-site opener missing`);
+        const popup = externalPopups.get(`panthorium-external-${app.id}`);
+        assert(popup, `${app.label}: real browser window was not opened`);
+        assert.equal(popup.url, app.externalUrl, `${app.label}: fixed external URL`);
+      }
       assert.equal((await command(`เปิด ${app.aliases[0]}`)).ok, true);
       assert.equal(w.document.querySelectorAll(app.selector).length, 1, `${app.label}: duplicate window`);
       if (app.refresher || app.refreshButton) assert.equal((await command(`รีเฟรช ${app.aliases[0]}`)).ok, true, `${app.label} refresh`);
@@ -91,6 +100,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       assert.equal(closed.ok, true);
       assert.equal(closed.text, `ปิด ${app.label}`);
       assert.equal(isVisible(app), false, `${app.label} stayed open`);
+      if (app.external) assert.equal(externalPopups.get(`panthorium-external-${app.id}`)?.closed, true, `${app.label}: browser window stayed open`);
       assert.equal((await command(`ปิด ${app.aliases[0]}`)).ok, true, 'close should be idempotent');
       assert.equal((await command(`เปิด ${app.aliases[0]}`)).ok, true);
       assert.equal(isVisible(app), true, `${app.label} did not reopen`);
@@ -103,7 +113,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       await command(`ปิด ${app.aliases[0]}`);
       assert(!root.isConnected || w.getComputedStyle(root).display === 'none');
     }
-    console.log('PASS: actual 13 module windows open, focus without duplicates, close, close twice, reopen; supported refresh and minimized restore');
+    console.log(`PASS: actual ${catalog.apps.length} registered windows open, focus without duplicates, close, close twice, reopen; supported refresh and minimized restore`);
 
     // Every registered module function must be callable through the same
     // authenticated command path. Mutating/costly controls stop at approval.

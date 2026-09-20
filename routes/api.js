@@ -2,6 +2,7 @@ const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { randomUUID } = require("crypto");
 const { requireAuth, requirePermission } = require("../middleware/auth");
+const { denyGuest } = require("../middleware/guestAccess");
 const { synthesizeSentinelMaleVoice } = require("../services/sentinelSpeechAudio");
 function validText(value, max) { return typeof value === "string" && value.trim().length > 0 && value.length <= max; }
 function validChatBody(body = {}) {
@@ -17,10 +18,11 @@ function hasVoicePermission(user, permission) { return (user?.permissions || [])
 
 function createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler) {
   const router = express.Router(); const auth = requireAuth(authService);
+  router.use(['/ai', '/agent'], auth, denyGuest);
   const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
   const speechLimiter = rateLimit({ windowMs: 60 * 1000, limit: 90, standardHeaders: true, legacyHeaders: false });
   const agentLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
-  router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", sentinel: sentinel.status(), time: new Date().toISOString() }));
+  router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", release: process.env.K_REVISION || process.env.PANTHORIUM_RELEASE || require("../package.json").version, sentinel: sentinel.status(), time: new Date().toISOString() }));
   router.get("/sentinel/status", auth, requirePermission("system:read"), (req, res) => res.json({ ok: true, ...sentinel.status() }));
   router.get("/ai/providers", auth, requirePermission("chat"), (req, res) => res.json({ ok: true, providers: sentinel.providerCatalog() }));
   router.get("/ai/operations", auth, requirePermission("chat"), async (req, res, next) => { try { res.json({ ok: true, metrics: await aiOperations.overview(req.user.sub, req.query.hours) }); } catch (error) { next(error); } });
@@ -62,6 +64,21 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     }
   });
   router.get("/agent/tools", auth, agentLimiter, (req, res) => res.json({ ok: true, tools: agentService.catalogFor(req.user) }));
+  router.post("/speech/transcribe", auth, requirePermission("chat"), speechLimiter, async (req, res) => {
+    try {
+      const value = typeof req.body?.audio === "string" ? req.body.audio : "";
+      const match = /^data:(audio\/[a-z0-9.+-]+)(?:;[^,]*)?;base64,([A-Za-z0-9+/=]+)$/i.exec(value);
+      if (!match || match[2].length > 700000) return res.status(400).json({ ok: false, error: "invalid_audio" });
+      const audio = Buffer.from(match[2], "base64");
+      if (!audio.length || audio.length > 512 * 1024) return res.status(413).json({ ok: false, error: "audio_too_large" });
+      const result = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language);
+      res.json({ ok: true, text: result.text, provider: result.provider, model: result.model });
+    } catch (error) {
+      audit.record("sentinel.transcription_failed", { userId: req.user?.sub, error: error.message });
+      const code = error?.code === "transcription_provider_unavailable" ? error.code : "transcription_unavailable";
+      res.status(code === "transcription_provider_unavailable" ? 503 : 502).json({ ok: false, error: code });
+    }
+  });
   router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { res.json({ ok: true, runs: await agentRuns.list(req.user.sub, Number(req.query.limit) || 30) }); } catch (error) { next(error); } });
   router.get("/agent/runs/:workflowId", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { if (!validText(req.params.workflowId, 80)) return res.status(400).json({ ok: false, error: "invalid_workflow_id" }); const run = await agentRuns.get(req.user.sub, req.params.workflowId); if (!run) return res.status(404).json({ ok: false, error: "agent_run_not_found" }); res.json({ ok: true, run }); } catch (error) { next(error); } });
   router.get("/agent/jobs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { res.json({ ok: true, jobs: await agentScheduler.list(req.user.sub, Number(req.query.limit) || 30) }); } catch (error) { next(error); } });
@@ -138,6 +155,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       const text = command.trim();
       const statusCommand = /^(?:ขอ|ช่วย)?(?:แสดง|ตรวจ|ตรวจสอบ|เช็ค|เช็ก)?สถานะระบบ(?:หน่อย|ครับ|ค่ะ)?$/.test(windowCatalog.normalize(text)) || /^(?:show |check )?system status[.!]?$/i.test(text);
       const search = /^(?:ค้นความรู้|ค้นหาความรู้|ค้นในคลังความรู้|search knowledge)\s+(.+)$/i.exec(text);
+      if (search && req.user.roles?.includes('guest')) return res.status(403).json({ ok: false, error: 'voice_action_permission_denied' });
       if (statusCommand || search) {
         const execution = await agentService.execute({ user: req.user, toolId: statusCommand ? 'system.status' : 'knowledge.search', args: statusCommand ? {} : { query: search[1].trim() }, requestId: req.requestId });
         return res.status(execution.ok ? 200 : execution.error === 'tool_permission_denied' ? 403 : 422).json({ ok: execution.ok, error: execution.error, executed: execution.ok, completed: execution.ok, results: [execution] });

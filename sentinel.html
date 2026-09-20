@@ -8,6 +8,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-capable" content="yes">
     <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/svg+xml" href="/panthorium-logo.svg">
+    <link rel="apple-touch-icon" href="/panthorium-logo.svg">
     <title>Panthorium OS</title>
     <style>
         :root {
@@ -296,6 +298,31 @@
             border-radius: 50%;
             background: var(--success);
             box-shadow: 0 0 6px var(--success);
+        }
+
+        /* Version number — top-right, plain digits matching orb cyan */
+        #version-badge {
+            position: fixed;
+            top: max(12px, env(safe-area-inset-top, 0px));
+            right: max(14px, env(safe-area-inset-right, 0px));
+            z-index: 7500;
+            pointer-events: none;
+            user-select: none;
+            margin: 0;
+            padding: 0;
+            border: none;
+            background: none;
+            box-shadow: none;
+            backdrop-filter: none;
+            font-size: 13px;
+            font-weight: 300;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.08em;
+            color: #7adfff;
+            text-shadow: 0 0 12px rgba(0, 170, 255, 0.35);
+            line-height: 1;
+            white-space: nowrap;
+            opacity: 0.85;
         }
 
         /* ========== START MENU ========== */
@@ -682,7 +709,7 @@
 
     <!-- BOOT -->
     <div id="boot-screen">
-        <div class="boot-logo"><div style="width:50px;height:50px;background:var(--accent);border-radius:50%;opacity:0.4;"></div></div>
+        <div class="boot-logo"><img src="/panthorium-logo.svg" data-panthorium-logo alt="Panthorium" style="width:100%;height:100%;object-fit:contain;"></div>
         <div class="boot-title">PANTHORIUM</div>
         <div class="boot-sub">OPERATING SYSTEM</div>
         <div class="boot-progress"><div class="boot-bar" id="boot-bar"></div></div>
@@ -694,6 +721,7 @@
 
     <!-- DESKTOP -->
     <div id="desktop">
+        <div id="version-badge" aria-label="เวอร์ชัน">15.0.4</div>
         <canvas id="bg-canvas"></canvas>
         <section id="orb-transcript" tabindex="0" role="region" aria-label="ข้อความประกอบเสียงตอบของ AI">
             <div class="orb-transcript-line previous" data-orb-line="previous" aria-label="ประโยคก่อนหน้า"></div>
@@ -711,7 +739,7 @@
         <!-- Start Menu -->
         <div id="start-menu">
             <div class="sm-header">
-                <div class="sm-avatar">🛡️</div>
+                <div class="sm-avatar"><img src="/panthorium-logo.svg" data-panthorium-logo alt="Panthorium" style="width:32px;height:32px;object-fit:contain;"></div>
                 <div>
                     <div class="sm-user">ผู้ใช้ทั่วไป</div>
                     <div class="sm-status" id="sm-status">Online · ฟรี</div>
@@ -745,8 +773,18 @@
     // =========================================================
     // Panthorium OS - Sentinel Runtime
     // =========================================================
+    function defaultBackendOrigin() {
+        // The installed Electron shell loads the OS from the configured remote
+        // origin. Prefer that origin over an old localStorage override so API
+        // calls stay same-origin and do not hit the staging CORS boundary.
+        if (window.panthoriumDesktop?.isElectron && /^https?:$/.test(window.location.protocol)) return window.location.origin;
+        const stored = localStorage.getItem("pt_backend_url");
+        return stored || (/^https?:$/.test(window.location.protocol) ? window.location.origin : "http://localhost:8787");
+    }
     const OS = {
+        // Web OS shell build (shown in About). Browser app version is releaseVersion.
         version: "1.1.0",
+        releaseVersion: "15.0.4",
         state: {
             booted: false,
             loggedIn: false,
@@ -755,7 +793,7 @@
         },
         config: {
             // Backend / Sentinel
-            backendUrl: localStorage.getItem("pt_backend_url") || window.location.origin,
+            backendUrl: defaultBackendOrigin(),
             useBackend: localStorage.getItem("pt_use_backend") !== "0",
             sessionId: localStorage.getItem("pt_session_id") || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
             // Access token stays in memory only; provider secrets remain server-side.
@@ -796,6 +834,26 @@
     }
     setInterval(updateClock, 10000);
     updateClock();
+
+    // ---------- Version number (top-right) — digits only, tracks release updates ----------
+    function renderVersionBadge(version) {
+        const badge = $("version-badge");
+        if (!badge) return;
+        const value = String(version || OS.releaseVersion || "").replace(/^v/i, "").trim();
+        if (!value) return;
+        OS.releaseVersion = value;
+        badge.textContent = value;
+        badge.setAttribute("aria-label", "เวอร์ชัน " + value);
+    }
+    renderVersionBadge(OS.releaseVersion);
+    (async () => {
+        try {
+            if (window.panthoriumDesktop?.getAppInfo) {
+                const info = await window.panthoriumDesktop.getAppInfo();
+                if (info?.version) renderVersionBadge(info.version);
+            }
+        } catch (_) {}
+    })();
 
     // ---------- Network Status ----------
     window.addEventListener("online", () => {
@@ -1418,8 +1476,11 @@
         if (!button || button.dataset.ready) return;
         button.dataset.ready = "1";
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const electronVoice = Boolean(window.panthoriumDesktop?.isElectron);
+        const recorderSupported = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
         let recognition = null;
         let autoResume = true;
+        let recognitionBlocked = false;
         let voiceState = "idle";
         let silenceTimer = null;
         let transcriptParts = new Map();
@@ -1436,6 +1497,285 @@
             if (row) { row.classList.add("active"); row.textContent = label; }
             if (announce) toast(label, kind === "processing" || kind === "unresponsive" ? 10000 : 2500);
         };
+        if (!SR && !recorderSupported) {
+            status("unsupported", "ไม่รองรับคำสั่ง");
+            button.onclick = () => status("unsupported", "ไม่รองรับคำสั่ง");
+            return;
+        }
+
+        // Assigned by the active voice path so processTranscript can resume listening.
+        let resumeAfterTranscript = () => {};
+        // Shared transcript handler (Web Speech + MediaRecorder)
+        const processTranscript = async text => {
+            const value = String(text || "").trim();
+            if (!value) {
+                voiceState = "idle";
+                status("unresponsive", "ยังไม่ได้ยินเสียง");
+                resumeAfterTranscript();
+                return;
+            }
+            voiceState = "processing";
+            status("processing", "กำลังประมวลผล");
+            try {
+                const { intent, response: res } = await requestVoiceInput(value);
+                if (!res || !res.ok || !res.text) {
+                    const reason = res?.text || "ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง";
+                    status("unresponsive", reason);
+                    return;
+                }
+                if (voiceResponseNeedsSpeech(intent, res)) {
+                    voiceState = "speaking";
+                    status("processing", res.confirmationRequired ? res.text : "กำลังเตรียมเสียงตอบ");
+                    if (!(await speakVoiceResponse(res.text))) {
+                        status("unresponsive", voicePlaybackFailure);
+                        return;
+                    }
+                }
+                status("ready", "พร้อมใช้งาน", intent === "conversation");
+            } catch (error) {
+                console.warn("Global voice command failed", error);
+                status("unresponsive", "ไม่ตอบสนอง");
+            } finally {
+                voiceState = "idle";
+                resumeAfterTranscript();
+            }
+        };
+
+        // Electron: Chromium SpeechRecognition almost always fails with "network"
+        // (Google cloud STT is not available like in Chrome). Prefer MediaRecorder
+        // + /api/speech/transcribe (Whisper via backend / Electron bridge).
+        // Regular browsers: prefer Web Speech API when available.
+        if (recorderSupported && (!SR || electronVoice)) {
+            let recorder = null;
+            let recorderStream = null;
+            let recorderChunks = [];
+            let recorderMime = "audio/webm";
+            let recorderContext = null;
+            let recorderAnalyser = null;
+            let recorderData = null;
+            let recorderMonitor = null;
+            let recorderStartedAt = 0;
+            let recorderLastVoiceAt = 0;
+
+            const restartListening = () => {
+                if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
+                setTimeout(() => {
+                    if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
+                    startRecorder();
+                }, 350);
+            };
+            resumeAfterTranscript = restartListening;
+
+            const cleanupRecorder = () => {
+                clearTimeout(recorderMonitor);
+                recorderMonitor = null;
+                recorderAnalyser = null;
+                recorderData = null;
+                if (recorderContext) { try { recorderContext.close(); } catch (_) {} }
+                recorderContext = null;
+                recorderStream?.getTracks?.().forEach(track => track.stop());
+                recorderStream = null;
+            };
+            const toDataUrl = async blob => {
+                const bytes = new Uint8Array(await blob.arrayBuffer());
+                let binary = "";
+                const step = 0x8000;
+                for (let offset = 0; offset < bytes.length; offset += step) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + step, bytes.length)));
+                const mimeType = String(blob.type || recorderMime).split(";")[0] || "audio/webm";
+                return "data:" + mimeType + ";base64," + btoa(binary);
+            };
+            const transcribeRecorderBlob = async blob => {
+                const audio = await toDataUrl(blob);
+                const transcribeDirect = async () => {
+                    const base = OS.config.backendUrl.replace(/\/$/, "");
+                    const response = await authorizedFetch(base + "/api/speech/transcribe", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ audio, language: "th-TH" }),
+                        signal: AbortSignal.timeout(35000),
+                        cache: "no-store"
+                    });
+                    return {
+                        data: await response.json().catch(() => ({})),
+                        statusCode: response.status
+                    };
+                };
+
+                let data;
+                let statusCode;
+
+                if (electronVoice) {
+                    if (
+                        Number(window.panthoriumDesktop?.bridgeVersion || 0) < 4 ||
+                        typeof window.panthoriumDesktop?.transcribeAudio !== "function"
+                    ) throw new Error("browser_update_required");
+
+                    if (!(await ensureAuth())) throw new Error("authentication_required");
+
+                    try {
+                        let result = await window.panthoriumDesktop.transcribeAudio(
+                            audio,
+                            "th-TH",
+                            OS.config.accessToken
+                        );
+
+                        if (result?.status === 401 && await ensureAuth(true)) {
+                            result = await window.panthoriumDesktop.transcribeAudio(
+                                audio,
+                                "th-TH",
+                                OS.config.accessToken
+                            );
+                        }
+
+                        const bridgeError = String(result?.data?.error || "");
+
+                        if (
+                            !result ||
+                            bridgeError.startsWith("electron_upload_failed") ||
+                            bridgeError === "invalid_server_response"
+                        ) {
+                            throw new Error(bridgeError || "electron_bridge_empty");
+                        }
+
+                        data = result.data || {};
+                        statusCode = Number(result.status || 500);
+                    } catch (bridgeError) {
+                        console.warn(
+                            "[Sentinel transcription bridge fallback]",
+                            bridgeError?.message || bridgeError
+                        );
+                        ({ data, statusCode } = await transcribeDirect());
+                    }
+                } else {
+                    ({ data, statusCode } = await transcribeDirect());
+                }
+
+                if (
+                    statusCode < 200 ||
+                    statusCode >= 300 ||
+                    !data.ok ||
+                    typeof data.text !== "string" ||
+                    !data.text.trim()
+                ) throw new Error(data.error || "transcription_unavailable");
+
+                return data.text.trim();
+            };
+            const finishRecorder = ({ discard = false } = {}) => {
+                if (!recorder || recorder.state !== "recording") return;
+                clearTimeout(recorderMonitor);
+                discardOnEnd = discard;
+                voiceState = "stopping";
+                if (!discard) status("processing", "ฟังจบแล้ว กำลังเตรียมประมวลผล");
+                try { recorder.stop(); } catch (_) { cleanupRecorder(); voiceState = "idle"; restartListening(); }
+            };
+            const monitorRecorder = () => {
+                if (!recorder || recorder.state !== "recording") return;
+                const now = performance.now();
+                if (recorderAnalyser && recorderData) {
+                    recorderAnalyser.getByteTimeDomainData(recorderData);
+                    let sum = 0;
+                    for (const value of recorderData) { const centered = (value - 128) / 128; sum += centered * centered; }
+                    if (Math.sqrt(sum / recorderData.length) > 0.025) recorderLastVoiceAt = now;
+                }
+                const quietLongEnough = recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 1400 && now - recorderStartedAt > 700;
+                if (quietLongEnough || now - recorderStartedAt > 15000) { finishRecorder({ discard: false }); return; }
+                recorderMonitor = setTimeout(monitorRecorder, 100);
+            };
+            const startRecorder = async () => {
+                if (!autoResume || voiceState !== "idle" || recorder) return;
+                try {
+                    recorderStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+                    const supportedMime = typeof MediaRecorder.isTypeSupported === "function"
+                        ? ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find(type => MediaRecorder.isTypeSupported(type))
+                        : "";
+                    recorderMime = supportedMime || "";
+                    recorderChunks = [];
+                    recorder = recorderMime ? new MediaRecorder(recorderStream, { mimeType: recorderMime }) : new MediaRecorder(recorderStream);
+                    recorderMime = recorder.mimeType || recorderMime || "audio/webm";
+                    recorder.ondataavailable = event => { if (event.data?.size) recorderChunks.push(event.data); };
+                    recorder.onerror = () => status("unresponsive", "บันทึกเสียงไม่สำเร็จ ตรวจสอบไมโครโฟนแล้วลองใหม่");
+                    recorder.onstop = async () => {
+                        const chunks = recorderChunks.slice();
+                        const discard = discardOnEnd;
+                        recorder = null;
+                        recorderChunks = [];
+                        cleanupRecorder();
+                        userSpeechActive = false;
+                        window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
+                        if (discard) { discardOnEnd = false; voiceState = "idle"; restartListening(); return; }
+                        if (!chunks.length) { voiceState = "idle"; status("unresponsive", "ยังไม่ได้ยินเสียง"); restartListening(); return; }
+                        voiceState = "processing";
+                        status("processing", "กำลังถอดเสียง");
+                        try {
+                            const text = await transcribeRecorderBlob(new Blob(chunks, { type: recorderMime }));
+                            window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
+                            await processTranscript(text);
+                        } catch (error) {
+                            console.warn("[Sentinel transcription]", error);
+                            voiceState = "idle";
+                            const message = ({
+                                transcription_provider_unavailable: "บริการถอดเสียงยังไม่ได้เชื่อมต่อผู้ให้บริการ AI",
+                                transcription_unavailable: "บริการถอดเสียงตอบกลับผิดพลาด กรุณาลองอีกครั้ง",
+                                invalid_audio: "รูปแบบหรือขนาดเสียงไม่ถูกต้อง ลองพูดให้สั้นลง",
+                                audio_too_large: "เสียงยาวเกินไป ลองพูดให้สั้นลง",
+                                authentication_required: "เซสชันยังไม่พร้อม กรุณาลองอีกครั้ง",
+                                invalid_or_expired_token: "เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง",
+                                voice_session_changed: "เริ่มเซสชันใหม่แล้ว กรุณาพูดอีกครั้ง",
+                                electron_upload_failed: "Panthorium Browser ส่งเสียงไม่สำเร็จ กรุณาลองอีกครั้ง",
+                                browser_update_required: "Panthorium Browser รุ่นนี้เก่าเกินไป กรุณาอัปเดตเป็นรุ่นล่าสุด",
+                                transcription_timeout: "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง",
+                                untrusted_origin: "Panthorium Browser ไม่อนุญาตต้นทางนี้"
+                            })[String(error?.message || "").split(":")[0]] || (error?.name === "TimeoutError" || error?.name === "AbortError"
+                                ? "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง"
+                                : "ส่งเสียงไปยังบริการถอดเสียงไม่สำเร็จ กรุณาตรวจการเชื่อมต่อ");
+                            status("unresponsive", message);
+                            restartListening();
+                        }
+                    };
+                    recorder.start(250);
+                    recorderStartedAt = performance.now();
+                    recorderLastVoiceAt = 0;
+                    voiceState = "listening";
+                    discardOnEnd = false;
+                    userSpeechActive = true;
+                    window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
+                    status("listening", "กำลังฟัง...", false);
+                    recorderContext = new AudioContext();
+                    const source = recorderContext.createMediaStreamSource(recorderStream);
+                    recorderAnalyser = recorderContext.createAnalyser();
+                    recorderAnalyser.fftSize = 512;
+                    recorderData = new Uint8Array(recorderAnalyser.fftSize);
+                    source.connect(recorderAnalyser);
+                    recorderMonitor = setTimeout(monitorRecorder, 100);
+                } catch (error) {
+                    cleanupRecorder();
+                    autoResume = false;
+                    recognitionBlocked = true;
+                    voiceState = "idle";
+                    const denied = error?.name === "NotAllowedError" || error?.name === "SecurityError";
+                    status("unsupported", denied ? "กรุณาอนุญาตสิทธิ์ไมโครโฟนให้ Panthorium Browser" : "เปิดไมโครโฟนไม่สำเร็จ");
+                }
+            };
+            const stopRecorder = () => finishRecorder({ discard: false });
+            window.PanthoriumVoice = {
+                pause() { autoResume = false; clearTimeout(recorderMonitor); if (voiceState === "listening") finishRecorder({ discard: true }); },
+                resume() { if (recognitionBlocked) return; autoResume = true; if (voiceState === "idle") setTimeout(startRecorder, 350); },
+                recognitionFailure() { status("unresponsive", "Electron ไม่สามารถถอดเสียงได้"); },
+                state() { return voiceState; }
+            };
+            button.onclick = async () => {
+                unlockVoiceAudio();
+                if (voiceState === "processing" || voiceState === "speaking" || voiceState === "stopping") { status("processing", "กำลังประมวลผล"); return; }
+                if (voiceState === "listening") { autoResume = false; stopRecorder(); return; }
+                recognitionBlocked = false;
+                autoResume = true;
+                await startRecorder();
+            };
+            autoResume = true;
+            setTimeout(() => { if (autoResume && !recognitionBlocked) startRecorder(); }, 400);
+            return;
+        }
+
         if (!SR) {
             status("unsupported", "ไม่รองรับคำสั่ง");
             button.onclick = () => status("unsupported", "ไม่รองรับคำสั่ง");
@@ -1480,40 +1820,13 @@
             }, 7000);
         };
         const restartListening = () => {
-            if (!autoResume || voiceState !== "idle") return;
+            if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
             setTimeout(() => {
-                if (!autoResume || voiceState !== "idle") return;
+                if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
                 try { recognition.start(); } catch { status("unresponsive", "ไม่ตอบสนอง"); }
             }, 350);
         };
-        const processTranscript = async text => {
-            voiceState = "processing";
-            status("processing", "กำลังประมวลผล");
-            try {
-                const { intent, response: res } = await requestVoiceInput(text);
-                if (!res || !res.ok || !res.text) {
-                    const reason = res?.text || "ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง";
-                    status("unresponsive", reason);
-                    return;
-                }
-                if (voiceResponseNeedsSpeech(intent, res)) {
-                    voiceState = "speaking";
-                    status("processing", res.confirmationRequired ? res.text : "กำลังเตรียมเสียงตอบ");
-                    if (!(await speakVoiceResponse(res.text))) {
-                        status("unresponsive", voicePlaybackFailure);
-                        return;
-                    }
-                }
-                // Keep command results/permission prompts visible in the top toast.
-                status("ready", "พร้อมใช้งาน", intent === "conversation");
-            } catch (error) {
-                console.warn("Global voice command failed", error);
-                status("unresponsive", "ไม่ตอบสนอง");
-            } finally {
-                voiceState = "idle";
-                restartListening();
-            }
-        };
+        resumeAfterTranscript = restartListening;
         const finishListening = ({ discard = false } = {}) => {
             if (voiceState !== "listening") return;
             clearTimeout(silenceTimer);
@@ -1539,14 +1852,32 @@
                 silenceTimer = setTimeout(finishListening, 1400);
             }
         };
-        recognition.onerror = event => {
+        const recognitionFailure = event => {
             clearTimeout(listenWatchdog);
+            clearTimeout(silenceTimer);
             userSpeechActive = false;
             const permissionDenied = event.error === "not-allowed" || event.error === "service-not-allowed";
-            if (permissionDenied) autoResume = false;
+            const terminalFailure = permissionDenied || ["network", "audio-capture", "language-not-supported"].includes(event.error);
+            if (terminalFailure) {
+                recognitionBlocked = true;
+                autoResume = false;
+                discardOnEnd = true;
+                transcriptParts.clear();
+                latestInterim = "";
+            }
             if (voiceState !== "processing" && voiceState !== "speaking") voiceState = "idle";
-            status(permissionDenied ? "unsupported" : "unresponsive", permissionDenied ? "ไม่รองรับคำสั่ง" : "ไม่ตอบสนอง");
+            const message = event.error === "network"
+                ? (window.panthoriumDesktop?.isElectron
+                    ? "Electron เชื่อมต่อบริการรู้จำเสียงไม่ได้ (network) หยุดลองซ้ำแล้ว ใช้แชตพิมพ์ข้อความได้"
+                    : "เชื่อมต่อบริการรู้จำเสียงไม่ได้ (network) ตรวจเครือข่ายแล้วกดไมค์เพื่อลองใหม่")
+                : permissionDenied ? "ไม่ได้รับอนุญาตให้ใช้บริการรู้จำเสียง ตรวจสิทธิ์ไมโครโฟน"
+                : event.error === "audio-capture" ? "เข้าถึงไมโครโฟนไม่ได้ ตรวจอุปกรณ์แล้วกดไมค์เพื่อลองใหม่"
+                : event.error === "language-not-supported" ? "บริการรู้จำเสียงไม่รองรับภาษาที่เลือก"
+                : "ไม่ตอบสนอง";
+            console.warn('[Sentinel recognition]', event.error || 'unknown');
+            status(permissionDenied ? "unsupported" : "unresponsive", message);
         };
+        recognition.onerror = recognitionFailure;
         recognition.onend = () => {
             clearTimeout(silenceTimer);
             clearTimeout(listenWatchdog);
@@ -1585,6 +1916,7 @@
                 finishListening({ discard: false });
                 return;
             }
+            recognitionBlocked = false; // An explicit click permits one fresh attempt.
             autoResume = true;
             if (!(await prepareMobileMicrophone())) return;
             try { recognition.start(); } catch { status("unresponsive", "ไม่ตอบสนอง"); }
@@ -1600,15 +1932,17 @@
                 }
             },
             resume() {
+                if (recognitionBlocked) return;
                 autoResume = true;
                 if (voiceState === "idle") restartListening();
             },
+            recognitionFailure,
             state() { return voiceState; }
         };
         // Keep hands-free startup on every device. If a mobile browser blocks
         // automatic capture, tapping the microphone runs the permission warmup.
         autoResume = true;
-        setTimeout(() => { try { recognition.start(); } catch { status("unsupported", "แตะปุ่มไมโครโฟนเพื่ออนุญาตการฟัง"); } }, 400);
+        setTimeout(() => { if (!autoResume || recognitionBlocked) return; try { recognition.start(); } catch { status("unsupported", "แตะปุ่มไมโครโฟนเพื่ออนุญาตการฟัง"); } }, 400);
     }
     if (window.speechSynthesis) {
         speechSynthesis.getVoices();
@@ -1630,6 +1964,7 @@
             if (!res.ok) throw new Error("guest auth failed");
             const data = await res.json();
             OS.config.accessToken = data.accessToken || "";
+            OS.state.user = data.user || null;
             return !!OS.config.accessToken;
         } catch (e) {
             console.warn("Authentication unavailable:", e.message);
@@ -1641,8 +1976,8 @@
     let sessionRefreshInFlight = null;
     async function authorizedFetch(url, options = {}) {
         const principal = () => OS.state.user?.id || OS.state.user?.sub || "";
+        if (!(await ensureAuth())) throw new Error("authentication_required");
         const owner = principal();
-        await ensureAuth();
         const headers = new Headers(options.headers || {});
         if (OS.config.accessToken) headers.set("Authorization", `Bearer ${OS.config.accessToken}`);
         let res = await fetch(url, { ...options, headers, credentials: "include" });
@@ -1740,9 +2075,15 @@
             } catch (e) {
                 console.warn("Sentinel unavailable:", e.message);
                 OS.sentinelOnline = false;
-                const error = e.message === "voice_session_changed" ? "voice_session_changed" : /TimeoutError|AbortError/.test(e.name) ? "chat_timeout" : "chat_network_error";
+                const msg = String(e && e.message || "");
+                const error = msg === "voice_session_changed" ? "voice_session_changed"
+                    : msg === "authentication_required" ? "authentication_required"
+                    : /TimeoutError|AbortError/.test(e.name || "") || /aborted|timeout/i.test(msg) ? "chat_timeout"
+                    : "chat_network_error";
                 const text = error === "voice_session_changed" ? "บัญชีผู้ใช้เปลี่ยนแล้ว กรุณาถามใหม่"
-                    : error === "chat_timeout" ? "รอคำตอบ AI เกินเวลา กรุณาลองใหม่" : "เชื่อมต่อ AI ไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ";
+                    : error === "authentication_required" ? "ยังเข้าสู่ระบบไม่ได้ — ตรวจ Backend หรือลองโหลดหน้าใหม่"
+                    : error === "chat_timeout" ? "รอคำตอบ AI เกินเวลา กรุณาลองใหม่"
+                    : "เชื่อมต่อ AI ไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ";
                 return { ok: false, text: `${text} (${error})`, error, via: "sentinel" };
             }
         }
@@ -1879,16 +2220,61 @@
     }
 
     // ---------- Apps Definition ----------
+    const BROWSER_RELEASE_URL = "https://github.com/rambo4075krub/Panthorium/releases/tag/staging";
+    const isAdminShell = /^\/admin(?:\/|$)/i.test(window.location.pathname);
+    let deferredInstallPrompt = null;
+
+    window.addEventListener("beforeinstallprompt", event => {
+        event.preventDefault();
+        deferredInstallPrompt = event;
+    });
+    window.addEventListener("appinstalled", () => { deferredInstallPrompt = null; });
+
+    function isMobileDevice() {
+        return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    }
+
+    window.PanthoriumPWAInstall = async () => {
+        if (!deferredInstallPrompt) return false;
+        deferredInstallPrompt.prompt();
+        const result = await deferredInstallPrompt.userChoice;
+        deferredInstallPrompt = null;
+        return result.outcome === "accepted";
+    };
+
+    function openBrowserDownload() {
+        if (isMobileDevice()) {
+            const installAction = deferredInstallPrompt
+                ? `<button onclick="window.PanthoriumPWAInstall()" style="padding:11px 18px;border:0;border-radius:10px;background:linear-gradient(135deg,#00c9b7,#159dff);color:#03101a;font-weight:700;cursor:pointer;">ติดตั้งบนอุปกรณ์นี้</button>`
+                : `<a href="${BROWSER_RELEASE_URL}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:11px 18px;border-radius:10px;background:linear-gradient(135deg,#00c9b7,#159dff);color:#03101a;text-decoration:none;font-weight:700;">เปิด Panthorium</a>`;
+            const html = `
+                <div style="padding:24px;text-align:center;line-height:1.7;">
+                    <div style="font-size:42px;margin-bottom:8px;">🌐</div>
+                    <h2 style="margin:0 0 8px;">ติดตั้ง Panthorium บนมือถือ</h2>
+                    <p style="color:var(--text-dim);font-size:13px;margin:0 0 18px;">ติดตั้งเป็นแอปบนหน้าจอหลักเพื่อเปิด Panthorium OS ได้ทันที</p>
+                    ${installAction}
+                    <p style="color:var(--text-dim);font-size:11px;margin:16px 0 0;">iPhone: กด Share → Add to Home Screen<br>Android: กดเมนูเบราว์เซอร์ → Install app</p>
+                </div>`;
+            createWindow("browser-download", "ติดตั้ง Panthorium", html, { width: 440, height: 360 });
+            return;
+        }
+        window.open(BROWSER_RELEASE_URL, "_blank", "noopener,noreferrer");
+    }
+
     const APP_LIST = [
         { id: "sentinel", name: "Sentinel AI", icon: "🤖", open: openSentinel },
         { id: "settings", name: "ตั้งค่า", icon: "⚙️", open: openSettings }
     ];
 
+    function visibleApps() {
+        return APP_LIST.filter(app => !app.visible || app.visible());
+    }
+
     function initDesktop() {
         // Desktop icons
         const desk = $("desktop-icons");
         desk.innerHTML = "";
-        APP_LIST.forEach(app => {
+        visibleApps().forEach(app => {
             const el = document.createElement("div");
             el.className = "desk-icon";
             el.innerHTML = `<div class="icon-img">${app.icon}</div><span>${app.name}</span>`;
@@ -1899,7 +2285,7 @@
         // Start menu apps
         const sm = $("sm-apps");
         sm.innerHTML = "";
-        APP_LIST.forEach(app => {
+        visibleApps().forEach(app => {
             const el = document.createElement("div");
             el.className = "sm-app";
             el.innerHTML = `<div class="ico">${app.icon}</div><span>${app.name}</span>`;
@@ -1985,12 +2371,18 @@
                 const last = messages.querySelector('.msg.loading, .msg[data-streaming="1"]');
                 if (last) last.remove();
 
-                appendMsg(res?.text || "ยังไม่ได้รับคำตอบจาก AI", "ai", false, res?.provider);
-                if (!res?.ok) toast(res?.text || "ยังไม่ได้รับคำตอบจาก AI", 10000);
+                const reply = (res && res.text && String(res.text).trim()) || "ยังไม่ได้รับคำตอบจาก AI";
+                appendMsg(reply, "ai", false, res?.provider);
+                if (!res?.ok) toast(reply, 10000);
                 else if (voiceResponseNeedsSpeech(intent, res) && !(await speakVoiceResponse(res.text))) toast(voicePlaybackFailure, 10000);
-            } catch (_) {
+            } catch (err) {
                 messages.querySelector('.msg.loading, .msg[data-streaming="1"]')?.remove();
-                toast("รับคำตอบไม่สำเร็จ กรุณาลองใหม่", 10000);
+                const reason = err && err.message === "authentication_required"
+                    ? "ยังเข้าสู่ระบบไม่ได้ — ตรวจ Backend หรือลองโหลดหน้าใหม่"
+                    : "รับคำตอบไม่สำเร็จ กรุณาลองใหม่";
+                appendMsg(reason, "ai");
+                toast(reason, 10000);
+                console.warn("send() failed:", err);
             } finally {
                 sendBusy = false;
                 if (resumeGlobalVoice) window.PanthoriumVoice?.resume();
@@ -2009,14 +2401,145 @@
         sendBtn.onclick = send;
         input.onkeydown = (e) => { if (e.key === "Enter") send(); };
 
-        // Voice
+        // Voice — Electron uses MediaRecorder + server STT; browsers use Web Speech API
         let recognition = null;
         let voiceSilenceTimer = null;
         let voiceRecognitionFailed = false;
         let voiceParts = new Map();
         let voiceInterim = "";
+        let chatRecorder = null;
+        let chatRecorderStream = null;
+        let chatRecorderChunks = [];
+        let chatRecorderMime = "audio/webm";
+        let chatRecorderMonitor = null;
+        let chatRecorderStartedAt = 0;
+        let chatRecorderLastVoiceAt = 0;
+        let chatRecorderContext = null;
+        let chatRecorderAnalyser = null;
+        let chatRecorderData = null;
+        const chatElectron = Boolean(window.panthoriumDesktop?.isElectron);
+        const chatRecorderOk = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SR) {
+
+        const cleanupChatRecorder = () => {
+            clearTimeout(chatRecorderMonitor);
+            chatRecorderMonitor = null;
+            if (chatRecorderContext) { try { chatRecorderContext.close(); } catch (_) {} }
+            chatRecorderContext = null;
+            chatRecorderAnalyser = null;
+            chatRecorderData = null;
+            chatRecorderStream?.getTracks?.().forEach(t => t.stop());
+            chatRecorderStream = null;
+        };
+
+        const transcribeChatBlob = async blob => {
+            const bytes = new Uint8Array(await blob.arrayBuffer());
+            let binary = "";
+            const step = 0x8000;
+            for (let offset = 0; offset < bytes.length; offset += step) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + step, bytes.length)));
+            const mimeType = String(blob.type || chatRecorderMime).split(";")[0] || "audio/webm";
+            const audio = "data:" + mimeType + ";base64," + btoa(binary);
+            const base = OS.config.backendUrl.replace(/\/$/, "");
+            const post = async () => {
+                const response = await authorizedFetch(base + "/api/speech/transcribe", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ audio, language: "th-TH" }),
+                    signal: AbortSignal.timeout(35000),
+                    cache: "no-store"
+                });
+                return { data: await response.json().catch(() => ({})), statusCode: response.status };
+            };
+            let data, statusCode;
+            if (chatElectron && typeof window.panthoriumDesktop?.transcribeAudio === "function") {
+                if (!(await ensureAuth())) throw new Error("authentication_required");
+                try {
+                    let result = await window.panthoriumDesktop.transcribeAudio(audio, "th-TH", OS.config.accessToken);
+                    if (result?.status === 401 && await ensureAuth(true)) {
+                        result = await window.panthoriumDesktop.transcribeAudio(audio, "th-TH", OS.config.accessToken);
+                    }
+                    data = result?.data || {};
+                    statusCode = Number(result?.status || 500);
+                } catch (_) {
+                    ({ data, statusCode } = await post());
+                }
+            } else {
+                ({ data, statusCode } = await post());
+            }
+            if (statusCode < 200 || statusCode >= 300 || !data.ok || typeof data.text !== "string" || !data.text.trim()) {
+                throw new Error(data.error || "transcription_unavailable");
+            }
+            return data.text.trim();
+        };
+
+        const startChatRecorder = async () => {
+            chatRecorderStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+            const supportedMime = typeof MediaRecorder.isTypeSupported === "function"
+                ? ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find(type => MediaRecorder.isTypeSupported(type))
+                : "";
+            chatRecorderMime = supportedMime || "";
+            chatRecorderChunks = [];
+            chatRecorder = chatRecorderMime ? new MediaRecorder(chatRecorderStream, { mimeType: chatRecorderMime }) : new MediaRecorder(chatRecorderStream);
+            chatRecorderMime = chatRecorder.mimeType || chatRecorderMime || "audio/webm";
+            chatRecorder.ondataavailable = event => { if (event.data?.size) chatRecorderChunks.push(event.data); };
+            chatRecorder.onstop = async () => {
+                const chunks = chatRecorderChunks.slice();
+                chatRecorder = null;
+                chatRecorderChunks = [];
+                cleanupChatRecorder();
+                userSpeechActive = false;
+                window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
+                micBtn.classList.remove("listening");
+                if (!chunks.length) {
+                    toast("ยังไม่ได้ยินเสียง");
+                    window.PanthoriumVoice?.resume();
+                    return;
+                }
+                toast("กำลังถอดเสียง...", 4000);
+                try {
+                    const text = await transcribeChatBlob(new Blob(chunks, { type: chatRecorderMime }));
+                    input.value = text;
+                    window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
+                    await send({ resumeGlobalVoice: true });
+                } catch (error) {
+                    console.warn("[Sentinel chat transcription]", error);
+                    toast("ถอดเสียงไม่สำเร็จ กรุณาลองใหม่หรือพิมพ์ข้อความ");
+                    window.PanthoriumVoice?.resume();
+                }
+            };
+            chatRecorder.start(250);
+            chatRecorderStartedAt = performance.now();
+            chatRecorderLastVoiceAt = 0;
+            userSpeechActive = true;
+            window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
+            micBtn.classList.add("listening");
+            try {
+                chatRecorderContext = new AudioContext();
+                const source = chatRecorderContext.createMediaStreamSource(chatRecorderStream);
+                chatRecorderAnalyser = chatRecorderContext.createAnalyser();
+                chatRecorderAnalyser.fftSize = 512;
+                chatRecorderData = new Uint8Array(chatRecorderAnalyser.fftSize);
+                source.connect(chatRecorderAnalyser);
+            } catch (_) {}
+            const monitor = () => {
+                if (!chatRecorder || chatRecorder.state !== "recording") return;
+                const now = performance.now();
+                if (chatRecorderAnalyser && chatRecorderData) {
+                    chatRecorderAnalyser.getByteTimeDomainData(chatRecorderData);
+                    let sum = 0;
+                    for (const value of chatRecorderData) { const c = (value - 128) / 128; sum += c * c; }
+                    if (Math.sqrt(sum / chatRecorderData.length) > 0.025) chatRecorderLastVoiceAt = now;
+                }
+                if ((chatRecorderLastVoiceAt > 0 && now - chatRecorderLastVoiceAt > 1400 && now - chatRecorderStartedAt > 700) || now - chatRecorderStartedAt > 15000) {
+                    try { chatRecorder.stop(); } catch (_) {}
+                    return;
+                }
+                chatRecorderMonitor = setTimeout(monitor, 100);
+            };
+            chatRecorderMonitor = setTimeout(monitor, 100);
+        };
+
+        if (SR && !chatElectron) {
             recognition = new SR();
             recognition.lang = "th-TH";
             recognition.continuous = true;
@@ -2061,29 +2584,75 @@
                     window.PanthoriumVoice?.resume();
                 }
             };
-            recognition.onerror = () => {
+            recognition.onerror = event => {
                 voiceRecognitionFailed = true;
                 clearTimeout(voiceSilenceTimer);
                 userSpeechActive = false;
                 micBtn.classList.remove("listening");
-                window.PanthoriumVoice?.resume();
+                const code = event?.error || "";
+                if (code === "no-speech") {
+                    toast("ยังไม่ได้ยินเสียง พูดอีกครั้งได้");
+                    window.PanthoriumVoice?.resume();
+                } else if (code === "aborted") {
+                    window.PanthoriumVoice?.resume();
+                } else if (typeof window.PanthoriumVoice?.recognitionFailure === "function") {
+                    window.PanthoriumVoice.recognitionFailure(event);
+                } else if (code === "not-allowed" || code === "service-not-allowed") {
+                    toast("กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์");
+                } else if (code === "network") {
+                    toast("รู้จำเสียงต้องใช้อินเทอร์เน็ต — ตรวจการเชื่อมต่อ");
+                } else {
+                    toast("รู้จำเสียงไม่สำเร็จ ลองใหม่");
+                }
             };
         }
 
-        micBtn.onclick = () => {
+        micBtn.onclick = async () => {
+            // Electron / recorder path
+            if (chatElectron && chatRecorderOk) {
+                if (chatRecorder && chatRecorder.state === "recording") {
+                    try { chatRecorder.stop(); } catch (_) {}
+                    return;
+                }
+                window.PanthoriumVoice?.pause();
+                unlockVoiceAudio();
+                try {
+                    await startChatRecorder();
+                } catch (error) {
+                    cleanupChatRecorder();
+                    micBtn.classList.remove("listening");
+                    const denied = error?.name === "NotAllowedError" || error?.name === "SecurityError";
+                    toast(denied ? "กรุณาอนุญาตไมโครโฟนให้ Panthorium Browser" : "เปิดไมโครโฟนไม่สำเร็จ");
+                    window.PanthoriumVoice?.resume();
+                }
+                return;
+            }
             if (!recognition) {
-                toast("เบราว์เซอร์ไม่รองรับการรู้จำเสียง");
+                toast("เบราว์เซอร์นี้ไม่รองรับการรู้จำเสียง (แนะนำ Chrome, Edge หรือ Panthorium Browser)");
                 return;
             }
             if (micBtn.classList.contains("listening")) {
-                recognition.stop();
+                try { recognition.stop(); } catch (_) {}
                 return;
             }
             window.PanthoriumVoice?.pause();
             unlockVoiceAudio();
             try { window.speechSynthesis?.resume(); } catch (_) {}
             micBtn.classList.add("listening");
-            recognition.start();
+            try {
+                recognition.start();
+            } catch (err) {
+                try { recognition.abort(); } catch (_) {}
+                setTimeout(() => {
+                    try {
+                        recognition.start();
+                    } catch (_) {
+                        micBtn.classList.remove("listening");
+                        toast("ไม่สามารถเริ่มรู้จำเสียงได้ — ลองกดไมค์อีกครั้ง");
+                        window.PanthoriumVoice?.resume();
+                    }
+                }, 250);
+            }
         };
     }
 
@@ -2364,7 +2933,7 @@
     function openAbout() {
         const html = `
             <div class="about-content">
-                <div class="about-logo">🛡️</div>
+                <div class="about-logo"><img src="/panthorium-logo.svg" data-panthorium-logo alt="Panthorium" style="width:72px;height:72px;object-fit:contain;"></div>
                 <h2 style="margin-bottom:8px;">Panthorium OS</h2>
                 <p style="color:var(--text-dim);font-size:13px;margin-bottom:20px;">Version ${OS.version}</p>
                 <p style="font-size:13px;line-height:1.7;color:var(--text-dim);max-width:300px;margin:0 auto;">
@@ -2675,6 +3244,22 @@
     if ("serviceWorker" in navigator) {
         navigator.serviceWorker.register("./sw.js?v=orb-display-fix-v3-voice").catch(() => {});
     }
+
+    async function checkRemoteRelease() {
+        try {
+            const base = OS.config.backendUrl.replace(/\/$/, "");
+            const response = await fetch(base + "/api/health", { cache: "no-store", credentials: "include" });
+            if (!response.ok) return;
+            const data = await response.json();
+            const release = String(data.release || "").trim();
+            if (!release) return;
+            const previous = sessionStorage.getItem("pt_server_release");
+            sessionStorage.setItem("pt_server_release", release);
+            if (previous && previous !== release && document.visibilityState !== "hidden") location.reload();
+        } catch (_) {}
+    }
+    checkRemoteRelease();
+    window.setInterval(checkRemoteRelease, 60000);
 
     // ---------- Start ----------
     boot();

@@ -1,9 +1,6 @@
 (function(){
 'use strict';
 
-const STAGING_HOST='panthorium-staging.onrender.com';
-const STAGING_CLOUD_RUN=/staging/i;
-const CLOUD_RUN_SUFFIX=/\.run\.app$/;
 const TARGET_PATH=/^\/admin(?:\/|\.html)?$/;
 const APPS=[
   {id:'sentinel',icon:'🤖',label:'Sentinel AI',openers:['openSentinel']},
@@ -23,8 +20,7 @@ const APPS=[
 
 let renderedFingerprint='';
 
-function isTarget(){return (location.hostname===STAGING_HOST||(STAGING_CLOUD_RUN.test(location.hostname)&&CLOUD_RUN_SUFFIX.test(location.hostname)))&&TARGET_PATH.test(location.pathname);}
-if(!isTarget())return;
+function isTarget(){return TARGET_PATH.test(location.pathname)||auth()?.isAdministrator?.()===true;}
 
 function auth(){return window.PanthoriumAuth||null;}
 function closeMenu(){document.getElementById('start-menu')?.classList.remove('open');}
@@ -92,7 +88,7 @@ function configureStartMenu(){
   if(!footer)return;
   let restart=document.getElementById('btn-restart');
   if(!restart){restart=document.createElement('button');restart.id='btn-restart';restart.type='button';restart.textContent='🔄 รีสตาร์ท';restart.title='รีสตาร์ท Panthorium';restart.onclick=()=>{closeMenu();location.reload();};footer.insertBefore(restart,footer.firstChild);}
-  const logout=document.getElementById('btn-logout');if(logout){logout.style.display='';if(auth()?.isGuest?.()){logout.textContent='🔐 เข้าสู่ระบบผู้ดูแล';logout.onclick=()=>{location.href='/admin';};}else{logout.textContent='🚪 ออกจากระบบ';logout.onclick=()=>auth()?.logout?.();}}
+  window.PanthoriumAccessShell?.sync?.();
 }
 function sync(){if(!isTarget())return;removeLegacyFloatingLaunchers();configureStartMenu();renderDesktop();}
 function syncAfterShell(){requestAnimationFrame(()=>{sync();requestAnimationFrame(sync);});}

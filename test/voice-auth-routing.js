@@ -16,6 +16,7 @@ async function checkOrder(streamFirst) {
     if (streamFirst) { w.eval(source('ai-stream-client.js')); w.PanthoriumAIStream.install(); }
     w.eval(source('phase2-auth.js'));
     await new Promise(resolve => setImmediate(resolve));
+    w.OS.config.accessToken = 'test-authenticated-session';
     w.OS.state.user = { sub: 'operator', permissions: ['chat', 'settings'], roles: ['operator'] };
     if (!streamFirst) { w.eval(source('ai-stream-client.js')); w.PanthoriumAIStream.install(); }
     await w.callAI('เปิด Learning Lab', { voiceMode: true });

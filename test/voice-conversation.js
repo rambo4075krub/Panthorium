@@ -62,7 +62,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     };
     w.SpeechRecognition = class {
       constructor() { recognizers.push(this); }
-      start() { assert.equal(playing, false, 'recognition must not restart while the answer is playing'); this.onstart?.(); }
+      start() { this.starts = (this.starts || 0) + 1; assert.equal(playing, false, 'recognition must not restart while the answer is playing'); this.onstart?.(); }
       stop() { return this.onend?.(); }
     };
     w.fetch = async (url, options = {}) => {
@@ -77,7 +77,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     };
     const inline = [...w.document.scripts].find(script => script.textContent.includes('const OS =')).textContent;
     evaluate(inline.replace(/\n    boot\(\);/, '\n    OS.state.booted = true;'));
-    for (const file of ['phase2-auth.js', 'voice-window-catalog.js', 'voice-command-client.js', 'ai-stream-client.js']) evaluate(source(file));
+    for (const file of ['phase2-auth.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'ai-stream-client.js']) evaluate(source(file));
     await tick(); await w.PanthoriumAuth.login('admin', 'fixture'); w.PanthoriumAIStream.install();
     evaluate('initGlobalVoice();');
     w.addEventListener('panthorium:voice-start', () => {
@@ -85,7 +85,9 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     });
     const globalMic = recognizers[0];
     // Let the shell's one-time mic startup finish before injecting transcripts.
-    await new Promise(resolve => setTimeout(resolve, 420)); w.PanthoriumVoice.pause();
+    await new Promise(resolve => setTimeout(resolve, 420));
+    assert.equal(globalMic.starts, 1, 'hands-free microphone starts once without a click');
+    w.PanthoriumVoice.pause();
     const transcript = (mic, text, final = true) => { const result = [{ transcript: text, confidence: 0.99 }]; result.isFinal = final; mic.onresult({ resultIndex: 0, results: [result] }); };
     async function utter(text, final = true) {
       globalMic.start(); transcript(globalMic, text, final); globalMic.stop();
@@ -176,6 +178,32 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     assert.equal(playback.length, 6);
     assert.equal(playing, false);
     w.PanthoriumVoice.pause();
+
+    // Electron exposes SpeechRecognition even when its remote service fails.
+    // An error followed by onend/resume must never create a 350ms retry loop.
+    w.panthoriumDesktop = { isElectron: true };
+    w.PanthoriumVoice.resume();
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const startsBeforeFailure = globalMic.starts;
+    globalMic.onerror({ error: 'network' });
+    globalMic.stop();
+    w.PanthoriumVoice.resume();
+    await new Promise(resolve => setTimeout(resolve, 800));
+    assert.equal(globalMic.starts, startsBeforeFailure, 'network failure latches across onend and resume');
+    assert.match(w.document.getElementById('toast').textContent, /Electron.*network/);
+    assert.equal(w.PanthoriumVoice.state(), 'idle');
+    await w.document.getElementById('global-voice').onclick();
+    assert.equal(globalMic.starts, startsBeforeFailure + 1, 'explicit mic click permits a fresh attempt');
+    w.PanthoriumVoice.pause();
+    await w.document.getElementById('chat-mic').onclick();
+    const beforeChatError = globalMic.starts;
+    chatMic.onerror({ error: 'network' });
+    await chatMic.stop();
+    await new Promise(resolve => setTimeout(resolve, 800));
+    assert.equal(globalMic.starts, beforeChatError, 'chat mic failure must not transfer the retry loop to global mic');
+    assert.match(w.document.getElementById('toast').textContent, /Electron.*network/);
+    const afterMicFailure = await w.callAI('การเรียนรู้คืออะไร');
+    assert.equal(afterMicFailure.text, answer, 'typing still works after recognition fails');
 
     evaluate('unlockVoiceAudio();'); await tick();
     const warmups = [...objects.values()].filter(b => b.type === 'audio/wav');

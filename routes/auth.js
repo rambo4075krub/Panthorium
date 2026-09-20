@@ -32,23 +32,35 @@ function createAuthRouter(authService, config, securityResponse) {
       }
 
       if (securityResponse) {
-        const block = await securityResponse.getActiveBlock(req.ip);
-        if (block) {
-          const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(block.expiresAt) - Date.now()) / 1000));
-          res.set("Retry-After", String(retryAfterSeconds));
-          authService.audit.record("security.blocked_login", { requestId: req.requestId, ip: req.ip || null, username, expiresAt: block.expiresAt, reason: block.reason });
-          return res.status(429).json({ ok: false, error: "temporarily_blocked", retryAfterSeconds });
+        try {
+          const block = await securityResponse.getActiveBlock(req.ip);
+          if (block) {
+            const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(block.expiresAt) - Date.now()) / 1000));
+            res.set("Retry-After", String(retryAfterSeconds));
+            authService.audit.record("security.blocked_login", { requestId: req.requestId, ip: req.ip || null, username, expiresAt: block.expiresAt, reason: block.reason });
+            return res.status(429).json({ ok: false, error: "temporarily_blocked", retryAfterSeconds });
+          }
+        } catch (error) {
+          // Security telemetry must not turn a normal authentication failure
+          // into HTTP 500. The request remains rate-limited by this route.
+          console.error("[AUTH] security precheck unavailable (" + req.requestId + "): " + error.message);
         }
       }
 
       const session = await authService.login(username, password, requestMeta(req));
       if (!session) {
-        if (securityResponse) await securityResponse.evaluateLoginFailure(req.ip);
+        if (securityResponse) {
+          try { await securityResponse.evaluateLoginFailure(req.ip); }
+          catch (error) { console.error("[AUTH] security failure evaluation unavailable (" + req.requestId + "): " + error.message); }
+        }
         return res.status(401).json({ ok: false, error: "invalid_credentials" });
       }
       res.cookie("pt_refresh", session.refreshToken, cookieOptions);
       res.json({ ok: true, accessToken: session.accessToken, user: session.principal });
-    } catch (error) { next(error); }
+    } catch (error) {
+      console.error("[AUTH] login failed (" + req.requestId + "): " + error.message);
+      res.status(503).json({ ok: false, error: "auth_unavailable", requestId: req.requestId });
+    }
   });
 
   router.get("/me", auth, (req, res) => {

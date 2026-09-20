@@ -13,7 +13,7 @@
   ];
 
   function isStagingAdmin() {
-    return (location.hostname === 'panthorium-staging.onrender.com' || (/staging/i.test(location.hostname) && /\.run\.app$/.test(location.hostname))) && /^\/admin(?:\/|\.html)?$/.test(location.pathname);
+    return /^\/admin(?:\/|\.html)?$/.test(location.pathname) || !!currentUser()?.roles?.includes('administrator');
   }
 
   function currentUser() {
@@ -36,7 +36,7 @@
       '#sm-apps{overflow-y:auto;}',
       '@media (max-width:600px){#start-menu{width:calc(100% - 20px);max-height:78vh;}}'
     ];
-    if (!isStagingAdmin()) rules.unshift('#desktop-icons{display:none!important;}');
+    rules.unshift('body[data-panthorium-role="guest"] #desktop-icons{display:none!important;}');
     style.textContent = rules.join('');
     document.head.appendChild(style);
   }
@@ -59,12 +59,7 @@
       });
     }
 
-    var accountButton = document.getElementById('btn-logout');
-    if (accountButton) {
-      var desired = guest ? '🔐 เข้าสู่ระบบผู้ดูแล' : '🚪 ออกจากระบบ';
-      if (accountButton.textContent !== desired) accountButton.textContent = desired;
-      accountButton.title = guest ? 'เข้าสู่ระบบผู้ดูแล' : 'ออกจากระบบ';
-    }
+    window.PanthoriumAccessShell?.sync?.();
   }
 
   function keepLogoutInStartMenuOnly() {

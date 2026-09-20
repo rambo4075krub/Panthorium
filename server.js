@@ -124,9 +124,30 @@ sentinel.training = sentinelTraining;
 sentinel.sentinelControl = sentinelOrchestrator;
 
 app.disable("x-powered-by");
-app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
-app.use(cors({ origin(origin, cb) { if (!origin || config.allowedOrigins.includes(origin)) return cb(null, true); cb(new Error("CORS origin denied")); }, credentials: true }));
-app.use(express.json({ limit: "768kb", type: "application/json" }));
+app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins], frameSrc: ["'self'"], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
+const allowElectronFileOrigin = process.env.ALLOW_ELECTRON_ORIGIN === "1";
+app.use((req, res, next) => {
+  // The installed Electron shell can report a local/custom origin even though
+  // it is the trusted Panthorium desktop client. Normalize only Electron
+  // requests when the isolated staging flag is enabled; normal browsers remain
+  // subject to the exact CORS allowlist below.
+  const userAgent = req.get("user-agent") || "";
+  if (allowElectronFileOrigin && /\bElectron\/\d/i.test(userAgent) && config.allowedOrigins[0]) {
+    req.headers.origin = config.allowedOrigins[0];
+  }
+  next();
+});
+app.use(cors({ origin(origin, cb) {
+  // Requests without an Origin header are same-origin/server-to-server calls.
+  // Browser origins must be an exact configured origin. Installed Electron
+  // shells may send the literal "null" origin when a local shell is loaded;
+  // allow that only when explicitly enabled by the isolated staging deploy.
+  const isAllowedElectronOrigin = allowElectronFileOrigin && origin === "null";
+  if (!origin || config.allowedOrigins.includes(origin) || isAllowedElectronOrigin) return cb(null, true);
+  console.warn("[HTTP] CORS origin denied: " + JSON.stringify(String(origin).slice(0, 240)));
+  cb(new Error("CORS origin denied"));
+}, credentials: true }));
+app.use(express.json({ limit: "2mb", type: "application/json" }));
 app.use(cookieParser());
 app.use(requestContext(audit));
 
@@ -139,6 +160,7 @@ app.get("/healthz", async (req, res) => {
   }
 });
 
+require('./middleware/guestAccess').installGuestAccess(app, authService);
 app.use("/api/training/release-gate", createReleaseGateRouter(authService, sentinelReleaseGate));
 app.use("/api/training", createTrainingRouter(authService, sentinelTraining, sentinelBenchmark, sentinelActiveLearning));
 app.use("/api/governance", createGovernanceRouter(authService, autonomousGovernance));
@@ -173,7 +195,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-window-catalog.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-window-catalog.js", "external-apps-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js"];
 for (const script of shellScripts) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -187,7 +209,7 @@ for (const script of shellScripts) {
 
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
-  const version = "voice-conversation-v3";
+  const version = "external-apps-v1";
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
   }
@@ -204,6 +226,19 @@ function serveShell(req, res, next) {
   }
 }
 
+app.get("/browser-releases.json", async (req, res) => {
+  try {
+    const upstream = await fetch("https://api.github.com/repos/rambo4075krub/Panthorium/releases/tags/staging", {
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "Panthorium-Browser-Downloads" },
+      signal: AbortSignal.timeout(10000)
+    });
+    if (!upstream.ok) return res.status(503).json({ error: "release_unavailable" });
+    const release = await upstream.json();
+    res.set("Cache-Control", "public, max-age=60").json({ assets: (release.assets || []).map(asset => ({
+      name: asset.name, browser_download_url: asset.browser_download_url
+    })) });
+  } catch (_) { res.status(503).json({ error: "release_unavailable" }); }
+});
 app.get("/", serveShell);
 app.get("/sentinel.html", serveShell);
 app.get("/admin", serveShell);
