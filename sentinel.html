@@ -1503,7 +1503,48 @@
             return;
         }
 
-        if (recorderSupported) {
+        // Assigned by the active voice path so processTranscript can resume listening.
+        let resumeAfterTranscript = () => {};
+        // Shared transcript handler (Web Speech + MediaRecorder)
+        const processTranscript = async text => {
+            const value = String(text || "").trim();
+            if (!value) {
+                voiceState = "idle";
+                status("unresponsive", "ยังไม่ได้ยินเสียง");
+                resumeAfterTranscript();
+                return;
+            }
+            voiceState = "processing";
+            status("processing", "กำลังประมวลผล");
+            try {
+                const { intent, response: res } = await requestVoiceInput(value);
+                if (!res || !res.ok || !res.text) {
+                    const reason = res?.text || "ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง";
+                    status("unresponsive", reason);
+                    return;
+                }
+                if (voiceResponseNeedsSpeech(intent, res)) {
+                    voiceState = "speaking";
+                    status("processing", res.confirmationRequired ? res.text : "กำลังเตรียมเสียงตอบ");
+                    if (!(await speakVoiceResponse(res.text))) {
+                        status("unresponsive", voicePlaybackFailure);
+                        return;
+                    }
+                }
+                status("ready", "พร้อมใช้งาน", intent === "conversation");
+            } catch (error) {
+                console.warn("Global voice command failed", error);
+                status("unresponsive", "ไม่ตอบสนอง");
+            } finally {
+                voiceState = "idle";
+                resumeAfterTranscript();
+            }
+        };
+
+        // Prefer Web Speech API when available (Chrome / Edge / Electron / Safari).
+        // MediaRecorder + server Whisper is the fallback for browsers without SR.
+        // This keeps voice usable even when /api/speech/transcribe is down.
+        if (recorderSupported && !SR) {
             let recorder = null;
             let recorderStream = null;
             let recorderChunks = [];
@@ -1514,6 +1555,15 @@
             let recorderMonitor = null;
             let recorderStartedAt = 0;
             let recorderLastVoiceAt = 0;
+
+            const restartListening = () => {
+                if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
+                setTimeout(() => {
+                    if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
+                    startRecorder();
+                }, 350);
+            };
+            resumeAfterTranscript = restartListening;
 
             const cleanupRecorder = () => {
                 clearTimeout(recorderMonitor);
@@ -1775,34 +1825,7 @@
                 try { recognition.start(); } catch { status("unresponsive", "ไม่ตอบสนอง"); }
             }, 350);
         };
-        const processTranscript = async text => {
-            voiceState = "processing";
-            status("processing", "กำลังประมวลผล");
-            try {
-                const { intent, response: res } = await requestVoiceInput(text);
-                if (!res || !res.ok || !res.text) {
-                    const reason = res?.text || "ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง";
-                    status("unresponsive", reason);
-                    return;
-                }
-                if (voiceResponseNeedsSpeech(intent, res)) {
-                    voiceState = "speaking";
-                    status("processing", res.confirmationRequired ? res.text : "กำลังเตรียมเสียงตอบ");
-                    if (!(await speakVoiceResponse(res.text))) {
-                        status("unresponsive", voicePlaybackFailure);
-                        return;
-                    }
-                }
-                // Keep command results/permission prompts visible in the top toast.
-                status("ready", "พร้อมใช้งาน", intent === "conversation");
-            } catch (error) {
-                console.warn("Global voice command failed", error);
-                status("unresponsive", "ไม่ตอบสนอง");
-            } finally {
-                voiceState = "idle";
-                restartListening();
-            }
-        };
+        resumeAfterTranscript = restartListening;
         const finishListening = ({ discard = false } = {}) => {
             if (voiceState !== "listening") return;
             clearTimeout(silenceTimer);
@@ -2435,24 +2458,42 @@
                 clearTimeout(voiceSilenceTimer);
                 userSpeechActive = false;
                 micBtn.classList.remove("listening");
-                window.PanthoriumVoice?.recognitionFailure(event);
+                const code = event?.error || "";
+                if (code === "no-speech") toast("ยังไม่ได้ยินเสียง พูดอีกครั้งได้");
+                else if (code === "not-allowed" || code === "service-not-allowed") toast("กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์");
+                else if (code === "network") toast("รู้จำเสียงต้องใช้อินเทอร์เน็ต — ตรวจการเชื่อมต่อ");
+                else if (code !== "aborted") window.PanthoriumVoice?.recognitionFailure(event);
+                else window.PanthoriumVoice?.resume();
             };
         }
 
         micBtn.onclick = () => {
             if (!recognition) {
-                toast("เบราว์เซอร์ไม่รองรับการรู้จำเสียง");
+                toast("เบราว์เซอร์นี้ไม่รองรับการรู้จำเสียง (แนะนำ Chrome, Edge หรือ Panthorium Browser)");
                 return;
             }
             if (micBtn.classList.contains("listening")) {
-                recognition.stop();
+                try { recognition.stop(); } catch (_) {}
                 return;
             }
             window.PanthoriumVoice?.pause();
             unlockVoiceAudio();
             try { window.speechSynthesis?.resume(); } catch (_) {}
             micBtn.classList.add("listening");
-            recognition.start();
+            try {
+                recognition.start();
+            } catch (err) {
+                try { recognition.abort(); } catch (_) {}
+                setTimeout(() => {
+                    try {
+                        recognition.start();
+                    } catch (_) {
+                        micBtn.classList.remove("listening");
+                        toast("ไม่สามารถเริ่มรู้จำเสียงได้ — ลองกดไมค์อีกครั้ง");
+                        window.PanthoriumVoice?.resume();
+                    }
+                }, 250);
+            }
         };
     }
 
