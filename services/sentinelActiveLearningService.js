@@ -239,6 +239,19 @@ class SentinelActiveLearningService {
     return { ok: true, running: true, run: this.session };
   }
 
+  async runOnce(options = {}) {
+    const current = await this.status();
+    if (current.running) return { ok: false, error: 'active_learning_already_running', run: current.run };
+    const started = await this.start({ ...options, durationHours: 1, intervalMinutes: 60, batchSize: 1, maxPrompts: 1, maxCandidates: 3, autoShadow: true });
+    if (!started.ok) return started;
+    this.shutdown();
+    await this.tick();
+    if (this.session?.status === 'running') await this.stop({ reason: 'one_shot_completed', userId: options.userId || 'administrator', requestId: options.requestId });
+    else if (this.session) { const stats={...(this.session.stats||{}),stopReason:'one_shot_completed'};await this.save({...this.session,status:'stopped',stoppedAt:new Date().toISOString(),stats}); }
+    const result = await this.status();
+    return { ok: true, oneShot: true, ...result };
+  }
+
   schedule(delayMs) {
     if (this.timer) clearTimeout(this.timer);
     if (!this.session || this.session.status !== 'running') return;
