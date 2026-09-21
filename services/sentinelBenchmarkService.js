@@ -1,6 +1,6 @@
 'use strict';
 
-const { randomUUID } = require('crypto');
+const { randomUUID, createHash } = require('crypto');
 
 function clampScore(value){const n=Math.round(Number(value));return Number.isFinite(n)?Math.max(0,Math.min(100,n)):0;}
 function clean(value,max=12000){return String(value==null?'':value).trim().slice(0,max);}
@@ -9,7 +9,7 @@ function avg(items,key){if(!items.length)return 0;return Math.round(items.reduce
 function summarize(result){const leader=result?.leaderboard?.[0]||null;const sentinel=(result?.leaderboard||[]).find(x=>x.name==='Sentinel AI')||null;const sentinelRank=sentinel?((result.leaderboard||[]).findIndex(x=>x.name==='Sentinel AI')+1):null;return{winner:leader?.name||null,winnerScore:leader?.score||0,sentinelScore:sentinel?.score||0,sentinelRank,caseCount:(result?.cases||[]).length,providerCount:(result?.providers||[]).length,passed:Boolean(sentinel&&sentinelRank===1&&Number(sentinel.score||0)>=85)};}
 
 class SentinelBenchmarkService{
-  constructor({sentinel,providers,audit,databaseUrl,databaseSslMode}={}){this.sentinel=sentinel;this.providers=providers;this.audit=audit;this.lastRun=null;this.historyCache=[];if(databaseUrl){const { getDatabasePool } = require('./databasePool');this.pool=getDatabasePool({connectionString:databaseUrl,ssl:databaseSslMode==='disable'?false:{rejectUnauthorized:false}});}else this.pool=null;}
+  constructor({sentinel,providers,audit,databaseUrl,databaseSslMode}={}){this.sentinel=sentinel;this.providers=providers;this.audit=audit;this.lastRun=null;this.historyCache=[];this.inFlight=null;this.lastFingerprint=null;this.lastCompletedAt=0;this.cooldownMs=Math.max(10000,Number(process.env.SENTINEL_BENCHMARK_COOLDOWN_MS)||60000);if(databaseUrl){const { getDatabasePool } = require('./databasePool');this.pool=getDatabasePool({connectionString:databaseUrl,ssl:databaseSslMode==='disable'?false:{rejectUnauthorized:false}});}else this.pool=null;}
   async init(){if(!this.pool)return;await this.pool.query(`CREATE TABLE IF NOT EXISTS panthorium_benchmark_runs(
     run_id UUID PRIMARY KEY,
     started_at TIMESTAMPTZ NOT NULL,
@@ -43,12 +43,23 @@ class SentinelBenchmarkService{
     this.lastRun=result;this.historyCache=[{runId:result.runId,startedAt:result.startedAt,durationMs:result.durationMs,createdBy:userId,providers:result.providers||[],caseCount:(result.cases||[]).length,winner:summary.winner,summary,result},...this.historyCache.filter(x=>x.runId!==result.runId)].slice(0,10);return result;
   }
   async history({limit=10}={}){const n=Math.max(1,Math.min(Number(limit)||10,50));if(this.pool){const q=await this.pool.query(`SELECT * FROM panthorium_benchmark_runs ORDER BY created_at DESC LIMIT $1`,[n]);return q.rows.map(row=>({runId:row.run_id,startedAt:row.started_at instanceof Date?row.started_at.toISOString():row.started_at,durationMs:Number(row.duration_ms||0),createdBy:row.created_by||null,providers:row.providers||[],caseCount:Number(row.case_count||0),winner:row.winner||null,summary:row.summary||{},result:{ok:true,runId:row.run_id,startedAt:row.started_at instanceof Date?row.started_at.toISOString():row.started_at,durationMs:Number(row.duration_ms||0),providers:row.providers||[],leaderboard:row.leaderboard||[],cases:row.cases||[],summary:row.summary||{}}}));}return this.historyCache.slice(0,n);}
-  async run({cases=[],providerNames,userId='system'}={}){
+  fingerprint({cases=[],providerNames}={}){return createHash('sha256').update(JSON.stringify({cases:Array.isArray(cases)?cases:[],providerNames:Array.isArray(providerNames)?providerNames.map(x=>String(x).toLowerCase()).sort():[]})).digest('hex');}
+  async run(options={}){
+    const fingerprint=this.fingerprint(options);
+    if(this.inFlight)return this.inFlight.promise;
+    const remaining=Math.max(0,this.cooldownMs-(Date.now()-this.lastCompletedAt));
+    if(this.lastRun&&this.lastFingerprint===fingerprint&&remaining>0)return{...this.lastRun,reused:true,runControl:{cached:true,cooldownRemainingMs:remaining}};
+    const startedAt=Date.now();
+    const promise=this.executeRun(options).then(result=>{if(result?.ok){this.lastFingerprint=fingerprint;this.lastCompletedAt=Date.now();}return result;}).finally(()=>{if(this.inFlight?.promise===promise)this.inFlight=null;});
+    this.inFlight={promise,startedAt,fingerprint};
+    return promise;
+  }
+  async executeRun({cases=[],providerNames,userId='system'}={}){
     const suite=Array.isArray(cases)?cases.slice(0,20):[];if(!suite.length)return{ok:false,error:'benchmark_cases_required'};
     const available=this.providers.available();const requested=Array.isArray(providerNames)?providerNames.map(x=>String(x).toLowerCase()):available;const opponents=[...new Set(requested)].filter(x=>available.includes(x)).slice(0,4);
     const rows=[];const started=Date.now();
     for(let i=0;i<suite.length;i++){
-      const item=suite[i]||{};const prompt=clean(item.prompt,6000);if(!prompt)continue;const reference=clean(item.reference||'',6000);const competitors=[];
+      const rawItem=suite[i];const item=typeof rawItem==='string'?{prompt:rawItem}:(rawItem||{});const prompt=clean(item.prompt,6000);if(!prompt)continue;const reference=clean(item.reference||'',6000);const competitors=[];
       const sentinelStart=Date.now();const trainingContext=this.sentinel.training?await this.sentinel.training.contextFor(prompt):'';const sentinel=await this.sentinel.gateway.complete({systemPrompt:this.sentinel.prompts.build('default')+trainingContext,history:[{role:'user',content:prompt}],userId:`benchmark:${userId}`,sessionId:`arena-${Date.now()}-${i}`});const sentinelLatency=Date.now()-sentinelStart;
       if(sentinel?.ok&&sentinel.text){const verdict=await this.evaluateAnswer({prompt,answer:sentinel.text,subjectProvider:'sentinel',reference});competitors.push({name:'Sentinel AI',provider:'sentinel',model:sentinel.model||null,latencyMs:sentinelLatency,usage:sentinel.usage||null,answer:sentinel.text,...verdict});}
       for(const provider of opponents){const t=Date.now();try{const r=await this.providers.callDetailed(provider,'ตอบคำถามให้ถูกต้อง ชัดเจน ปลอดภัย และอย่าอ้างสิ่งที่ไม่รู้',[{role:'user',content:prompt}]);const verdict=await this.evaluateAnswer({prompt,answer:r.text,subjectProvider:provider,reference});competitors.push({name:provider,provider,model:r.model||null,latencyMs:Date.now()-t,usage:r.usage||null,answer:r.text,...verdict});}catch(error){competitors.push({name:provider,provider,error:error.message,score:0,latencyMs:Date.now()-t});}}
@@ -57,6 +68,6 @@ class SentinelBenchmarkService{
     const names=[...new Set(rows.flatMap(r=>r.competitors.map(c=>c.name)))];const leaderboard=names.map(name=>{const list=rows.map(r=>r.competitors.find(c=>c.name===name)).filter(Boolean);return{name,cases:list.length,score:avg(list,'score'),correctness:avg(list,'correctness'),groundedness:avg(list,'groundedness'),safety:avg(list,'safety'),relevance:avg(list,'relevance'),clarity:avg(list,'clarity'),latencyMs:avg(list,'latencyMs'),wins:rows.filter(r=>r.winner===name).length};}).sort((a,b)=>b.score-a.score||b.wins-a.wins||a.latencyMs-b.latencyMs);
     const result={ok:true,runId:randomUUID(),startedAt:new Date(started).toISOString(),durationMs:Date.now()-started,cases:rows,leaderboard,providers:opponents};await this.saveRun(result,userId);this.audit?.record('sentinel.benchmark_completed',{runId:result.runId,caseCount:rows.length,providers:opponents,winner:leaderboard[0]?.name||null,durationMs:result.durationMs,summary:result.summary});return result;
   }
-  status(){return{ok:true,availableProviders:this.providers.available(),lastRun:this.lastRun,history:this.historyCache.map(x=>({runId:x.runId,startedAt:x.startedAt,durationMs:x.durationMs,createdBy:x.createdBy,providers:x.providers,caseCount:x.caseCount,winner:x.winner,summary:x.summary}))};}
+  status(){const now=Date.now();return{ok:true,availableProviders:this.providers.available(),lastRun:this.lastRun,runControl:{running:Boolean(this.inFlight),startedAt:this.inFlight?new Date(this.inFlight.startedAt).toISOString():null,cooldownMs:this.cooldownMs,cooldownRemainingMs:this.inFlight?0:Math.max(0,this.cooldownMs-(now-this.lastCompletedAt))},history:this.historyCache.map(x=>({runId:x.runId,startedAt:x.startedAt,durationMs:x.durationMs,createdBy:x.createdBy,providers:x.providers,caseCount:x.caseCount,winner:x.winner,summary:x.summary}))};}
 }
 module.exports={SentinelBenchmarkService,parseJudge,summarize};
