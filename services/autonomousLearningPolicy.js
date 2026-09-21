@@ -8,6 +8,10 @@ class AutonomousLearningPolicy {
     this.maxRegressionPct = clampNumber(options.maxRegressionPct ?? process.env.SENTINEL_AUTONOMOUS_MAX_REGRESSION_PCT, 5, 0, 100);
     this.rollbackScore = clampInt(options.rollbackScore ?? process.env.SENTINEL_AUTONOMOUS_ROLLBACK_SCORE, 82, 0, 100);
     this.minReviewers = clampInt(options.minReviewers ?? process.env.SENTINEL_AUTONOMOUS_MIN_REVIEWERS, 2, 1, 8);
+    this.promotionEnabled = options.promotionEnabled ?? process.env.SENTINEL_AUTONOMOUS_PROMOTION_ENABLED !== '0';
+    this.promotionPausedAt = this.promotionEnabled ? null : new Date().toISOString();
+    this.promotionPausedBy = this.promotionEnabled ? null : 'environment';
+    this.promotionPauseReason = this.promotionEnabled ? null : 'disabled_by_environment';
     this.protectedDomains = [
       'rbac',
       'administrator_permission',
@@ -37,6 +41,7 @@ class AutonomousLearningPolicy {
     const reasons = [];
     const uniqueReviewers = new Set((reviewers || []).filter(Boolean));
 
+    if (!this.promotionEnabled) reasons.push('promotion_emergency_stop');
     if (risk === 'protected') reasons.push('protected_domain');
     if (safe !== true) reasons.push('unsafe_evaluation');
     if (Number(score) < this.promotionScore) reasons.push('score_below_threshold');
@@ -53,9 +58,27 @@ class AutonomousLearningPolicy {
         minReviewers: this.minReviewers,
         shadowMinSamples: this.shadowMinSamples,
         shadowScore: this.shadowScore,
-        maxRegressionPct: this.maxRegressionPct
+        maxRegressionPct: this.maxRegressionPct,
+        promotionEnabled: this.promotionEnabled
       }
     };
+  }
+
+  promotionControl() {
+    return {
+      enabled: this.promotionEnabled,
+      pausedAt: this.promotionPausedAt,
+      pausedBy: this.promotionPausedBy,
+      reason: this.promotionPauseReason
+    };
+  }
+
+  setPromotionEnabled(enabled, { actor = 'administrator', reason = null } = {}) {
+    this.promotionEnabled = enabled === true;
+    this.promotionPausedAt = this.promotionEnabled ? null : new Date().toISOString();
+    this.promotionPausedBy = this.promotionEnabled ? null : String(actor || 'administrator').slice(0, 160);
+    this.promotionPauseReason = this.promotionEnabled ? null : String(reason || 'administrator_emergency_stop').slice(0, 500);
+    return this.promotionControl();
   }
 
   rollbackDecision({ rollingScore, baselineScore, criticalSafetyEvent = false } = {}) {
