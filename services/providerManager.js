@@ -12,11 +12,29 @@ function completionOptions(url, model) {
   }
   return { max_tokens: 320 };
 }
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+async function providerError(res) {
+  let detail = "";
+  try { const data = await res.clone().json(); detail = data?.error?.message || data?.message || data?.error || ""; } catch (_) { try { detail = await res.clone().text(); } catch (_) {} }
+  detail = String(detail || "").replace(/[\r\n\t]+/g, " ").replace(/(key|token|secret)\s*[=:]\s*\S+/gi, "$1=[redacted]").slice(0, 220);
+  const error = new Error(`Provider HTTP ${res.status}${detail ? `: ${detail}` : ""}`); error.status = res.status; return error;
+}
+async function fetchProvider(makeRequest, attempts = 3) {
+  let last;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const res = await makeRequest();
+    if (res.ok) return res;
+    last = res;
+    if (res.status !== 429 && res.status < 500) break;
+    if (attempt < attempts - 1) { const retryAfter = Number(res.headers.get("retry-after")); await sleep(Number.isFinite(retryAfter) ? Math.min(10000, retryAfter * 1000) : 750 * (attempt + 1)); }
+  }
+  throw await providerError(last);
+}
 class ProviderManager {
   constructor() {
     this.keys = { groq: process.env.GROQ_API_KEY || "", openai: process.env.OPENAI_API_KEY || "", gemini: process.env.GEMINI_API_KEY || "", anthropic: process.env.ANTHROPIC_API_KEY || "" };
     this.priority = (process.env.AI_PRIORITY || "groq,openai,gemini,anthropic").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-    this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-1.5-flash", anthropic: process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-20241022" };
+    this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-2.5-flash", anthropic: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5" };
   }
   available() { return this.priority.filter((p) => this.keys[p]); }
   catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: Boolean(this.keys[provider]), priority, streaming: provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
@@ -98,21 +116,21 @@ class ProviderManager {
     return { text: text.trim(), model: responseModel, usage, streaming: "native" };
   }
   async callOpenAICompatible(url, key, model, systemPrompt, history) {
-    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, ...completionOptions(url, model) }), signal: AbortSignal.timeout(30000) });
-    if (!res.ok) throw new Error(`Provider HTTP ${res.status}`); const data = await res.json();
+    const request = () => fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, ...completionOptions(url, model) }), signal: AbortSignal.timeout(30000) });
+    const res = await fetchProvider(request); const data = await res.json();
     return { text: data.choices?.[0]?.message?.content?.trim() || null, model: data.model || model, usage: data.usage ? { inputTokens: data.usage.prompt_tokens || 0, outputTokens: data.usage.completion_tokens || 0, totalTokens: data.usage.total_tokens || 0 } : null };
   }
   async callGemini(key, model, systemPrompt, history) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`; const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
+    const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
     if (contents.length && contents[0].role === "user") contents[0].parts[0].text = `${systemPrompt}\n\n${contents[0].parts[0].text}`;
-    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents, generationConfig: { temperature: 0.65, maxOutputTokens: 320 } }), signal: AbortSignal.timeout(30000) });
-    if (!res.ok) throw new Error(`Provider HTTP ${res.status}`); const data = await res.json(); const usage = data.usageMetadata;
-    return { text: data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null, model, usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null };
+    const candidates = [...new Set([model, "gemini-2.5-flash-lite"])]; let lastError;
+    for (const candidate of candidates) { try { const url = `https://generativelanguage.googleapis.com/v1beta/models/${candidate}:generateContent?key=${key}`; const res = await fetchProvider(() => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents, generationConfig: { temperature: 0.65, maxOutputTokens: 320 } }), signal: AbortSignal.timeout(30000) })); const data = await res.json(); const usage = data.usageMetadata; return { text: data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null, model:candidate, usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null }; } catch (error) { lastError=error; if(error.status!==404)throw error; } }
+    throw lastError;
   }
   async callAnthropic(key, model, systemPrompt, history) {
-    const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model, max_tokens: 320, temperature: 0.65, system: systemPrompt, messages: history.map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })) }), signal: AbortSignal.timeout(30000) });
-    if (!res.ok) throw new Error(`Provider HTTP ${res.status}`); const data = await res.json();
-    return { text: data.content?.[0]?.text?.trim() || null, model: data.model || model, usage: data.usage ? { inputTokens: data.usage.input_tokens || 0, outputTokens: data.usage.output_tokens || 0, totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0) } : null };
+    const candidates=[...new Set([model,"claude-haiku-4-5-20251001"])];let lastError;
+    for(const candidate of candidates){try{const res=await fetchProvider(()=>fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model:candidate, max_tokens: 320, temperature: 0.65, system: systemPrompt, messages: history.map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })) }), signal: AbortSignal.timeout(30000) }));const data=await res.json();return { text: data.content?.[0]?.text?.trim() || null, model: data.model || candidate, usage: data.usage ? { inputTokens: data.usage.input_tokens || 0, outputTokens: data.usage.output_tokens || 0, totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0) } : null };}catch(error){lastError=error;if(![400,404].includes(error.status))throw error;}}
+    throw lastError;
   }
 }
 module.exports = { ProviderManager };
