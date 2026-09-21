@@ -52,7 +52,8 @@ class SentinelReleaseGateService {
     autoImproveEnabled = process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE !== 'false',
     autoImproveMaxRounds = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE_MAX_ROUNDS || 3),
     autoImproveRetryDelayMs = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE_RETRY_MS || 60000),
-    autoImproveMaxCases = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE_MAX_CASES || 3)
+    autoImproveMaxCases = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE_MAX_CASES || 3),
+    benchmarkTimeoutMs = Number(process.env.SENTINEL_RELEASE_GATE_BENCHMARK_TIMEOUT_MS || 180000)
   } = {}) {
     this.training = training;
     this.learning = learning || training?.learning || null;
@@ -66,10 +67,12 @@ class SentinelReleaseGateService {
     this.autoImproveMaxRounds = Math.max(0, Math.min(10, Number(autoImproveMaxRounds) || 3));
     this.autoImproveRetryDelayMs = Math.max(1000, Number(autoImproveRetryDelayMs) || 60000);
     this.autoImproveMaxCases = Math.max(1, Math.min(10, Number(autoImproveMaxCases) || 3));
+    this.benchmarkTimeoutMs = Math.max(30000, Number(benchmarkTimeoutMs) || 180000);
     this.lastAutoBenchmarkAt = null;
     this.lastAutoBenchmarkReason = null;
     this.lastReport = null;
     this.benchmarkJob = null;
+    this.benchmarkExecution = null;
     this.retryTimer = null;
   }
 
@@ -197,9 +200,13 @@ class SentinelReleaseGateService {
     return { ...this.automationStatus(), state: started.alreadyRunning ? 'benchmark_running' : 'benchmark_started', job: started.job };
   }
 
-  async startBenchmark({ userId = 'administrator', requestId, autoImprove = true, round = 0, improvementOf = null } = {}) {
+  async startBenchmark({ userId = 'administrator', requestId, autoImprove = true, round = 0, improvementOf = null, waitForCompletion = false } = {}) {
     if (!this.benchmark) return { ok: false, error: 'benchmark_unavailable' };
-    if (this.activeBenchmarkStatus()) return { ok: true, alreadyRunning: true, job: this.benchmarkJobStatus() };
+    this.expireStaleBenchmarkJob();
+    if (this.activeBenchmarkStatus()) {
+      if (waitForCompletion && this.benchmarkExecution) await this.benchmarkExecution;
+      return { ok: true, alreadyRunning: true, job: this.benchmarkJobStatus() };
+    }
     const available = safeArray(this.benchmark.status?.().availableProviders);
     if (!available.length) return { ok: false, error: 'no_benchmark_provider' };
     const job = {
@@ -218,19 +225,29 @@ class SentinelReleaseGateService {
       error: null,
       result: null,
       improvement: null,
-      nextRetryAt: null
+      nextRetryAt: null,
+      holdRequestOpen: waitForCompletion === true
     };
     this.benchmarkJob = job;
     this.audit?.record?.('sentinel.release_gate_benchmark_started', { jobId: job.jobId, userId, requestId, automatic: job.automatic, round: job.round, providers: available });
-    setImmediate(() => this.runBenchmarkJob(job).catch((error) => {
+    const execution = this.runBenchmarkJob(job).catch((error) => {
       this.benchmarkJob = { ...job, status: 'failed', completedAt: nowIso(), error: error.message };
       this.audit?.record?.('sentinel.release_gate_benchmark_failed', { jobId: job.jobId, error: error.message, automatic: job.automatic, round: job.round });
-    }));
+      return this.benchmarkJob;
+    }).finally(() => {
+      if (this.benchmarkExecution === execution) this.benchmarkExecution = null;
+    });
+    this.benchmarkExecution = execution;
+    if (waitForCompletion) await execution;
     return { ok: true, accepted: true, job: this.benchmarkJobStatus() };
   }
 
   async runBenchmarkJob(job) {
-    const result = await this.benchmark.run({ cases: releaseGateBenchmarkCases(), userId: `release-gate:${job.startedBy || 'system'}` });
+    const result = await this.withTimeout(
+      this.benchmark.run({ cases: releaseGateBenchmarkCases(), userId: `release-gate:${job.startedBy || 'system'}` }),
+      this.benchmarkTimeoutMs,
+      'benchmark_timeout'
+    );
     const sentinel = this.sentinelSummary(result);
     const completed = {
       ...job,
@@ -386,14 +403,21 @@ class SentinelReleaseGateService {
     return result;
   }
 
-  scheduleImprovementRetry(job) {
+  async scheduleImprovementRetry(job) {
     const nextRetryAt = new Date(Date.now() + this.autoImproveRetryDelayMs).toISOString();
     const waiting = { ...job, status: 'waiting_retry', nextRetryAt };
     this.benchmarkJob = waiting;
+    if (job.holdRequestOpen) {
+      await new Promise((resolve) => setTimeout(resolve, this.autoImproveRetryDelayMs));
+      if (this.benchmarkJob?.jobId !== waiting.jobId || this.benchmarkJob?.status !== 'waiting_retry') return this.benchmarkJob;
+      const retry = this.createRetryJob(waiting);
+      this.benchmarkJob = retry;
+      return this.runBenchmarkJob(retry);
+    }
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = setTimeout(() => {
       if (this.benchmarkJob?.jobId !== waiting.jobId || this.benchmarkJob?.status !== 'waiting_retry') return;
-      const retry = { ...waiting, jobId: randomUUID(), status: 'running', startedAt: nowIso(), completedAt: null, startedBy: 'release-gate:auto-improve', requestId: `auto-improve-retry:${waiting.jobId}`, automatic: true, round: number(waiting.round) + 1, improvementOf: waiting.jobId, error: null, result: null, nextRetryAt: null };
+      const retry = this.createRetryJob(waiting);
       this.benchmarkJob = retry;
       this.runBenchmarkJob(retry).catch((error) => {
         this.benchmarkJob = { ...retry, status: 'failed', completedAt: nowIso(), error: error.message };
@@ -405,7 +429,33 @@ class SentinelReleaseGateService {
     return waiting;
   }
 
+  createRetryJob(waiting) {
+    return { ...waiting, jobId: randomUUID(), status: 'running', startedAt: nowIso(), completedAt: null, startedBy: 'release-gate:auto-improve', requestId: `auto-improve-retry:${waiting.jobId}`, automatic: true, round: number(waiting.round) + 1, improvementOf: waiting.jobId, error: null, result: null, nextRetryAt: null };
+  }
+
+  expireStaleBenchmarkJob() {
+    if (!this.activeBenchmarkStatus() || !this.benchmarkJob?.startedAt) return false;
+    const ageMs = Date.now() - new Date(this.benchmarkJob.startedAt).getTime();
+    if (!Number.isFinite(ageMs) || ageMs <= this.benchmarkTimeoutMs + this.autoImproveRetryDelayMs) return false;
+    this.benchmarkJob = { ...this.benchmarkJob, status: 'failed', completedAt: nowIso(), error: 'benchmark_timeout', nextRetryAt: null };
+    this.audit?.record?.('sentinel.release_gate_benchmark_failed', { jobId: this.benchmarkJob.jobId, error: 'benchmark_timeout', round: this.benchmarkJob.round });
+    return true;
+  }
+
+  async withTimeout(promise, timeoutMs, code) {
+    let timer;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(code)), timeoutMs); })
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   benchmarkJobStatus() {
+    this.expireStaleBenchmarkJob();
     return this.benchmarkJob ? { ...this.benchmarkJob } : null;
   }
 

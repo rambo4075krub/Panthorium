@@ -41,8 +41,8 @@ function createReleaseGateRouter(authService, releaseGate) {
   router.post('/benchmark/start', ...admin, benchmarkLimiter, async (req, res, next) => {
     try {
       if (!releaseGate) return res.status(503).json({ ok: false, error: 'release_gate_unavailable' });
-      const result = await releaseGate.startBenchmark({ userId: req.user?.sub || 'administrator', requestId: req.requestId });
-      res.status(result.ok ? 202 : 409).json(result);
+      const result = await releaseGate.startBenchmark({ userId: req.user?.sub || 'administrator', requestId: req.requestId, waitForCompletion: req.query.wait === 'true' });
+      res.status(result.ok ? (req.query.wait === 'true' ? 200 : 202) : 409).json(result);
     } catch (error) {
       next(error);
     }
