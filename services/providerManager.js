@@ -34,7 +34,7 @@ class ProviderManager {
   constructor() {
     this.keys = { groq: process.env.GROQ_API_KEY || "", openai: process.env.OPENAI_API_KEY || "", gemini: process.env.GEMINI_API_KEY || "", anthropic: process.env.ANTHROPIC_API_KEY || "" };
     this.priority = (process.env.AI_PRIORITY || "groq,openai,gemini,anthropic").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-    this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-2.5-flash", anthropic: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5" };
+    this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite", anthropic: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001" };
   }
   available() { return this.priority.filter((p) => this.keys[p]); }
   catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: Boolean(this.keys[provider]), priority, streaming: provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
@@ -123,7 +123,7 @@ class ProviderManager {
   async callGemini(key, model, systemPrompt, history) {
     const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
     if (contents.length && contents[0].role === "user") contents[0].parts[0].text = `${systemPrompt}\n\n${contents[0].parts[0].text}`;
-    const candidates = [...new Set([model, "gemini-2.5-flash-lite"])]; let lastError;
+    const candidates = [...new Set([model, "gemini-3.5-flash-lite"])]; let lastError;
     for (const candidate of candidates) { try { const url = `https://generativelanguage.googleapis.com/v1beta/models/${candidate}:generateContent?key=${key}`; const res = await fetchProvider(() => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents, generationConfig: { temperature: 0.65, maxOutputTokens: 320 } }), signal: AbortSignal.timeout(30000) })); const data = await res.json(); const usage = data.usageMetadata; return { text: data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null, model:candidate, usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null }; } catch (error) { lastError=error; if(error.status!==404)throw error; } }
     throw lastError;
   }
