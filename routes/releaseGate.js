@@ -14,6 +14,11 @@ function createReleaseGateRouter(authService, releaseGate) {
   router.get('/status', ...admin, limiter, async (req, res, next) => {
     try {
       if (!releaseGate) return res.status(503).json({ ok: false, error: 'release_gate_unavailable' });
+      res.set('Cache-Control', 'no-store');
+      if (req.query.wait === 'true' && releaseGate.activeBenchmarkStatus()) {
+        // Bounded long polling keeps this request active while background work advances.
+        await new Promise(resolve => setTimeout(resolve, 15000));
+      }
       res.json(await releaseGate.status({ record: req.query.record === 'true', auto: req.query.auto !== 'false' }));
     } catch (error) {
       next(error);
