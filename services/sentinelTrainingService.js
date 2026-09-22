@@ -358,8 +358,12 @@ class SentinelTrainingService {
             : null,
         )
         .filter(Boolean);
-    const complete =
-        judges.length === ordered.length && judges.length >= this.minEvaluators,
+    // Quorum, not unanimity: a candidate needs at least minEvaluators independent
+    // judges to answer. Requiring every configured judge would make each extra
+    // evaluator a new single point of failure instead of added redundancy, so a
+    // quota-limited provider could silently stall all training. Judges that do
+    // answer must still agree, so the gate stays fail-closed below the quorum.
+    const complete = judges.length >= this.minEvaluators,
       score = judges.length
         ? Math.round(judges.reduce((s, i) => s + i.score, 0) / judges.length)
         : null,
@@ -376,6 +380,8 @@ class SentinelTrainingService {
         evaluatedAt: new Date().toISOString(),
         reason: error,
         requiredEvaluators: this.minEvaluators,
+        evaluatorsConfigured: ordered.length,
+        evaluatorsResponded: judges.length,
       };
     const updated = await this.repository.review(
       example.exampleId,

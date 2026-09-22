@@ -22,7 +22,7 @@ Training Lab ใช้การเรียนรู้แบบ RAG: บทส�
 - `SENTINEL_AUTO_INTERVAL_MS=60000` — รอบตรวจคิวขั้นต่ำ 15 วินาที
 - `SENTINEL_TEACHER_PROVIDERS=groq` — provider ที่อนุญาตให้สร้างตัวอย่างฝึก
 - `SENTINEL_EVALUATOR_PROVIDERS=openai,gemini,anthropic` — กรรมการอิสระตามลำดับ
-- `SENTINEL_MIN_EVALUATORS=2` — จำนวนกรรมการขั้นต่ำก่อนอนุมัติ (2–3)
+- `SENTINEL_MIN_EVALUATORS=2` — องค์ประชุมกรรมการขั้นต่ำก่อนอนุมัติ (2–3)
 - `SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=0` — เริ่มระบบโดยหยุด promotion อัตโนมัติ (emergency stop)
 - `SENTINEL_BENCHMARK_COOLDOWN_MS=60000` — ช่วงพักก่อนรัน benchmark ชุดเดิมซ้ำ
 - `SENTINEL_BENCHMARK_RATE_LIMIT=12` — จำนวนคำขอ `POST /api/training/benchmark/run` ต่อนาทีต่อ IP
@@ -30,6 +30,14 @@ Training Lab ใช้การเรียนรู้แบบ RAG: บทส�
 สถานะ emergency stop ถูกเก็บถาวรในตาราง `panthorium_learning_controls` (คีย์ `autonomous_promotion`) ค่าที่แอดมินสั่งไว้จะถูกโหลดกลับตอน boot และมีผลเหนือค่า env จึงไม่หลุดเมื่อรีสตาร์ทหรือมีหลาย instance หากเขียน/อ่านสถานะไม่สำเร็จ ระบบจะ fail-closed คือหยุด promotion ไว้ก่อน
 
 ค่าเริ่มต้นใช้ role separation: provider ที่สร้างตัวอย่างจะไม่สามารถตรวจตัวอย่างของตัวเองได้ หากกรรมการอิสระพร้อมใช้น้อยกว่าจำนวนขั้นต่ำ ระบบจะปฏิเสธ candidate แบบ fail-closed
+
+### การนับกรรมการแบบองค์ประชุม
+
+candidate ต้องมีกรรมการอิสระตอบกลับสำเร็จอย่างน้อย `SENTINEL_MIN_EVALUATORS` ราย ไม่ใช่ครบทุกรายที่ตั้งค่าไว้ เพราะการบังคับให้ครบทุกรายจะทำให้กรรมการที่เพิ่มเข้ามากลายเป็น single point of failure ใหม่แทนที่จะเป็นตัวสำรอง หาก provider ใดติด quota การเทรนทั้งระบบจะหยุดนิ่ง
+
+แต่องค์ประชุมไม่ใช่การโหวตตามเสียงข้างมาก: กรรมการทุกรายที่ตอบกลับมาต้องเห็นว่าปลอดภัย ถูกต้อง และตรงคำถามทั้งหมด กรรมการเพียงรายเดียวค้านก็บล็อก candidate ได้ และหากกรรมการพร้อมใช้น้อยกว่าองค์ประชุม ระบบจะปฏิเสธโดยไม่เสียโควตา provider เลย
+
+ผลการประเมินแต่ละครั้งรายงาน `evaluatorsConfigured` และ `evaluatorsResponded` เพื่อตรวจได้ว่ากรรมการรายใดหายไป
 
 ## API สำหรับแอดมิน
 
