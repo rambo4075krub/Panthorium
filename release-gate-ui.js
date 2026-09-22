@@ -24,6 +24,8 @@ function freshness(){
  const cooldown=Math.max(0,Math.ceil((cooldownUntil-Date.now())/1000));
  if(statusError){el.textContent=statusError;return;}
  el.textContent=lastReportAt?'อัปเดตล่าสุด '+age+' วินาทีก่อน'+(cooldown?' · cooldown '+cooldown+'s':''):'กำลังโหลดสถานะ';
+ const bench=document.getElementById('rg-benchmark');
+ if(bench&&!/กำลังทำงาน/.test(bench.textContent||'')){bench.disabled=cooldown>0;bench.textContent=cooldown?`⚔ Benchmark พร้อมอีก ${cooldown}s`:'⚔ บังคับรัน Benchmark ทันที';}
 }
 setInterval(freshness,1000);
 async function refresh(){
