@@ -23,6 +23,9 @@ Training Lab ใช้การเรียนรู้แบบ RAG: บทส�
 - `SENTINEL_TEACHER_PROVIDERS=groq` — provider ที่อนุญาตให้สร้างตัวอย่างฝึก
 - `SENTINEL_EVALUATOR_PROVIDERS=openai,gemini,anthropic` — กรรมการอิสระตามลำดับ
 - `SENTINEL_MIN_EVALUATORS=2` — จำนวนกรรมการขั้นต่ำก่อนอนุมัติ (2–3)
+- `SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=0` — เริ่มระบบโดยหยุด promotion อัตโนมัติ (emergency stop)
+- `SENTINEL_BENCHMARK_COOLDOWN_MS=60000` — ช่วงพักก่อนรัน benchmark ชุดเดิมซ้ำ
+- `SENTINEL_BENCHMARK_RATE_LIMIT=12` — จำนวนคำขอ `POST /api/training/benchmark/run` ต่อนาทีต่อ IP
 
 ค่าเริ่มต้นใช้ role separation: provider ที่สร้างตัวอย่างจะไม่สามารถตรวจตัวอย่างของตัวเองได้ หากกรรมการอิสระพร้อมใช้น้อยกว่าจำนวนขั้นต่ำ ระบบจะปฏิเสธ candidate แบบ fail-closed
 
