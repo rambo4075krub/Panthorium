@@ -42,6 +42,19 @@ function minutesUntil(value) {
   return Number.isFinite(ms) ? Math.max(0, Math.round(ms / 60000)) : 0;
 }
 
+function rateLimitDelayMs(error, fallbackMs = 60000) {
+  const message = String(error?.message || error || '');
+  if (!/(?:\b429\b|rate[ -]?limit|too many requests)/i.test(message)) return 0;
+  const explicit = Number(error?.retryAfterMs);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.min(24 * 60 * 60 * 1000, Math.max(1000, explicit));
+  const match = message.match(/(?:retry|try again)[^\d]*(?:(\d+(?:\.\d+)?)\s*h)?\s*(?:(\d+(?:\.\d+)?)\s*m)?\s*(?:(\d+(?:\.\d+)?)\s*s)?/i);
+  if (match && (match[1] || match[2] || match[3])) {
+    const parsed = (Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0)) * 1000;
+    return Math.min(24 * 60 * 60 * 1000, Math.max(1000, Math.ceil(parsed)));
+  }
+  return Math.min(24 * 60 * 60 * 1000, Math.max(1000, Number(fallbackMs) || 60000));
+}
+
 class SentinelActiveLearningService {
   constructor({ training, learning, providers, audit, databaseUrl, databaseSslMode, minIntervalMs = 60000 } = {}) {
     this.training = training;
@@ -102,7 +115,7 @@ class SentinelActiveLearningService {
   }
 
   async resumeRunningRun() {
-    const result = await this.pool.query(`SELECT * FROM panthorium_active_learning_runs WHERE status='running' ORDER BY updated_at DESC LIMIT 1`);
+    const result = await this.pool.query(`SELECT * FROM panthorium_active_learning_runs WHERE status IN ('running','paused') ORDER BY updated_at DESC LIMIT 1`);
     if (!result.rows[0]) return;
     const run = this.map(result.rows[0]);
     if (!run.options?.never && Date.now() >= new Date(run.stopAt).getTime()) {
@@ -110,6 +123,15 @@ class SentinelActiveLearningService {
       return;
     }
     this.session = run;
+    if (run.status === 'paused') {
+      const remaining = new Date(run.stats?.resumeAt || 0).getTime() - Date.now();
+      if (remaining > 0) {
+        this.schedule(remaining);
+        return;
+      }
+      await this.resumeFromPause();
+      return;
+    }
     const violation = this.guardrailViolation(run);
     if (violation) {
       await this.finish(run, 'guarded', { reason: violation.reason });
@@ -152,7 +174,9 @@ class SentinelActiveLearningService {
     }
     return {
       ok: true,
-      running: Boolean(this.session && this.session.status === 'running'),
+      running: Boolean(this.session && ['running', 'paused'].includes(this.session.status)),
+      paused: Boolean(this.session && this.session.status === 'paused'),
+      resumeAt: this.session?.status === 'paused' ? this.session.stats?.resumeAt || null : null,
       run: this.session || null,
       history: await this.listRuns({ limit: 8 }),
       providers: this.providers?.available?.() || [],
@@ -274,9 +298,37 @@ class SentinelActiveLearningService {
 
   schedule(delayMs) {
     if (this.timer) clearTimeout(this.timer);
-    if (!this.session || this.session.status !== 'running') return;
-    this.timer = setTimeout(() => this.tick().catch((error) => this.audit?.record('sentinel.active_learning_tick_failed', { error: error.message })), Math.max(250, Number(delayMs) || 1000));
+    if (!this.session || !['running', 'paused'].includes(this.session.status)) return;
+    const action = this.session.status === 'paused' ? () => this.resumeFromPause() : () => this.tick();
+    this.timer = setTimeout(() => action().catch((error) => this.audit?.record('sentinel.active_learning_tick_failed', { error: error.message })), Math.max(250, Number(delayMs) || 1000));
     this.timer.unref?.();
+  }
+
+  async pauseForRateLimit(error) {
+    const delayMs = rateLimitDelayMs(error, 60000) + 1500;
+    const now = new Date().toISOString();
+    const resumeAt = new Date(Date.now() + delayMs).toISOString();
+    const stats = {
+      ...(this.session.stats || {}),
+      pausedAt: now,
+      resumeAt,
+      pauseReason: 'provider_rate_limit',
+      pauseCount: Number(this.session.stats?.pauseCount || 0) + 1,
+      lastGuardCheck: 'paused_rate_limit'
+    };
+    await this.save({ ...this.session, status: 'paused', stats, lastError: String(error?.message || error) });
+    this.audit?.record('sentinel.active_learning_rate_limit_paused', { runId: this.session.runId, delayMs, resumeAt, error: this.session.lastError });
+    this.schedule(delayMs);
+  }
+
+  async resumeFromPause() {
+    if (!this.session || this.session.status !== 'paused') return;
+    const remaining = new Date(this.session.stats?.resumeAt || 0).getTime() - Date.now();
+    if (remaining > 0) return this.schedule(remaining);
+    const stats = { ...(this.session.stats || {}), resumedAt: new Date().toISOString(), pauseReason: null, resumeAt: null, lastGuardCheck: 'passed' };
+    await this.save({ ...this.session, status: 'running', stats, lastError: null });
+    this.audit?.record('sentinel.active_learning_rate_limit_resumed', { runId: this.session.runId });
+    this.schedule(500);
   }
 
   shutdown() {
@@ -350,6 +402,10 @@ class SentinelActiveLearningService {
       await this.save({ ...this.session, stats, lastError: null });
       this.audit?.record('sentinel.active_learning_cycle_completed', { runId: this.session.runId, stats, delta, remaining: this.remainingBudget(this.session) });
     } catch (error) {
+      if (this.session.options?.never && rateLimitDelayMs(error) > 0) {
+        await this.pauseForRateLimit(error);
+        return;
+      }
       const stats = {
         ...(this.session.stats || {}),
         failures: Number(this.session.stats?.failures || 0) + 1,
@@ -376,7 +432,7 @@ class SentinelActiveLearningService {
   async runCycle(run) {
     const delta = { prompts: 0, candidates: 0, failures: 0, shadowSamples: 0, unsafeShadow: 0, promotions: 0 };
     for (let i = 0; i < Number(run.options?.batchSize || 1); i += 1) {
-      if (Number(run.stats?.prompts || 0) + delta.prompts >= Number(run.options?.maxPrompts || 0)) break;
+      if (!run.options?.never && Number(run.stats?.prompts || 0) + delta.prompts >= Number(run.options?.maxPrompts || 0)) break;
       const prompt = this.nextPrompt({ ...run, stats: { ...run.stats, cycles: Number(run.stats?.cycles || 0) + i } });
       const result = await this.training.draftWithTeachers({
         prompt,
@@ -388,7 +444,9 @@ class SentinelActiveLearningService {
       delta.prompts += 1;
       delta.candidates += result.candidates?.length || 0;
       delta.failures += result.failures?.length || (result.ok === false ? 1 : 0);
-      if (Number(run.stats?.candidates || 0) + delta.candidates >= Number(run.options?.maxCandidates || 0)) break;
+      const rateLimited = result.failures?.find((failure) => rateLimitDelayMs(failure?.error || failure) > 0);
+      if (run.options?.never && rateLimited) throw new Error(String(rateLimited.error || rateLimited));
+      if (!run.options?.never && Number(run.stats?.candidates || 0) + delta.candidates >= Number(run.options?.maxCandidates || 0)) break;
     }
     if (run.options?.autoShadow !== false) {
       const shadow = await this.sampleShadow(run);
@@ -476,4 +534,4 @@ class SentinelActiveLearningService {
   }
 }
 
-module.exports = { SentinelActiveLearningService };
+module.exports = { SentinelActiveLearningService, rateLimitDelayMs };
