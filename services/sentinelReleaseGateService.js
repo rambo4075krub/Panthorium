@@ -69,6 +69,7 @@ class SentinelReleaseGateService {
     this.autoImproveMaxCases = Math.max(1, Math.min(10, Number(autoImproveMaxCases) || 3));
     this.benchmarkTimeoutMs = Math.max(30000, Number(benchmarkTimeoutMs) || 180000);
     this.lastAutoBenchmarkAt = null;
+    this.lastBenchmarkAt = null;
     this.lastAutoBenchmarkReason = null;
     this.lastReport = null;
     this.benchmarkJob = null;
@@ -158,7 +159,7 @@ class SentinelReleaseGateService {
   }
 
   automationStatus() {
-    const lastAutoAt = this.lastAutoBenchmarkAt;
+    const lastAutoAt = this.lastBenchmarkAt || this.lastAutoBenchmarkAt;
     const remaining = lastAutoAt ? Math.max(0, this.autoBenchmarkCooldownMs - (Date.now() - new Date(lastAutoAt).getTime())) : 0;
     return {
       enabled: this.autoBenchmarkEnabled,
@@ -207,6 +208,8 @@ class SentinelReleaseGateService {
       if (waitForCompletion && this.benchmarkExecution) await this.benchmarkExecution;
       return { ok: true, alreadyRunning: true, job: this.benchmarkJobStatus() };
     }
+    const cooldownRemainingMs = this.automationStatus().cooldownRemainingMs;
+    if (cooldownRemainingMs > 0) return { ok: false, error: 'benchmark_cooldown', retryAfterMs: cooldownRemainingMs };
     const available = safeArray(this.benchmark.status?.().availableProviders);
     if (!available.length) return { ok: false, error: 'no_benchmark_provider' };
     const job = {
@@ -229,6 +232,7 @@ class SentinelReleaseGateService {
       holdRequestOpen: waitForCompletion === true
     };
     this.benchmarkJob = job;
+    this.lastBenchmarkAt = nowIso();
     this.audit?.record?.('sentinel.release_gate_benchmark_started', { jobId: job.jobId, userId, requestId, automatic: job.automatic, round: job.round, providers: available });
     const execution = this.runBenchmarkJob(job).catch((error) => {
       this.benchmarkJob = { ...job, status: 'failed', completedAt: nowIso(), error: error.message };
@@ -285,8 +289,9 @@ class SentinelReleaseGateService {
     const next = { ...running, improvement: { ...running.improvement, ...improvement, status: 'completed', completedAt: nowIso() } };
     this.audit?.record?.('sentinel.release_gate_auto_improve_completed', { jobId: job.jobId, round: next.improvement.round, candidates: next.improvement.candidates, approved: next.improvement.approved, promoted: next.improvement.promoted, failures: next.improvement.failures });
 
-    if (improvement.approved > 0 || improvement.promoted > 0) return this.scheduleImprovementRetry(next);
-    this.benchmarkJob = { ...next, status: 'completed', nextRetryAt: null, improvement: { ...next.improvement, status: 'completed_no_retry', reason: 'no_approved_improvement_candidate' } };
+    const canRetry = number(job.round) + 1 < this.autoImproveMaxRounds;
+    if (canRetry && (improvement.approved > 0 || improvement.promoted > 0 || improvement.candidates > 0 || improvement.failures > 0)) return this.scheduleImprovementRetry(next);
+    this.benchmarkJob = { ...next, status: 'completed', nextRetryAt: null, improvement: { ...next.improvement, status: canRetry ? 'completed_no_retry' : 'max_rounds_reached', reason: canRetry ? 'no_retryable_improvement_result' : 'auto_improve_max_rounds_reached' } };
     return this.benchmarkJob;
   }
 
