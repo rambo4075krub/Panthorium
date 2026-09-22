@@ -347,7 +347,7 @@ class SentinelReleaseGateService {
     return safeArray(benchmarkResult?.cases).map((row) => {
       const sentinel = this.sentinelCompetitor(row);
       return { caseId: row.caseId, prompt: row.prompt, reference: row.reference, winner: row.winner, sentinelScore: number(sentinel?.score), sentinelAnswer: sentinel?.answer || '', feedback: this.feedbackFromCompetitor(sentinel), raw: row };
-    }).filter((item) => item.prompt && item.sentinelScore < this.minBenchmarkScore);
+    }).filter((item) => item.prompt && !this.sentinelCompetitor(item.raw)?.error && item.sentinelScore < this.minBenchmarkScore);
   }
 
   sentinelCompetitor(row) {
@@ -506,7 +506,8 @@ class SentinelReleaseGateService {
   }
 
   checkBenchmark({ benchmarkStatus, lastBenchmark, sentinelSummary }) {
-    const pass = Boolean(benchmarkStatus?.ok && lastBenchmark && sentinelSummary && number(sentinelSummary.score) >= this.minBenchmarkScore);
+    const complete = !lastBenchmark?.cases || (lastBenchmark.cases.length > 0 && lastBenchmark.cases.every(row => {const candidate=this.sentinelCompetitor(row);return candidate && !candidate.error && safeArray(candidate.judges).length >= 2;}));
+    const pass = Boolean(complete && benchmarkStatus?.ok && lastBenchmark && sentinelSummary && number(sentinelSummary.score) >= this.minBenchmarkScore);
     return { id: 'benchmark_evidence', label: 'Benchmark Arena evidence', pass, reason: pass ? null : `ต้องมี benchmark history และ Sentinel score ≥ ${this.minBenchmarkScore}`, evidence: { availableProviders: benchmarkStatus?.availableProviders || [], historyCount: safeArray(benchmarkStatus?.history).length, lastRunId: lastBenchmark?.runId || null, sentinel: sentinelSummary } };
   }
 
