@@ -355,6 +355,7 @@ async function start() {
   await integrationExecutions.init();
   await productionIntelligence.init();
   await sentinelTraining.init();
+  await sentinelRecovery.init();
   await sentinelBenchmark.init();
   await sentinelActiveLearning.init();
   await autonomousGovernance.init();

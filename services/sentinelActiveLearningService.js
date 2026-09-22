@@ -42,6 +42,19 @@ function minutesUntil(value) {
   return Number.isFinite(ms) ? Math.max(0, Math.round(ms / 60000)) : 0;
 }
 
+function rateLimitDelayMs(error, fallbackMs = 60000) {
+  const message = String(error?.message || error || '');
+  if (!/(?:\b429\b|rate[ -]?limit|too many requests)/i.test(message)) return 0;
+  const explicit = Number(error?.retryAfterMs);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.min(24 * 60 * 60 * 1000, Math.max(1000, explicit));
+  const match = message.match(/(?:retry|try again)[^\d]*(?:(\d+(?:\.\d+)?)\s*h)?\s*(?:(\d+(?:\.\d+)?)\s*m)?\s*(?:(\d+(?:\.\d+)?)\s*s)?/i);
+  if (match && (match[1] || match[2] || match[3])) {
+    const parsed = (Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0)) * 1000;
+    return Math.min(24 * 60 * 60 * 1000, Math.max(1000, Math.ceil(parsed)));
+  }
+  return Math.min(24 * 60 * 60 * 1000, Math.max(1000, Number(fallbackMs) || 60000));
+}
+
 class SentinelActiveLearningService {
   constructor({ training, learning, providers, audit, databaseUrl, databaseSslMode, minIntervalMs = 60000 } = {}) {
     this.training = training;
@@ -79,6 +92,9 @@ class SentinelActiveLearningService {
       CREATE INDEX IF NOT EXISTS idx_panthorium_active_learning_status ON panthorium_active_learning_runs(status, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_panthorium_active_learning_started ON panthorium_active_learning_runs(started_at DESC);`);
       await this.resumeRunningRun();
+      if (process.env.SENTINEL_ACTIVE_LEARNING_NEVER === '1') {
+        await this.enableNever({ userId: 'system:startup', requestId: 'startup-never-mode' });
+      }
     }
   }
 
@@ -99,14 +115,23 @@ class SentinelActiveLearningService {
   }
 
   async resumeRunningRun() {
-    const result = await this.pool.query(`SELECT * FROM panthorium_active_learning_runs WHERE status='running' ORDER BY updated_at DESC LIMIT 1`);
+    const result = await this.pool.query(`SELECT * FROM panthorium_active_learning_runs WHERE status IN ('running','paused') ORDER BY updated_at DESC LIMIT 1`);
     if (!result.rows[0]) return;
     const run = this.map(result.rows[0]);
-    if (Date.now() >= new Date(run.stopAt).getTime()) {
+    if (!run.options?.never && Date.now() >= new Date(run.stopAt).getTime()) {
       await this.finish(run, 'expired');
       return;
     }
     this.session = run;
+    if (run.status === 'paused') {
+      const remaining = new Date(run.stats?.resumeAt || 0).getTime() - Date.now();
+      if (remaining > 0) {
+        this.schedule(remaining);
+        return;
+      }
+      await this.resumeFromPause();
+      return;
+    }
     const violation = this.guardrailViolation(run);
     if (violation) {
       await this.finish(run, 'guarded', { reason: violation.reason });
@@ -149,7 +174,9 @@ class SentinelActiveLearningService {
     }
     return {
       ok: true,
-      running: Boolean(this.session && this.session.status === 'running'),
+      running: Boolean(this.session && ['running', 'paused'].includes(this.session.status)),
+      paused: Boolean(this.session && this.session.status === 'paused'),
+      resumeAt: this.session?.status === 'paused' ? this.session.stats?.resumeAt || null : null,
       run: this.session || null,
       history: await this.listRuns({ limit: 8 }),
       providers: this.providers?.available?.() || [],
@@ -174,7 +201,7 @@ class SentinelActiveLearningService {
     };
   }
 
-  normalizeOptions({ durationHours = 24, intervalMinutes = 5, batchSize = 1, providers, topics, autoShadow = true, maxPrompts, maxCandidates, maxFailures, maxConsecutiveFailures, maxUnsafeShadow } = {}) {
+  normalizeOptions({ durationHours = 24, intervalMinutes = 5, batchSize = 1, providers, topics, autoShadow = true, never = false, maxPrompts, maxCandidates, maxFailures, maxConsecutiveFailures, maxUnsafeShadow } = {}) {
     const available = this.providers?.available?.() || [];
     const selected = cleanList(providers).filter((provider) => available.includes(provider));
     const providerNames = selected.length ? selected : available.slice(0, 4);
@@ -193,6 +220,7 @@ class SentinelActiveLearningService {
       providers: providerNames,
       topics: cleanList(topics, 20),
       autoShadow: autoShadow !== false,
+      never: never === true,
       manualActivationRequired: true,
       maxPrompts: clampInt(maxPrompts, Math.min(Math.max(computedPrompts, guard.maxPrompts), 5000), 1, 5000),
       maxCandidates: clampInt(maxCandidates, Math.min(Math.max(computedPrompts * Math.max(1, providerNames.length), guard.maxCandidates), 15000), 1, 15000),
@@ -214,7 +242,7 @@ class SentinelActiveLearningService {
       status: 'running',
       startedBy: options.userId || 'administrator',
       startedAt: new Date().toISOString(),
-      stopAt: new Date(Date.now() + normalized.durationHours * 60 * 60 * 1000).toISOString(),
+      stopAt: normalized.never ? '9999-12-31T23:59:59.000Z' : new Date(Date.now() + normalized.durationHours * 60 * 60 * 1000).toISOString(),
       stoppedAt: null,
       activatedAt: null,
       options: normalized,
@@ -239,11 +267,68 @@ class SentinelActiveLearningService {
     return { ok: true, running: true, run: this.session };
   }
 
+  async enableNever(options = {}) {
+    const current = await this.status();
+    if (!current.running) return this.start({ ...options, never: true });
+    const run = current.run;
+    if (run.options?.never) return { ok: true, alreadyNever: true, running: true, run };
+    const next = await this.save({
+      ...run,
+      stopAt: '9999-12-31T23:59:59.000Z',
+      options: { ...(run.options || {}), never: true },
+      stats: { ...(run.stats || {}), neverEnabledAt: new Date().toISOString(), neverEnabledBy: options.userId || 'administrator' }
+    });
+    this.audit?.record('sentinel.active_learning_never_enabled', { runId: next.runId, userId: options.userId, requestId: options.requestId });
+    this.schedule(500);
+    return { ok: true, running: true, never: true, run: next };
+  }
+
+  async runOnce(options = {}) {
+    const current = await this.status();
+    if (current.running) return { ok: false, error: 'active_learning_already_running', run: current.run };
+    const started = await this.start({ ...options, durationHours: 1, intervalMinutes: 60, batchSize: 1, maxPrompts: 1, maxCandidates: 3, autoShadow: true });
+    if (!started.ok) return started;
+    this.shutdown();
+    await this.tick();
+    if (this.session?.status === 'running') await this.stop({ reason: 'one_shot_completed', userId: options.userId || 'administrator', requestId: options.requestId });
+    else if (this.session) { const stats={...(this.session.stats||{}),stopReason:'one_shot_completed'};await this.save({...this.session,status:'stopped',stoppedAt:new Date().toISOString(),stats}); }
+    const result = await this.status();
+    return { ok: true, oneShot: true, ...result };
+  }
+
   schedule(delayMs) {
     if (this.timer) clearTimeout(this.timer);
-    if (!this.session || this.session.status !== 'running') return;
-    this.timer = setTimeout(() => this.tick().catch((error) => this.audit?.record('sentinel.active_learning_tick_failed', { error: error.message })), Math.max(250, Number(delayMs) || 1000));
+    if (!this.session || !['running', 'paused'].includes(this.session.status)) return;
+    const action = this.session.status === 'paused' ? () => this.resumeFromPause() : () => this.tick();
+    this.timer = setTimeout(() => action().catch((error) => this.audit?.record('sentinel.active_learning_tick_failed', { error: error.message })), Math.max(250, Number(delayMs) || 1000));
     this.timer.unref?.();
+  }
+
+  async pauseForRateLimit(error) {
+    const delayMs = rateLimitDelayMs(error, 60000) + 1500;
+    const now = new Date().toISOString();
+    const resumeAt = new Date(Date.now() + delayMs).toISOString();
+    const stats = {
+      ...(this.session.stats || {}),
+      pausedAt: now,
+      resumeAt,
+      pauseReason: 'provider_rate_limit',
+      pauseCount: Number(this.session.stats?.pauseCount || 0) + 1,
+      lastGuardCheck: 'paused_rate_limit'
+    };
+    await this.save({ ...this.session, status: 'paused', stats, lastError: String(error?.message || error) });
+    this.audit?.record('sentinel.active_learning_rate_limit_paused', { runId: this.session.runId, delayMs, resumeAt, error: this.session.lastError });
+    this.schedule(delayMs);
+  }
+
+  async resumeFromPause() {
+    if (!this.session || this.session.status !== 'paused') return;
+    const remaining = new Date(this.session.stats?.resumeAt || 0).getTime() - Date.now();
+    if (remaining > 0) return this.schedule(remaining);
+    const stats = { ...(this.session.stats || {}), resumedAt: new Date().toISOString(), pauseReason: null, resumeAt: null, lastGuardCheck: 'passed' };
+    await this.save({ ...this.session, status: 'running', stats, lastError: null });
+    this.audit?.record('sentinel.active_learning_rate_limit_resumed', { runId: this.session.runId });
+    this.schedule(500);
   }
 
   shutdown() {
@@ -272,16 +357,18 @@ class SentinelActiveLearningService {
     const stats = run.stats || {};
     const options = run.options || {};
     const checks = [
-      ['max_prompts_reached', Number(stats.prompts || 0), Number(options.maxPrompts || 0)],
-      ['max_candidates_reached', Number(stats.candidates || 0), Number(options.maxCandidates || 0)],
-      ['max_failures_reached', Number(stats.failures || 0), Number(options.maxFailures || 0)],
+      ...(!options.never ? [
+        ['max_prompts_reached', Number(stats.prompts || 0), Number(options.maxPrompts || 0)],
+        ['max_candidates_reached', Number(stats.candidates || 0), Number(options.maxCandidates || 0)],
+        ['max_failures_reached', Number(stats.failures || 0), Number(options.maxFailures || 0)]
+      ] : []),
       ['max_consecutive_failures_reached', Number(stats.consecutiveFailures || 0), Number(options.maxConsecutiveFailures || 0)],
       ['unsafe_shadow_limit_reached', Number(stats.unsafeShadow || 0), Number(options.maxUnsafeShadow || 0)]
     ];
     for (const [reason, value, limit] of checks) {
       if (limit >= 0 && value >= limit) return { reason, value, limit };
     }
-    if (Date.now() >= new Date(run.stopAt).getTime()) return { reason: 'duration_expired', value: 0, limit: 0 };
+    if (!options.never && Date.now() >= new Date(run.stopAt).getTime()) return { reason: 'duration_expired', value: 0, limit: 0 };
     return null;
   }
 
@@ -315,6 +402,10 @@ class SentinelActiveLearningService {
       await this.save({ ...this.session, stats, lastError: null });
       this.audit?.record('sentinel.active_learning_cycle_completed', { runId: this.session.runId, stats, delta, remaining: this.remainingBudget(this.session) });
     } catch (error) {
+      if (this.session.options?.never && rateLimitDelayMs(error) > 0) {
+        await this.pauseForRateLimit(error);
+        return;
+      }
       const stats = {
         ...(this.session.stats || {}),
         failures: Number(this.session.stats?.failures || 0) + 1,
@@ -341,7 +432,7 @@ class SentinelActiveLearningService {
   async runCycle(run) {
     const delta = { prompts: 0, candidates: 0, failures: 0, shadowSamples: 0, unsafeShadow: 0, promotions: 0 };
     for (let i = 0; i < Number(run.options?.batchSize || 1); i += 1) {
-      if (Number(run.stats?.prompts || 0) + delta.prompts >= Number(run.options?.maxPrompts || 0)) break;
+      if (!run.options?.never && Number(run.stats?.prompts || 0) + delta.prompts >= Number(run.options?.maxPrompts || 0)) break;
       const prompt = this.nextPrompt({ ...run, stats: { ...run.stats, cycles: Number(run.stats?.cycles || 0) + i } });
       const result = await this.training.draftWithTeachers({
         prompt,
@@ -353,7 +444,9 @@ class SentinelActiveLearningService {
       delta.prompts += 1;
       delta.candidates += result.candidates?.length || 0;
       delta.failures += result.failures?.length || (result.ok === false ? 1 : 0);
-      if (Number(run.stats?.candidates || 0) + delta.candidates >= Number(run.options?.maxCandidates || 0)) break;
+      const rateLimited = result.failures?.find((failure) => rateLimitDelayMs(failure?.error || failure) > 0);
+      if (run.options?.never && rateLimited) throw new Error(String(rateLimited.error || rateLimited));
+      if (!run.options?.never && Number(run.stats?.candidates || 0) + delta.candidates >= Number(run.options?.maxCandidates || 0)) break;
     }
     if (run.options?.autoShadow !== false) {
       const shadow = await this.sampleShadow(run);
@@ -413,12 +506,13 @@ class SentinelActiveLearningService {
     const promoted = results.filter((item) => item.promoted).length;
     if (this.session) {
       const stats = { ...(this.session.stats || {}), promotions: Number(this.session.stats?.promotions || 0) + promoted, activatedBy: userId };
-      const status = stop ? 'activated' : this.session.status;
-      await this.save({ ...this.session, status, stats, activatedAt: new Date().toISOString(), stoppedAt: stop ? new Date().toISOString() : this.session.stoppedAt });
-      if (stop) this.shutdown();
+      const shouldStop = stop && !this.session.options?.never;
+      const status = shouldStop ? 'activated' : this.session.status;
+      await this.save({ ...this.session, status, stats, activatedAt: new Date().toISOString(), stoppedAt: shouldStop ? new Date().toISOString() : this.session.stoppedAt });
+      if (shouldStop) this.shutdown();
     }
     this.audit?.record('sentinel.active_learning_activated', { userId, requestId, promoted, total: results.length });
-    return { ok: true, promoted, results, stopped: Boolean(stop), run: this.session };
+    return { ok: true, promoted, results, stopped: Boolean(stop && !this.session?.options?.never), run: this.session };
   }
 
   async stop({ reason = 'administrator_stopped', userId = 'administrator', requestId } = {}) {
@@ -440,4 +534,4 @@ class SentinelActiveLearningService {
   }
 }
 
-module.exports = { SentinelActiveLearningService };
+module.exports = { SentinelActiveLearningService, rateLimitDelayMs };

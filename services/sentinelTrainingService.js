@@ -11,11 +11,15 @@ function cleanTags(value) {
       ].slice(0, 12)
     : [];
 }
+// Thai has no spaces between words, so plain regex splitting cannot retrieve
+// Thai knowledge. Segment with Intl.Segmenter instead (kept in sync with the
+// Thai retrieval fix on staging).
+const wordSegmenter = new Intl.Segmenter("th", { granularity: "word" });
 function terms(value) {
   return new Set(
-    String(value)
-      .toLowerCase()
-      .split(/[^\p{L}\p{N}_-]+/u)
+    Array.from(wordSegmenter.segment(String(value).normalize("NFKC").toLowerCase()))
+      .filter((part) => part.isWordLike)
+      .map((part) => part.segment)
       .filter((word) => word.length > 1)
       .slice(0, 80),
   );

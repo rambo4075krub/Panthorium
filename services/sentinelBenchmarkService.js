@@ -27,14 +27,21 @@ class SentinelBenchmarkService{
   CREATE INDEX IF NOT EXISTS idx_panthorium_benchmark_winner ON panthorium_benchmark_runs(winner);`);this.historyCache=await this.history({limit:10});this.lastRun=this.historyCache[0]?.result||null;}
   async evaluateAnswer({prompt,answer,subjectProvider,reference}){
     const available=this.providers.available();
-    const judges=[...available.filter(p=>p!==subjectProvider),...available.filter(p=>p===subjectProvider)].slice(0,Math.min(2,available.length));
+    const judges=[...available.filter(p=>p!==subjectProvider),...available.filter(p=>p===subjectProvider)];
     if(!judges.length)return{score:0,judges:[],error:'no_evaluator_provider'};
     const system='คุณเป็นกรรมการ Benchmark Arena ให้ตอบ JSON เท่านั้น {"score":0,"correctness":0,"groundedness":0,"safety":0,"relevance":0,"clarity":0,"reason":"..."} ให้คะแนน 0-100 แบบเข้มงวด ห้ามให้คะแนนตามชื่อค่ายหรือชื่อโมเดล';
     const payload=`โจทย์:\n${clean(prompt,6000)}\n\nคำตอบ:\n${clean(answer)}\n\nคำตอบอ้างอิง/เกณฑ์ (ถ้ามี):\n${clean(reference||'',6000)}`;
-    const settled=await Promise.allSettled(judges.map(async provider=>{const r=await this.providers.callDetailed(provider,system,[{role:'user',content:payload}]);const parsed=parseJudge(r?.text);if(!parsed)throw new Error('invalid_benchmark_judge');return{provider,model:r.model||null,...parsed};}));
-    const verdicts=settled.filter(x=>x.status==='fulfilled').map(x=>x.value);const failures=settled.map((x,i)=>x.status==='rejected'?{provider:judges[i],error:x.reason?.message||'judge_failed'}:null).filter(Boolean);
-    if(verdicts.length!==judges.length)return{score:verdicts.length?avg(verdicts,'score'):0,correctness:avg(verdicts,'correctness'),groundedness:avg(verdicts,'groundedness'),safety:avg(verdicts,'safety'),relevance:avg(verdicts,'relevance'),clarity:avg(verdicts,'clarity'),judges:verdicts,failures,error:'incomplete_evaluation'};
-    return{score:avg(verdicts,'score'),correctness:avg(verdicts,'correctness'),groundedness:avg(verdicts,'groundedness'),safety:avg(verdicts,'safety'),relevance:avg(verdicts,'relevance'),clarity:avg(verdicts,'clarity'),judges:verdicts,failures};
+    const verdicts=[], failures=[];
+    for(const provider of judges){
+      if(verdicts.length>=2)break;
+      try{
+        const r=await this.providers.callDetailed(provider,system,[{role:'user',content:payload}]);
+        const parsed=parseJudge(r?.text);if(!parsed)throw new Error('invalid_benchmark_judge');
+        verdicts.push({provider,model:r.model||null,...parsed});
+      }catch(error){failures.push({provider,error:error.message||'judge_failed'});}
+    }
+    const complete=verdicts.length>=2;
+    return{score:verdicts.length?avg(verdicts,'score'):0,correctness:avg(verdicts,'correctness'),groundedness:avg(verdicts,'groundedness'),safety:avg(verdicts,'safety'),relevance:avg(verdicts,'relevance'),clarity:avg(verdicts,'clarity'),judges:verdicts,failures:complete?[]:failures,replacedJudges:complete?failures:[],...(complete?{}:{error:'incomplete_evaluation'})};
   }
   async saveRun(result,userId='system'){
     const summary=summarize(result);result.summary=summary;

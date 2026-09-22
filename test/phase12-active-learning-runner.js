@@ -88,6 +88,16 @@ const providers = {
   const status = await service.status();
   assert.equal(status.running, false);
   assert.equal(status.run.status, 'activated');
+
+  const never = await service.enableNever({ intervalMinutes: 1, batchSize: 1, providers: ['groq', 'openai'], userId: 'admin-test' });
+  assert.equal(never.ok, true);
+  assert.equal(never.run.options.never, true);
+  assert.equal(never.run.stopAt, '9999-12-31T23:59:59.000Z');
+  never.run.stats.prompts = never.run.options.maxPrompts;
+  assert.equal(service.guardrailViolation(never.run), null);
+  const neverActivation = await service.activate({ userId: 'admin-test', stop: true });
+  assert.equal(neverActivation.stopped, false);
+  assert.equal(service.session.status, 'running');
   service.shutdown();
   console.log('Phase 12 Active Learning runner tests passed');
 })().catch((error) => {
