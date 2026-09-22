@@ -1,8 +1,28 @@
 const {AutonomousLearningPolicy}=require('./autonomousLearningPolicy');
 
+const PROMOTION_CONTROL_KEY='autonomous_promotion';
+
 class SentinelLearningOrchestrator{
   constructor({repository,trainingRepository,audit,policy=new AutonomousLearningPolicy(),shadowEvaluator,recovery=null}={}){this.repository=repository;this.trainingRepository=trainingRepository;this.audit=audit;this.policy=policy;this.shadowEvaluator=shadowEvaluator;this.recovery=recovery;}
-  async init(){await this.repository.init();}
+  async init(){await this.repository.init();await this.hydratePromotionControl();}
+
+  // The emergency stop is an operator decision, so a stored state always wins
+  // over the environment default. Without this a restart (or a second Cloud Run
+  // instance) would silently resume autonomous promotion.
+  async hydratePromotionControl(){
+    if(this.promotionHydrated)return this.policy.promotionControl?.()||{enabled:true};
+    this.promotionHydrated=true;
+    if(typeof this.repository.getControl!=='function'||typeof this.policy.setPromotionEnabled!=='function')return this.policy.promotionControl?.()||{enabled:true};
+    try{
+      const stored=await this.repository.getControl(PROMOTION_CONTROL_KEY);
+      if(stored&&typeof stored.value?.enabled==='boolean')this.policy.setPromotionEnabled(stored.value.enabled,{actor:stored.value.actor||stored.updatedBy||'persisted_state',reason:stored.value.reason||'restored_from_persisted_state'});
+    }catch(error){
+      // Fail safe: if the store is unreachable, keep autonomous promotion off.
+      this.policy.setPromotionEnabled(false,{actor:'system',reason:`promotion_control_load_failed:${error.message}`});
+      this.audit?.record('sentinel.learning_promotion_control_load_failed',{error:error.message});
+    }
+    return this.policy.promotionControl?.()||{enabled:true};
+  }
   riskFor(example){const text=`${example.prompt||''}\n${example.answer||''}`.toLowerCase();const protectedHit=this.policy.protectedDomains.some(d=>text.includes(d.replaceAll('_',' '))||text.includes(d));return protectedHit?'protected':'normal';}
   async exampleFor(exampleId){return(await this.trainingRepository.list({limit:500})).find(x=>x.exampleId===exampleId)||null;}
   async quarantine(example){await this.init();const risk=this.riskFor(example);const judges=example.evaluation?.judges||[];const consensus=judges.length?Math.round((judges.filter(j=>j.safe&&j.correct&&j.relevant).length/judges.length)*100):0;const version=await this.repository.create({exampleId:example.exampleId,state:'quarantined',score:example.qualityScore,risk,metadata:{source:example.source,provider:example.provider,model:example.model,fingerprint:example.fingerprint,evaluatorConsensus:consensus,reviewers:judges.map(j=>j.provider)}});await this.repository.event(version.versionId,'quarantined',{risk,consensus});this.audit?.record('sentinel.learning_quarantined',{versionId:version.versionId,exampleId:example.exampleId,risk,consensus});return version;}
@@ -14,6 +34,12 @@ class SentinelLearningOrchestrator{
   async recover(versionId){if(!this.recovery)return{ok:false,error:'automatic_recovery_unavailable'};return this.recovery.recover(versionId,{reason:'administrator_requested_recovery'});}
   async status(){const versions=await this.repository.list({limit:500});const events=await this.repository.recentEvents(80);const counts={quarantined:0,shadow:0,active:0,rejected:0,rolled_back:0};for(const v of versions)counts[v.state]=(counts[v.state]||0)+1;const active=versions.filter(v=>v.state==='active');const shadow=versions.filter(v=>v.state==='shadow');const average=(items,key)=>items.length?Math.round(items.reduce((s,x)=>s+Number(x[key]||0),0)/items.length):0;return{ok:true,counts,total:versions.length,metrics:{activeAverageScore:average(active,'score'),shadowAverageScore:average(shadow,'shadowScore'),averageConsensus:versions.length?Math.round(versions.reduce((s,v)=>s+Number(v.metadata?.evaluatorConsensus||0),0)/versions.length):0,recoveryPending:versions.filter(v=>v.state==='rolled_back'&&v.metadata?.automaticRecoveryScheduled).length},policy:{promotionScore:this.policy.promotionScore,shadowMinSamples:this.policy.shadowMinSamples,shadowScore:this.policy.shadowScore,maxRegressionPct:this.policy.maxRegressionPct,rollbackScore:this.policy.rollbackScore,promotionControl:this.policy.promotionControl?.()||{enabled:true}},events};}
 
-  async setPromotionEnabled(enabled,{actor='administrator',reason=null,requestId=null}={}){const control=this.policy.setPromotionEnabled(enabled,{actor,reason});await this.repository.event(null,control.enabled?'promotion_emergency_stop_released':'promotion_emergency_stop_activated',{...control,requestId});this.audit?.record(control.enabled?'sentinel.learning_promotion_resumed':'sentinel.learning_promotion_paused',{actor,reason:control.reason,requestId});return{ok:true,promotionControl:control};}
+  async setPromotionEnabled(enabled,{actor='administrator',reason=null,requestId=null}={}){const control=this.policy.setPromotionEnabled(enabled,{actor,reason});this.promotionHydrated=true;if(typeof this.repository.setControl==='function'){try{await this.repository.setControl(PROMOTION_CONTROL_KEY,{enabled:control.enabled,actor,reason:control.reason,requestId},{actor});}catch(error){
+      // Never report a resume we could not persist: fall back to paused so the
+      // next instance or restart cannot inherit an unsafe enabled state.
+      const safe=this.policy.setPromotionEnabled(false,{actor:'system',reason:`promotion_control_persist_failed:${error.message}`});
+      this.audit?.record('sentinel.learning_promotion_control_persist_failed',{actor,error:error.message});
+      return{ok:false,error:'promotion_control_persist_failed',detail:error.message,promotionControl:safe};
+    }}await this.repository.event(null,control.enabled?'promotion_emergency_stop_released':'promotion_emergency_stop_activated',{...control,requestId});this.audit?.record(control.enabled?'sentinel.learning_promotion_resumed':'sentinel.learning_promotion_paused',{actor,reason:control.reason,requestId});return{ok:true,promotionControl:control};}
 }
 module.exports={SentinelLearningOrchestrator};

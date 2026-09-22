@@ -27,6 +27,8 @@ Training Lab ใช้การเรียนรู้แบบ RAG: บทส�
 - `SENTINEL_BENCHMARK_COOLDOWN_MS=60000` — ช่วงพักก่อนรัน benchmark ชุดเดิมซ้ำ
 - `SENTINEL_BENCHMARK_RATE_LIMIT=12` — จำนวนคำขอ `POST /api/training/benchmark/run` ต่อนาทีต่อ IP
 
+สถานะ emergency stop ถูกเก็บถาวรในตาราง `panthorium_learning_controls` (คีย์ `autonomous_promotion`) ค่าที่แอดมินสั่งไว้จะถูกโหลดกลับตอน boot และมีผลเหนือค่า env จึงไม่หลุดเมื่อรีสตาร์ทหรือมีหลาย instance หากเขียน/อ่านสถานะไม่สำเร็จ ระบบจะ fail-closed คือหยุด promotion ไว้ก่อน
+
 ค่าเริ่มต้นใช้ role separation: provider ที่สร้างตัวอย่างจะไม่สามารถตรวจตัวอย่างของตัวเองได้ หากกรรมการอิสระพร้อมใช้น้อยกว่าจำนวนขั้นต่ำ ระบบจะปฏิเสธ candidate แบบ fail-closed
 
 ## API สำหรับแอดมิน
