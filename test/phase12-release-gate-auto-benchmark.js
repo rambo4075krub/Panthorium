@@ -54,7 +54,7 @@ const recoveryVersion = {
         runId: 'auto-bench-1',
         durationMs: 7,
         providers: ['groq'],
-        cases: cases.map((item) => ({ caseId: item.id, competitors: [] })),
+        cases: cases.map((item) => ({ caseId: item.id, competitors: [{provider:'sentinel',score:91,judges:[{provider:'a'},{provider:'b'}]}] })),
         leaderboard: [{ name: 'Sentinel AI', score: 91, wins: 3, cases: cases.length }],
         summary: { sentinel: { rank: 1, score: 91, wins: 3, cases: cases.length, passed: true } }
       };

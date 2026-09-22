@@ -17,7 +17,10 @@ async function providerError(res) {
   let detail = "";
   try { const data = await res.clone().json(); detail = data?.error?.message || data?.message || data?.error || ""; } catch (_) { try { detail = await res.clone().text(); } catch (_) {} }
   detail = String(detail || "").replace(/[\r\n\t]+/g, " ").replace(/(key|token|secret)\s*[=:]\s*\S+/gi, "$1=[redacted]").slice(0, 220);
-  const error = new Error(`Provider HTTP ${res.status}${detail ? `: ${detail}` : ""}`); error.status = res.status; return error;
+  const error = new Error(`Provider HTTP ${res.status}${detail ? `: ${detail}` : ""}`); error.status = res.status;
+  const retry = res.headers.get('retry-after');
+  error.retryAfterMs = retry ? (Number.isFinite(Number(retry)) ? Number(retry)*1000 : Math.max(0,Date.parse(retry)-Date.now())) : 60000;
+  return error;
 }
 async function fetchProvider(makeRequest, attempts = 3) {
   let last;
@@ -25,12 +28,13 @@ async function fetchProvider(makeRequest, attempts = 3) {
     const res = await makeRequest();
     if (res.ok) return res;
     last = res;
-    if (res.status !== 429 && res.status < 500) break;
+    if (res.status === 429 || res.status < 500) break;
     if (attempt < attempts - 1) { const retryAfter = Number(res.headers.get("retry-after")); await sleep(Number.isFinite(retryAfter) ? Math.min(10000, retryAfter * 1000) : 750 * (attempt + 1)); }
   }
   throw await providerError(last);
 }
 class ProviderManager {
+  cooling = new Map();
   constructor() {
     this.keys = { groq: process.env.GROQ_API_KEY || "", openai: process.env.OPENAI_API_KEY || "", gemini: process.env.GEMINI_API_KEY || "", anthropic: process.env.ANTHROPIC_API_KEY || "" };
     this.priority = (process.env.AI_PRIORITY || "groq,openai,gemini,anthropic").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -78,6 +82,14 @@ class ProviderManager {
   }
   async call(provider, systemPrompt, history) { const result = await this.callDetailed(provider, systemPrompt, history); return result?.text || null; }
   async callDetailed(provider, systemPrompt, history, options = {}) {
+    const paused=this.cooling.get(provider);
+    if(paused&&paused.until>Date.now()){
+      const error=new Error('Provider HTTP 429: provider cooling down');error.status=429;error.retryAfterMs=paused.until-Date.now();throw error;
+    }
+    try{return await this.callAvailable(provider,systemPrompt,history,options);}
+    catch(error){if(error.status===429)this.cooling.set(provider,{until:Date.now()+Math.max(60000,error.retryAfterMs||60000)});throw error;}
+  }
+  async callAvailable(provider, systemPrompt, history, options = {}) {
     const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
     if (provider === "groq") return this.callOpenAICompatible(GROQ_CHAT_URL, key, model, systemPrompt, history);
     if (provider === "openai") return this.callOpenAICompatible("https://api.openai.com/v1/chat/completions", key, model, systemPrompt, history);
