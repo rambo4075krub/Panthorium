@@ -46,13 +46,25 @@ const{Sentinel}=require('../services/sentinel');
   assert.doesNotMatch(redacted.example.prompt,/owner@example\.com|abc123456789/);
   assert.doesNotMatch(redacted.example.answer,/081-234-5678/);
   const autoStats=await autoRepository.stats();
-  assert.equal(autoStats.approved,2);
-  assert.equal(autoStats.rejected,1);
-  assert.equal(autoStats.autoApproved,2);
+  assert.equal(autoStats.approved,1);
+  assert.equal(autoStats.rejected,2);
+  assert.equal(autoStats.autoApproved,1);
   const partialProviders={available:()=>['openai','gemini'],catalog:()=>[],callDetailed:async provider=>{if(provider==='gemini')throw new Error('provider_down');return{text:'{"score":99,"safe":true,"correct":true,"relevant":true,"reason":"ok"}',model:'judge-test'};}};
   const partialTraining=new SentinelTrainingService({repository:new SentinelTrainingRepository(),providers:partialProviders});
   const partial=await partialTraining.addExample({prompt:'ทดสอบเมื่อผู้ตรวจทำงานไม่ครบ',answer:'ข้อมูลนี้ต้องไม่ผ่านหากผู้ตรวจทำงานไม่ครบทุกตัว',user});
   assert.equal(partial.example.status,'rejected');
   assert.equal(partial.evaluation.error,'incomplete_evaluation');
+  const roleCalls=[];
+  const roleProviders={
+    available:()=>['groq','openai','gemini','anthropic'],catalog:()=>[],
+    callDetailed:async(provider,systemPrompt)=>{roleCalls.push({provider,systemPrompt});return systemPrompt.includes('ผู้ตรวจคุณภาพ')?{text:'{"score":96,"safe":true,"correct":true,"relevant":true,"reason":"ok"}',model:'judge'}:{text:'คำตอบจากครู Groq ที่ถูกส่งให้กรรมการอิสระตรวจ',model:'teacher'};}
+  };
+  const roleTraining=new SentinelTrainingService({repository:new SentinelTrainingRepository(),providers:roleProviders,teacherProviders:['groq'],evaluatorProviders:['openai','gemini','anthropic'],minEvaluators:2});
+  const roleDraft=await roleTraining.draftWithTeachers({prompt:'ทดสอบการแยกบทบาทผู้สร้างและกรรมการ',user});
+  assert.equal(roleDraft.ok,true);
+  assert.deepEqual(roleCalls.filter(x=>!x.systemPrompt.includes('ผู้ตรวจคุณภาพ')).map(x=>x.provider),['groq']);
+  assert.deepEqual(roleCalls.filter(x=>x.systemPrompt.includes('ผู้ตรวจคุณภาพ')).map(x=>x.provider),['openai','gemini','anthropic']);
+  assert.equal(roleDraft.candidates[0].example.status,'approved');
+  assert.equal(roleTraining.settings().roleSeparation,true);
   console.log('Phase 11 Sentinel training tests passed');
 })().catch(error=>{console.error(error);process.exit(1);});
