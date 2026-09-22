@@ -53,6 +53,28 @@ const sentinel = {
   assert.equal(summary.caseCount, 2);
   assert(summary.winner);
 
+  const fallback = new SentinelBenchmarkService({ providers: {
+    available: () => ['groq','openai','gemini'],
+    async callDetailed(provider) {
+      if(provider==='groq')throw new Error('Provider HTTP 429');
+      return {text:JSON.stringify({score:73}),model:provider};
+    }
+  }});
+  const verdict=await fallback.evaluateAnswer({prompt:'test',answer:'answer',subjectProvider:'sentinel'});
+  assert.equal(verdict.error,undefined);
+  assert.equal(verdict.score,73);
+  assert.deepEqual(verdict.judges.map(x=>x.provider),['openai','gemini']);
+  assert.equal(verdict.replacedJudges[0].provider,'groq');
+  fallback.providers.available=()=>['groq','openai'];
+  assert.equal((await fallback.evaluateAnswer({prompt:'test',answer:'answer'})).error,'incomplete_evaluation');
+
+  const {ProviderManager}=require('../services/providerManager');
+  const manager=new ProviderManager();let calls=0;
+  manager.callAvailable=async()=>{calls++;const error=new Error('quota');error.status=429;error.retryAfterMs=300000;throw error;};
+  await assert.rejects(manager.callDetailed('groq','',[]));
+  await assert.rejects(manager.callDetailed('groq','',[]),e=>e.status===429&&e.retryAfterMs>290000);
+  assert.equal(calls,1,'cooldown must prevent repeated paid requests');
+
   console.log('Phase 12 Benchmark evidence history tests passed');
 })().catch((error) => {
   console.error(error);
