@@ -79,6 +79,9 @@ class SentinelActiveLearningService {
       CREATE INDEX IF NOT EXISTS idx_panthorium_active_learning_status ON panthorium_active_learning_runs(status, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_panthorium_active_learning_started ON panthorium_active_learning_runs(started_at DESC);`);
       await this.resumeRunningRun();
+      if (process.env.SENTINEL_ACTIVE_LEARNING_NEVER === '1') {
+        await this.enableNever({ userId: 'system:startup', requestId: 'startup-never-mode' });
+      }
     }
   }
 
@@ -102,7 +105,7 @@ class SentinelActiveLearningService {
     const result = await this.pool.query(`SELECT * FROM panthorium_active_learning_runs WHERE status='running' ORDER BY updated_at DESC LIMIT 1`);
     if (!result.rows[0]) return;
     const run = this.map(result.rows[0]);
-    if (Date.now() >= new Date(run.stopAt).getTime()) {
+    if (!run.options?.never && Date.now() >= new Date(run.stopAt).getTime()) {
       await this.finish(run, 'expired');
       return;
     }
@@ -174,7 +177,7 @@ class SentinelActiveLearningService {
     };
   }
 
-  normalizeOptions({ durationHours = 24, intervalMinutes = 5, batchSize = 1, providers, topics, autoShadow = true, maxPrompts, maxCandidates, maxFailures, maxConsecutiveFailures, maxUnsafeShadow } = {}) {
+  normalizeOptions({ durationHours = 24, intervalMinutes = 5, batchSize = 1, providers, topics, autoShadow = true, never = false, maxPrompts, maxCandidates, maxFailures, maxConsecutiveFailures, maxUnsafeShadow } = {}) {
     const available = this.providers?.available?.() || [];
     const selected = cleanList(providers).filter((provider) => available.includes(provider));
     const providerNames = selected.length ? selected : available.slice(0, 4);
@@ -193,6 +196,7 @@ class SentinelActiveLearningService {
       providers: providerNames,
       topics: cleanList(topics, 20),
       autoShadow: autoShadow !== false,
+      never: never === true,
       manualActivationRequired: true,
       maxPrompts: clampInt(maxPrompts, Math.min(Math.max(computedPrompts, guard.maxPrompts), 5000), 1, 5000),
       maxCandidates: clampInt(maxCandidates, Math.min(Math.max(computedPrompts * Math.max(1, providerNames.length), guard.maxCandidates), 15000), 1, 15000),
@@ -214,7 +218,7 @@ class SentinelActiveLearningService {
       status: 'running',
       startedBy: options.userId || 'administrator',
       startedAt: new Date().toISOString(),
-      stopAt: new Date(Date.now() + normalized.durationHours * 60 * 60 * 1000).toISOString(),
+      stopAt: normalized.never ? '9999-12-31T23:59:59.000Z' : new Date(Date.now() + normalized.durationHours * 60 * 60 * 1000).toISOString(),
       stoppedAt: null,
       activatedAt: null,
       options: normalized,
@@ -237,6 +241,22 @@ class SentinelActiveLearningService {
     this.audit?.record('sentinel.active_learning_started', { runId: run.runId, userId: options.userId, requestId: options.requestId, options: run.options });
     this.schedule(500);
     return { ok: true, running: true, run: this.session };
+  }
+
+  async enableNever(options = {}) {
+    const current = await this.status();
+    if (!current.running) return this.start({ ...options, never: true });
+    const run = current.run;
+    if (run.options?.never) return { ok: true, alreadyNever: true, running: true, run };
+    const next = await this.save({
+      ...run,
+      stopAt: '9999-12-31T23:59:59.000Z',
+      options: { ...(run.options || {}), never: true },
+      stats: { ...(run.stats || {}), neverEnabledAt: new Date().toISOString(), neverEnabledBy: options.userId || 'administrator' }
+    });
+    this.audit?.record('sentinel.active_learning_never_enabled', { runId: next.runId, userId: options.userId, requestId: options.requestId });
+    this.schedule(500);
+    return { ok: true, running: true, never: true, run: next };
   }
 
   async runOnce(options = {}) {
@@ -285,16 +305,18 @@ class SentinelActiveLearningService {
     const stats = run.stats || {};
     const options = run.options || {};
     const checks = [
-      ['max_prompts_reached', Number(stats.prompts || 0), Number(options.maxPrompts || 0)],
-      ['max_candidates_reached', Number(stats.candidates || 0), Number(options.maxCandidates || 0)],
-      ['max_failures_reached', Number(stats.failures || 0), Number(options.maxFailures || 0)],
+      ...(!options.never ? [
+        ['max_prompts_reached', Number(stats.prompts || 0), Number(options.maxPrompts || 0)],
+        ['max_candidates_reached', Number(stats.candidates || 0), Number(options.maxCandidates || 0)],
+        ['max_failures_reached', Number(stats.failures || 0), Number(options.maxFailures || 0)]
+      ] : []),
       ['max_consecutive_failures_reached', Number(stats.consecutiveFailures || 0), Number(options.maxConsecutiveFailures || 0)],
       ['unsafe_shadow_limit_reached', Number(stats.unsafeShadow || 0), Number(options.maxUnsafeShadow || 0)]
     ];
     for (const [reason, value, limit] of checks) {
       if (limit >= 0 && value >= limit) return { reason, value, limit };
     }
-    if (Date.now() >= new Date(run.stopAt).getTime()) return { reason: 'duration_expired', value: 0, limit: 0 };
+    if (!options.never && Date.now() >= new Date(run.stopAt).getTime()) return { reason: 'duration_expired', value: 0, limit: 0 };
     return null;
   }
 
@@ -426,12 +448,13 @@ class SentinelActiveLearningService {
     const promoted = results.filter((item) => item.promoted).length;
     if (this.session) {
       const stats = { ...(this.session.stats || {}), promotions: Number(this.session.stats?.promotions || 0) + promoted, activatedBy: userId };
-      const status = stop ? 'activated' : this.session.status;
-      await this.save({ ...this.session, status, stats, activatedAt: new Date().toISOString(), stoppedAt: stop ? new Date().toISOString() : this.session.stoppedAt });
-      if (stop) this.shutdown();
+      const shouldStop = stop && !this.session.options?.never;
+      const status = shouldStop ? 'activated' : this.session.status;
+      await this.save({ ...this.session, status, stats, activatedAt: new Date().toISOString(), stoppedAt: shouldStop ? new Date().toISOString() : this.session.stoppedAt });
+      if (shouldStop) this.shutdown();
     }
     this.audit?.record('sentinel.active_learning_activated', { userId, requestId, promoted, total: results.length });
-    return { ok: true, promoted, results, stopped: Boolean(stop), run: this.session };
+    return { ok: true, promoted, results, stopped: Boolean(stop && !this.session?.options?.never), run: this.session };
   }
 
   async stop({ reason = 'administrator_stopped', userId = 'administrator', requestId } = {}) {
