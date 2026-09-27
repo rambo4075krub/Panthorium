@@ -41,7 +41,7 @@ class ProviderManager {
   vertexTokenExpiresAt = 0;
   constructor() {
     this.keys = { groq: process.env.GROQ_API_KEY || "", openai: process.env.OPENAI_API_KEY || "", gemini: process.env.GEMINI_API_KEY || "", anthropic: process.env.ANTHROPIC_API_KEY || "" };
-    this.priority = (process.env.AI_PRIORITY || "groq,openai,gemini,anthropic").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+    this.priority = (process.env.AI_PRIORITY || "vertex,groq,openai,gemini,anthropic").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
     this.vertex = {
       project: process.env.SENTINEL_VERTEX_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || "",
       location: process.env.SENTINEL_VERTEX_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || "",
