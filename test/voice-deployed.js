@@ -52,6 +52,7 @@ const { JSDOM } = require('jsdom');
   assert.equal(chatResponse.status, 200, 'guest chat HTTP status');
   const chat = await chatResponse.json();
   assert.equal(chat.ok, true, `guest AI chat failed: ${chat.error || 'unknown'}`);
+  if (chat.provider !== 'vertex') console.error('Vertex fallback diagnostic:', JSON.stringify(chat.providerFailureCodes || []));
   assert.equal(chat.provider, 'vertex', `tuned Vertex endpoint unavailable (fallback: ${chat.provider || 'none'})`);
   assert(chat.text?.trim(), 'guest chat answer must be nonempty');
   console.log('Staging: browser and Electron CORS passed; command assets loaded; guest command and tuned Vertex chat answered. Live microphone/TTS acceptance is still required.');
