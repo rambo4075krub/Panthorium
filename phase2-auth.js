@@ -66,7 +66,7 @@
   }
   async function login(username, password) {
     const base = OS.config.backendUrl.replace(/\/$/, ''); const res = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }), credentials: 'include' });
-    const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.error || 'login_failed'); OS.config.accessToken = data.accessToken || ''; OS.state.user = data.user || null; updateIdentityUI(); notifyAuthChanged(); return data;
+    const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.error || 'login_failed'); if (!data.accessToken || !data.user) throw new Error('invalid_auth_response'); OS.config.accessToken = data.accessToken; OS.state.user = data.user; updateIdentityUI(); notifyAuthChanged(); return data;
   }
   async function revokeServerSession() { const base = OS.config.backendUrl.replace(/\/$/, ''); await fetch(base + '/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => null); }
   async function logout() { await revokeServerSession(); OS.config.accessToken = ''; OS.state.user = null; OS.state.loggedIn = false; OS.state.verified = false; closeForbiddenWindows(); notifyAuthChanged(); document.getElementById('desktop')?.classList.remove('active'); if (isAdminEntry()) showLogin(); else { await guestSession(); activateDesktop(); } }
@@ -84,7 +84,9 @@
     if (authInFlight) return authInFlight;
     authInFlight = (async () => {
       // Never create a guest identity on the administrator entrance.
-      if (isAdminEntry()) return force ? await refreshSession() : false;
+      // Restore an admin session from its refresh cookie if the page lost its token.
+      // Never switch an admin to guest.
+      if (isAdminEntry()) return await refreshSession();
       if (force && OS.state.user && await refreshSession()) return true;
       await guestSession();
       return Boolean(OS.config.accessToken && hasPermission('chat'));
