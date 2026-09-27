@@ -42,6 +42,22 @@ const assert = require('assert');
     const payload = JSON.parse(requests[1].options.body);
     assert.equal(payload.systemInstruction.parts[0].text, 'System instruction');
     assert.equal(payload.contents[0].parts[0].text, 'Hello');
+    // Test streamDetailed with Vertex
+    let streamedText = '';
+    const streamResult = await manager.streamDetailed('vertex', 'System instruction', [{ role: 'user', content: 'Stream test' }], {}, (delta) => {
+      streamedText += delta;
+    });
+    assert.equal(streamResult.text, 'Sentinel direct response');
+    assert.equal(streamResult.streaming, 'buffered');
+    assert.equal(streamedText, 'Sentinel direct response');
+
+    // Test direct VERTEX_ACCESS_TOKEN override
+    process.env.VERTEX_ACCESS_TOKEN = 'manual-direct-token';
+    const overrideManager = new ProviderManager();
+    const token = await overrideManager.vertexAccessToken();
+    assert.equal(token, 'manual-direct-token');
+    delete process.env.VERTEX_ACCESS_TOKEN;
+
     console.log('Vertex tuned endpoint direct API tests passed');
   } finally {
     global.fetch = originalFetch;

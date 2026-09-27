@@ -115,18 +115,42 @@ class ProviderManager {
     return null;
   }
   async vertexAccessToken() {
+    // Direct access token override for local testing or CI outside Cloud Run
+    if (process.env.VERTEX_ACCESS_TOKEN) return process.env.VERTEX_ACCESS_TOKEN;
     // Cloud Run's metadata server supplies short-lived Application Default
     // Credentials. No service-account key or always-on inference VM is needed.
     if (this.vertexToken && this.vertexTokenExpiresAt > Date.now() + 60000) return this.vertexToken;
-    const response = await fetch("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", {
-      headers: { "Metadata-Flavor": "Google" }, signal: AbortSignal.timeout(5000)
-    });
-    if (!response.ok) throw await providerError(response);
-    const data = await response.json();
-    if (!data.access_token) throw new Error("vertex_adc_token_missing");
-    this.vertexToken = data.access_token;
-    this.vertexTokenExpiresAt = Date.now() + Math.max(60, Number(data.expires_in) || 300) * 1000;
-    return data.access_token;
+    try {
+      const response = await fetch("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", {
+        headers: { "Metadata-Flavor": "Google" }, signal: AbortSignal.timeout(5000)
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.access_token) {
+          this.vertexToken = data.access_token;
+          this.vertexTokenExpiresAt = Date.now() + Math.max(60, Number(data.expires_in) || 300) * 1000;
+          return data.access_token;
+        }
+      }
+    } catch (_) {
+      // metadata server unreachable (e.g. testing outside GCP)
+    }
+    // Fallback: Check if google-auth-library is available
+    try {
+      const { GoogleAuth } = require("google-auth-library");
+      const auth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
+      const client = await auth.getClient();
+      const tokenRes = await client.getAccessToken();
+      const token = typeof tokenRes === "string" ? tokenRes : tokenRes?.token;
+      if (token) {
+        this.vertexToken = token;
+        this.vertexTokenExpiresAt = Date.now() + 300000;
+        return token;
+      }
+    } catch (_) {
+      // google-auth-library not installed or ADC credentials not configured
+    }
+    throw new Error("vertex_adc_token_missing");
   }
   async callVertexTuned(systemPrompt, history) {
     const { project, location, endpointId, maxOutputTokens } = this.vertex;
@@ -152,6 +176,14 @@ class ProviderManager {
     };
   }
   async streamDetailed(provider, systemPrompt, history, options = {}, onDelta = () => {}) {
+    if (provider === "vertex") {
+      if (!this.vertexConfigured()) return null;
+      const model = this.resolveModel(provider, options.model);
+      if (!model) throw new Error("model_not_allowed");
+      const result = await this.callDetailed(provider, systemPrompt, history, { model });
+      if (result?.text) onDelta(result.text);
+      return { ...result, streaming: "buffered" };
+    }
     const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
     if (provider === "groq") return this.streamOpenAICompatible(GROQ_CHAT_URL, key, model, systemPrompt, history, onDelta, false);
     if (provider === "openai") return this.streamOpenAICompatible("https://api.openai.com/v1/chat/completions", key, model, systemPrompt, history, onDelta, true);
