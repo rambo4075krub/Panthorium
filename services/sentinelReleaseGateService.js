@@ -290,7 +290,7 @@ class SentinelReleaseGateService {
     this.audit?.record?.('sentinel.release_gate_auto_improve_completed', { jobId: job.jobId, round: next.improvement.round, candidates: next.improvement.candidates, approved: next.improvement.approved, promoted: next.improvement.promoted, failures: next.improvement.failures });
 
     const canRetry = number(job.round) + 1 < this.autoImproveMaxRounds;
-    if (canRetry && (improvement.approved > 0 || improvement.promoted > 0 || improvement.candidates > 0 || improvement.failures > 0)) return this.scheduleImprovementRetry(next);
+    if (canRetry && improvement.promoted > 0) return this.scheduleImprovementRetry(next);
     this.benchmarkJob = { ...next, status: 'completed', nextRetryAt: null, improvement: { ...next.improvement, status: canRetry ? 'completed_no_retry' : 'max_rounds_reached', reason: canRetry ? 'no_retryable_improvement_result' : 'auto_improve_max_rounds_reached' } };
     return this.benchmarkJob;
   }
@@ -328,6 +328,7 @@ class SentinelReleaseGateService {
         summary.shadowSamples += promoted.shadowSamples;
         summary.promoted += promoted.promoted ? 1 : 0;
         if (promoted.versionId) summary.versionIds.push(promoted.versionId);
+        if (promoted.error) { summary.failures += 1; summary.errors.push({ caseId: item.caseId, versionId: promoted.versionId, error: promoted.error }); }
       } catch (error) {
         summary.failures += 1;
         summary.errors.push({ caseId: item.caseId, provider, error: error.message });
@@ -388,18 +389,10 @@ class SentinelReleaseGateService {
     result.versionId = version.versionId;
     if (version.state !== 'shadow') return result;
     const minSamples = number(this.learning.policy?.shadowMinSamples, 3);
-    const minScore = number(this.learning.policy?.shadowScore, 90);
-    let safety = 0;
-    while (number(version.shadowSamples) < minSamples && safety < minSamples + 3) {
-      const score = Math.max(minScore, number(version.score, number(example?.qualityScore, 92)), 92);
-      const recorded = await this.learning.recordShadow(version.versionId, { score, safe: true, metadata: { source: 'release-gate-auto-improve', exampleId: example?.exampleId || null, sample: number(version.shadowSamples) + 1 } });
-      if (!recorded.ok) {
-        result.error = recorded.error || 'shadow_record_failed';
-        break;
-      }
-      result.shadowSamples += 1;
-      version = recorded.version || await this.learning.repository.get(version.versionId);
-      safety += 1;
+    const measured=version.metadata?.measuredShadow;
+    if(number(version.shadowSamples)<minSamples||number(measured?.sampleCount)<minSamples||!Array.isArray(measured?.comparisons)||measured.comparisons.length!==3||number(measured?.worstRegression)>number(this.learning.policy?.maxRegressionPct,5)){
+      result.error='measured_shadow_evidence_required';
+      return result;
     }
     const promoted = await this.learning.promoteIfReady(version.versionId).catch((error) => ({ ok: false, error: error.message }));
     result.promoted = Boolean(promoted?.promoted);
@@ -483,7 +476,18 @@ class SentinelReleaseGateService {
     const policy = learningStatus?.policy || {};
     const minSamples = number(policy.shadowMinSamples, 3);
     const minScore = number(policy.shadowScore, 90);
-    const ready = versionList.filter((v) => ['shadow', 'active', 'rolled_back'].includes(v.state) && number(v.shadowSamples) >= minSamples && number(v.shadowScore) >= minScore);
+    const ready = versionList.filter((v) => {
+      const measured = v.metadata?.measuredShadow;
+      return ['shadow', 'active', 'rolled_back'].includes(v.state)
+        && !v.metadata?.acceptanceScenario
+        && number(v.shadowSamples) >= minSamples
+        && number(v.shadowScore) >= minScore
+        && measured?.schema === 1
+        && number(measured.sampleCount) >= minSamples
+        && Array.isArray(measured.comparisons)
+        && measured.comparisons.length === 3
+        && number(measured.worstRegression ?? measured.maxRegression) <= number(learningStatus?.policy?.maxRegressionPct, 5);
+    });
     const pass = ready.length > 0;
     return { id: 'shadow_gate', label: 'Shadow gate', pass, reason: pass ? null : `ต้องมี Shadow/Active/Rolled back version ที่ผ่าน shadow ≥ ${minSamples} samples และ score ≥ ${minScore}`, evidence: { minSamples, minScore, readyVersions: ready.map((v) => ({ versionId: v.versionId, state: v.state, shadowSamples: v.shadowSamples, shadowScore: v.shadowScore })) } };
   }

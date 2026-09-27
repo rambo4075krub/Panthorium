@@ -45,10 +45,7 @@ const learning = {
   },
   async promoteIfReady(versionId) {
     const current = versions.get(versionId);
-    const ready = Number(current.shadowSamples || 0) >= 3 && Number(current.shadowScore || 0) >= 90;
-    const next = ready ? { ...current, state: 'active' } : current;
-    versions.set(versionId, next);
-    return { ok: true, promoted: ready, version: next, decision: { ready } };
+    return { ok: true, promoted: false, version: current, decision: { ready: false, reasons: ['measured_shadow_evidence_required'] } };
   }
 };
 
@@ -104,14 +101,16 @@ const benchmark = {
   const started = await gate.startBenchmark({ userId: 'release-gate:auto', requestId: 'test-auto-improve' });
   assert.equal(started.ok, true);
 
-  const waiting = await waitFor(() => gate.benchmarkJobStatus()?.status === 'waiting_retry' && gate.benchmarkJobStatus());
-  assert.equal(waiting.improvement.promoted, 1);
+  const waiting = await waitFor(() => gate.benchmarkJobStatus()?.status === 'completed' && gate.benchmarkJobStatus());
+  assert.equal(waiting.improvement.promoted, 0);
+  assert.equal(waiting.improvement.failures, 1);
+  assert.equal(waiting.improvement.errors[0].error, 'measured_shadow_evidence_required');
+  assert.equal(waiting.improvement.status, 'completed_no_retry');
   assert.equal(repairsCreated, 1);
 
-  const finalJob = await waitFor(() => gate.benchmarkJobStatus()?.status === 'completed' && gate.benchmarkJobStatus()?.round === 1 && gate.benchmarkJobStatus());
-  assert.equal(finalJob.result.sentinel.score, 88);
-  assert.equal(finalJob.result.mergeReadyIfRechecked, true);
-  assert.equal(benchmarkRuns, 2);
+  assert.equal(waiting.result.sentinel.score, 53);
+  assert.equal(waiting.result.mergeReadyIfRechecked, false);
+  assert.equal(benchmarkRuns, 1);
 
   console.log('Phase 12 Release Gate auto-improve tests passed');
 })().catch((error) => {

@@ -62,7 +62,7 @@ const providers = {
 };
 
 (async () => {
-  service = new SentinelActiveLearningService({ training, learning, providers, minIntervalMs: 5 });
+  service = new SentinelActiveLearningService({ training, learning, providers, shadowEvaluator: { async evaluate() { return { score: 94, safe: true, samples: 1, unsafe: 0, failures: 0 }; } }, minIntervalMs: 5 });
   await service.init();
   const started = await service.start({ durationHours: 0.05, intervalMinutes: 0.001, batchSize: 1, providers: ['groq', 'openai'], userId: 'admin-test' });
   assert.equal(started.ok, true);

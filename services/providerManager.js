@@ -10,7 +10,9 @@ function completionOptions(url, model) {
     // Reasoning shares the token budget. Return only the answer to chat/TTS.
     return { max_completion_tokens: 2048, reasoning_effort: "low", include_reasoning: false };
   }
-  return { max_tokens: 320 };
+  const configured = Number(process.env.SENTINEL_MAX_OUTPUT_TOKENS || 1536);
+  const maxTokens = Number.isFinite(configured) ? Math.min(3072, Math.max(512, Math.floor(configured))) : 1536;
+  return { max_tokens: maxTokens };
 }
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 async function providerError(res) {
@@ -111,7 +113,7 @@ class ProviderManager {
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}`, Accept: "text/event-stream" }, body: JSON.stringify(body), signal: AbortSignal.timeout(45000) });
     if (!res.ok) throw new Error(`Provider HTTP ${res.status}`);
     if (!res.body) throw new Error("provider_stream_unavailable");
-    const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let text = ""; let usage = null; let responseModel = model;
+    const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let text = ""; let usage = null; let responseModel = model; let truncated=false;
     while (true) {
       const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n"); buffer = lines.pop() || "";
@@ -119,29 +121,30 @@ class ProviderManager {
         const line = raw.trim(); if (!line.startsWith("data:")) continue; const payload = line.slice(5).trim(); if (!payload || payload === "[DONE]") continue;
         let data; try { data = JSON.parse(payload); } catch { continue; }
         responseModel = data.model || responseModel;
+        if(data.choices?.[0]?.finish_reason==='length')truncated=true;
         const tokenUsage = data.usage || data.x_groq?.usage;
         if (tokenUsage) usage = { inputTokens: tokenUsage.prompt_tokens || 0, outputTokens: tokenUsage.completion_tokens || 0, totalTokens: tokenUsage.total_tokens || 0 };
         const delta = data.choices?.[0]?.delta?.content || ""; if (delta) { text += delta; onDelta(delta); }
       }
     }
     if (!text.trim()) throw new Error("provider_stream_empty");
-    return { text: text.trim(), model: responseModel, usage, streaming: "native" };
+    return { text: text.trim(), model: responseModel, usage, streaming: "native", truncated };
   }
   async callOpenAICompatible(url, key, model, systemPrompt, history) {
     const request = () => fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, ...completionOptions(url, model) }), signal: AbortSignal.timeout(30000) });
     const res = await fetchProvider(request); const data = await res.json();
-    return { text: data.choices?.[0]?.message?.content?.trim() || null, model: data.model || model, usage: data.usage ? { inputTokens: data.usage.prompt_tokens || 0, outputTokens: data.usage.completion_tokens || 0, totalTokens: data.usage.total_tokens || 0 } : null };
+    const choice=data.choices?.[0];return { text: choice?.message?.content?.trim() || null, model: data.model || model, truncated: choice?.finish_reason === 'length', usage: data.usage ? { inputTokens: data.usage.prompt_tokens || 0, outputTokens: data.usage.completion_tokens || 0, totalTokens: data.usage.total_tokens || 0 } : null };
   }
   async callGemini(key, model, systemPrompt, history) {
     const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
     if (contents.length && contents[0].role === "user") contents[0].parts[0].text = `${systemPrompt}\n\n${contents[0].parts[0].text}`;
     const candidates = [...new Set([model, "gemini-3.5-flash-lite"])]; let lastError;
-    for (const candidate of candidates) { try { const url = `https://generativelanguage.googleapis.com/v1beta/models/${candidate}:generateContent?key=${key}`; const res = await fetchProvider(() => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents, generationConfig: { temperature: 0.65, maxOutputTokens: 320 } }), signal: AbortSignal.timeout(30000) })); const data = await res.json(); const usage = data.usageMetadata; return { text: data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null, model:candidate, usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null }; } catch (error) { lastError=error; if(error.status!==404)throw error; } }
+    for (const candidate of candidates) { try { const url = `https://generativelanguage.googleapis.com/v1beta/models/${candidate}:generateContent?key=${key}`; const configured=Number(process.env.SENTINEL_MAX_OUTPUT_TOKENS||1536);const maxOutputTokens=Number.isFinite(configured)?Math.min(3072,Math.max(512,Math.floor(configured))):1536;const res = await fetchProvider(() => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents, generationConfig: { temperature: 0.65, maxOutputTokens } }), signal: AbortSignal.timeout(30000) })); const data = await res.json(); const candidateResult=data.candidates?.[0];const usage = data.usageMetadata; return { text: candidateResult?.content?.parts?.[0]?.text?.trim() || null, model:candidate, truncated:candidateResult?.finishReason==='MAX_TOKENS', usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null }; } catch (error) { lastError=error; if(error.status!==404)throw error; } }
     throw lastError;
   }
   async callAnthropic(key, model, systemPrompt, history) {
     const candidates=[...new Set([model,"claude-haiku-4-5-20251001"])];let lastError;
-    for(const candidate of candidates){try{const res=await fetchProvider(()=>fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model:candidate, max_tokens: 320, temperature: 0.65, system: systemPrompt, messages: history.map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })) }), signal: AbortSignal.timeout(30000) }));const data=await res.json();return { text: data.content?.[0]?.text?.trim() || null, model: data.model || candidate, usage: data.usage ? { inputTokens: data.usage.input_tokens || 0, outputTokens: data.usage.output_tokens || 0, totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0) } : null };}catch(error){lastError=error;if(![400,404].includes(error.status))throw error;}}
+    for(const candidate of candidates){try{const configured=Number(process.env.SENTINEL_MAX_OUTPUT_TOKENS||1536);const max_tokens=Number.isFinite(configured)?Math.min(3072,Math.max(512,Math.floor(configured))):1536;const res=await fetchProvider(()=>fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model:candidate, max_tokens, temperature: 0.65, system: systemPrompt, messages: history.map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })) }), signal: AbortSignal.timeout(30000) }));const data=await res.json();return { text: data.content?.[0]?.text?.trim() || null, model: data.model || candidate,truncated:data.stop_reason==='max_tokens', usage: data.usage ? { inputTokens: data.usage.input_tokens || 0, outputTokens: data.usage.output_tokens || 0, totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0) } : null };}catch(error){lastError=error;if(![400,404].includes(error.status))throw error;}}
     throw lastError;
   }
 }

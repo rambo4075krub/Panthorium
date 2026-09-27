@@ -10,21 +10,21 @@ const shadowVersion = {
   state: 'shadow',
   shadowSamples: 3,
   shadowScore: 94,
-  metadata: { acceptanceScenario: true }
+  metadata: { acceptanceScenario: true, measuredShadow: { schema: 1, sampleCount: 3, worstRegression: 0, comparisons: [{ candidateScore: 94 }, { candidateScore: 94 }, { candidateScore: 94 }] } }
 };
 const rolledVersion = {
   versionId: 'rolled-ready',
   state: 'rolled_back',
   shadowSamples: 3,
   shadowScore: 94,
-  metadata: { acceptanceScenario: true, rollbackReason: 'baseline_regression' }
+  metadata: { acceptanceScenario: true, rollbackReason: 'baseline_regression', measuredShadow: { schema: 1, sampleCount: 3, worstRegression: 0, comparisons: [{ candidateScore: 94 }, { candidateScore: 94 }, { candidateScore: 94 }] } }
 };
 const recoveryVersion = {
   versionId: 'recovery-ready',
   state: 'shadow',
   shadowSamples: 3,
   shadowScore: 93,
-  metadata: { recoveryOf: 'rolled-ready' }
+  metadata: { recoveryOf: 'rolled-ready', measuredShadow: { schema: 1, sampleCount: 3, worstRegression: 0, comparisons: [{ candidateScore: 93 }, { candidateScore: 93 }, { candidateScore: 93 }] } }
 };
 
 (async () => {
