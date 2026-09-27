@@ -146,11 +146,6 @@ app.use(cookieParser());
 app.use(requestContext(audit));
 
 app.get("/healthz", async (req, res) => {
-app.use(express.json({ limit: "2mb", type: "application/json" }));
-app.use(cookieParser());
-app.use(requestContext(audit));
-
-app.get("/healthz", async (req, res) => {
   try {
     const result = await productionIntelligence.readiness();
     res.status(result.ok ? 200 : 503).json({ ok: result.ok, status: result.status });
