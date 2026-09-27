@@ -130,26 +130,22 @@ app.disable("x-powered-by");
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins], frameSrc: ["'self'"], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
 const allowElectronFileOrigin = process.env.ALLOW_ELECTRON_ORIGIN === "1";
 app.use((req, res, next) => {
-  // The installed Electron shell can report a local/custom origin even though
-  // it is the trusted Panthorium desktop client. Normalize only Electron
-  // requests when the isolated staging flag is enabled; normal browsers remain
-  // subject to the exact CORS allowlist below.
-  const userAgent = req.get("user-agent") || "";
-  if (allowElectronFileOrigin && /\bElectron\/\d/i.test(userAgent) && config.allowedOrigins[0]) {
-    req.headers.origin = config.allowedOrigins[0];
+  const origin = req.get("origin");
+  // Same-origin requests must remain valid when Cloud Run's URL or a mapped
+  // domain changes. Preserve the original Origin for the response header.
+  const ownOrigin = `${req.protocol}://${req.get("host")}`;
+  const electronFile = allowElectronFileOrigin && origin === "null" && /\bElectron\/\d/i.test(req.get("user-agent") || "");
+  if (origin && origin !== ownOrigin && !config.allowedOrigins.includes(origin) && !electronFile) {
+    console.warn("[HTTP] CORS origin denied: " + JSON.stringify(String(origin).slice(0, 240)));
+    return next(new Error("CORS origin denied"));
   }
-  next();
+  return cors({ origin: origin || false, credentials: true })(req, res, next);
 });
-app.use(cors({ origin(origin, cb) {
-  // Requests without an Origin header are same-origin/server-to-server calls.
-  // Browser origins must be an exact configured origin. Installed Electron
-  // shells may send the literal "null" origin when a local shell is loaded;
-  // allow that only when explicitly enabled by the isolated staging deploy.
-  const isAllowedElectronOrigin = allowElectronFileOrigin && origin === "null";
-  if (!origin || config.allowedOrigins.includes(origin) || isAllowedElectronOrigin) return cb(null, true);
-  console.warn("[HTTP] CORS origin denied: " + JSON.stringify(String(origin).slice(0, 240)));
-  cb(new Error("CORS origin denied"));
-}, credentials: true }));
+app.use(express.json({ limit: "2mb", type: "application/json" }));
+app.use(cookieParser());
+app.use(requestContext(audit));
+
+app.get("/healthz", async (req, res) => {
 app.use(express.json({ limit: "2mb", type: "application/json" }));
 app.use(cookieParser());
 app.use(requestContext(audit));
