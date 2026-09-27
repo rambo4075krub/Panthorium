@@ -72,6 +72,13 @@ jobs:
           service_account: ${{ env.DEPLOY_SA }}
           project_id: ${{ env.PROJECT }}
       - uses: google-github-actions/setup-gcloud@v2
+      - name: Grant staging runtime access to tuned Vertex project
+        if: env.VERTEX_PROJECT != ''
+        run: |
+          gcloud projects add-iam-policy-binding "$VERTEX_PROJECT" \
+            --member="serviceAccount:$RUNTIME_SA" \
+            --role="roles/aiplatform.user" \
+            --condition=None --quiet
       - name: Verify staging provider secrets
         run: |
           set -euo pipefail
