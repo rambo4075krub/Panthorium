@@ -40,7 +40,7 @@ module.exports = async function testGroqMigration() {
         if (failGroq) return new Response('{}', { status: 429 });
       } else {
         assert.equal(url, 'https://api.openai.com/v1/chat/completions');
-        assert.equal(body.max_tokens, 320);
+        assert.equal(body.max_tokens, 1536);
         assert.equal(body.reasoning_effort, undefined);
         assert.equal(body.include_reasoning, undefined);
       }

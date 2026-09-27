@@ -57,7 +57,7 @@ const sentinel = {
     available: () => ['groq','openai','gemini'],
     async callDetailed(provider) {
       if(provider==='groq')throw new Error('Provider HTTP 429');
-      return {text:JSON.stringify({score:73}),model:provider};
+      return {text:JSON.stringify({score:73,correctness:73,groundedness:73,safety:90,relevance:73,clarity:73,reason:'valid test verdict'}),model:provider};
     }
   }});
   const verdict=await fallback.evaluateAnswer({prompt:'test',answer:'answer',subjectProvider:'sentinel'});

@@ -14,6 +14,8 @@ const {AutonomousLearningPolicy}=require('../services/autonomousLearningPolicy')
  const s=await loop.evaluateForShadow(q,example);assert.equal(s.state,'shadow');
  let early=await loop.promoteIfReady(s.versionId);assert.equal(early.promoted,false);
  await loop.recordShadow(s.versionId,{score:95});await loop.recordShadow(s.versionId,{score:94});await loop.recordShadow(s.versionId,{score:96});
+ let unmeasured=await loop.promoteIfReady(s.versionId);assert.equal(unmeasured.promoted,false,'scores without measured shadow evidence must not promote');
+ await repo.update(s.versionId,{metadata:{measuredShadow:{schema:1,sampleCount:3,worstRegression:0,comparisons:[{candidateScore:95},{candidateScore:94},{candidateScore:96}]}}});
  const promoted=await loop.promoteIfReady(s.versionId);assert.equal(promoted.promoted,true);assert.equal(promoted.version.state,'active');
  const monitored=await loop.monitor(s.versionId,{rollingScore:95,baselineScore:96});assert.equal(monitored.rollback,false);
  const rolled=await loop.monitor(s.versionId,{rollingScore:80,baselineScore:96});assert.equal(rolled.rollback,true);assert.equal(rolled.version.state,'rolled_back');
@@ -24,6 +26,7 @@ const {AutonomousLearningPolicy}=require('../services/autonomousLearningPolicy')
  examples.push(stopExample);
  const stopQ=await loop.quarantine(stopExample);const stopS=await loop.evaluateForShadow(stopQ,stopExample);
  await loop.recordShadow(stopS.versionId,{score:95});await loop.recordShadow(stopS.versionId,{score:95});await loop.recordShadow(stopS.versionId,{score:95});
+ await repo.update(stopS.versionId,{metadata:{...stopS.metadata,measuredShadow:{schema:1,sampleCount:3,worstRegression:0,comparisons:[{candidateScore:95},{candidateScore:95},{candidateScore:95}]}}});
  const paused=await loop.setPromotionEnabled(false,{actor:'test-admin',reason:'incident'});assert.equal(paused.promotionControl.enabled,false);
  const blocked=await loop.promoteIfReady(stopS.versionId);assert.equal(blocked.promoted,false);assert(blocked.decision.reasons.includes('promotion_emergency_stop'));
  const status=await loop.status();assert.equal(status.policy.promotionControl.enabled,false);
