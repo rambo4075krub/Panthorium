@@ -98,6 +98,7 @@ toolRegistry.register({
   run: async ({ user, args }) => agentKnowledge.search({ user, query: args.query, limit: args.limit == null ? 8 : Number(args.limit) })
 });
 const agentMemory = new AgentMemoryService({ repository: agentMemoryRepository, audit, knowledge: agentKnowledge });
+sentinel.memory = agentMemory;
 const agentPlanner = new AgentPlannerService({ agentService, gateway: sentinel.gateway, audit, memory: agentMemory });
 const agentWorkflow = new AgentWorkflowService({ agentService, gateway: sentinel.gateway, audit, runs: agentRuns, pendingStore: agentPending, memory: agentMemory });
 const agentAutomationPolicy = new AgentAutomationPolicyService();

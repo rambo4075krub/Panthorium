@@ -23,6 +23,10 @@ jobs:
       OPENAI_SECRET: ${{ vars.STAGING_OPENAI_SECRET || 'panthorium-staging-openai-api-key' }}
       GEMINI_SECRET: ${{ vars.STAGING_GEMINI_SECRET || 'panthorium-staging-gemini-api-key' }}
       ANTHROPIC_SECRET: ${{ vars.STAGING_ANTHROPIC_SECRET || 'panthorium-staging-anthropic-api-key' }}
+      VERTEX_PROJECT: ${{ vars.STAGING_VERTEX_PROJECT_ID || '' }}
+      VERTEX_LOCATION: ${{ vars.STAGING_VERTEX_LOCATION || '' }}
+      VERTEX_ENDPOINT_ID: ${{ vars.STAGING_VERTEX_ENDPOINT_ID || '' }}
+      VERTEX_MODEL: ${{ vars.STAGING_VERTEX_MODEL || 'sentinel-v3' }}
       REGION: asia-southeast1
       SERVICE: panthorium-backend-staging
     steps:
@@ -47,6 +51,14 @@ jobs:
           [[ "$WIF_PROVIDER" == "projects/124818950958/locations/global/workloadIdentityPools/github-staging/providers/github" ]]
           [[ "$RUNTIME_SA" == *"@$PROJECT.iam.gserviceaccount.com" ]]
           [[ "$SQL_INSTANCE" == "$PROJECT:$REGION:"* ]]
+          configured=0
+          for name in VERTEX_PROJECT VERTEX_LOCATION VERTEX_ENDPOINT_ID; do
+            if [ -n "${!name}" ]; then configured=$((configured + 1)); fi
+          done
+          if [ "$configured" -ne 0 ] && [ "$configured" -ne 3 ]; then
+            echo "::error::Configure all three optional staging Vertex variables or leave all three empty"
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -76,7 +88,7 @@ jobs:
             --image="$IMAGE" --service-account="$RUNTIME_SA" --allow-unauthenticated \
             --port=8787 --max-instances=1 --min-instances=1 --no-cpu-throttling \
             --set-cloudsql-instances="$SQL_INSTANCE" \
-            --update-env-vars="^@^NODE_ENV=production@HOST=0.0.0.0@TRUST_PROXY=1@DATABASE_SSL_MODE=disable@ALLOW_ELECTRON_ORIGIN=1@SENTINEL_AUTO_TRAINING=1@SENTINEL_AUTO_CAPTURE=0@SENTINEL_ACTIVE_LEARNING_NEVER=1@AI_PRIORITY=groq,openai,gemini,anthropic@GROQ_MODEL=openai/gpt-oss-20b@OPENAI_MODEL=gpt-4o-mini@GEMINI_MODEL=gemini-3.5-flash-lite@ANTHROPIC_MODEL=claude-haiku-4-5-20251001@SENTINEL_TEACHER_PROVIDERS=groq@SENTINEL_EVALUATOR_PROVIDERS=openai,gemini,anthropic@SENTINEL_MIN_EVALUATORS=2@SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=0" \
+            --update-env-vars="^@^NODE_ENV=production@HOST=0.0.0.0@TRUST_PROXY=1@DATABASE_SSL_MODE=disable@ALLOW_ELECTRON_ORIGIN=1@SENTINEL_AUTO_TRAINING=1@SENTINEL_AUTO_CAPTURE=0@SENTINEL_ACTIVE_LEARNING_NEVER=1@AI_PRIORITY=vertex,groq,openai,gemini@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@GROQ_MODEL=openai/gpt-oss-20b@OPENAI_MODEL=gpt-4o-mini@GEMINI_MODEL=gemini-3.5-flash-lite@ANTHROPIC_MODEL=claude-haiku-4-5-20251001@SENTINEL_TEACHER_PROVIDERS=groq@SENTINEL_EVALUATOR_PROVIDERS=openai,gemini@SENTINEL_MIN_EVALUATORS=2@SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=0" \
             --update-secrets="DATABASE_URL=panthorium-staging-database-url:latest,JWT_SECRET=panthorium-staging-jwt:latest,ADMIN_PASSWORD=panthorium-staging-admin-password:latest,GROQ_API_KEY=$GROQ_SECRET:latest,OPENAI_API_KEY=$OPENAI_SECRET:latest,GEMINI_API_KEY=$GEMINI_SECRET:latest,ANTHROPIC_API_KEY=$ANTHROPIC_SECRET:latest" --quiet
           URL=$(gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" --format='value(status.url)')
           # Keep the Cloud Run service URL and the installed Electron staging

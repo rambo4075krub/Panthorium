@@ -37,13 +37,22 @@ async function fetchProvider(makeRequest, attempts = 3) {
 }
 class ProviderManager {
   cooling = new Map();
+  vertexToken = "";
+  vertexTokenExpiresAt = 0;
   constructor() {
     this.keys = { groq: process.env.GROQ_API_KEY || "", openai: process.env.OPENAI_API_KEY || "", gemini: process.env.GEMINI_API_KEY || "", anthropic: process.env.ANTHROPIC_API_KEY || "" };
     this.priority = (process.env.AI_PRIORITY || "groq,openai,gemini,anthropic").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-    this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite", anthropic: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001" };
+    this.vertex = {
+      project: process.env.SENTINEL_VERTEX_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || "",
+      location: process.env.SENTINEL_VERTEX_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || "",
+      endpointId: process.env.SENTINEL_VERTEX_ENDPOINT_ID || "",
+      maxOutputTokens: Math.max(128, Math.min(8192, Number(process.env.SENTINEL_VERTEX_MAX_OUTPUT_TOKENS) || 4096))
+    };
+    this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite", anthropic: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001", vertex: process.env.SENTINEL_VERTEX_MODEL || "sentinel-v3" };
   }
-  available() { return this.priority.filter((p) => this.keys[p]); }
-  catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: Boolean(this.keys[provider]), priority, streaming: provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
+  vertexConfigured() { return Boolean(this.vertex.project && this.vertex.location && this.vertex.endpointId); }
+  available() { return this.priority.filter((p) => p === "vertex" ? this.vertexConfigured() : Boolean(this.keys[p])); }
+  catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: provider === "vertex" ? this.vertexConfigured() : Boolean(this.keys[provider]), priority, streaming: provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
   resolveModel(provider, requestedModel) {
     const configured = this.models[provider];
     if (!configured) return null;
@@ -92,12 +101,55 @@ class ProviderManager {
     catch(error){if(error.status===429)this.cooling.set(provider,{until:Date.now()+Math.max(60000,error.retryAfterMs||60000)});throw error;}
   }
   async callAvailable(provider, systemPrompt, history, options = {}) {
+    if (provider === "vertex") {
+      if (!this.vertexConfigured()) return null;
+      const model = this.resolveModel(provider, options.model);
+      if (!model) throw new Error("model_not_allowed");
+      return this.callVertexTuned(systemPrompt, history);
+    }
     const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
     if (provider === "groq") return this.callOpenAICompatible(GROQ_CHAT_URL, key, model, systemPrompt, history);
     if (provider === "openai") return this.callOpenAICompatible("https://api.openai.com/v1/chat/completions", key, model, systemPrompt, history);
     if (provider === "gemini") return this.callGemini(key, model, systemPrompt, history);
     if (provider === "anthropic") return this.callAnthropic(key, model, systemPrompt, history);
     return null;
+  }
+  async vertexAccessToken() {
+    // Cloud Run's metadata server supplies short-lived Application Default
+    // Credentials. No service-account key or always-on inference VM is needed.
+    if (this.vertexToken && this.vertexTokenExpiresAt > Date.now() + 60000) return this.vertexToken;
+    const response = await fetch("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", {
+      headers: { "Metadata-Flavor": "Google" }, signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) throw await providerError(response);
+    const data = await response.json();
+    if (!data.access_token) throw new Error("vertex_adc_token_missing");
+    this.vertexToken = data.access_token;
+    this.vertexTokenExpiresAt = Date.now() + Math.max(60, Number(data.expires_in) || 300) * 1000;
+    return data.access_token;
+  }
+  async callVertexTuned(systemPrompt, history) {
+    const { project, location, endpointId, maxOutputTokens } = this.vertex;
+    const host = location === "eu" || location === "us"
+      ? `https://aiplatform.${location}.rep.googleapis.com`
+      : `https://${location}-aiplatform.googleapis.com`;
+    const url = `${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(location)}/endpoints/${encodeURIComponent(endpointId)}:generateContent`;
+    const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: String(m.content || "") }] }));
+    const request = async () => fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${await this.vertexAccessToken()}` },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: systemPrompt }] }, contents, generationConfig: { temperature: 0.65, maxOutputTokens } }),
+      signal: AbortSignal.timeout(60000)
+    });
+    const response = await fetchProvider(request);
+    const data = await response.json();
+    const text = (data.candidates?.[0]?.content?.parts || []).map((part) => part.text || "").join("").trim();
+    const usage = data.usageMetadata;
+    return {
+      text: text || null,
+      model: this.models.vertex,
+      usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null
+    };
   }
   async streamDetailed(provider, systemPrompt, history, options = {}, onDelta = () => {}) {
     const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
