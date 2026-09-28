@@ -510,11 +510,20 @@ class SentinelReleaseGateService {
 
   checkRecovery({ versionList, events }) {
     const rolled = versionList.filter((v) => v.state === 'rolled_back');
-    const recoveryVersions = versionList.filter((v) => v.metadata?.recoveryOf || String(v.metadata?.acceptanceStep || '').includes('recovery'));
+    const rolledIds = new Set(rolled.map((v) => v.versionId));
+    const recoveryVersions = versionList.filter((v) => {
+      const recoveryOf = v.metadata?.recoveryOf;
+      return recoveryOf && rolledIds.has(recoveryOf) && ['quarantined', 'shadow', 'active'].includes(v.state);
+    });
     const recoveryEvents = events.filter((e) => /recovery/i.test(String(e.event || '')));
     const monitorEvents = events.filter((e) => /monitor|rolled_back/i.test(String(e.event || '')));
-    const pass = rolled.length > 0 && (recoveryVersions.length > 0 || recoveryEvents.length > 0);
-    return { id: 'rollback_recovery', label: 'Automatic Recovery หลัง rollback', pass, reason: pass ? null : 'ต้องมี rolled_back version และมี recovery candidate/event หลัง rollback', evidence: { rolledBackVersions: rolled.map((v) => v.versionId), recoveryVersions: recoveryVersions.map((v) => ({ versionId: v.versionId, state: v.state, recoveryOf: v.metadata?.recoveryOf || null })), recoveryEvents: recoveryEvents.slice(0, 5).map((e) => e.event), monitorEvents: monitorEvents.slice(0, 5).map((e) => e.event) } };
+    const successfulRecoveryEvents = recoveryEvents.filter((e) =>
+      e.event === 'recovery_candidates_created'
+      && rolledIds.has(e.versionId)
+      && number(e.payload?.count) > 0
+    );
+    const pass = rolled.length > 0 && (recoveryVersions.length > 0 || successfulRecoveryEvents.length > 0);
+    return { id: 'rollback_recovery', label: 'Automatic Recovery หลัง rollback', pass, reason: pass ? null : 'ต้องมี rolled_back version และมี recovery candidate ที่ยังใช้งานต่อได้ หรือ event สร้าง candidate สำเร็จหลัง rollback', evidence: { rolledBackVersions: rolled.map((v) => v.versionId), recoveryVersions: recoveryVersions.map((v) => ({ versionId: v.versionId, state: v.state, recoveryOf: v.metadata?.recoveryOf || null })), recoveryEvents: recoveryEvents.slice(0, 5).map((e) => ({ event: e.event, versionId: e.versionId, count: e.payload?.count ?? null })), successfulRecoveryEvents: successfulRecoveryEvents.length, monitorEvents: monitorEvents.slice(0, 5).map((e) => e.event) } };
   }
 
   checkActiveLearning({ activeStatus, activeHistory }) {
