@@ -395,13 +395,17 @@ class SentinelActiveLearningService {
     try {
       const delta = await this.runCycle(this.session);
       const stats = { ...(this.session.stats || {}) };
-      Object.entries(delta).forEach(([key, value]) => { stats[key] = Number(stats[key] || 0) + Number(value || 0); });
+      Object.entries(delta).forEach(([key, value]) => { if (Number.isFinite(Number(value))) stats[key] = Number(stats[key] || 0) + Number(value || 0); });
       stats.cycles = Number(stats.cycles || 0) + 1;
       stats.consecutiveFailures = 0;
       stats.lastCycleAt = new Date().toISOString();
       stats.lastGuardCheck = 'passed';
       await this.save({ ...this.session, stats, lastError: null });
       this.audit?.record('sentinel.active_learning_cycle_completed', { runId: this.session.runId, stats, delta, remaining: this.remainingBudget(this.session) });
+      if (delta.rateLimitError) {
+        await this.pauseForRateLimit(new Error(delta.rateLimitError));
+        return;
+      }
     } catch (error) {
       if (this.session.options?.never && rateLimitDelayMs(error) > 0) {
         await this.pauseForRateLimit(error);
@@ -432,6 +436,18 @@ class SentinelActiveLearningService {
 
   async runCycle(run) {
     const delta = { prompts: 0, candidates: 0, failures: 0, shadowSamples: 0, unsafeShadow: 0, promotions: 0 };
+    // Spend the available evaluator budget on existing non-acceptance learning
+    // candidates first. Teacher quota exhaustion must not starve Shadow checks.
+    if (run.options?.autoShadow !== false) {
+      const shadow = await this.sampleShadow(run);
+      delta.shadowSamples += shadow.samples;
+      delta.unsafeShadow += shadow.unsafe;
+      delta.failures += shadow.failures;
+      if (shadow.rateLimitError) {
+        delta.rateLimitError = shadow.rateLimitError;
+        return delta;
+      }
+    }
     for (let i = 0; i < Number(run.options?.batchSize || 1); i += 1) {
       if (!run.options?.never && Number(run.stats?.prompts || 0) + delta.prompts >= Number(run.options?.maxPrompts || 0)) break;
       const prompt = this.nextPrompt({ ...run, stats: { ...run.stats, cycles: Number(run.stats?.cycles || 0) + i } });
@@ -446,36 +462,33 @@ class SentinelActiveLearningService {
       delta.candidates += result.candidates?.length || 0;
       delta.failures += result.failures?.length || (result.ok === false ? 1 : 0);
       const rateLimited = result.failures?.find((failure) => rateLimitDelayMs(failure?.error || failure) > 0);
-      if (run.options?.never && rateLimited) throw new Error(String(rateLimited.error || rateLimited));
+      if (run.options?.never && rateLimited) {
+        delta.rateLimitError = String(rateLimited.error || rateLimited);
+        break;
+      }
       if (!run.options?.never && Number(run.stats?.candidates || 0) + delta.candidates >= Number(run.options?.maxCandidates || 0)) break;
-    }
-    if (run.options?.autoShadow !== false) {
-      const shadow = await this.sampleShadow(run);
-      delta.shadowSamples += shadow.samples;
-      delta.unsafeShadow += shadow.unsafe;
-      delta.failures += shadow.failures;
     }
     return delta;
   }
 
   async sampleShadow(run) {
     const shadows = await this.learning.repository.list({ state: 'shadow', limit: 25 });
-    const needingSamples = shadows.filter((version) => Number(version.shadowSamples || 0) < Number(this.learning.policy?.shadowMinSamples || 3)).slice(0, 1);
-    const delta = { samples: 0, unsafe: 0, failures: 0 };
+    const needingSamples = shadows.filter((version) => !version.metadata?.acceptanceScenario && Number(version.shadowSamples || 0) < Number(this.learning.policy?.shadowMinSamples || 3)).slice(0, 1);
+    const delta = { samples: 0, unsafe: 0, failures: 0, rateLimitError: null };
     for (const version of needingSamples) {
       const example = await this.learning.exampleFor(version.exampleId);
       if (!example) continue;
       try {
+        const beforeSamples = Number(version.shadowSamples || 0);
         const evaluation = await this.evaluateShadow(version, example, run);
-        const result = await this.learning.recordShadow(version.versionId, {
-          score: evaluation.score,
-          safe: evaluation.safe,
-          metadata: { source: 'active-learning-provider-shadow', evaluator: evaluation.provider, reason: evaluation.reason }
-        });
-        if (result.ok) delta.samples += 1;
+        const latest = await this.learning.repository.get(version.versionId);
+        const measured = latest?.metadata?.measuredShadow;
+        if (measured?.schema !== 1 || !Array.isArray(measured.comparisons) || measured.comparisons.length !== 3 || Number(measured.sampleCount || 0) < 3) throw new Error('measured_shadow_evidence_required');
+        delta.samples += Math.max(0, Number(latest.shadowSamples || 0) - beforeSamples);
         if (evaluation.safe === false) delta.unsafe += 1;
       } catch (error) {
         delta.failures += 1;
+        if (rateLimitDelayMs(error) > 0) delta.rateLimitError = error.message;
         this.audit?.record('sentinel.active_learning_shadow_failed', { runId: run.runId, versionId: version.versionId, error: error.message });
       }
     }
