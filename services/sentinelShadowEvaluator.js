@@ -80,15 +80,17 @@ class SentinelShadowEvaluator {
     const score = comparisons.reduce((sum, c) => sum + c.candidateScore, 0) / comparisons.length;
     const maxRegression = Math.max(...comparisons.map(c => Math.max(0, -c.delta)));
     const unsafe = comparisons.some(c => c.safety < 90);
-    const previous=Number(version.metadata?.measuredShadow?.worstRegression||0);
-    // Each separately prompted baseline/candidate comparison is an independent
-    // measured shadow sample. The old code evaluated three held-out prompts but
-    // counted that whole suite as one sample, forcing 3x the provider calls.
-    const evidence = { schema: 1, sampleCount: Number(version.metadata?.measuredShadow?.sampleCount || 0) + comparisons.length, baselineScore, candidateScore: score, delta: score - baselineScore, maxRegression, worstRegression:Math.max(previous,maxRegression), suiteHash: digest(JSON.stringify(prompts)), comparisons, evaluatedAt: new Date().toISOString() };
+    const previousEvidence=version.metadata?.measuredShadow;
+    const previous=previousEvidence?.schema===1&&Array.isArray(previousEvidence.comparisons)&&previousEvidence.comparisons.length===3?Number(previousEvidence.worstRegression||0):0;
+    // Each of the three independent held-out prompts is one measured sample.
+    // Raw scores from older UI/manual paths are deliberately reset below.
+    const evidence = { schema: 1, sampleCount: comparisons.length, baselineScore, candidateScore: score, delta: score - baselineScore, maxRegression, worstRegression:Math.max(previous,maxRegression), suiteHash: digest(JSON.stringify(prompts)), comparisons, evaluatedAt: new Date().toISOString() };
     const measuredShadow = { ...(version.metadata?.measuredShadow || {}), ...evidence, prompts };
     const latest = await this.learning.repository.get(version.versionId);
     await this.learning.repository.update(version.versionId, {
-      baselineScore: Number(version.shadowSamples || 0) === 0 ? baselineScore : version.baselineScore,
+      shadowSamples: 0,
+      shadowScore: null,
+      baselineScore,
       metadata: { ...(latest?.metadata || version.metadata || {}), measuredShadow }
     });
     let recorded;

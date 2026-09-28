@@ -93,7 +93,7 @@ async function fixture(withEvaluator = true) {
   assert.equal(withoutEvaluator.versions[0].shadowSamples, 0, 'must not invent synthetic shadow samples');
 
   let sampleCount = 0;
-  const measuredVersion = { versionId: 'measured-version', state: 'shadow', shadowSamples: 0, shadowScore: 0, baselineScore: null, metadata: { measuredShadow: { schema: 1, prompts: ['test one', 'test two', 'test three'], sampleCount: 0 } } };
+  const measuredVersion = { versionId: 'measured-version', state: 'shadow', shadowSamples: 4, shadowScore: 99, baselineScore: 100, metadata: { measuredShadow: { schema: 1, prompts: ['test one', 'test two', 'test three'], sampleCount: 0 } } };
   const measuredRepository = {
     async get() { return measuredVersion; },
     async update(id, patch) { Object.assign(measuredVersion, patch); measuredVersion.metadata = { ...measuredVersion.metadata, ...(patch.metadata || {}) }; return measuredVersion; }

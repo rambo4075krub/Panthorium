@@ -473,18 +473,30 @@ class SentinelActiveLearningService {
 
   async sampleShadow(run) {
     const shadows = await this.learning.repository.list({ state: 'shadow', limit: 25 });
-    const needingSamples = shadows.filter((version) => !version.metadata?.acceptanceScenario && Number(version.shadowSamples || 0) < Number(this.learning.policy?.shadowMinSamples || 3)).slice(0, 1);
+    const minSamples = Number(this.learning.policy?.shadowMinSamples || 3);
+    const maxRegression = Number(this.learning.policy?.maxRegressionPct ?? 5);
+    const needingSamples = shadows.filter((version) => {
+      if (version.metadata?.acceptanceScenario) return false;
+      const measured = version.metadata?.measuredShadow;
+      const evidenceReady = measured?.schema === 1
+        && Number(measured.sampleCount || 0) >= minSamples
+        && Array.isArray(measured.comparisons)
+        && measured.comparisons.length === 3
+        && Number(measured.worstRegression ?? measured.maxRegression) <= maxRegression;
+      return Number(version.shadowSamples || 0) < minSamples || !evidenceReady;
+    }).slice(0, 1);
     const delta = { samples: 0, unsafe: 0, failures: 0, rateLimitError: null };
     for (const version of needingSamples) {
       const example = await this.learning.exampleFor(version.exampleId);
       if (!example) continue;
       try {
-        const beforeSamples = Number(version.shadowSamples || 0);
         const evaluation = await this.evaluateShadow(version, example, run);
         const latest = await this.learning.repository.get(version.versionId);
         const measured = latest?.metadata?.measuredShadow;
-        if (measured?.schema !== 1 || !Array.isArray(measured.comparisons) || measured.comparisons.length !== 3 || Number(measured.sampleCount || 0) < 3) throw new Error('measured_shadow_evidence_required');
-        delta.samples += Math.max(0, Number(latest.shadowSamples || 0) - beforeSamples);
+        const minSamples = Number(this.learning.policy?.shadowMinSamples || 3);
+        if (measured?.schema !== 1 || !Array.isArray(measured.comparisons) || measured.comparisons.length !== 3 || Number(measured.sampleCount || 0) < minSamples) throw new Error('measured_shadow_evidence_required');
+        // Count only evaluator-backed samples. Older raw scores are not evidence.
+        delta.samples += Math.max(0, Math.min(Number(measured.sampleCount || 0), Number(latest.shadowSamples || 0)));
         if (evaluation.safe === false) delta.unsafe += 1;
       } catch (error) {
         delta.failures += 1;

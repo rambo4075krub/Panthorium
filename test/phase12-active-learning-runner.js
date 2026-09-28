@@ -12,8 +12,8 @@ const shadowVersion = {
   exampleId: 'example-1',
   state: 'shadow',
   score: 94,
-  shadowSamples: 0,
-  shadowScore: null,
+  shadowSamples: 4,
+  shadowScore: 98,
   metadata: {}
 };
 
@@ -57,7 +57,7 @@ const providers = {
 };
 
 (async () => {
-  service = new SentinelActiveLearningService({ training, learning, providers, shadowEvaluator: { async evaluate() { shadowCalls += 1; shadowVersion.shadowSamples += 3; shadowVersion.shadowScore = 94; shadowVersion.metadata.measuredShadow = { schema: 1, sampleCount: 3, worstRegression: 0, comparisons: [{}, {}, {}] }; return { score: 94, safe: true, samples: 3, unsafe: 0, failures: 0 }; } }, minIntervalMs: 5 });
+  service = new SentinelActiveLearningService({ training, learning, providers, shadowEvaluator: { async evaluate() { shadowCalls += 1; shadowVersion.shadowSamples = 3; shadowVersion.shadowScore = 94; shadowVersion.metadata.measuredShadow = { schema: 1, sampleCount: 3, worstRegression: 0, comparisons: [{}, {}, {}] }; return { score: 94, safe: true, samples: 3, unsafe: 0, failures: 0 }; } }, minIntervalMs: 5 });
   await service.init();
   const started = await service.start({ durationHours: 0.05, intervalMinutes: 0.001, batchSize: 1, providers: ['groq', 'openai'], userId: 'admin-test' });
   assert.equal(started.ok, true);
