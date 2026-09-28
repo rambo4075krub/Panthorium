@@ -1,0 +1,99 @@
+(function () {
+  'use strict';
+  let profileCache = null;
+  let profileCacheAt = 0;
+
+  function getOS() { try { return typeof OS !== 'undefined' ? OS : null; } catch (_) { return null; } }
+  function esc(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char])); }
+  async function token() {
+    if (getOS()?.config?.accessToken) return getOS().config.accessToken;
+    if (window.PanthoriumAuth?.refreshSession && await window.PanthoriumAuth.refreshSession().catch(() => false)) return getOS()?.config?.accessToken || '';
+    return '';
+  }
+  async function api(path, options = {}, retry = true) {
+    const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) };
+    const accessToken = await token();
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+    let response = await fetch(path, { ...options, headers, credentials: 'include', cache: 'no-store' });
+    if (response.status === 401 && retry && window.PanthoriumAuth?.refreshSession && await window.PanthoriumAuth.refreshSession().catch(() => false)) return api(path, options, false);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { const error = new Error(data.error || `HTTP ${response.status}`); error.status = response.status; throw error; }
+    return data;
+  }
+  async function profiles(force = false) {
+    if (!force && profileCache && Date.now() - profileCacheAt < 30000) return profileCache;
+    const data = await api('/api/biometrics/voice/profiles');
+    profileCache = Array.isArray(data.profiles) ? data.profiles : [];
+    profileCacheAt = Date.now();
+    return profileCache;
+  }
+  async function authorizeAudio(audio) {
+    let enrolled;
+    try { enrolled = await profiles(); }
+    catch (error) {
+      // Public guest sessions have no durable owner identity to attach a voice
+      // template to. Keep ordinary guest voice usable; enrolled account/admin
+      // sessions remain fail-closed on verification outages.
+      if (error?.status === 403) return { required: false, matched: true, enrollmentRequired: true };
+      return { required: true, matched: false, error: 'voice_verification_unavailable' };
+    }
+    if (!enrolled.length) return { required: false, matched: true, enrollmentRequired: true };
+    try {
+      const result = await api('/api/biometrics/voice/verify', { method: 'POST', body: JSON.stringify({ audio }) });
+      return { required: true, matched: result.matched === true, profile: result.profile || null, score: result.score, error: result.matched ? null : 'voice_not_authorized' };
+    } catch (error) { return { required: true, matched: false, error: error.message || 'voice_verification_unavailable' }; }
+  }
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(blob); });
+  }
+  async function capture(button) {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) throw new Error('browser_recorder_unsupported');
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(value => !MediaRecorder.isTypeSupported || MediaRecorder.isTypeSupported(value)) || '';
+    const recorder = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
+    const chunks = [];
+    recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
+    button.disabled = true; button.textContent = 'กำลังบันทึก 4 วินาที…';
+    recorder.start(200);
+    await new Promise(resolve => setTimeout(resolve, 4000));
+    const stopped = new Promise(resolve => { recorder.onstop = resolve; });
+    recorder.stop(); await stopped;
+    stream.getTracks().forEach(track => track.stop());
+    button.disabled = false; button.textContent = 'บันทึกตัวอย่างเสียง';
+    if (!chunks.length) throw new Error('empty_voice_sample');
+    return blobToDataUrl(new Blob(chunks, { type: recorder.mimeType || type || 'audio/webm' }));
+  }
+  function label(type) { return ({ user: 'ผู้ใช้', family: 'คนในครอบครัว', administrator: 'แอดมิน' })[type] || type; }
+  async function refresh(root = document.getElementById('panthorium-voice-identity')) {
+    if (!root) return;
+    const state = root.querySelector('[data-state]');
+    try {
+      const [status, list] = await Promise.all([api('/api/biometrics/status'), profiles(true)]);
+      state.textContent = status.configured ? 'พร้อมตรวจเสียงก่อนส่งเข้า Sentinel' : 'ยังต้องตั้งค่าบริการ Speaker Verification และกุญแจเข้ารหัสบนเซิร์ฟเวอร์';
+      state.style.color = status.configured ? '#6ee7b7' : '#fbbf24';
+      root.querySelector('[data-list]').innerHTML = list.length ? list.map(item => `<div style="padding:10px;border-bottom:1px solid #243448"><b>${esc(item.displayName)}</b> · ${esc(label(item.subjectType))}<div style="font-size:11px;color:#8ea3b8">ตัวอย่าง ${esc(item.sampleCount)} ครั้ง${item.relationship ? ` · ${esc(item.relationship)}` : ''}</div><button data-remove="${esc(item.profileId)}" style="margin-top:6px">ลบเสียงนี้</button></div>`).join('') : '<div style="color:#94a3b8">ยังไม่มีเสียงที่ลงทะเบียน ระบบจะยังไม่เปิดด่านคัดกรอง</div>';
+      root.querySelectorAll('[data-remove]').forEach(button => { button.onclick = async () => { if (!confirm('ลบเสียงที่ลงทะเบียนนี้?')) return; await api(`/api/biometrics/voice/profiles/${encodeURIComponent(button.dataset.remove)}`, { method: 'DELETE' }); profileCache = null; await refresh(root); }; });
+    } catch (error) { state.textContent = `โหลดข้อมูลไม่สำเร็จ: ${error.message}`; state.style.color = '#fda4af'; }
+  }
+  async function open() {
+    if (document.getElementById('panthorium-voice-identity')) return;
+    const root = document.createElement('div');
+    root.id = 'panthorium-voice-identity';
+    root.style.cssText = 'position:fixed;inset:5%;z-index:10050;background:rgba(7,15,26,.99);border:1px solid #2b5268;border-radius:16px;color:#e6f5ff;padding:16px;overflow:auto;box-shadow:0 24px 80px #000;font-family:system-ui';
+    root.innerHTML = `<div style="display:flex;justify-content:space-between;gap:12px"><div><h2 style="margin:0">🎙️ Voice Identity</h2><div data-state style="font-size:12px;color:#8ea3b8">กำลังตรวจสอบ…</div></div><div><button data-refresh>รีเฟรช</button> <button data-close>✕</button></div></div><div style="display:grid;grid-template-columns:minmax(280px,1fr) minmax(280px,1fr);gap:14px;margin-top:14px"><section style="border:1px solid #294154;border-radius:12px;padding:14px;background:#0a1725"><h3 style="margin-top:0">ลงทะเบียนเสียงที่อนุญาต</h3><input data-name maxlength="80" placeholder="ชื่อบุคคล" style="width:100%;box-sizing:border-box;padding:9px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><select data-type style="width:100%;margin-top:8px;padding:9px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><option value="user">ผู้ใช้</option><option value="family">คนในครอบครัว</option><option value="administrator">แอดมิน</option></select><input data-relationship maxlength="80" placeholder="ความสัมพันธ์ (ถ้ามี)" style="width:100%;box-sizing:border-box;margin-top:8px;padding:9px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><p style="font-size:12px;color:#9fb4c7">บันทึก 3 ครั้ง ครั้งละ 4 วินาที พูดด้วยเสียงธรรมชาติในสภาพแวดล้อมต่างกันเล็กน้อย</p><button data-record>บันทึกตัวอย่างเสียง</button><div data-count style="margin:9px 0;color:#67e8f9">0 / 3 ตัวอย่าง</div><label style="font-size:12px"><input data-consent type="checkbox"> บุคคลนี้ยินยอมให้สร้างและเก็บแม่แบบเสียงแบบเข้ารหัส</label><br><button data-enroll disabled style="margin-top:12px">บันทึก Voice Identity</button><div data-form-state style="margin-top:8px;font-size:12px"></div></section><section style="border:1px solid #294154;border-radius:12px;padding:14px;background:#0a1725"><h3 style="margin-top:0">เสียงที่ระบบยอมรับ</h3><div data-list></div><p style="font-size:11px;color:#8ea3b8">เมื่อมีอย่างน้อยหนึ่งรายการ ระบบจะตรวจลายนิ้วมือเสียงก่อนถอดคำพูด เสียงอื่นจะไม่ถูกส่งไป STT หรือ Sentinel</p></section></div>`;
+    document.body.appendChild(root);
+    const samples = [];
+    const record = root.querySelector('[data-record]'); const enroll = root.querySelector('[data-enroll]'); const count = root.querySelector('[data-count]'); const formState = root.querySelector('[data-form-state]');
+    record.onclick = async () => { try { if (samples.length >= 5) return; samples.push(await capture(record)); count.textContent = `${samples.length} / 3 ตัวอย่าง${samples.length >= 3 ? ' · พร้อมบันทึก' : ''}`; enroll.disabled = samples.length < 3; } catch (error) { formState.textContent = `บันทึกเสียงไม่สำเร็จ: ${error.message}`; } };
+    enroll.onclick = async () => { enroll.disabled = true; formState.textContent = 'กำลังตรวจความสอดคล้องและเข้ารหัสแม่แบบเสียง…'; try { await api('/api/biometrics/voice/profiles', { method: 'POST', body: JSON.stringify({ displayName: root.querySelector('[data-name]').value.trim(), subjectType: root.querySelector('[data-type]').value, relationship: root.querySelector('[data-relationship]').value.trim(), consent: root.querySelector('[data-consent]').checked, samples }) }); samples.splice(0); count.textContent = '0 / 3 ตัวอย่าง'; profileCache = null; formState.textContent = 'บันทึกสำเร็จ ด่านคัดกรองเสียงเปิดใช้งานแล้ว'; await refresh(root); } catch (error) { formState.textContent = `บันทึกไม่สำเร็จ: ${error.message}`; enroll.disabled = samples.length < 3; } };
+    root.querySelector('[data-close]').onclick = () => root.remove(); root.querySelector('[data-refresh]').onclick = () => refresh(root); refresh(root);
+  }
+  function install() {
+    const menu = document.getElementById('sm-apps') || document.querySelector('.start-menu, #start-menu');
+    if (!menu || document.getElementById('voice-identity-launcher')) return !!menu;
+    const button = document.createElement('button'); button.id = 'voice-identity-launcher'; button.className = 'sm-app'; button.style.cssText = 'border:0;background:transparent;color:inherit;font:inherit'; button.innerHTML = '<div class="ico">🎙️</div><span>Voice Identity</span>'; button.onclick = () => { open(); try { closeStartMenu(); } catch (_) {} }; menu.appendChild(button); return true;
+  }
+  window.PanthoriumVoiceIdentity = { open, refresh, authorizeAudio, profiles };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install); else install();
+  window.addEventListener('panthorium:auth-changed', () => { profileCache = null; install(); }); setInterval(install, 1500);
+})();

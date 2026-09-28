@@ -64,15 +64,20 @@ const { createTrainingRouter } = require("./routes/training");
 const { createReleaseGateRouter } = require("./routes/releaseGate");
 const { createGovernanceRouter } = require("./routes/governance");
 const { createSentinelControlRouter } = require("./routes/sentinelControl");
+const { createBiometricsRouter } = require("./routes/biometrics");
+const { createBiometricIdentityRepository } = require("./services/biometricIdentityRepository");
+const { BiometricIdentityService } = require("./services/biometricIdentityService");
 const { requestContext } = require("./middleware/requestContext");
 
 const app = express();
 if (config.trustProxy) app.set("trust proxy", 1);
 
 const authRepository = createAuthRepository(config);
+const biometricIdentityRepository = createBiometricIdentityRepository(config);
 const audit = new AuditService({ file: config.auditFile, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const securityResponse = new SecurityResponseService({ audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const authService = new AuthService({ repository: authRepository, config, audit });
+const biometrics = new BiometricIdentityService({ repository: biometricIdentityRepository, audit, providerUrl: config.biometricSpeakerUrl, providerToken: config.biometricSpeakerToken, encryptionKey: config.biometricTemplateKey, matchThreshold: config.biometricVoiceThreshold, enrollmentThreshold: config.biometricEnrollmentThreshold });
 const conversations = new ConversationRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const aiOperations = new AiOperationsService({ audit, conversations });
 const agentRuns = new AgentRunRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
@@ -160,6 +165,7 @@ app.use("/api/training", createTrainingRouter(authService, sentinelTraining, sen
 app.use("/api/governance", createGovernanceRouter(authService, autonomousGovernance));
 app.use("/api/sentinel-control", createSentinelControlRouter(authService, sentinelOrchestrator));
 app.use("/api/auth", createAuthRouter(authService, config, securityResponse));
+app.use("/api/biometrics", createBiometricsRouter(authService, biometrics));
 app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
 app.use("/api/agent/automation", createAutomationRouter(authService, agentAutomation));
 app.use("/api/agent/memory", createMemoryRouter(authService, agentMemory));
@@ -189,7 +195,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-window-catalog.js", "external-apps-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "external-apps-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js"];
 for (const script of shellScripts) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -338,6 +344,7 @@ async function start() {
   await audit.init();
   await securityResponse.init();
   await authService.init();
+  await biometrics.init();
   await conversations.init();
   await agentRuns.init();
   await agentPending.init();
@@ -410,4 +417,4 @@ if (require.main === module) {
   }).catch((error) => { console.error("[BOOT]", error); process.exit(1); });
 }
 
-module.exports = { app, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
+module.exports = { app, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };

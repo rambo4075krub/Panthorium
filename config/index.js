@@ -46,5 +46,10 @@ module.exports = {
   sentinelMinEvaluators: Number(process.env.SENTINEL_MIN_EVALUATORS || 2),
   adminUsername: process.env.ADMIN_USERNAME || "admin",
   adminPassword: process.env.ADMIN_PASSWORD || "",
-  trustProxy: process.env.TRUST_PROXY === "1"
+  trustProxy: process.env.TRUST_PROXY === "1",
+  biometricSpeakerUrl: process.env.BIOMETRIC_SPEAKER_URL || "",
+  biometricSpeakerToken: process.env.BIOMETRIC_SPEAKER_TOKEN || "",
+  biometricTemplateKey: process.env.BIOMETRIC_TEMPLATE_KEY || "",
+  biometricVoiceThreshold: Number(process.env.BIOMETRIC_VOICE_THRESHOLD || 0.82),
+  biometricEnrollmentThreshold: Number(process.env.BIOMETRIC_ENROLLMENT_THRESHOLD || 0.76)
 };

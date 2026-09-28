@@ -12,7 +12,7 @@ const catalog = require('../voice-window-catalog');
   const auth = new AuthService({ config: { jwtSecret: 'guest-access-test-secret', accessTokenTtl: '1h' }, audit });
   const guest = auth.guest().principal;
   const admin = { id: 'admin-test', roles: ['administrator'], permissions: ['chat', 'settings', 'system:read', 'sentinel:command'] };
-  const excluded = ['settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control'];
+  const excluded = ['settings', 'voice-identity', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control'];
   const sentinel = { status: () => ({ ready: true }), providerCatalog: () => [], chat: async () => ({ ok: true, text: 'test reply' }) };
   const agent = new AgentService({ tools: new ToolRegistry({ sentinel }), audit });
   const app = express(); app.use(express.json()); installGuestAccess(app, auth);

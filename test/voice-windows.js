@@ -75,7 +75,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     load('phase2-auth.js'); await tick();
     await w.PanthoriumAuth.login('admin', 'fixture');
     w.document.getElementById('desktop').classList.add('active');
-    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumAIStream.install();
     const command = text => w.callAI(text, { voiceMode: true });
     const isVisible = app => { const el = w.document.querySelector(app.selector); return !!el && w.getComputedStyle(el).display !== 'none'; };
