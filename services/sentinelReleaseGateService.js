@@ -489,7 +489,23 @@ class SentinelReleaseGateService {
         && number(measured.worstRegression ?? measured.maxRegression) <= number(learningStatus?.policy?.maxRegressionPct, 5);
     });
     const pass = ready.length > 0;
-    return { id: 'shadow_gate', label: 'Shadow gate', pass, reason: pass ? null : `ต้องมี Shadow/Active/Rolled back version ที่ผ่าน shadow ≥ ${minSamples} samples และ score ≥ ${minScore}`, evidence: { minSamples, minScore, readyVersions: ready.map((v) => ({ versionId: v.versionId, state: v.state, shadowSamples: v.shadowSamples, shadowScore: v.shadowScore })) } };
+    const evaluated = versionList.filter((v) =>
+      ['shadow', 'active', 'rolled_back'].includes(v.state)
+      && !v.metadata?.acceptanceScenario
+      && (Number(v.shadowSamples || 0) > 0 || v.metadata?.measuredShadow)
+    ).slice(0, 20).map((v) => ({
+      versionId: v.versionId,
+      state: v.state,
+      shadowSamples: number(v.shadowSamples),
+      shadowScore: v.shadowScore == null ? null : number(v.shadowScore),
+      baselineScore: v.baselineScore == null ? null : number(v.baselineScore),
+      regressionPct: v.metadata?.regressionPct == null ? null : number(v.metadata.regressionPct),
+      measuredSamples: number(v.metadata?.measuredShadow?.sampleCount),
+      worstRegression: v.metadata?.measuredShadow?.worstRegression == null ? null : number(v.metadata.measuredShadow.worstRegression),
+      candidateScore: v.metadata?.measuredShadow?.candidateScore == null ? null : number(v.metadata.measuredShadow.candidateScore),
+      rollbackReason: typeof v.metadata?.rollbackReason === 'string' ? v.metadata.rollbackReason.slice(0, 120) : null
+    }));
+    return { id: 'shadow_gate', label: 'Shadow gate', pass, reason: pass ? null : `ต้องมี Shadow/Active/Rolled back version ที่ผ่าน shadow ≥ ${minSamples} samples และ score ≥ ${minScore}`, evidence: { minSamples, minScore, maxRegressionPct: number(policy.maxRegressionPct, 5), readyVersions: ready.map((v) => ({ versionId: v.versionId, state: v.state, shadowSamples: v.shadowSamples, shadowScore: v.shadowScore })), evaluatedVersions: evaluated } };
   }
 
   checkRecovery({ versionList, events }) {

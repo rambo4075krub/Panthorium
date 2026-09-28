@@ -90,6 +90,9 @@ function buildGate({ benchmarkScore = 91, activeRun = true } = {}) {
   assert.equal(ready.checks.length, 5);
   assert(ready.checks.every((check) => check.pass));
   assert.equal(ready.evidence.benchmark.score, 91);
+  const readyShadow = ready.checks.find((check) => check.id === 'shadow_gate');
+  assert.equal(readyShadow.evidence.evaluatedVersions[0].versionId, 'recovery-shadow');
+  assert.equal(readyShadow.evidence.evaluatedVersions[0].candidateScore, undefined);
 
   const withHistoryOnly = await buildGate({ activeRun: false }).status();
   assert.equal(withHistoryOnly.mergeAllowed, true);
