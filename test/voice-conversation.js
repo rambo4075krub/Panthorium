@@ -28,6 +28,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
   const audit = { record() {} };
   const auth = new AuthService({ config: { jwtSecret: 'voice-conversation-local-test-secret', accessTokenTtl: '1h' }, audit });
   const sentinel = {
+    status: () => ({ name: 'Sentinel', providers: ['fixture'] }),
     chat: async input => { conversations.push(input); return failProvider ? { ok: false, error: 'no_provider_available' } : { ok: true, text: answer, provider: 'fixture' }; },
     streamChat: async ({ onDelta }) => { onDelta(answer); return { ok: true, text: answer }; }
   };

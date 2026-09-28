@@ -41,6 +41,9 @@ module.exports = {
   sentinelAutoCapture: process.env.SENTINEL_AUTO_CAPTURE !== "0",
   sentinelAutoScoreThreshold: Number(process.env.SENTINEL_AUTO_SCORE_THRESHOLD || 85),
   sentinelAutoIntervalMs: Number(process.env.SENTINEL_AUTO_INTERVAL_MS || 60000),
+  sentinelTeacherProviders: list(process.env.SENTINEL_TEACHER_PROVIDERS, ["groq"]),
+  sentinelEvaluatorProviders: list(process.env.SENTINEL_EVALUATOR_PROVIDERS, ["openai", "gemini", "anthropic"]),
+  sentinelMinEvaluators: Number(process.env.SENTINEL_MIN_EVALUATORS || 2),
   adminUsername: process.env.ADMIN_USERNAME || "admin",
   adminPassword: process.env.ADMIN_PASSWORD || "",
   trustProxy: process.env.TRUST_PROXY === "1"

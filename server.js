@@ -98,6 +98,7 @@ toolRegistry.register({
   run: async ({ user, args }) => agentKnowledge.search({ user, query: args.query, limit: args.limit == null ? 8 : Number(args.limit) })
 });
 const agentMemory = new AgentMemoryService({ repository: agentMemoryRepository, audit, knowledge: agentKnowledge });
+sentinel.memory = agentMemory;
 const agentPlanner = new AgentPlannerService({ agentService, gateway: sentinel.gateway, audit, memory: agentMemory });
 const agentWorkflow = new AgentWorkflowService({ agentService, gateway: sentinel.gateway, audit, runs: agentRuns, pendingStore: agentPending, memory: agentMemory });
 const agentAutomationPolicy = new AgentAutomationPolicyService();
@@ -110,12 +111,14 @@ const sentinelTrainingRepository = new SentinelTrainingRepository({ databaseUrl:
 const sentinelLearningRepository = new SentinelLearningRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const sentinelLearningPolicy = new AutonomousLearningPolicy();
 const sentinelLearning = new SentinelLearningOrchestrator({ repository: sentinelLearningRepository, trainingRepository: sentinelTrainingRepository, audit, policy: sentinelLearningPolicy });
-const sentinelTraining = new SentinelTrainingService({ repository: sentinelTrainingRepository, providers: sentinel.providers, audit, learning: sentinelLearning, autoEnabled: config.sentinelAutoTraining, autoCapture: config.sentinelAutoCapture, autoScoreThreshold: config.sentinelAutoScoreThreshold, autoIntervalMs: config.sentinelAutoIntervalMs });
+const sentinelTraining = new SentinelTrainingService({ repository: sentinelTrainingRepository, providers: sentinel.providers, audit, learning: sentinelLearning, autoEnabled: config.sentinelAutoTraining, autoCapture: config.sentinelAutoCapture, autoScoreThreshold: config.sentinelAutoScoreThreshold, autoIntervalMs: config.sentinelAutoIntervalMs, teacherProviders: config.sentinelTeacherProviders, evaluatorProviders: config.sentinelEvaluatorProviders, minEvaluators: config.sentinelMinEvaluators });
 toolRegistry.register({ id: 'training.status', description: 'Read Sentinel Learning Lab status', permission: 'settings', risk: 'low', mutates: false, argsSchema: {}, run: async () => sentinelTraining.list({ limit: 1 }) });
 toolRegistry.register({ id: 'learning_lab.open', description: 'Open the Learning Lab in the admin interface', permission: 'settings', risk: 'low', mutates: false, argsSchema: {}, run: async () => ({ ok: true, uiAction: 'open_learning_lab' }) });
 const sentinelRecovery = new SentinelRecoveryService({ learning: sentinelLearning, training: sentinelTraining, trainingRepository: sentinelTrainingRepository, providers: sentinel.providers, audit, maxAttempts: Number(process.env.SENTINEL_AUTONOMOUS_RECOVERY_MAX_ATTEMPTS || 3) });
 const sentinelBenchmark = new SentinelBenchmarkService({ sentinel, providers: sentinel.providers, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
-const sentinelActiveLearning = new SentinelActiveLearningService({ training: sentinelTraining, learning: sentinelLearning, providers: sentinel.providers, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
+const { SentinelShadowEvaluator } = require('./services/sentinelShadowEvaluator');
+const sentinelShadowEvaluator=new SentinelShadowEvaluator({sentinel,benchmark:sentinelBenchmark,providers:sentinel.providers,learning:sentinelLearning,audit});
+const sentinelActiveLearning = new SentinelActiveLearningService({ training: sentinelTraining, learning: sentinelLearning, providers: sentinel.providers, shadowEvaluator:sentinelShadowEvaluator, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const sentinelReleaseGate = new SentinelReleaseGateService({ training: sentinelTraining, learning: sentinelLearning, benchmark: sentinelBenchmark, activeLearning: sentinelActiveLearning, audit, minBenchmarkScore: Number(process.env.SENTINEL_RELEASE_GATE_MIN_BENCHMARK_SCORE || 80) });
 const autonomousGovernance = new AutonomousGovernanceService({ production: productionIntelligence, releaseGate: sentinelReleaseGate, benchmark: sentinelBenchmark, activeLearning: sentinelActiveLearning, learning: sentinelLearning, training: sentinelTraining, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, mode: process.env.PANTHORIUM_GOVERNANCE_MODE || 'observe', intervalMs: process.env.PANTHORIUM_GOVERNANCE_INTERVAL_MS || 300000 });
 const sentinelOrchestrator = new SentinelOrchestratorService({ sentinel, training: sentinelTraining, learning: sentinelLearning, releaseGate: sentinelReleaseGate, benchmark: sentinelBenchmark, activeLearning: sentinelActiveLearning, governance: autonomousGovernance, production: productionIntelligence, providers: sentinel.providers, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, mode: process.env.PANTHORIUM_SENTINEL_CONTROL_MODE || 'observe', intervalMs: process.env.PANTHORIUM_SENTINEL_CONTROL_INTERVAL_MS || 300000 });
@@ -127,26 +130,17 @@ app.disable("x-powered-by");
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins], frameSrc: ["'self'"], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
 const allowElectronFileOrigin = process.env.ALLOW_ELECTRON_ORIGIN === "1";
 app.use((req, res, next) => {
-  // The installed Electron shell can report a local/custom origin even though
-  // it is the trusted Panthorium desktop client. Normalize only Electron
-  // requests when the isolated staging flag is enabled; normal browsers remain
-  // subject to the exact CORS allowlist below.
-  const userAgent = req.get("user-agent") || "";
-  if (allowElectronFileOrigin && /\bElectron\/\d/i.test(userAgent) && config.allowedOrigins[0]) {
-    req.headers.origin = config.allowedOrigins[0];
+  const origin = req.get("origin");
+  // Same-origin requests must remain valid when Cloud Run's URL or a mapped
+  // domain changes. Preserve the original Origin for the response header.
+  const ownOrigin = `${req.protocol}://${req.get("host")}`;
+  const electronFile = allowElectronFileOrigin && origin === "null" && /\bElectron\/\d/i.test(req.get("user-agent") || "");
+  if (origin && origin !== ownOrigin && !config.allowedOrigins.includes(origin) && !electronFile) {
+    console.warn("[HTTP] CORS origin denied: " + JSON.stringify(String(origin).slice(0, 240)));
+    return next(new Error("CORS origin denied"));
   }
-  next();
+  return cors({ origin: origin || false, credentials: true })(req, res, next);
 });
-app.use(cors({ origin(origin, cb) {
-  // Requests without an Origin header are same-origin/server-to-server calls.
-  // Browser origins must be an exact configured origin. Installed Electron
-  // shells may send the literal "null" origin when a local shell is loaded;
-  // allow that only when explicitly enabled by the isolated staging deploy.
-  const isAllowedElectronOrigin = allowElectronFileOrigin && origin === "null";
-  if (!origin || config.allowedOrigins.includes(origin) || isAllowedElectronOrigin) return cb(null, true);
-  console.warn("[HTTP] CORS origin denied: " + JSON.stringify(String(origin).slice(0, 240)));
-  cb(new Error("CORS origin denied"));
-}, credentials: true }));
 app.use(express.json({ limit: "2mb", type: "application/json" }));
 app.use(cookieParser());
 app.use(requestContext(audit));
@@ -355,6 +349,7 @@ async function start() {
   await integrationExecutions.init();
   await productionIntelligence.init();
   await sentinelTraining.init();
+  await sentinelRecovery.init();
   await sentinelBenchmark.init();
   await sentinelActiveLearning.init();
   await autonomousGovernance.init();

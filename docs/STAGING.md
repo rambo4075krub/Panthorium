@@ -14,7 +14,7 @@ Create Secret Manager secrets in the staging project:
 - panthorium-staging-database-url: connection string for the staging-only database.
 - panthorium-staging-jwt: newly generated signing secret, different from production.
 - panthorium-staging-admin-password: new test administrator password.
-Configure separate provider keys on the staging service before AI tests; never copy production secrets implicitly.
+Configure separate Groq, OpenAI, Gemini and Anthropic provider keys on the staging service before AI tests; never copy production secrets implicitly. Staging uses Groq as the teacher and OpenAI/Gemini/Anthropic as independent evaluators, requiring at least two evaluators. Automatic capture remains disabled and autonomous promotion remains paused until benchmark acceptance passes.
 
 Create GitHub environment staging:
 - Variable STAGING_GCP_PROJECT_ID

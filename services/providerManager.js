@@ -10,17 +10,51 @@ function completionOptions(url, model) {
     // Reasoning shares the token budget. Return only the answer to chat/TTS.
     return { max_completion_tokens: 2048, reasoning_effort: "low", include_reasoning: false };
   }
-  return { max_tokens: 320 };
+  const configured = Number(process.env.SENTINEL_MAX_OUTPUT_TOKENS || 1536);
+  const maxTokens = Number.isFinite(configured) ? Math.min(3072, Math.max(512, Math.floor(configured))) : 1536;
+  return { max_tokens: maxTokens };
 }
-const { callVertex } = require("./vertexProvider");
-class ProviderManager {
-  constructor() {
-    this.keys = { groq: process.env.GROQ_API_KEY || "", openai: process.env.OPENAI_API_KEY || "", gemini: process.env.GEMINI_API_KEY || "", anthropic: process.env.ANTHROPIC_API_KEY || "", vertex: (process.env.VERTEX_PROJECT && process.env.VERTEX_ENDPOINT_ID) ? "adc" : "" };
-    this.priority = (process.env.AI_PRIORITY || "groq,openai,gemini,anthropic,vertex").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-    this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-1.5-flash", anthropic: process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-20241022", vertex: process.env.VERTEX_MODEL || "sentinel-v15.2" };
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+async function providerError(res) {
+  let detail = "";
+  try { const data = await res.clone().json(); detail = data?.error?.message || data?.message || data?.error || ""; } catch (_) { try { detail = await res.clone().text(); } catch (_) {} }
+  detail = String(detail || "").replace(/[\r\n\t]+/g, " ").replace(/(key|token|secret)\s*[=:]\s*\S+/gi, "$1=[redacted]").slice(0, 220);
+  const error = new Error(`Provider HTTP ${res.status}${detail ? `: ${detail}` : ""}`); error.status = res.status;
+  const retry = res.headers.get('retry-after');
+  error.retryAfterMs = retry ? (Number.isFinite(Number(retry)) ? Number(retry)*1000 : Math.max(0,Date.parse(retry)-Date.now())) : 60000;
+  return error;
+}
+async function fetchProvider(makeRequest, attempts = 3) {
+  let last;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const res = await makeRequest();
+    if (res.ok) return res;
+    last = res;
+    if (res.status === 429 || res.status < 500) break;
+    if (attempt < attempts - 1) { const retryAfter = Number(res.headers.get("retry-after")); await sleep(Number.isFinite(retryAfter) ? Math.min(10000, retryAfter * 1000) : 750 * (attempt + 1)); }
   }
-  available() { return this.priority.filter((p) => this.keys[p]); }
-  catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: Boolean(this.keys[provider]), priority, streaming: provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
+  throw await providerError(last);
+}
+class ProviderManager {
+  cooling = new Map();
+  vertexToken = "";
+  vertexTokenExpiresAt = 0;
+  constructor() {
+    this.keys = { groq: process.env.GROQ_API_KEY || "", openai: process.env.OPENAI_API_KEY || "", gemini: process.env.GEMINI_API_KEY || "", anthropic: process.env.ANTHROPIC_API_KEY || "" };
+    this.priority = (process.env.AI_PRIORITY || "vertex,groq,openai,gemini,anthropic").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+    this.vertex = {
+      // Keep the original Vertex variable names working during the main
+      // deployment migration; staging uses the explicit SENTINEL_* names.
+      project: process.env.SENTINEL_VERTEX_PROJECT_ID || process.env.VERTEX_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "",
+      location: process.env.SENTINEL_VERTEX_LOCATION || process.env.VERTEX_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || (process.env.VERTEX_ENDPOINT_ID ? "us" : ""),
+      endpointId: process.env.SENTINEL_VERTEX_ENDPOINT_ID || process.env.VERTEX_ENDPOINT_ID || "",
+      maxOutputTokens: Math.max(128, Math.min(8192, Number(process.env.SENTINEL_VERTEX_MAX_OUTPUT_TOKENS) || 4096))
+    };
+    this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite", anthropic: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001", vertex: process.env.SENTINEL_VERTEX_MODEL || process.env.VERTEX_MODEL || "sentinel-v3" };
+  }
+  vertexConfigured() { return Boolean(this.vertex.project && this.vertex.location && this.vertex.endpointId); }
+  available() { return this.priority.filter((p) => p === "vertex" ? this.vertexConfigured() : Boolean(this.keys[p])); }
+  catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: provider === "vertex" ? this.vertexConfigured() : Boolean(this.keys[provider]), priority, streaming: provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
   resolveModel(provider, requestedModel) {
     const configured = this.models[provider];
     if (!configured) return null;
@@ -61,15 +95,103 @@ class ProviderManager {
   }
   async call(provider, systemPrompt, history) { const result = await this.callDetailed(provider, systemPrompt, history); return result?.text || null; }
   async callDetailed(provider, systemPrompt, history, options = {}) {
+    const paused=this.cooling.get(provider);
+    if(paused&&paused.until>Date.now()){
+      const error=new Error('Provider HTTP 429: provider cooling down');error.status=429;error.retryAfterMs=paused.until-Date.now();throw error;
+    }
+    try{return await this.callAvailable(provider,systemPrompt,history,options);}
+    catch(error){if(error.status===429)this.cooling.set(provider,{until:Date.now()+Math.max(60000,error.retryAfterMs||60000)});throw error;}
+  }
+  async callAvailable(provider, systemPrompt, history, options = {}) {
+    if (provider === "vertex") {
+      if (!this.vertexConfigured()) return null;
+      const model = this.resolveModel(provider, options.model);
+      if (!model) throw new Error("model_not_allowed");
+      return this.callVertexTuned(systemPrompt, history);
+    }
     const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
     if (provider === "groq") return this.callOpenAICompatible(GROQ_CHAT_URL, key, model, systemPrompt, history);
     if (provider === "openai") return this.callOpenAICompatible("https://api.openai.com/v1/chat/completions", key, model, systemPrompt, history);
     if (provider === "gemini") return this.callGemini(key, model, systemPrompt, history);
     if (provider === "anthropic") return this.callAnthropic(key, model, systemPrompt, history);
-    if (provider === "vertex") return callVertex(model, systemPrompt, history);
     return null;
   }
+  async vertexAccessToken() {
+    // Direct access token override for local testing or CI outside Cloud Run
+    if (process.env.VERTEX_ACCESS_TOKEN) return process.env.VERTEX_ACCESS_TOKEN;
+    // Cloud Run's metadata server supplies short-lived Application Default
+    // Credentials. No service-account key or always-on inference VM is needed.
+    if (this.vertexToken && this.vertexTokenExpiresAt > Date.now() + 60000) return this.vertexToken;
+    try {
+      const response = await fetch("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", {
+        headers: { "Metadata-Flavor": "Google" }, signal: AbortSignal.timeout(5000)
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.access_token) {
+          this.vertexToken = data.access_token;
+          this.vertexTokenExpiresAt = Date.now() + Math.max(60, Number(data.expires_in) || 300) * 1000;
+          return data.access_token;
+        }
+      }
+    } catch (_) {
+      // metadata server unreachable (e.g. testing outside GCP)
+    }
+    // Fallback: Check if google-auth-library is available
+    try {
+      const { GoogleAuth } = require("google-auth-library");
+      const auth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
+      const client = await auth.getClient();
+      const tokenRes = await client.getAccessToken();
+      const token = typeof tokenRes === "string" ? tokenRes : tokenRes?.token;
+      if (token) {
+        this.vertexToken = token;
+        this.vertexTokenExpiresAt = Date.now() + 300000;
+        return token;
+      }
+    } catch (_) {
+      // google-auth-library not installed or ADC credentials not configured
+    }
+    throw new Error("vertex_adc_token_missing");
+  }
+  async callVertexTuned(systemPrompt, history) {
+    const { project, location, endpointId, maxOutputTokens } = this.vertex;
+    const host = process.env.VERTEX_HOST
+      ? (process.env.VERTEX_HOST.startsWith("http") ? process.env.VERTEX_HOST : `https://${process.env.VERTEX_HOST}`)
+      : (location === "eu" || location === "us"
+        ? `https://aiplatform.${location}.rep.googleapis.com`
+        : `https://${location}-aiplatform.googleapis.com`);
+    const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: String(m.content || "") }] }));
+    const url = `${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(location)}/endpoints/${encodeURIComponent(endpointId)}:generateContent`;
+    const request = async () => fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${await this.vertexAccessToken()}`,
+        "X-Goog-User-Project": String(project)
+      },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: systemPrompt }] }, contents, generationConfig: { temperature: 0.65, maxOutputTokens } }),
+      signal: AbortSignal.timeout(60000)
+    });
+    const response = await fetchProvider(request);
+    const data = await response.json();
+    const text = (data.candidates?.[0]?.content?.parts || []).map((part) => part.text || "").join("").trim();
+    const usage = data.usageMetadata;
+    return {
+      text: text || null,
+      model: this.models.vertex,
+      usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null
+    };
+  }
   async streamDetailed(provider, systemPrompt, history, options = {}, onDelta = () => {}) {
+    if (provider === "vertex") {
+      if (!this.vertexConfigured()) return null;
+      const model = this.resolveModel(provider, options.model);
+      if (!model) throw new Error("model_not_allowed");
+      const result = await this.callDetailed(provider, systemPrompt, history, { model });
+      if (result?.text) onDelta(result.text);
+      return { ...result, streaming: "buffered" };
+    }
     const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
     if (provider === "groq") return this.streamOpenAICompatible(GROQ_CHAT_URL, key, model, systemPrompt, history, onDelta, false);
     if (provider === "openai") return this.streamOpenAICompatible("https://api.openai.com/v1/chat/completions", key, model, systemPrompt, history, onDelta, true);
@@ -83,7 +205,7 @@ class ProviderManager {
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}`, Accept: "text/event-stream" }, body: JSON.stringify(body), signal: AbortSignal.timeout(45000) });
     if (!res.ok) throw new Error(`Provider HTTP ${res.status}`);
     if (!res.body) throw new Error("provider_stream_unavailable");
-    const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let text = ""; let usage = null; let responseModel = model;
+    const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let text = ""; let usage = null; let responseModel = model; let truncated=false;
     while (true) {
       const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n"); buffer = lines.pop() || "";
@@ -91,30 +213,31 @@ class ProviderManager {
         const line = raw.trim(); if (!line.startsWith("data:")) continue; const payload = line.slice(5).trim(); if (!payload || payload === "[DONE]") continue;
         let data; try { data = JSON.parse(payload); } catch { continue; }
         responseModel = data.model || responseModel;
+        if(data.choices?.[0]?.finish_reason==='length')truncated=true;
         const tokenUsage = data.usage || data.x_groq?.usage;
         if (tokenUsage) usage = { inputTokens: tokenUsage.prompt_tokens || 0, outputTokens: tokenUsage.completion_tokens || 0, totalTokens: tokenUsage.total_tokens || 0 };
         const delta = data.choices?.[0]?.delta?.content || ""; if (delta) { text += delta; onDelta(delta); }
       }
     }
     if (!text.trim()) throw new Error("provider_stream_empty");
-    return { text: text.trim(), model: responseModel, usage, streaming: "native" };
+    return { text: text.trim(), model: responseModel, usage, streaming: "native", truncated };
   }
   async callOpenAICompatible(url, key, model, systemPrompt, history) {
-    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, ...completionOptions(url, model) }), signal: AbortSignal.timeout(30000) });
-    if (!res.ok) throw new Error(`Provider HTTP ${res.status}`); const data = await res.json();
-    return { text: data.choices?.[0]?.message?.content?.trim() || null, model: data.model || model, usage: data.usage ? { inputTokens: data.usage.prompt_tokens || 0, outputTokens: data.usage.completion_tokens || 0, totalTokens: data.usage.total_tokens || 0 } : null };
+    const request = () => fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, ...completionOptions(url, model) }), signal: AbortSignal.timeout(30000) });
+    const res = await fetchProvider(request); const data = await res.json();
+    const choice=data.choices?.[0];return { text: choice?.message?.content?.trim() || null, model: data.model || model, truncated: choice?.finish_reason === 'length', usage: data.usage ? { inputTokens: data.usage.prompt_tokens || 0, outputTokens: data.usage.completion_tokens || 0, totalTokens: data.usage.total_tokens || 0 } : null };
   }
   async callGemini(key, model, systemPrompt, history) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`; const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
+    const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
     if (contents.length && contents[0].role === "user") contents[0].parts[0].text = `${systemPrompt}\n\n${contents[0].parts[0].text}`;
-    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents, generationConfig: { temperature: 0.65, maxOutputTokens: 320 } }), signal: AbortSignal.timeout(30000) });
-    if (!res.ok) throw new Error(`Provider HTTP ${res.status}`); const data = await res.json(); const usage = data.usageMetadata;
-    return { text: data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null, model, usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null };
+    const candidates = [...new Set([model, "gemini-3.5-flash-lite"])]; let lastError;
+    for (const candidate of candidates) { try { const url = `https://generativelanguage.googleapis.com/v1beta/models/${candidate}:generateContent?key=${key}`; const configured=Number(process.env.SENTINEL_MAX_OUTPUT_TOKENS||1536);const maxOutputTokens=Number.isFinite(configured)?Math.min(3072,Math.max(512,Math.floor(configured))):1536;const res = await fetchProvider(() => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents, generationConfig: { temperature: 0.65, maxOutputTokens } }), signal: AbortSignal.timeout(30000) })); const data = await res.json(); const candidateResult=data.candidates?.[0];const usage = data.usageMetadata; return { text: candidateResult?.content?.parts?.[0]?.text?.trim() || null, model:candidate, truncated:candidateResult?.finishReason==='MAX_TOKENS', usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null }; } catch (error) { lastError=error; if(error.status!==404)throw error; } }
+    throw lastError;
   }
   async callAnthropic(key, model, systemPrompt, history) {
-    const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model, max_tokens: 320, temperature: 0.65, system: systemPrompt, messages: history.map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })) }), signal: AbortSignal.timeout(30000) });
-    if (!res.ok) throw new Error(`Provider HTTP ${res.status}`); const data = await res.json();
-    return { text: data.content?.[0]?.text?.trim() || null, model: data.model || model, usage: data.usage ? { inputTokens: data.usage.input_tokens || 0, outputTokens: data.usage.output_tokens || 0, totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0) } : null };
+    const candidates=[...new Set([model,"claude-haiku-4-5-20251001"])];let lastError;
+    for(const candidate of candidates){try{const configured=Number(process.env.SENTINEL_MAX_OUTPUT_TOKENS||1536);const max_tokens=Number.isFinite(configured)?Math.min(3072,Math.max(512,Math.floor(configured))):1536;const res=await fetchProvider(()=>fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model:candidate, max_tokens, temperature: 0.65, system: systemPrompt, messages: history.map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })) }), signal: AbortSignal.timeout(30000) }));const data=await res.json();return { text: data.content?.[0]?.text?.trim() || null, model: data.model || candidate,truncated:data.stop_reason==='max_tokens', usage: data.usage ? { inputTokens: data.usage.input_tokens || 0, outputTokens: data.usage.output_tokens || 0, totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0) } : null };}catch(error){lastError=error;if(![400,404].includes(error.status))throw error;}}
+    throw lastError;
   }
 }
 module.exports = { ProviderManager };

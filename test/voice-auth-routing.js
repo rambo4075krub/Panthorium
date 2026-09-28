@@ -33,8 +33,31 @@ async function checkOrder(streamFirst) {
   } finally { w.close(); }
 }
 
+async function checkAdminRefresh() {
+  const dom = new JSDOM('<div id="desktop"></div>', { url: 'https://example.test/admin', runScripts: 'outside-only' });
+  const w = dom.window;
+  try {
+    const requests = [];
+    w.OS = { state: { booted: true, user: null }, config: { backendUrl: 'https://example.test', accessToken: '' } };
+    w.ensureAuth = async () => false;
+    w.callAI = async () => ({ ok: true, text: 'answered' });
+    w.fetch = async url => {
+      requests.push(String(url));
+      if (String(url).endsWith('/api/auth/refresh')) return { ok: true, json: async () => ({ accessToken: 'restored-token', user: { sub: 'admin', roles: ['administrator'], permissions: ['chat'] } }) };
+      return { ok: true, json: async () => ({}) };
+    };
+    w.eval(source('phase2-auth.js'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal((await w.callAI('ทดสอบเซสชัน')).ok, true);
+    assert.equal(w.OS.config.accessToken, 'restored-token');
+    assert.equal(requests.filter(url => url.endsWith('/api/auth/refresh')).length, 1);
+    assert.equal(requests.some(url => url.endsWith('/api/auth/guest')), false, 'admin must never become a guest');
+  } finally { w.close(); }
+}
+
 (async () => {
   await checkOrder(false);
   await checkOrder(true);
+  await checkAdminRefresh();
   console.log('Voice options survive both auth/stream wrapper orders; RBAC denial preserved');
 })().catch(error => { console.error(error); process.exitCode = 1; });

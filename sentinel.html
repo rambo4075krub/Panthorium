@@ -774,10 +774,9 @@
     // Panthorium OS - Sentinel Runtime
     // =========================================================
     function defaultBackendOrigin() {
-        // The installed Electron shell loads the OS from the configured remote
-        // origin. Prefer that origin over an old localStorage override so API
-        // calls stay same-origin and do not hit the staging CORS boundary.
-        if (window.panthoriumDesktop?.isElectron && /^https?:$/.test(window.location.protocol)) return window.location.origin;
+        // Use the origin serving the shell; saved overrides can point at old
+        // staging deployments and lose the same-site refresh cookie.
+        if (/^https?:$/.test(window.location.protocol)) return window.location.origin;
         const stored = localStorage.getItem("pt_backend_url");
         return stored || (/^https?:$/.test(window.location.protocol) ? window.location.origin : "http://localhost:8787");
     }
@@ -1541,11 +1540,9 @@
             }
         };
 
-        // Electron: Chromium SpeechRecognition almost always fails with "network"
-        // (Google cloud STT is not available like in Chrome). Prefer MediaRecorder
-        // + /api/speech/transcribe (Whisper via backend / Electron bridge).
-        // Regular browsers: prefer Web Speech API when available.
-        if (recorderSupported && (!SR || electronVoice)) {
+        // Use one transcription path for desktop and web browsers. Web Speech
+        // can report an opaque "no-speech"/"network" error even with a working mic.
+        if (recorderSupported) {
             let recorder = null;
             let recorderStream = null;
             let recorderChunks = [];
@@ -1703,7 +1700,7 @@
                         userSpeechActive = false;
                         window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
                         if (discard) { discardOnEnd = false; voiceState = "idle"; restartListening(); return; }
-                        if (!chunks.length) { voiceState = "idle"; status("unresponsive", "ยังไม่ได้ยินเสียง"); restartListening(); return; }
+                        if (!chunks.length || !recorderLastVoiceAt) { voiceState = "idle"; status("unresponsive", "ยังไม่ได้ยินเสียง ตรวจสอบไมโครโฟนแล้วลองพูดอีกครั้ง"); restartListening(); return; }
                         voiceState = "processing";
                         status("processing", "กำลังถอดเสียง");
                         try {
@@ -2054,7 +2051,7 @@
                         mode: "default",
                         voice: conversationalVoice
                     }),
-                    signal: AbortSignal.timeout(30000)
+                    signal: AbortSignal.timeout(75000)
                 });
                 const data = await res.json().catch(() => ({}));
                 OS.sentinelOnline = res.ok;

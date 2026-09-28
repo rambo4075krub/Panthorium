@@ -66,7 +66,7 @@
   }
   async function login(username, password) {
     const base = OS.config.backendUrl.replace(/\/$/, ''); const res = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }), credentials: 'include' });
-    const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.error || 'login_failed'); OS.config.accessToken = data.accessToken || ''; OS.state.user = data.user || null; updateIdentityUI(); notifyAuthChanged(); return data;
+    const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.error || 'login_failed'); if (!data.accessToken || !data.user) throw new Error('invalid_auth_response'); OS.config.accessToken = data.accessToken; OS.state.user = data.user; updateIdentityUI(); notifyAuthChanged(); return data;
   }
   async function revokeServerSession() { const base = OS.config.backendUrl.replace(/\/$/, ''); await fetch(base + '/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => null); }
   async function logout() { await revokeServerSession(); OS.config.accessToken = ''; OS.state.user = null; OS.state.loggedIn = false; OS.state.verified = false; closeForbiddenWindows(); notifyAuthChanged(); document.getElementById('desktop')?.classList.remove('active'); if (isAdminEntry()) showLogin(); else { await guestSession(); activateDesktop(); } }
@@ -75,7 +75,7 @@
     loginScreen.innerHTML = `<div class="login-card"><div class="login-avatar"><img src="/panthorium-logo.svg" alt="Panthorium" style="width:64px;height:64px;object-fit:contain;"></div><div class="login-title">Panthorium OS · Admin</div><div class="login-sub">เข้าสู่ระบบผู้ดูแลเพื่อใช้งานฟังก์ชันหลังบ้าน</div><input id="phase2-username" autocomplete="username" value="admin" placeholder="ชื่อผู้ใช้" style="width:100%;padding:12px;margin-bottom:10px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.25);color:var(--text);outline:none;"><input id="phase2-password" type="password" autocomplete="current-password" placeholder="รหัสผ่าน" style="width:100%;padding:12px;margin-bottom:12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.25);color:var(--text);outline:none;"><button class="login-btn" id="phase2-login-btn">เข้าสู่ระบบ</button><div class="login-hint" id="phase2-login-status">Admin RBAC · Secure Session</div></div>`;
     desktop.classList.remove('active'); loginScreen.style.display = 'flex'; loginScreen.classList.add('active'); OS.state.loggedIn = false;
     const status = document.getElementById('phase2-login-status'); const password = document.getElementById('phase2-password');
-    async function submitLogin() { const btn = document.getElementById('phase2-login-btn'); btn.disabled = true; status.textContent = 'กำลังตรวจสอบสิทธิ์...'; try { await login(document.getElementById('phase2-username').value.trim(), password.value); activateDesktop(); if (typeof toast === 'function') toast('เข้าสู่ระบบสำเร็จ'); } catch (error) { console.error('[Phase2 Auth] login failed', error); const code = error.message || 'login_failed'; status.textContent = code === 'invalid_credentials' ? 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' : code === 'auth_unavailable' ? 'บริการเข้าสู่ระบบหรือฐานข้อมูล staging ยังไม่พร้อม' : code === 'cors_denied' ? 'ต้นทางของ Electron ไม่ได้รับอนุญาตจาก staging' : 'เข้าสู่ระบบไม่สำเร็จ (' + code + ')'; } finally { btn.disabled = false; password.value = ''; } }
+    async function submitLogin() { const btn = document.getElementById('phase2-login-btn'); btn.disabled = true; status.textContent = 'กำลังตรวจสอบสิทธิ์...'; try { await login(document.getElementById('phase2-username').value.trim(), password.value); activateDesktop(); if (typeof toast === 'function') toast('เข้าสู่ระบบสำเร็จ'); } catch (error) { console.error('[Phase2 Auth] login failed', error); const code = error.message || 'login_failed'; status.textContent = code === 'invalid_credentials' ? 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' : code === 'auth_unavailable' ? 'บริการเข้าสู่ระบบหรือฐานข้อมูล staging ยังไม่พร้อม' : code === 'cors_denied' ? 'ต้นทางเว็บไซต์นี้ไม่ได้รับอนุญาตจาก staging' : 'เข้าสู่ระบบไม่สำเร็จ (' + code + ')'; } finally { btn.disabled = false; password.value = ''; } }
     document.getElementById('phase2-login-btn').onclick = submitLogin; password.onkeydown = e => { if (e.key === 'Enter') submitLogin(); };
   }
   let authInFlight = null;
@@ -84,7 +84,9 @@
     if (authInFlight) return authInFlight;
     authInFlight = (async () => {
       // Never create a guest identity on the administrator entrance.
-      if (isAdminEntry()) return force ? await refreshSession() : false;
+      // Restore an admin session from its refresh cookie if the page lost its token.
+      // Never switch an admin to guest.
+      if (isAdminEntry()) return await refreshSession();
       if (force && OS.state.user && await refreshSession()) return true;
       await guestSession();
       return Boolean(OS.config.accessToken && hasPermission('chat'));
