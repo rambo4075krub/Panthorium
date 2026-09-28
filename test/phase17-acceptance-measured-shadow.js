@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { ensureAcceptanceActive } = require('../routes/training');
+const { SentinelShadowEvaluator } = require('../services/sentinelShadowEvaluator');
 
 async function fixture(withEvaluator = true) {
   const examples = [];
@@ -64,9 +65,9 @@ async function fixture(withEvaluator = true) {
   const shadowEvaluator = withEvaluator ? {
     async evaluate(version) {
       const latest = await repository.get(version.versionId);
-      const count = Number(latest.metadata.measuredShadow?.sampleCount || 0) + 1;
+      const count = Number(latest.metadata.measuredShadow?.sampleCount || 0) + 3;
       const measuredShadow = { schema: 1, sampleCount: count, worstRegression: 0, comparisons: [{}, {}, {}] };
-      latest.shadowSamples += 1;
+      latest.shadowSamples += 3;
       latest.shadowScore = 96;
       latest.metadata.measuredShadow = measuredShadow;
       return { safe: true, evidence: measuredShadow };
@@ -90,6 +91,35 @@ async function fixture(withEvaluator = true) {
   assert.equal(blocked.ok, false);
   assert.equal(blocked.error, 'real_shadow_evaluator_unavailable');
   assert.equal(withoutEvaluator.versions[0].shadowSamples, 0, 'must not invent synthetic shadow samples');
+
+  let sampleCount = 0;
+  const measuredVersion = { versionId: 'measured-version', state: 'shadow', shadowSamples: 0, shadowScore: 0, baselineScore: null, metadata: { measuredShadow: { schema: 1, prompts: ['test one', 'test two', 'test three'], sampleCount: 0 } } };
+  const measuredRepository = {
+    async get() { return measuredVersion; },
+    async update(id, patch) { Object.assign(measuredVersion, patch); measuredVersion.metadata = { ...measuredVersion.metadata, ...(patch.metadata || {}) }; return measuredVersion; }
+  };
+  const measuredLearning = {
+    repository: measuredRepository,
+    policy: { maxRegressionPct: 5 },
+    async recordShadow(id, { score }) {
+      sampleCount++;
+      measuredVersion.shadowSamples++;
+      measuredVersion.shadowScore = Math.round(((measuredVersion.shadowScore * (sampleCount - 1)) + score) / sampleCount);
+      return { ok: true, version: measuredVersion };
+    }
+  };
+  const evaluator = new SentinelShadowEvaluator({
+    sentinel: { async answerForEvaluation({ prompt, shadowExample }) { return { ok: true, text: `${shadowExample ? 'candidate' : 'baseline'} ${prompt}`, provider: 'vertex' }; } },
+    benchmark: { async evaluateAnswer() { return { score: 95, judges: [{ provider: 'one', score: 95, safety: 100 }, { provider: 'two', score: 95, safety: 100 }] }; } },
+    providers: { available() { return ['vertex', 'groq']; } },
+    learning: measuredLearning
+  });
+  const measured = await evaluator.evaluate(measuredVersion, { exampleId: 'example-1', prompt: 'example prompt' });
+  assert.equal(measured.samples, 3, 'three independently judged held-out prompts are three measured samples');
+  assert.equal(measured.evidence.sampleCount, 3);
+  assert.equal(measuredVersion.shadowSamples, 3);
+  assert.equal(measuredVersion.shadowScore, 95);
+
   console.log('Phase 17 measured-shadow acceptance tests passed');
 })().catch((error) => {
   console.error(error);

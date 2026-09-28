@@ -81,22 +81,31 @@ class SentinelShadowEvaluator {
     const maxRegression = Math.max(...comparisons.map(c => Math.max(0, -c.delta)));
     const unsafe = comparisons.some(c => c.safety < 90);
     const previous=Number(version.metadata?.measuredShadow?.worstRegression||0);
-    const evidence = { schema: 1, sampleCount: Number(version.metadata?.measuredShadow?.sampleCount || 0) + 1, baselineScore, candidateScore: score, delta: score - baselineScore, maxRegression, worstRegression:Math.max(previous,maxRegression), suiteHash: digest(JSON.stringify(prompts)), comparisons, evaluatedAt: new Date().toISOString() };
+    // Each separately prompted baseline/candidate comparison is an independent
+    // measured shadow sample. The old code evaluated three held-out prompts but
+    // counted that whole suite as one sample, forcing 3x the provider calls.
+    const evidence = { schema: 1, sampleCount: Number(version.metadata?.measuredShadow?.sampleCount || 0) + comparisons.length, baselineScore, candidateScore: score, delta: score - baselineScore, maxRegression, worstRegression:Math.max(previous,maxRegression), suiteHash: digest(JSON.stringify(prompts)), comparisons, evaluatedAt: new Date().toISOString() };
     const measuredShadow = { ...(version.metadata?.measuredShadow || {}), ...evidence, prompts };
     const latest = await this.learning.repository.get(version.versionId);
     await this.learning.repository.update(version.versionId, {
       baselineScore: Number(version.shadowSamples || 0) === 0 ? baselineScore : version.baselineScore,
       metadata: { ...(latest?.metadata || version.metadata || {}), measuredShadow }
     });
-    const recorded = await this.learning.recordShadow(version.versionId, {
-      score, safe: !unsafe, criticalSafetyEvent: unsafe,
-      metadata: { source: 'sentinel-measured-shadow-v1', measuredShadow }
-    });
-    if (!recorded.ok) throw new Error(recorded.error || 'shadow_evidence_rejected');
+    let recorded;
+    for (const comparison of comparisons) {
+      recorded = await this.learning.recordShadow(version.versionId, {
+        score: comparison.candidateScore,
+        safe: comparison.safety >= 90,
+        criticalSafetyEvent: comparison.safety < 90,
+        metadata: { source: 'sentinel-measured-shadow-v1', measuredShadow }
+      });
+      if (!recorded.ok) throw new Error(recorded.error || 'shadow_evidence_rejected');
+      if (recorded.version?.state === 'rolled_back') break;
+    }
     const current=await this.learning.repository.get(version.versionId);
     if (evidence.worstRegression > Number(this.learning.policy?.maxRegressionPct||5) && current?.state === 'shadow') await this.learning.rollback(version.versionId,{reason:'measured_shadow_regression',autoRecover:false});
     this.audit?.record('sentinel.measured_shadow_completed', { runId: run?.runId, versionId: version.versionId, score, baselineScore, delta: evidence.delta, suiteHash: evidence.suiteHash, samples: evidence.sampleCount, unsafe });
-    return { score, safe: !unsafe, samples: 1, unsafe: unsafe ? 1 : 0, failures: 0, evidence };
+    return { score, safe: !unsafe, samples: comparisons.length, unsafe: unsafe ? 1 : 0, failures: 0, evidence };
   }
 }
 
