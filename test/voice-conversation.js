@@ -219,6 +219,21 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     assert.equal(evaluate('voiceResponseNeedsSpeech("command", { ok:true, text:"permission for next step", confirmationRequired:true, confirmedCommand:true })'), true, 'a subsequent pending step must ask permission again');
     assert.equal(evaluate('voiceResponseNeedsSpeech("command", { ok:true, text:"done", uiResults:[] })'), false, 'empty results must not accidentally enable command speech');
     assert.equal(evaluate('voiceResponseNeedsSpeech("conversation", { ok:true, text:"answer", via:"sentinel-stream" })'), true, 'speech policy must not depend on transport names');
+    assert.equal(evaluate(`(() => {
+      const detector = createAdaptiveVoiceDetector();
+      for (let i = 0; i < 5; i += 1) detector.observe(0.018, i * 80);
+      return detector.observe(0.065, 520) || detector.observe(0.065, 620);
+    })()`), true, 'adaptive VAD must detect speech above a calibrated noisy-room floor');
+    assert.equal(evaluate(`(() => {
+      const detector = createAdaptiveVoiceDetector();
+      for (let i = 0; i < 8; i += 1) detector.observe(0.004, i * 50);
+      return detector.observe(0.015, 500) || detector.observe(0.015, 600);
+    })()`), true, 'adaptive VAD must still detect a quiet microphone after calibration');
+    let interrupted = false;
+    w.addEventListener('panthorium:voice-end', event => { if (event.detail?.interrupted) interrupted = true; }, { once: true });
+    evaluate('aiSpeechActive = true; stopSentinelSpeech();');
+    assert.equal(evaluate('aiSpeechActive'), false, 'barge-in must stop the current Sentinel speech state');
+    assert.equal(interrupted, true, 'barge-in must emit an interrupted voice-end event');
     console.log('PASS: both mics → real authenticated chat route (voice=true) → TTS route → audio ended; interim input, expired sessions, provider/TTS/playback failures, silent command failure and typed streaming');
   } finally { w.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1213,6 +1213,20 @@
     let voiceAudioUnlocked = false;
     let voiceAudioUnlocking = false;
     let activeSpeechRun = 0;
+    let cancelRemotePlayback = null;
+    let speechInterruptedByUser = false;
+    function stopSentinelSpeech() {
+        speechInterruptedByUser = true;
+        activeSpeechRun += 1;
+        try { window.speechSynthesis?.cancel(); } catch (_) {}
+        try { cancelRemotePlayback?.(); } catch (_) {}
+        cancelRemotePlayback = null;
+        try { voiceAudio.pause(); voiceAudio.currentTime = 0; } catch (_) {}
+        aiSpeechActive = false;
+        aiSpeechPulse = 0;
+        window.PanthoriumOrb?.setAISpeaking(false);
+        window.dispatchEvent(new CustomEvent("panthorium:voice-end", { detail: { interrupted: true } }));
+    }
     function unlockVoiceAudio() {
         if (voiceAudioUnlocked || voiceAudioUnlocking || aiSpeechActive) return;
         if (!URL.createObjectURL) return;
@@ -1282,8 +1296,11 @@
                 audio.onerror = null;
                 audio.ontimeupdate = null;
                 releaseRemoteChunk(prepared);
+                if (cancelRemotePlayback === cancel) cancelRemotePlayback = null;
                 resolve(value);
             };
+            const cancel = () => finish(false);
+            cancelRemotePlayback = cancel;
             const timeout = setTimeout(() => finish(false), Math.max(12000, Math.min(30000, String(text).length * 180)));
             (async () => {
                 try {
@@ -1371,6 +1388,7 @@
     }
 
     async function speak(text) {
+        speechInterruptedByUser = false;
         text = voiceSafeText(text);
         setOrbTranscript(text, 0);
         const speechRun = ++activeSpeechRun;
@@ -1446,6 +1464,25 @@
         return spokeAny;
     }
 
+    function createAdaptiveVoiceDetector() {
+        let noiseFloor = 0.008;
+        let samples = 0;
+        let voicedFrames = 0;
+        return {
+            observe(level, elapsedMs) {
+                const value = Number.isFinite(level) ? level : 0;
+                if (elapsedMs < 450 && value < 0.08) {
+                    samples += 1;
+                    noiseFloor += (value - noiseFloor) / samples;
+                }
+                const threshold = Math.min(0.055, Math.max(0.012, noiseFloor * 2.6));
+                if (value >= threshold) voicedFrames += 1;
+                else voicedFrames = Math.max(0, voicedFrames - 1);
+                return voicedFrames >= 2;
+            }
+        };
+    }
+
     // Browsers may keep speech synthesis paused until the first user gesture.
     window.addEventListener("pointerdown", () => {
         unlockVoiceAudio();
@@ -1513,6 +1550,7 @@
                 resumeAfterTranscript();
                 return;
             }
+            setOrbTranscript(value, 0);
             voiceState = "processing";
             status("processing", "กำลังประมวลผล");
             try {
@@ -1553,6 +1591,7 @@
             let recorderMonitor = null;
             let recorderStartedAt = 0;
             let recorderLastVoiceAt = 0;
+            let recorderVoiceDetector = createAdaptiveVoiceDetector();
 
             const restartListening = () => {
                 if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
@@ -1672,7 +1711,8 @@
                     recorderAnalyser.getByteTimeDomainData(recorderData);
                     let sum = 0;
                     for (const value of recorderData) { const centered = (value - 128) / 128; sum += centered * centered; }
-                    if (Math.sqrt(sum / recorderData.length) > 0.025) recorderLastVoiceAt = now;
+                    const level = Math.sqrt(sum / recorderData.length);
+                    if (recorderVoiceDetector.observe(level, now - recorderStartedAt)) recorderLastVoiceAt = now;
                 }
                 const quietLongEnough = recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 1400 && now - recorderStartedAt > 700;
                 if (quietLongEnough || now - recorderStartedAt > 15000) { finishRecorder({ discard: false }); return; }
@@ -1732,6 +1772,7 @@
                     recorder.start(250);
                     recorderStartedAt = performance.now();
                     recorderLastVoiceAt = 0;
+                    recorderVoiceDetector = createAdaptiveVoiceDetector();
                     voiceState = "listening";
                     discardOnEnd = false;
                     userSpeechActive = true;
@@ -1762,7 +1803,11 @@
             };
             button.onclick = async () => {
                 unlockVoiceAudio();
-                if (voiceState === "processing" || voiceState === "speaking" || voiceState === "stopping") { status("processing", "กำลังประมวลผล"); return; }
+                if (voiceState === "speaking") {
+                    stopSentinelSpeech();
+                    voiceState = "idle";
+                }
+                if (voiceState === "processing" || voiceState === "stopping") { status("processing", "กำลังประมวลผล"); return; }
                 if (voiceState === "listening") { autoResume = false; stopRecorder(); return; }
                 recognitionBlocked = false;
                 autoResume = true;
@@ -1902,10 +1947,11 @@
         button.onclick = async () => {
             unlockVoiceAudio();
             try { window.speechSynthesis?.resume(); } catch (_) {}
-            if (voiceState === "processing" || voiceState === "speaking" || voiceState === "stopping") {
-                status("processing", voiceState === "speaking" ? "Sentinel กำลังพูด..." : "กำลังประมวลผล");
-                return;
+            if (voiceState === "speaking") {
+                stopSentinelSpeech();
+                voiceState = "idle";
             }
+            if (voiceState === "processing" || voiceState === "stopping") { status("processing", "กำลังประมวลผล"); return; }
             if (voiceState === "listening") {
                 autoResume = false;
                 // A tap on the stop button means "finish this command". The
@@ -2012,7 +2058,14 @@
     const voicePlaybackFailure = "ได้รับคำตอบแล้ว แต่เล่นเสียงไม่สำเร็จ ตรวจสอบเสียงเว็บไซต์หรือบริการเสียง แล้วแตะไมโครโฟนเพื่อลองใหม่";
     async function speakVoiceResponse(text) {
         // The answer remains readable under the Orb even if playback is blocked.
-        try { return await speak(text); } catch (_) { return false; }
+        try {
+            const spoken = await speak(text);
+            if (!spoken && speechInterruptedByUser) {
+                speechInterruptedByUser = false;
+                return true;
+            }
+            return spoken;
+        } catch (_) { return false; }
     }
 
     // ---------- AI: Sentinel (Backend) ----------
@@ -2416,6 +2469,7 @@
         let chatRecorderMonitor = null;
         let chatRecorderStartedAt = 0;
         let chatRecorderLastVoiceAt = 0;
+        let chatVoiceDetector = createAdaptiveVoiceDetector();
         let chatRecorderContext = null;
         let chatRecorderAnalyser = null;
         let chatRecorderData = null;
@@ -2512,6 +2566,7 @@
             chatRecorder.start(250);
             chatRecorderStartedAt = performance.now();
             chatRecorderLastVoiceAt = 0;
+            chatVoiceDetector = createAdaptiveVoiceDetector();
             userSpeechActive = true;
             window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
             micBtn.classList.add("listening");
@@ -2530,7 +2585,8 @@
                     chatRecorderAnalyser.getByteTimeDomainData(chatRecorderData);
                     let sum = 0;
                     for (const value of chatRecorderData) { const c = (value - 128) / 128; sum += c * c; }
-                    if (Math.sqrt(sum / chatRecorderData.length) > 0.025) chatRecorderLastVoiceAt = now;
+                    const level = Math.sqrt(sum / chatRecorderData.length);
+                    if (chatVoiceDetector.observe(level, now - chatRecorderStartedAt)) chatRecorderLastVoiceAt = now;
                 }
                 if ((chatRecorderLastVoiceAt > 0 && now - chatRecorderLastVoiceAt > 1400 && now - chatRecorderStartedAt > 700) || now - chatRecorderStartedAt > 15000) {
                     try { chatRecorder.stop(); } catch (_) {}
@@ -2610,6 +2666,7 @@
         }
 
         micBtn.onclick = async () => {
+            if (aiSpeechActive) stopSentinelSpeech();
             // Electron / recorder path
             if (chatElectron && chatRecorderOk) {
                 if (chatRecorder && chatRecorder.state === "recording") {
