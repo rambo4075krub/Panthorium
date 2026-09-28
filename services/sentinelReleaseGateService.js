@@ -53,7 +53,7 @@ class SentinelReleaseGateService {
     autoImproveMaxRounds = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE_MAX_ROUNDS || 3),
     autoImproveRetryDelayMs = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE_RETRY_MS || 60000),
     autoImproveMaxCases = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE_MAX_CASES || 3),
-    benchmarkTimeoutMs = Number(process.env.SENTINEL_RELEASE_GATE_BENCHMARK_TIMEOUT_MS || 180000)
+    benchmarkTimeoutMs = Number(process.env.SENTINEL_RELEASE_GATE_BENCHMARK_TIMEOUT_MS || 270000)
   } = {}) {
     this.training = training;
     this.learning = learning || training?.learning || null;
@@ -67,7 +67,7 @@ class SentinelReleaseGateService {
     this.autoImproveMaxRounds = Math.max(0, Math.min(10, Number(autoImproveMaxRounds) || 3));
     this.autoImproveRetryDelayMs = Math.max(1000, Number(autoImproveRetryDelayMs) || 60000);
     this.autoImproveMaxCases = Math.max(1, Math.min(10, Number(autoImproveMaxCases) || 3));
-    this.benchmarkTimeoutMs = Math.max(30000, Number(benchmarkTimeoutMs) || 180000);
+    this.benchmarkTimeoutMs = Math.max(30000, Number(benchmarkTimeoutMs) || 270000);
     this.lastAutoBenchmarkAt = null;
     this.lastBenchmarkAt = null;
     this.lastAutoBenchmarkReason = null;
@@ -489,16 +489,41 @@ class SentinelReleaseGateService {
         && number(measured.worstRegression ?? measured.maxRegression) <= number(learningStatus?.policy?.maxRegressionPct, 5);
     });
     const pass = ready.length > 0;
-    return { id: 'shadow_gate', label: 'Shadow gate', pass, reason: pass ? null : `ต้องมี Shadow/Active/Rolled back version ที่ผ่าน shadow ≥ ${minSamples} samples และ score ≥ ${minScore}`, evidence: { minSamples, minScore, readyVersions: ready.map((v) => ({ versionId: v.versionId, state: v.state, shadowSamples: v.shadowSamples, shadowScore: v.shadowScore })) } };
+    const evaluated = versionList.filter((v) =>
+      ['shadow', 'active', 'rolled_back'].includes(v.state)
+      && !v.metadata?.acceptanceScenario
+      && (Number(v.shadowSamples || 0) > 0 || v.metadata?.measuredShadow)
+    ).slice(0, 20).map((v) => ({
+      versionId: v.versionId,
+      state: v.state,
+      shadowSamples: number(v.shadowSamples),
+      shadowScore: v.shadowScore == null ? null : number(v.shadowScore),
+      baselineScore: v.baselineScore == null ? null : number(v.baselineScore),
+      regressionPct: v.metadata?.regressionPct == null ? null : number(v.metadata.regressionPct),
+      measuredSamples: number(v.metadata?.measuredShadow?.sampleCount),
+      worstRegression: v.metadata?.measuredShadow?.worstRegression == null ? null : number(v.metadata.measuredShadow.worstRegression),
+      candidateScore: v.metadata?.measuredShadow?.candidateScore == null ? null : number(v.metadata.measuredShadow.candidateScore),
+      rollbackReason: typeof v.metadata?.rollbackReason === 'string' ? v.metadata.rollbackReason.slice(0, 120) : null
+    }));
+    return { id: 'shadow_gate', label: 'Shadow gate', pass, reason: pass ? null : `ต้องมี Shadow/Active/Rolled back version ที่ผ่าน shadow ≥ ${minSamples} samples และ score ≥ ${minScore}`, evidence: { minSamples, minScore, maxRegressionPct: number(policy.maxRegressionPct, 5), readyVersions: ready.map((v) => ({ versionId: v.versionId, state: v.state, shadowSamples: v.shadowSamples, shadowScore: v.shadowScore })), evaluatedVersions: evaluated } };
   }
 
   checkRecovery({ versionList, events }) {
     const rolled = versionList.filter((v) => v.state === 'rolled_back');
-    const recoveryVersions = versionList.filter((v) => v.metadata?.recoveryOf || String(v.metadata?.acceptanceStep || '').includes('recovery'));
+    const rolledIds = new Set(rolled.map((v) => v.versionId));
+    const recoveryVersions = versionList.filter((v) => {
+      const recoveryOf = v.metadata?.recoveryOf;
+      return recoveryOf && rolledIds.has(recoveryOf) && !v.metadata?.acceptanceScenario && !v.metadata?.recoveryFallback && ['quarantined', 'shadow', 'active'].includes(v.state);
+    });
     const recoveryEvents = events.filter((e) => /recovery/i.test(String(e.event || '')));
     const monitorEvents = events.filter((e) => /monitor|rolled_back/i.test(String(e.event || '')));
-    const pass = rolled.length > 0 && (recoveryVersions.length > 0 || recoveryEvents.length > 0);
-    return { id: 'rollback_recovery', label: 'Automatic Recovery หลัง rollback', pass, reason: pass ? null : 'ต้องมี rolled_back version และมี recovery candidate/event หลัง rollback', evidence: { rolledBackVersions: rolled.map((v) => v.versionId), recoveryVersions: recoveryVersions.map((v) => ({ versionId: v.versionId, state: v.state, recoveryOf: v.metadata?.recoveryOf || null })), recoveryEvents: recoveryEvents.slice(0, 5).map((e) => e.event), monitorEvents: monitorEvents.slice(0, 5).map((e) => e.event) } };
+    const successfulRecoveryEvents = recoveryEvents.filter((e) =>
+      e.event === 'recovery_candidates_created'
+      && rolledIds.has(e.versionId)
+      && number(e.payload?.count) > 0
+    );
+    const pass = rolled.length > 0 && (recoveryVersions.length > 0 || successfulRecoveryEvents.length > 0);
+    return { id: 'rollback_recovery', label: 'Automatic Recovery หลัง rollback', pass, reason: pass ? null : 'ต้องมี rolled_back version และมี recovery candidate ที่ยังใช้งานต่อได้ หรือ event สร้าง candidate สำเร็จหลัง rollback', evidence: { rolledBackVersions: rolled.map((v) => v.versionId), recoveryVersions: recoveryVersions.map((v) => ({ versionId: v.versionId, state: v.state, recoveryOf: v.metadata?.recoveryOf || null })), recoveryEvents: recoveryEvents.slice(0, 5).map((e) => ({ event: e.event, versionId: e.versionId, count: e.payload?.count ?? null })), successfulRecoveryEvents: successfulRecoveryEvents.length, monitorEvents: monitorEvents.slice(0, 5).map((e) => e.event) } };
   }
 
   checkActiveLearning({ activeStatus, activeHistory }) {
@@ -506,7 +531,7 @@ class SentinelReleaseGateService {
     const historicalRun = activeHistory.find((item) => ['running', 'activated', 'stopped', 'expired', 'guarded'].includes(item.status));
     const currentOrPast = run || historicalRun || null;
     const pass = Boolean(activeStatus?.ok && currentOrPast && currentOrPast.options?.manualActivationRequired === true);
-    return { id: 'active_learning_runner', label: 'Active Learning 24h Runner', pass, reason: pass ? null : 'ต้องมีสถานะหรือประวัติ Active Learning runner 24 ชั่วโมง พร้อม manual activation gate', warnings: activeStatus?.running ? [] : ['Runner ไม่ได้กำลังรันอยู่ตอนนี้ ตรวจ history ก่อน merge'], evidence: { running: Boolean(activeStatus?.running), runId: currentOrPast?.runId || null, status: currentOrPast?.status || null, durationHours: currentOrPast?.options?.durationHours || null, manualActivationRequired: currentOrPast?.options?.manualActivationRequired || false, guardrails: currentOrPast ? { maxPrompts: currentOrPast.options?.maxPrompts, maxCandidates: currentOrPast.options?.maxCandidates, maxFailures: currentOrPast.options?.maxFailures, maxConsecutiveFailures: currentOrPast.options?.maxConsecutiveFailures, maxUnsafeShadow: currentOrPast.options?.maxUnsafeShadow } : null } };
+    return { id: 'active_learning_runner', label: 'Active Learning 24h Runner', pass, reason: pass ? null : 'ต้องมีสถานะหรือประวัติ Active Learning runner 24 ชั่วโมง พร้อม manual activation gate', warnings: activeStatus?.running ? [] : ['Runner ไม่ได้กำลังรันอยู่ตอนนี้ ตรวจ history ก่อน merge'], evidence: { running: Boolean(activeStatus?.running), runId: currentOrPast?.runId || null, status: currentOrPast?.status || null, durationHours: currentOrPast?.options?.durationHours || null, manualActivationRequired: currentOrPast?.options?.manualActivationRequired || false, lastCycleAt: currentOrPast?.stats?.lastCycleAt || null, cycles: number(currentOrPast?.stats?.cycles), prompts: number(currentOrPast?.stats?.prompts), candidates: number(currentOrPast?.stats?.candidates), shadowSamples: number(currentOrPast?.stats?.shadowSamples), failures: number(currentOrPast?.stats?.failures), recentFailures: safeArray(currentOrPast?.stats?.lastFailureDetails).slice(-5), guardrails: currentOrPast ? { maxPrompts: currentOrPast.options?.maxPrompts, maxCandidates: currentOrPast.options?.maxCandidates, maxFailures: currentOrPast.options?.maxFailures, maxConsecutiveFailures: currentOrPast.options?.maxConsecutiveFailures, maxUnsafeShadow: currentOrPast.options?.maxUnsafeShadow } : null } };
   }
 
   checkBenchmark({ benchmarkStatus, lastBenchmark, sentinelSummary }) {

@@ -63,6 +63,8 @@ const{Sentinel}=require('../services/sentinel');
   const roleDraft=await roleTraining.draftWithTeachers({prompt:'ทดสอบการแยกบทบาทผู้สร้างและกรรมการ',user});
   assert.equal(roleDraft.ok,true);
   assert.deepEqual(roleCalls.filter(x=>!x.systemPrompt.includes('ผู้ตรวจคุณภาพ')).map(x=>x.provider),['groq']);
+  assert.match(roleCalls.find(x=>!x.systemPrompt.includes('ผู้ตรวจคุณภาพ')).systemPrompt,/90\/100/);
+  assert.match(roleCalls.find(x=>!x.systemPrompt.includes('ผู้ตรวจคุณภาพ')).systemPrompt,/ทบทวน/);
   assert.deepEqual(roleCalls.filter(x=>x.systemPrompt.includes('ผู้ตรวจคุณภาพ')).map(x=>x.provider),['openai','gemini','anthropic']);
   assert.equal(roleDraft.candidates[0].example.status,'approved');
   assert.equal(roleTraining.settings().roleSeparation,true);

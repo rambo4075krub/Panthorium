@@ -63,7 +63,11 @@ const providers = {
   await pausedService.tick();
   assert.equal(pausedService.session.status, 'paused');
   assert.equal(pausedService.session.stats.pauseReason, 'provider_rate_limit');
-  assert.equal(pausedService.session.stats.failures, 0);
+  assert.equal(pausedService.session.stats.failures, 1);
+  assert.equal(pausedService.session.stats.lastFailureDetails[0].stage, 'teacher');
+  assert.equal(pausedService.session.stats.lastFailureDetails[0].provider, 'groq');
+  assert.match(pausedService.session.stats.lastFailureDetails[0].error, /429/);
+  assert.equal(pausedService.session.stats.cycles, 1, 'persist provider work and outcomes before pausing');
   assert(new Date(pausedService.session.stats.resumeAt).getTime() > Date.now());
   pausedService.shutdown();
   pausedService.session.stats.resumeAt = new Date(Date.now() - 1).toISOString();

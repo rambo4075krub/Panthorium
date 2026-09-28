@@ -82,6 +82,37 @@ function buildGate({ benchmarkScore = 91, activeRun = true } = {}) {
   });
 }
 
+const gateForRecoveryChecks = new SentinelReleaseGateService();
+const failedRecoveryOnly = gateForRecoveryChecks.checkRecovery({
+  versionList: [
+    { versionId: 'rolled-failed', state: 'rolled_back' },
+    { versionId: 'recovery-failed', state: 'rolled_back', metadata: { recoveryOf: 'rolled-failed' } }
+  ],
+  events: [{ event: 'recovery_failed', versionId: 'rolled-failed', payload: { count: 0 } }]
+});
+assert.equal(failedRecoveryOnly.pass, false, 'failed recovery events and rolled-back recovery versions must not satisfy the recovery gate');
+
+const acceptanceFallbackOnly = gateForRecoveryChecks.checkRecovery({
+  versionList: [
+    { versionId: 'rolled-fallback', state: 'rolled_back' },
+    { versionId: 'synthetic-fallback', state: 'shadow', metadata: { recoveryOf: 'rolled-fallback', acceptanceScenario: true, recoveryFallback: true } }
+  ],
+  events: [{ event: 'recovery_fallback_candidate_created', versionId: 'rolled-fallback', payload: { count: 1 } }]
+});
+assert.equal(acceptanceFallbackOnly.pass, false, 'staging acceptance fallback must not count as real automatic recovery evidence');
+
+const successfulRecoveryEvent = gateForRecoveryChecks.checkRecovery({
+  versionList: [{ versionId: 'rolled-success', state: 'rolled_back' }],
+  events: [{ event: 'recovery_candidates_created', versionId: 'rolled-success', payload: { count: 1 } }]
+});
+assert.equal(successfulRecoveryEvent.pass, true, 'a linked successful recovery candidate event should satisfy the recovery gate');
+
+const unmeasuredShadow = gateForRecoveryChecks.checkShadowGate({
+  learningStatus: { policy: { shadowMinSamples: 3, shadowScore: 90, maxRegressionPct: 5 } },
+  versionList: [{ versionId: 'raw-high-score', state: 'shadow', shadowSamples: 4, shadowScore: 98, metadata: {} }]
+});
+assert.equal(unmeasuredShadow.pass, false, 'high raw shadow scores without measured evidence must not satisfy the gate');
+
 (async () => {
   const ready = await buildGate().status({ record: true });
   assert.equal(ready.ok, true);
@@ -90,6 +121,9 @@ function buildGate({ benchmarkScore = 91, activeRun = true } = {}) {
   assert.equal(ready.checks.length, 5);
   assert(ready.checks.every((check) => check.pass));
   assert.equal(ready.evidence.benchmark.score, 91);
+  const readyShadow = ready.checks.find((check) => check.id === 'shadow_gate');
+  assert.equal(readyShadow.evidence.evaluatedVersions[0].versionId, 'recovery-shadow');
+  assert.equal(readyShadow.evidence.evaluatedVersions[0].candidateScore, undefined);
 
   const withHistoryOnly = await buildGate({ activeRun: false }).status();
   assert.equal(withHistoryOnly.mergeAllowed, true);

@@ -12,8 +12,8 @@ const shadowVersion = {
   exampleId: 'example-1',
   state: 'shadow',
   score: 94,
-  shadowSamples: 0,
-  shadowScore: null,
+  shadowSamples: 4,
+  shadowScore: 98,
   metadata: {}
 };
 
@@ -22,6 +22,8 @@ const training = {
   async draftWithTeachers(args) {
     draftCalls += 1;
     assert(args.prompt.includes('Active Learning'));
+    assert.match(args.prompt, /90\/100/);
+    assert.match(args.prompt, /ทบทวน/);
     assert.deepEqual(args.providerNames, ['groq', 'openai']);
     assert(args.tags.includes('active-learning'));
     return { ok: true, candidates: [{ provider: 'groq' }], failures: [] };
@@ -32,22 +34,17 @@ const learning = {
   policy: { shadowMinSamples: 1 },
   async init() {},
   repository: {
-    async list({ state } = {}) { return state === 'shadow' ? [shadowVersion] : [shadowVersion]; }
+    async list({ state } = {}) { return state === 'shadow' ? [shadowVersion] : [shadowVersion]; },
+    async get() { return shadowVersion; }
   },
   async exampleFor(exampleId) {
     assert.equal(exampleId, 'example-1');
     return { exampleId, prompt: 'ทดสอบ Active Learning', answer: 'คำตอบ', provider: 'groq' };
   },
-  async recordShadow(versionId, sample) {
-    assert.equal(versionId, 'shadow-1');
-    shadowCalls += 1;
-    shadowVersion.shadowSamples += 1;
-    shadowVersion.shadowScore = sample.score;
-    return { ok: true, version: shadowVersion };
-  },
+  async recordShadow() { throw new Error('runner must not duplicate measured evaluator samples'); },
   async promoteIfReady(versionId) {
     assert.equal(versionId, 'shadow-1');
-    promoted = shadowVersion.shadowSamples >= 1;
+    promoted = shadowVersion.shadowSamples >= 3;
     return { ok: true, promoted, version: { ...shadowVersion, state: promoted ? 'active' : 'shadow' } };
   }
 };
@@ -62,7 +59,7 @@ const providers = {
 };
 
 (async () => {
-  service = new SentinelActiveLearningService({ training, learning, providers, shadowEvaluator: { async evaluate() { return { score: 94, safe: true, samples: 1, unsafe: 0, failures: 0 }; } }, minIntervalMs: 5 });
+  service = new SentinelActiveLearningService({ training, learning, providers, shadowEvaluator: { async evaluate() { shadowCalls += 1; shadowVersion.shadowSamples = 3; shadowVersion.shadowScore = 94; shadowVersion.metadata.measuredShadow = { schema: 1, sampleCount: 3, worstRegression: 0, comparisons: [{}, {}, {}] }; return { score: 94, safe: true, samples: 3, unsafe: 0, failures: 0 }; } }, minIntervalMs: 5 });
   await service.init();
   const started = await service.start({ durationHours: 0.05, intervalMinutes: 0.001, batchSize: 1, providers: ['groq', 'openai'], userId: 'admin-test' });
   assert.equal(started.ok, true);
@@ -76,7 +73,7 @@ const providers = {
   assert.equal(shadowCalls, 1);
   assert.equal(service.session.stats.cycles, 1);
   assert.equal(service.session.stats.candidates, 1);
-  assert.equal(service.session.stats.shadowSamples, 1);
+  assert.equal(service.session.stats.shadowSamples, 3);
 
   const activated = await service.activate({ userId: 'admin-test', stop: true });
   assert.equal(activated.ok, true);

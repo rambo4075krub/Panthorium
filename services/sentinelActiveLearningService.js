@@ -37,6 +37,12 @@ function parseEval(text) {
   }
 }
 
+function safeFailureMessage(error) {
+  return String(error?.message || error || 'unknown_failure')
+    .replace(/(?:sk-[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z_-]{20,}|Bearer\\s+[A-Za-z0-9._~+/-]+=*)/gi, '[redacted]')
+    .slice(0, 240);
+}
+
 function minutesUntil(value) {
   const ms = new Date(value).getTime() - Date.now();
   return Number.isFinite(ms) ? Math.max(0, Math.round(ms / 60000)) : 0;
@@ -350,7 +356,7 @@ class SentinelActiveLearningService {
       'Integrations external action safety'
     ];
     const topic = topics[(cycle - 1) % topics.length];
-    return `Active Learning รอบที่ ${cycle}: สร้างคำตอบภาษาไทยแบบ production-grade สำหรับหัวข้อ "${topic}" โดยต้องถูกต้อง กระชับ ปลอดภัย อธิบายได้ และเหมาะกับ Panthorium OS / Sentinel AI ห้ามเปิดเผย secret, token, API key หรือแนะนำให้ bypass RBAC/guardrail`;
+    return `Active Learning รอบที่ ${cycle}: ตอบโจทย์ภาษาไทยสำหรับหัวข้อ "${topic}" ในฐานะ Sentinel AI ของ Panthorium OS โดยตั้งเป้าคุณภาพจากกรรมการอิสระอย่างน้อย 90/100\n\nเกณฑ์คำตอบ: ตอบสิ่งที่ผู้ใช้ถามโดยตรง; ข้อเท็จจริงถูกต้องและไม่อ้างความสามารถหรือการกระทำที่ตรวจสอบไม่ได้; ครบขั้นตอนและข้อจำกัดที่จำเป็น; ให้คำแนะนำที่นำไปทำได้จริง; ระบุสมมติฐานหรือความไม่แน่ใจเมื่อมี\n\nก่อนส่งคำตอบ ให้ทบทวนความถูกต้อง ความเกี่ยวข้อง ความครบถ้วน ความชัดเจน ประโยชน์ต่อผู้ใช้ และความปลอดภัย แล้วแก้ส่วนที่ยังอ่อน ห้ามเติมข้อความเพื่อยืดคำตอบหรือแต่งข้อเท็จจริงให้ได้คะแนน ตอบเฉพาะคำตอบสุดท้าย ห้ามเปิดเผย secret, token, API key หรือแนะนำให้ bypass RBAC/guardrail`;
   }
 
   guardrailViolation(run) {
@@ -395,13 +401,18 @@ class SentinelActiveLearningService {
     try {
       const delta = await this.runCycle(this.session);
       const stats = { ...(this.session.stats || {}) };
-      Object.entries(delta).forEach(([key, value]) => { stats[key] = Number(stats[key] || 0) + Number(value || 0); });
+      Object.entries(delta).forEach(([key, value]) => { if (key !== 'failureDetails' && Number.isFinite(Number(value))) stats[key] = Number(stats[key] || 0) + Number(value || 0); });
+      stats.lastFailureDetails = (delta.failureDetails || []).slice(-5).map((item) => ({ ...item, error: safeFailureMessage(item.error) }));
       stats.cycles = Number(stats.cycles || 0) + 1;
       stats.consecutiveFailures = 0;
       stats.lastCycleAt = new Date().toISOString();
       stats.lastGuardCheck = 'passed';
       await this.save({ ...this.session, stats, lastError: null });
       this.audit?.record('sentinel.active_learning_cycle_completed', { runId: this.session.runId, stats, delta, remaining: this.remainingBudget(this.session) });
+      if (delta.rateLimitError) {
+        await this.pauseForRateLimit(new Error(delta.rateLimitError));
+        return;
+      }
     } catch (error) {
       if (this.session.options?.never && rateLimitDelayMs(error) > 0) {
         await this.pauseForRateLimit(error);
@@ -431,7 +442,20 @@ class SentinelActiveLearningService {
   }
 
   async runCycle(run) {
-    const delta = { prompts: 0, candidates: 0, failures: 0, shadowSamples: 0, unsafeShadow: 0, promotions: 0 };
+    const delta = { prompts: 0, candidates: 0, failures: 0, shadowSamples: 0, unsafeShadow: 0, promotions: 0, failureDetails: [] };
+    // Spend the available evaluator budget on existing non-acceptance learning
+    // candidates first. Teacher quota exhaustion must not starve Shadow checks.
+    if (run.options?.autoShadow !== false) {
+      const shadow = await this.sampleShadow(run);
+      delta.shadowSamples += shadow.samples;
+      delta.unsafeShadow += shadow.unsafe;
+      delta.failures += shadow.failures;
+      delta.failureDetails.push(...(shadow.failureDetails || []));
+      if (shadow.rateLimitError) {
+        delta.rateLimitError = shadow.rateLimitError;
+        return delta;
+      }
+    }
     for (let i = 0; i < Number(run.options?.batchSize || 1); i += 1) {
       if (!run.options?.never && Number(run.stats?.prompts || 0) + delta.prompts >= Number(run.options?.maxPrompts || 0)) break;
       const prompt = this.nextPrompt({ ...run, stats: { ...run.stats, cycles: Number(run.stats?.cycles || 0) + i } });
@@ -445,37 +469,50 @@ class SentinelActiveLearningService {
       delta.prompts += 1;
       delta.candidates += result.candidates?.length || 0;
       delta.failures += result.failures?.length || (result.ok === false ? 1 : 0);
+      for (const failure of result.failures || (result.ok === false ? [{ provider: null, error: result.error || 'teacher_failed' }] : [])) {
+        delta.failureDetails.push({ stage: 'teacher', provider: failure.provider || null, error: safeFailureMessage(failure.error || 'teacher_failed') });
+      }
       const rateLimited = result.failures?.find((failure) => rateLimitDelayMs(failure?.error || failure) > 0);
-      if (run.options?.never && rateLimited) throw new Error(String(rateLimited.error || rateLimited));
+      if (run.options?.never && rateLimited) {
+        delta.rateLimitError = String(rateLimited.error || rateLimited);
+        break;
+      }
       if (!run.options?.never && Number(run.stats?.candidates || 0) + delta.candidates >= Number(run.options?.maxCandidates || 0)) break;
-    }
-    if (run.options?.autoShadow !== false) {
-      const shadow = await this.sampleShadow(run);
-      delta.shadowSamples += shadow.samples;
-      delta.unsafeShadow += shadow.unsafe;
-      delta.failures += shadow.failures;
     }
     return delta;
   }
 
   async sampleShadow(run) {
     const shadows = await this.learning.repository.list({ state: 'shadow', limit: 25 });
-    const needingSamples = shadows.filter((version) => Number(version.shadowSamples || 0) < Number(this.learning.policy?.shadowMinSamples || 3)).slice(0, 1);
-    const delta = { samples: 0, unsafe: 0, failures: 0 };
+    const minSamples = Number(this.learning.policy?.shadowMinSamples || 3);
+    const maxRegression = Number(this.learning.policy?.maxRegressionPct ?? 5);
+    const needingSamples = shadows.filter((version) => {
+      if (version.metadata?.acceptanceScenario) return false;
+      const measured = version.metadata?.measuredShadow;
+      const evidenceReady = measured?.schema === 1
+        && Number(measured.sampleCount || 0) >= minSamples
+        && Array.isArray(measured.comparisons)
+        && measured.comparisons.length === 3
+        && Number(measured.worstRegression ?? measured.maxRegression) <= maxRegression;
+      return Number(version.shadowSamples || 0) < minSamples || !evidenceReady;
+    }).slice(0, 1);
+    const delta = { samples: 0, unsafe: 0, failures: 0, rateLimitError: null, failureDetails: [] };
     for (const version of needingSamples) {
       const example = await this.learning.exampleFor(version.exampleId);
       if (!example) continue;
       try {
         const evaluation = await this.evaluateShadow(version, example, run);
-        const result = await this.learning.recordShadow(version.versionId, {
-          score: evaluation.score,
-          safe: evaluation.safe,
-          metadata: { source: 'active-learning-provider-shadow', evaluator: evaluation.provider, reason: evaluation.reason }
-        });
-        if (result.ok) delta.samples += 1;
+        const latest = await this.learning.repository.get(version.versionId);
+        const measured = latest?.metadata?.measuredShadow;
+        const minSamples = Number(this.learning.policy?.shadowMinSamples || 3);
+        if (measured?.schema !== 1 || !Array.isArray(measured.comparisons) || measured.comparisons.length !== 3 || Number(measured.sampleCount || 0) < minSamples) throw new Error('measured_shadow_evidence_required');
+        // Count only evaluator-backed samples. Older raw scores are not evidence.
+        delta.samples += Math.max(0, Math.min(Number(measured.sampleCount || 0), Number(latest.shadowSamples || 0)));
         if (evaluation.safe === false) delta.unsafe += 1;
       } catch (error) {
         delta.failures += 1;
+        delta.failureDetails.push({ stage: 'shadow_evaluation', versionId: version.versionId, error: safeFailureMessage(error) });
+        if (rateLimitDelayMs(error) > 0) delta.rateLimitError = error.message;
         this.audit?.record('sentinel.active_learning_shadow_failed', { runId: run.runId, versionId: version.versionId, error: error.message });
       }
     }

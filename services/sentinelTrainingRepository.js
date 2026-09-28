@@ -43,6 +43,12 @@ class SentinelTrainingRepository {
     return [...this.examples.values()].find(item=>item.fingerprint===fingerprint)||null;
   }
 
+  async getById(exampleId){
+    if(!exampleId)return null;
+    if(this.pool){const result=await this.pool.query(`SELECT * FROM panthorium_training_examples WHERE example_id=$1 LIMIT 1`,[exampleId]);return result.rows[0]?this.map(result.rows[0]):null;}
+    return this.examples.get(String(exampleId))||null;
+  }
+
   async list({status,limit=50}={}) {
     const n=Math.max(1,Math.min(Number(limit)||50,200));
     if(this.pool){const values=[];let where='';if(status){values.push(status);where=`WHERE status=$${values.length}`;}values.push(n);const result=await this.pool.query(`SELECT * FROM panthorium_training_examples ${where} ORDER BY created_at DESC LIMIT $${values.length}`,values);return result.rows.map(row=>this.map(row));}
