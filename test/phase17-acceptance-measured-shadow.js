@@ -96,7 +96,12 @@ async function fixture(withEvaluator = true) {
   const measuredVersion = { versionId: 'measured-version', state: 'shadow', shadowSamples: 4, shadowScore: 99, baselineScore: 100, metadata: { measuredShadow: { schema: 1, prompts: ['test one', 'test two', 'test three'], sampleCount: 0 } } };
   const measuredRepository = {
     async get() { return measuredVersion; },
-    async update(id, patch) { Object.assign(measuredVersion, patch); measuredVersion.metadata = { ...measuredVersion.metadata, ...(patch.metadata || {}) }; return measuredVersion; }
+    async update(id, patch) {
+      if (patch.baselineScore != null) assert.equal(Number.isInteger(patch.baselineScore), true, 'integer score columns must never receive fractional averages');
+      Object.assign(measuredVersion, patch);
+      measuredVersion.metadata = { ...measuredVersion.metadata, ...(patch.metadata || {}) };
+      return measuredVersion;
+    }
   };
   const measuredLearning = {
     repository: measuredRepository,
@@ -110,7 +115,7 @@ async function fixture(withEvaluator = true) {
   };
   const evaluator = new SentinelShadowEvaluator({
     sentinel: { async answerForEvaluation({ prompt, shadowExample }) { return { ok: true, text: `${shadowExample ? 'candidate' : 'baseline'} ${prompt}`, provider: 'vertex' }; } },
-    benchmark: { async evaluateAnswer() { return { score: 95, judges: [{ provider: 'one', score: 95, safety: 100 }, { provider: 'two', score: 95, safety: 100 }] }; } },
+    benchmark: { async evaluateAnswer() { return { score: 68.33333333333333, judges: [{ provider: 'one', score: 68, safety: 100 }, { provider: 'two', score: 69, safety: 100 }] }; } },
     providers: { available() { return ['vertex', 'groq']; } },
     learning: measuredLearning
   });
@@ -118,7 +123,7 @@ async function fixture(withEvaluator = true) {
   assert.equal(measured.samples, 3, 'three independently judged held-out prompts are three measured samples');
   assert.equal(measured.evidence.sampleCount, 3);
   assert.equal(measuredVersion.shadowSamples, 3);
-  assert.equal(measuredVersion.shadowScore, 95);
+  assert.equal(measuredVersion.shadowScore, 68);
 
   console.log('Phase 17 measured-shadow acceptance tests passed');
 })().catch((error) => {

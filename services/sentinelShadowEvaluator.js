@@ -90,7 +90,8 @@ class SentinelShadowEvaluator {
     await this.learning.repository.update(version.versionId, {
       shadowSamples: 0,
       shadowScore: null,
-      baselineScore,
+      // The relational baseline_score column is INTEGER; keep precision in JSON evidence.
+      baselineScore: Math.round(baselineScore),
       metadata: { ...(latest?.metadata || version.metadata || {}), measuredShadow }
     });
     let recorded;
