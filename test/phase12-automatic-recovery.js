@@ -5,7 +5,7 @@ const{SentinelRecoveryService}=require('../services/sentinelRecoveryService');
 const{AutonomousLearningPolicy}=require('../services/autonomousLearningPolicy');
 (async()=>{
  const repo=new SentinelLearningRepository();const source={exampleId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',prompt:'Explain Panthorium recovery',answer:'old answer',source:'test',provider:'gen',tags:['test'],qualityScore:96,evaluation:{safe:true,judges:[{provider:'a',safe:true,correct:true,relevant:true},{provider:'b',safe:true,correct:true,relevant:true}]}};
- const trainingRepository={list:async()=>[source]};const learning=new SentinelLearningOrchestrator({repository:repo,trainingRepository,policy:new AutonomousLearningPolicy({shadowMinSamples:1})});
+ const trainingRepository={list:async()=>[],getById:async id=>id===source.exampleId?source:null};const learning=new SentinelLearningOrchestrator({repository:repo,trainingRepository,policy:new AutonomousLearningPolicy({shadowMinSamples:1})});
  const created=[];const training={addExample:async input=>{created.push(input);return{ok:true,example:{exampleId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',...input},learning:{state:'shadow'}};}};
  const providers={available:()=>['a','b'],callDetailed:async p=>({text:`recovered answer by ${p}`,model:'test'})};const recovery=new SentinelRecoveryService({learning,training,trainingRepository,providers,audit:{record(){}},recoveryRetryMs:1000});learning.recovery=recovery;
  const q=await learning.quarantine(source);const s=await learning.evaluateForShadow(q,source);await repo.update(s.versionId,{state:'active'});const rolled=await learning.rollback(s.versionId,{reason:'baseline_regression'});assert.equal(rolled.version.state,'rolled_back');

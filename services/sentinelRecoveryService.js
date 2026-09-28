@@ -55,6 +55,11 @@ class SentinelRecoveryService {
   }
 
   async sourceExample(version) {
+    if (!version?.exampleId || !this.trainingRepository) return null;
+    if (typeof this.trainingRepository.getById === 'function') {
+      return this.trainingRepository.getById(version.exampleId);
+    }
+    // Compatibility for older repository adapters that do not expose ID lookup.
     const items = await this.trainingRepository.list({ limit: 500 });
     return items.find((x) => x.exampleId === version.exampleId) || null;
   }
