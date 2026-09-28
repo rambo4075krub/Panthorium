@@ -92,6 +92,15 @@ const failedRecoveryOnly = gateForRecoveryChecks.checkRecovery({
 });
 assert.equal(failedRecoveryOnly.pass, false, 'failed recovery events and rolled-back recovery versions must not satisfy the recovery gate');
 
+const acceptanceFallbackOnly = gateForRecoveryChecks.checkRecovery({
+  versionList: [
+    { versionId: 'rolled-fallback', state: 'rolled_back' },
+    { versionId: 'synthetic-fallback', state: 'shadow', metadata: { recoveryOf: 'rolled-fallback', acceptanceScenario: true, recoveryFallback: true } }
+  ],
+  events: [{ event: 'recovery_fallback_candidate_created', versionId: 'rolled-fallback', payload: { count: 1 } }]
+});
+assert.equal(acceptanceFallbackOnly.pass, false, 'staging acceptance fallback must not count as real automatic recovery evidence');
+
 const successfulRecoveryEvent = gateForRecoveryChecks.checkRecovery({
   versionList: [{ versionId: 'rolled-success', state: 'rolled_back' }],
   events: [{ event: 'recovery_candidates_created', versionId: 'rolled-success', payload: { count: 1 } }]

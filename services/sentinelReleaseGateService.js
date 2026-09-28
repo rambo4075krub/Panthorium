@@ -513,7 +513,7 @@ class SentinelReleaseGateService {
     const rolledIds = new Set(rolled.map((v) => v.versionId));
     const recoveryVersions = versionList.filter((v) => {
       const recoveryOf = v.metadata?.recoveryOf;
-      return recoveryOf && rolledIds.has(recoveryOf) && ['quarantined', 'shadow', 'active'].includes(v.state);
+      return recoveryOf && rolledIds.has(recoveryOf) && !v.metadata?.acceptanceScenario && !v.metadata?.recoveryFallback && ['quarantined', 'shadow', 'active'].includes(v.state);
     });
     const recoveryEvents = events.filter((e) => /recovery/i.test(String(e.event || '')));
     const monitorEvents = events.filter((e) => /monitor|rolled_back/i.test(String(e.event || '')));
