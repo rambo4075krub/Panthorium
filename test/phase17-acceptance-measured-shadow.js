@@ -1,0 +1,97 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { ensureAcceptanceActive } = require('../routes/training');
+
+async function fixture(withEvaluator = true) {
+  const examples = [];
+  const versions = [];
+  const policy = { shadowMinSamples: 3, shadowScore: 90, maxRegressionPct: 5 };
+  const repository = {
+    async list() { return versions; },
+    async get(id) { return versions.find((item) => item.versionId === id) || null; },
+    async update(id, patch) {
+      const version = await this.get(id);
+      if (!version) return null;
+      Object.assign(version, patch);
+      if (patch.metadata) version.metadata = { ...(version.metadata || {}), ...patch.metadata };
+      return version;
+    }
+  };
+  const trainingRepository = {
+    async findByFingerprint() { return null; },
+    async create(data) {
+      const example = { ...data, exampleId: 'example-1', status: 'pending', qualityScore: 0 };
+      examples.push(example);
+      return example;
+    },
+    async review(id, status, reviewer, result) {
+      const example = examples.find((item) => item.exampleId === id);
+      Object.assign(example, { status, reviewer, ...result });
+      return example;
+    }
+  };
+  const learning = {
+    policy,
+    repository,
+    async init() {},
+    async quarantine(example) {
+      const version = { versionId: 'version-1', exampleId: example.exampleId, state: 'quarantined', score: example.qualityScore, shadowSamples: 0, shadowScore: 0, metadata: {} };
+      versions.push(version);
+      return version;
+    },
+    async evaluateForShadow(version) {
+      version.state = 'shadow';
+      version.baselineScore = 95;
+      return version;
+    },
+    async promoteIfReady(id) {
+      const version = await repository.get(id);
+      const evidence = version.metadata.measuredShadow;
+      if (version.shadowSamples < 3 || evidence?.sampleCount < 3 || evidence?.comparisons?.length !== 3 || evidence?.worstRegression > 5) {
+        return { ok: true, promoted: false, decision: { reasons: ['measured_shadow_evidence_required'] }, version };
+      }
+      version.state = 'active';
+      return { ok: true, promoted: true, version };
+    }
+  };
+  const training = {
+    repository: trainingRepository,
+    learning,
+    async init() {},
+    audit: { record() {} }
+  };
+  const shadowEvaluator = withEvaluator ? {
+    async evaluate(version) {
+      const latest = await repository.get(version.versionId);
+      const count = Number(latest.metadata.measuredShadow?.sampleCount || 0) + 1;
+      const measuredShadow = { schema: 1, sampleCount: count, worstRegression: 0, comparisons: [{}, {}, {}] };
+      latest.shadowSamples += 1;
+      latest.shadowScore = 96;
+      latest.metadata.measuredShadow = measuredShadow;
+      return { safe: true, evidence: measuredShadow };
+    }
+  } : null;
+  return { training, shadowEvaluator, versions };
+}
+
+(async () => {
+  const { training, shadowEvaluator, versions } = await fixture();
+  const result = await ensureAcceptanceActive(training, { shadowEvaluator, requestId: 'test-request' });
+  assert.equal(result.ok, true);
+  assert.equal(result.promoted, true);
+  assert.equal(result.version.state, 'active');
+  assert.equal(result.version.shadowSamples, 3);
+  assert.equal(result.version.metadata.measuredShadow.sampleCount, 3);
+  assert.equal(versions.length, 1);
+
+  const withoutEvaluator = await fixture(false);
+  const blocked = await ensureAcceptanceActive(withoutEvaluator.training, { shadowEvaluator: null });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.error, 'real_shadow_evaluator_unavailable');
+  assert.equal(withoutEvaluator.versions[0].shadowSamples, 0, 'must not invent synthetic shadow samples');
+  console.log('Phase 17 measured-shadow acceptance tests passed');
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

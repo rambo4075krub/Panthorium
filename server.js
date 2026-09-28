@@ -156,7 +156,7 @@ app.get("/healthz", async (req, res) => {
 
 require('./middleware/guestAccess').installGuestAccess(app, authService);
 app.use("/api/training/release-gate", createReleaseGateRouter(authService, sentinelReleaseGate));
-app.use("/api/training", createTrainingRouter(authService, sentinelTraining, sentinelBenchmark, sentinelActiveLearning));
+app.use("/api/training", createTrainingRouter(authService, sentinelTraining, sentinelBenchmark, sentinelActiveLearning, sentinelShadowEvaluator));
 app.use("/api/governance", createGovernanceRouter(authService, autonomousGovernance));
 app.use("/api/sentinel-control", createSentinelControlRouter(authService, sentinelOrchestrator));
 app.use("/api/auth", createAuthRouter(authService, config, securityResponse));
