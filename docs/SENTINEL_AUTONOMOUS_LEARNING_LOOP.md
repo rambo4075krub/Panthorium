@@ -141,6 +141,15 @@ Environment defaults:
 
 Emergency stop must disable promotion immediately while leaving monitoring/audit online.
 
+Runtime controls (administrator `settings` permission only):
+
+- `POST /api/training/learning/promotion/pause` with optional `{ "reason": "..." }`
+- `POST /api/training/learning/promotion/resume`
+- `SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=0` starts the service with promotion paused
+
+The stop is fail-closed at the server-side promotion policy. Capture, evaluation,
+shadow sampling, monitoring, audit events and rollback/recovery remain available.
+
 ## Acceptance gates
 
 1. No knowledge becomes active without deterministic safety + evaluator + shadow gates.

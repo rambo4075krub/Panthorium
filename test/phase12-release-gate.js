@@ -10,7 +10,7 @@ const shadowVersion = {
   score: 94,
   shadowSamples: 3,
   shadowScore: 94,
-  metadata: { acceptanceScenario: true }
+  metadata: { acceptanceScenario: true, measuredShadow: { schema: 1, sampleCount: 3, worstRegression: 0, comparisons: [{ candidateScore: 94 }, { candidateScore: 94 }, { candidateScore: 94 }] } }
 };
 const rolledVersion = {
   versionId: 'rolled-1',
@@ -19,7 +19,7 @@ const rolledVersion = {
   score: 94,
   shadowSamples: 3,
   shadowScore: 94,
-  metadata: { acceptanceScenario: true, rollbackReason: 'baseline_regression' }
+  metadata: { acceptanceScenario: true, rollbackReason: 'baseline_regression', measuredShadow: { schema: 1, sampleCount: 3, worstRegression: 0, comparisons: [{ candidateScore: 94 }, { candidateScore: 94 }, { candidateScore: 94 }] } }
 };
 const recoveryVersion = {
   versionId: 'recovery-shadow',
@@ -28,7 +28,7 @@ const recoveryVersion = {
   score: 93,
   shadowSamples: 3,
   shadowScore: 93,
-  metadata: { recoveryOf: 'rolled-1' }
+  metadata: { recoveryOf: 'rolled-1', measuredShadow: { schema: 1, sampleCount: 3, worstRegression: 0, comparisons: [{ candidateScore: 93 }, { candidateScore: 93 }, { candidateScore: 93 }] } }
 };
 
 function buildGate({ benchmarkScore = 91, activeRun = true } = {}) {

@@ -3,7 +3,7 @@ const { randomUUID } = require('crypto');
 class SentinelLearningRepository {
   constructor({databaseUrl,databaseSslMode}={}){
     if(databaseUrl){const { getDatabasePool } = require('./databasePool');this.pool=getDatabasePool({connectionString:databaseUrl,ssl:databaseSslMode==='disable'?false:{rejectUnauthorized:false}});}else this.pool=null;
-    this.versions=new Map();this.events=[];
+    this.versions=new Map();this.events=[];this.controls=new Map();
   }
   async init(){if(!this.pool)return;await this.pool.query(`CREATE TABLE IF NOT EXISTS panthorium_learning_versions(
     version_id UUID PRIMARY KEY, example_id UUID NOT NULL, state TEXT NOT NULL,
@@ -16,7 +16,15 @@ class SentinelLearningRepository {
   CREATE TABLE IF NOT EXISTS panthorium_learning_events(
     event_id UUID PRIMARY KEY, version_id UUID, event TEXT NOT NULL, payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  ); CREATE INDEX IF NOT EXISTS idx_panthorium_learning_events_time ON panthorium_learning_events(created_at DESC);`);}
+  ); CREATE INDEX IF NOT EXISTS idx_panthorium_learning_events_time ON panthorium_learning_events(created_at DESC);
+  CREATE TABLE IF NOT EXISTS panthorium_learning_controls(
+    control_key TEXT PRIMARY KEY, value JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_by TEXT
+  );`);}
+  // Durable operator switches (for example the promotion emergency stop) must
+  // outlive a process restart and stay shared across Cloud Run instances.
+  async getControl(key){if(this.pool){const q=await this.pool.query(`SELECT value,updated_at,updated_by FROM panthorium_learning_controls WHERE control_key=$1`,[key]);if(!q.rows[0])return null;return{value:q.rows[0].value||{},updatedAt:q.rows[0].updated_at instanceof Date?q.rows[0].updated_at.toISOString():q.rows[0].updated_at,updatedBy:q.rows[0].updated_by||null};}return this.controls.get(key)||null;}
+  async setControl(key,value,{actor=null}={}){const updatedAt=new Date().toISOString();if(this.pool){await this.pool.query(`INSERT INTO panthorium_learning_controls(control_key,value,updated_at,updated_by) VALUES($1,$2::jsonb,NOW(),$3) ON CONFLICT(control_key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW(),updated_by=EXCLUDED.updated_by`,[key,JSON.stringify(value||{}),actor]);return this.getControl(key);}const item={value:value||{},updatedAt,updatedBy:actor};this.controls.set(key,item);return item;}
   map(r){return{versionId:r.version_id,exampleId:r.example_id,state:r.state,score:r.score==null?null:Number(r.score),risk:r.risk,baselineScore:r.baseline_score==null?null:Number(r.baseline_score),shadowSamples:Number(r.shadow_samples||0),shadowScore:r.shadow_score==null?null:Number(r.shadow_score),metadata:r.metadata||{},createdAt:r.created_at,promotedAt:r.promoted_at||null,retiredAt:r.retired_at||null};}
   async create({exampleId,state='quarantined',score=null,risk='normal',metadata={}}){const versionId=randomUUID(),now=new Date().toISOString();if(this.pool){const q=await this.pool.query(`INSERT INTO panthorium_learning_versions(version_id,example_id,state,score,risk,metadata) VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING *`,[versionId,exampleId,state,score,risk,JSON.stringify(metadata)]);return this.map(q.rows[0]);}const v={versionId,exampleId,state,score,risk,baselineScore:null,shadowSamples:0,shadowScore:null,metadata,createdAt:now,promotedAt:null,retiredAt:null};this.versions.set(versionId,v);return v;}
   async get(versionId){if(this.pool){const q=await this.pool.query(`SELECT * FROM panthorium_learning_versions WHERE version_id=$1`,[versionId]);return q.rows[0]?this.map(q.rows[0]):null;}return this.versions.get(versionId)||null;}

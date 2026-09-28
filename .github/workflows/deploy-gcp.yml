@@ -10,6 +10,10 @@ env:
   REGION: asia-southeast1
   SERVICE_NAME: panthorium-backend
   REPOSITORY_NAME: panthorium
+  VERTEX_PROJECT_ID: ${{ vars.SENTINEL_VERTEX_PROJECT_ID || '' }}
+  VERTEX_LOCATION: ${{ vars.SENTINEL_VERTEX_LOCATION || '' }}
+  VERTEX_ENDPOINT_ID: ${{ vars.SENTINEL_VERTEX_ENDPOINT_ID || '' }}
+  VERTEX_MODEL: ${{ vars.SENTINEL_VERTEX_MODEL || 'sentinel-v3' }}
 
 jobs:
   deploy:
@@ -19,6 +23,18 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Validate optional Vertex endpoint settings
+        run: |
+          set -euo pipefail
+          configured=0
+          for name in VERTEX_PROJECT_ID VERTEX_LOCATION VERTEX_ENDPOINT_ID; do
+            if [ -n "${!name}" ]; then configured=$((configured + 1)); fi
+          done
+          if [ "$configured" -ne 0 ] && [ "$configured" -ne 3 ]; then
+            echo "::error::Set all three repository variables SENTINEL_VERTEX_PROJECT_ID, SENTINEL_VERTEX_LOCATION, and SENTINEL_VERTEX_ENDPOINT_ID, or leave all three empty."
+            exit 1
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -62,11 +78,17 @@ jobs:
       - name: Deploy to Cloud Run
         run: |
           IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+          ENV_VARS="^@^NODE_ENV=production@HOST=0.0.0.0@AI_PRIORITY=vertex,groq,openai,gemini,anthropic"
+          if [ -n "$VERTEX_PROJECT_ID" ]; then
+            ENV_VARS="$ENV_VARS@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL"
+          fi
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image "$IMAGE_URI" \
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
             --port 8787 \
-            --update-env-vars NODE_ENV=production,HOST=0.0.0.0 \
+            --min-instances=0 \
+            --cpu-throttling \
+            --update-env-vars="$ENV_VARS" \
             --quiet

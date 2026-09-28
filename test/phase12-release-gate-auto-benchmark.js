@@ -10,21 +10,21 @@ const shadowVersion = {
   state: 'shadow',
   shadowSamples: 3,
   shadowScore: 94,
-  metadata: { acceptanceScenario: true }
+  metadata: { acceptanceScenario: true, measuredShadow: { schema: 1, sampleCount: 3, worstRegression: 0, comparisons: [{ candidateScore: 94 }, { candidateScore: 94 }, { candidateScore: 94 }] } }
 };
 const rolledVersion = {
   versionId: 'rolled-ready',
   state: 'rolled_back',
   shadowSamples: 3,
   shadowScore: 94,
-  metadata: { acceptanceScenario: true, rollbackReason: 'baseline_regression' }
+  metadata: { acceptanceScenario: true, rollbackReason: 'baseline_regression', measuredShadow: { schema: 1, sampleCount: 3, worstRegression: 0, comparisons: [{ candidateScore: 94 }, { candidateScore: 94 }, { candidateScore: 94 }] } }
 };
 const recoveryVersion = {
   versionId: 'recovery-ready',
   state: 'shadow',
   shadowSamples: 3,
   shadowScore: 93,
-  metadata: { recoveryOf: 'rolled-ready' }
+  metadata: { recoveryOf: 'rolled-ready', measuredShadow: { schema: 1, sampleCount: 3, worstRegression: 0, comparisons: [{ candidateScore: 93 }, { candidateScore: 93 }, { candidateScore: 93 }] } }
 };
 
 (async () => {
@@ -54,7 +54,7 @@ const recoveryVersion = {
         runId: 'auto-bench-1',
         durationMs: 7,
         providers: ['groq'],
-        cases: cases.map((item) => ({ caseId: item.id, competitors: [] })),
+        cases: cases.map((item) => ({ caseId: item.id, competitors: [{provider:'sentinel',score:91,judges:[{provider:'a'},{provider:'b'}]}] })),
         leaderboard: [{ name: 'Sentinel AI', score: 91, wins: 3, cases: cases.length }],
         summary: { sentinel: { rank: 1, score: 91, wins: 3, cases: cases.length, passed: true } }
       };
