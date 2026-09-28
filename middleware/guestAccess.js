@@ -5,7 +5,7 @@ const { requireAuth } = require('./auth');
 // to authenticated guests; hiding a launcher alone is not an access boundary.
 const restrictedPaths = [
   '/api/settings', '/api/security', '/api/auth/users', '/api/ai', '/api/agent',
-  '/api/training', '/api/production', '/api/governance', '/api/sentinel-control', '/api/integrations'
+  '/api/training', '/api/production', '/api/governance', '/api/sentinel-control', '/api/integrations', '/api/biometrics'
 ];
 function denyGuest(req, res, next) {
   if (req.user?.roles?.includes('guest')) return res.status(403).json({ ok: false, error: 'guest_feature_restricted' });
