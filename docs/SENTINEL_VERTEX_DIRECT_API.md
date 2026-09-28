@@ -27,6 +27,14 @@ workflow leaves Vertex unconfigured if the first three values are all empty,
 and rejects a partial configuration. The configured endpoint is ordered first
 in the provider priority list.
 
+For the `main` Cloud Run deployment, set the repository-level Actions variables
+`SENTINEL_VERTEX_PROJECT_ID`, `SENTINEL_VERTEX_LOCATION`, and
+`SENTINEL_VERTEX_ENDPOINT_ID`; optionally set `SENTINEL_VERTEX_MODEL`. The
+production workflow applies these values together when all three are present.
+If they are all empty, it preserves any existing legacy `VERTEX_*` service
+settings. The production Cloud Run service account must have Vertex AI User on
+the project that owns the tuned endpoint.
+
 Use the endpoint for the checkpoint selected as the tuned model's default in
 Model Registry. Copy the endpoint location and endpoint ID from that endpoint's
 details. Don't put credentials in the browser, the repository, or a client-side

@@ -43,12 +43,14 @@ class ProviderManager {
     this.keys = { groq: process.env.GROQ_API_KEY || "", openai: process.env.OPENAI_API_KEY || "", gemini: process.env.GEMINI_API_KEY || "", anthropic: process.env.ANTHROPIC_API_KEY || "" };
     this.priority = (process.env.AI_PRIORITY || "vertex,groq,openai,gemini,anthropic").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
     this.vertex = {
-      project: process.env.SENTINEL_VERTEX_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || "",
-      location: process.env.SENTINEL_VERTEX_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || "",
-      endpointId: process.env.SENTINEL_VERTEX_ENDPOINT_ID || "",
+      // Keep the original Vertex variable names working during the main
+      // deployment migration; staging uses the explicit SENTINEL_* names.
+      project: process.env.SENTINEL_VERTEX_PROJECT_ID || process.env.VERTEX_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "",
+      location: process.env.SENTINEL_VERTEX_LOCATION || process.env.VERTEX_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || (process.env.VERTEX_ENDPOINT_ID ? "us" : ""),
+      endpointId: process.env.SENTINEL_VERTEX_ENDPOINT_ID || process.env.VERTEX_ENDPOINT_ID || "",
       maxOutputTokens: Math.max(128, Math.min(8192, Number(process.env.SENTINEL_VERTEX_MAX_OUTPUT_TOKENS) || 4096))
     };
-    this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite", anthropic: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001", vertex: process.env.SENTINEL_VERTEX_MODEL || "sentinel-v3" };
+    this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite", anthropic: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001", vertex: process.env.SENTINEL_VERTEX_MODEL || process.env.VERTEX_MODEL || "sentinel-v3" };
   }
   vertexConfigured() { return Boolean(this.vertex.project && this.vertex.location && this.vertex.endpointId); }
   available() { return this.priority.filter((p) => p === "vertex" ? this.vertexConfigured() : Boolean(this.keys[p])); }

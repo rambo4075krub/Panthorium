@@ -5,7 +5,11 @@ const assert = require('assert');
     SENTINEL_VERTEX_PROJECT_ID: process.env.SENTINEL_VERTEX_PROJECT_ID,
     SENTINEL_VERTEX_LOCATION: process.env.SENTINEL_VERTEX_LOCATION,
     SENTINEL_VERTEX_ENDPOINT_ID: process.env.SENTINEL_VERTEX_ENDPOINT_ID,
-    AI_PRIORITY: process.env.AI_PRIORITY
+    AI_PRIORITY: process.env.AI_PRIORITY,
+    VERTEX_PROJECT: process.env.VERTEX_PROJECT,
+    VERTEX_LOCATION: process.env.VERTEX_LOCATION,
+    VERTEX_ENDPOINT_ID: process.env.VERTEX_ENDPOINT_ID,
+    VERTEX_MODEL: process.env.VERTEX_MODEL
   };
   Object.assign(process.env, {
     SENTINEL_VERTEX_PROJECT_ID: 'test-project',
@@ -57,6 +61,21 @@ const assert = require('assert');
     const token = await overrideManager.vertexAccessToken();
     assert.equal(token, 'manual-direct-token');
     delete process.env.VERTEX_ACCESS_TOKEN;
+
+    // Production deployments can still have the original VERTEX_* settings.
+    delete process.env.SENTINEL_VERTEX_PROJECT_ID;
+    delete process.env.SENTINEL_VERTEX_LOCATION;
+    delete process.env.SENTINEL_VERTEX_ENDPOINT_ID;
+    process.env.VERTEX_PROJECT = 'legacy-project';
+    process.env.VERTEX_LOCATION = 'eu';
+    process.env.VERTEX_ENDPOINT_ID = 'legacy-endpoint';
+    process.env.VERTEX_MODEL = 'legacy-model';
+    const legacyManager = new ProviderManager();
+    assert.equal(legacyManager.vertexConfigured(), true);
+    assert.equal(legacyManager.vertex.project, 'legacy-project');
+    assert.equal(legacyManager.vertex.location, 'eu');
+    assert.equal(legacyManager.vertex.endpointId, 'legacy-endpoint');
+    assert.equal(legacyManager.models.vertex, 'legacy-model');
 
     console.log('Vertex tuned endpoint direct API tests passed');
   } finally {
