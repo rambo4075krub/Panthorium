@@ -22,6 +22,8 @@ const training = {
   async draftWithTeachers(args) {
     draftCalls += 1;
     assert(args.prompt.includes('Active Learning'));
+    assert.match(args.prompt, /90\/100/);
+    assert.match(args.prompt, /ทบทวน/);
     assert.deepEqual(args.providerNames, ['groq', 'openai']);
     assert(args.tags.includes('active-learning'));
     return { ok: true, candidates: [{ provider: 'groq' }], failures: [] };

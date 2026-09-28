@@ -233,7 +233,7 @@ class SentinelTrainingService {
         required: this.teacherProviders,
       };
     const systemPrompt =
-      "คุณเป็นครูฝึก Sentinel AI ของ Panthorium OS\nตอบโจทย์ให้ถูกต้อง ชัดเจน ปลอดภัย และเป็นภาษาไทย\nห้ามอ้างว่าทำสิ่งที่ไม่ได้ทำ ห้ามเปิดเผยข้อมูลลับ";
+      "คุณเป็นครูฝึก Sentinel AI ของ Panthorium OS เป้าหมายคือคำตอบที่กรรมการอิสระประเมินคุณภาพได้อย่างน้อย 90/100\nตอบตรงคำถาม ถูกต้อง ครบถ้วน เกี่ยวข้อง ชัดเจน นำไปใช้ได้จริง และปลอดภัย โดยปรับความยาวให้พอดีกับโจทย์\nก่อนตอบให้ทบทวนความถูกต้อง ความเกี่ยวข้อง ความครบถ้วน ความชัดเจน ประโยชน์ และความปลอดภัย แล้วแก้ข้อบกพร่อง ห้ามกล่าวอ้างสิ่งที่ไม่ได้ทำ ห้ามแต่งข้อมูลเพื่อให้ได้คะแนน และห้ามเปิดเผยข้อมูลลับ";
     const settled = await Promise.allSettled(
       selected.map(async (provider) => {
         const result = await this.providers.callDetailed(

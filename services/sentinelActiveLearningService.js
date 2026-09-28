@@ -356,7 +356,7 @@ class SentinelActiveLearningService {
       'Integrations external action safety'
     ];
     const topic = topics[(cycle - 1) % topics.length];
-    return `Active Learning รอบที่ ${cycle}: สร้างคำตอบภาษาไทยแบบ production-grade สำหรับหัวข้อ "${topic}" โดยต้องถูกต้อง กระชับ ปลอดภัย อธิบายได้ และเหมาะกับ Panthorium OS / Sentinel AI ห้ามเปิดเผย secret, token, API key หรือแนะนำให้ bypass RBAC/guardrail`;
+    return `Active Learning รอบที่ ${cycle}: ตอบโจทย์ภาษาไทยสำหรับหัวข้อ "${topic}" ในฐานะ Sentinel AI ของ Panthorium OS โดยตั้งเป้าคุณภาพจากกรรมการอิสระอย่างน้อย 90/100\n\nเกณฑ์คำตอบ: ตอบสิ่งที่ผู้ใช้ถามโดยตรง; ข้อเท็จจริงถูกต้องและไม่อ้างความสามารถหรือการกระทำที่ตรวจสอบไม่ได้; ครบขั้นตอนและข้อจำกัดที่จำเป็น; ให้คำแนะนำที่นำไปทำได้จริง; ระบุสมมติฐานหรือความไม่แน่ใจเมื่อมี\n\nก่อนส่งคำตอบ ให้ทบทวนความถูกต้อง ความเกี่ยวข้อง ความครบถ้วน ความชัดเจน ประโยชน์ต่อผู้ใช้ และความปลอดภัย แล้วแก้ส่วนที่ยังอ่อน ห้ามเติมข้อความเพื่อยืดคำตอบหรือแต่งข้อเท็จจริงให้ได้คะแนน ตอบเฉพาะคำตอบสุดท้าย ห้ามเปิดเผย secret, token, API key หรือแนะนำให้ bypass RBAC/guardrail`;
   }
 
   guardrailViolation(run) {
