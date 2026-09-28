@@ -154,47 +154,32 @@ class ProviderManager {
   }
   async callVertexTuned(systemPrompt, history) {
     const { project, location, endpointId, maxOutputTokens } = this.vertex;
-    const hosts = [];
-    if (process.env.VERTEX_HOST) {
-      hosts.push(process.env.VERTEX_HOST.startsWith("http") ? process.env.VERTEX_HOST : `https://${process.env.VERTEX_HOST}`);
-    }
-    if (location === "eu") {
-      hosts.push("https://eu-aiplatform.googleapis.com", "https://aiplatform.eu.rep.googleapis.com");
-    } else if (location === "us") {
-      hosts.push("https://us-aiplatform.googleapis.com", "https://aiplatform.us.rep.googleapis.com");
-    } else {
-      hosts.push(`https://${location}-aiplatform.googleapis.com`);
-    }
+    const host = process.env.VERTEX_HOST
+      ? (process.env.VERTEX_HOST.startsWith("http") ? process.env.VERTEX_HOST : `https://${process.env.VERTEX_HOST}`)
+      : (location === "eu" || location === "us"
+        ? `https://aiplatform.${location}.rep.googleapis.com`
+        : `https://${location}-aiplatform.googleapis.com`);
     const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: String(m.content || "") }] }));
-    let lastError;
-    for (const host of hosts) {
-      const url = `${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(location)}/endpoints/${encodeURIComponent(endpointId)}:generateContent`;
-      const request = async () => fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${await this.vertexAccessToken()}`,
-          "X-Goog-User-Project": String(project)
-        },
-        body: JSON.stringify({ systemInstruction: { parts: [{ text: systemPrompt }] }, contents, generationConfig: { temperature: 0.65, maxOutputTokens } }),
-        signal: AbortSignal.timeout(60000)
-      });
-      try {
-        const response = await fetchProvider(request);
-        const data = await response.json();
-        const text = (data.candidates?.[0]?.content?.parts || []).map((part) => part.text || "").join("").trim();
-        const usage = data.usageMetadata;
-        return {
-          text: text || null,
-          model: this.models.vertex,
-          usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null
-        };
-      } catch (err) {
-        lastError = err;
-        if (err.status !== 404) throw err;
-      }
-    }
-    throw lastError;
+    const url = `${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(location)}/endpoints/${encodeURIComponent(endpointId)}:generateContent`;
+    const request = async () => fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${await this.vertexAccessToken()}`,
+        "X-Goog-User-Project": String(project)
+      },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: systemPrompt }] }, contents, generationConfig: { temperature: 0.65, maxOutputTokens } }),
+      signal: AbortSignal.timeout(60000)
+    });
+    const response = await fetchProvider(request);
+    const data = await response.json();
+    const text = (data.candidates?.[0]?.content?.parts || []).map((part) => part.text || "").join("").trim();
+    const usage = data.usageMetadata;
+    return {
+      text: text || null,
+      model: this.models.vertex,
+      usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null
+    };
   }
   async streamDetailed(provider, systemPrompt, history, options = {}, onDelta = () => {}) {
     if (provider === "vertex") {
