@@ -23,6 +23,8 @@ jobs:
       OPENAI_SECRET: ${{ vars.STAGING_OPENAI_SECRET || 'panthorium-staging-openai-api-key' }}
       GEMINI_SECRET: ${{ vars.STAGING_GEMINI_SECRET || 'panthorium-staging-gemini-api-key' }}
       ANTHROPIC_SECRET: ${{ vars.STAGING_ANTHROPIC_SECRET || 'panthorium-staging-anthropic-api-key' }}
+      RESEND_SECRET: ${{ vars.STAGING_RESEND_SECRET || '' }}
+      EMAIL_FROM_ADDRESS: ${{ vars.STAGING_EMAIL_FROM || '' }}
       VERTEX_PROJECT: ${{ vars.STAGING_VERTEX_PROJECT_ID || '' }}
       VERTEX_LOCATION: ${{ vars.STAGING_VERTEX_LOCATION || '' }}
       VERTEX_ENDPOINT_ID: ${{ vars.STAGING_VERTEX_ENDPOINT_ID || '' }}
@@ -79,6 +81,11 @@ jobs:
             [[ "$secret" =~ ^[A-Za-z0-9_-]+$ ]]
             gcloud secrets describe "$secret" --project="$PROJECT" >/dev/null
           done
+          if [ -n "$RESEND_SECRET" ] || [ -n "$EMAIL_FROM_ADDRESS" ]; then
+            test -n "$RESEND_SECRET" && test -n "$EMAIL_FROM_ADDRESS"
+            [[ "$RESEND_SECRET" =~ ^[A-Za-z0-9_-]+$ ]]
+            gcloud secrets describe "$RESEND_SECRET" --project="$PROJECT" >/dev/null
+          fi
       - name: Build and deploy isolated staging
         run: |
           set -euo pipefail
@@ -90,6 +97,13 @@ jobs:
             --set-cloudsql-instances="$SQL_INSTANCE" \
             --update-env-vars="^@^NODE_ENV=production@HOST=0.0.0.0@TRUST_PROXY=1@DATABASE_SSL_MODE=disable@ALLOW_ELECTRON_ORIGIN=1@SENTINEL_AUTO_TRAINING=1@SENTINEL_AUTO_CAPTURE=0@SENTINEL_ACTIVE_LEARNING_NEVER=1@AI_PRIORITY=vertex,groq,openai,gemini@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@GROQ_MODEL=openai/gpt-oss-20b@OPENAI_MODEL=gpt-4o-mini@GEMINI_MODEL=gemini-3.5-flash-lite@ANTHROPIC_MODEL=claude-haiku-4-5-20251001@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=openai,gemini@SENTINEL_MIN_EVALUATORS=2@SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=1" \
             --update-secrets="DATABASE_URL=panthorium-staging-database-url:latest,JWT_SECRET=panthorium-staging-jwt:latest,ADMIN_PASSWORD=panthorium-staging-admin-password:latest,GROQ_API_KEY=$GROQ_SECRET:latest,OPENAI_API_KEY=$OPENAI_SECRET:latest,GEMINI_API_KEY=$GEMINI_SECRET:latest,ANTHROPIC_API_KEY=$ANTHROPIC_SECRET:latest" --quiet
+          if [ -n "$RESEND_SECRET" ]; then
+            gcloud run services update "$SERVICE" --project="$PROJECT" --region="$REGION" \
+              --update-secrets="RESEND_API_KEY=$RESEND_SECRET:latest" \
+              --update-env-vars="EMAIL_FROM=$EMAIL_FROM_ADDRESS" --quiet
+          else
+            echo "::warning::Email OTP is unavailable until STAGING_RESEND_SECRET and STAGING_EMAIL_FROM are configured."
+          fi
           URL=$(gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" --format='value(status.url)')
           # Keep the Cloud Run service URL and the installed Electron staging
           # URL in the exact CORS allowlist. Local origins are limited to the
