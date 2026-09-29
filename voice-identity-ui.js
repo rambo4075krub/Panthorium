@@ -5,7 +5,7 @@
 
   function getOS() { try { return typeof OS !== 'undefined' ? OS : null; } catch (_) { return null; } }
   function isAdminEnrollmentContext() { const auth = window.PanthoriumAuth; return auth?.isAdministrator?.() === true && auth?.isAdminEntry?.() === true; }
-  function canManageVoiceProfiles() { const auth = window.PanthoriumAuth; return !!auth && auth.isGuest?.() !== true && auth.hasPermission?.('settings') === true; }
+  function canManageVoiceProfiles() { const auth = window.PanthoriumAuth; return !!auth && (auth.isGuest?.() === true || auth.hasPermission?.('chat') === true || auth.hasPermission?.('settings') === true); }
   function notify(message) { try { if (typeof toast === 'function') toast(message); else console.info('[VoiceIdentity]', message); } catch (_) {} }
   function esc(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char])); }
   async function token() {
@@ -35,8 +35,8 @@
     let enrolled;
     try { enrolled = await profiles(); }
     catch (error) {
-      // A guest has no durable identity for enrollment. Voice is unavailable
-      // until the person signs in and enrolls with consent.
+      // Guest voice profiles are scoped to a random per-tab guest identity and
+      // automatically expire after 24 hours.
       if (error?.status === 403) return { required: true, matched: false, error: 'voice_enrollment_required' };
       return { required: true, matched: false, error: 'voice_verification_unavailable' };
     }
