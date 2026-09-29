@@ -139,7 +139,7 @@
       if (!registrationToken) throw new Error('email_verification_required');
       const confirmPassword = root.querySelector('[data-password-confirm]').value;
       if (password !== confirmPassword) throw new Error('password_mismatch');
-      const payload = { email, password, confirmPassword, rememberMe, deviceKey, ...(existingProfileId ? { existingProfileId } : { displayName: root.querySelector('[data-name]').value.trim(), subjectType: root.querySelector('[data-type]').value, relationship: root.querySelector('[data-relationship]').value.trim(), consent: root.querySelector('[data-consent]').checked, samples }) };
+      const payload = { email, password, confirmPassword, registrationToken, rememberMe, deviceKey, ...(existingProfileId ? { existingProfileId } : { displayName: root.querySelector('[data-name]').value.trim(), subjectType: root.querySelector('[data-type]').value, relationship: root.querySelector('[data-relationship]').value.trim(), consent: root.querySelector('[data-consent]').checked, samples }) };
       const result = await api('/api/auth/register/voice', { method: 'POST', body: JSON.stringify(payload) });
       window.PanthoriumAuth.acceptSession(result);
       await window.PanthoriumAuth.savePassword(email, password, rememberMe);
