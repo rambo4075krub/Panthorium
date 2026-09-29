@@ -4,6 +4,7 @@
 const TARGET_PATH=/^\/admin(?:\/|\.html)?$/;
 const APPS=[
   {id:'sentinel',icon:'🤖',label:'Sentinel AI',openers:['openSentinel']},
+  {id:'voice-identity',icon:'🎙️',label:'Voice Identity',role:'administrator',openers:['PanthoriumVoiceIdentity.open']},
   {id:'settings',icon:'⚙️',label:'ตั้งค่า',openers:['openSettings']},
   {id:'security',icon:'🛡️',label:'Security',openers:['PanthoriumSecurityDashboard.open','openSecurityDashboard'],launcherId:'phase3-security-start'},
   {id:'ai-platform',icon:'🧠',label:'AI Platform',openers:['PanthoriumAI.open'],launcherId:'phase4-ai-launcher'},
@@ -30,6 +31,7 @@ function openerReady(app){return (app.openers||[]).some(path=>typeof resolve(pat
 function removeLegacyFloatingLaunchers(){document.querySelectorAll('[data-production-intelligence="1"]').forEach(node=>{if(!node.closest('#sm-apps'))node.remove();});}
 async function openApp(app){
   closeMenu();
+  if(app.role&&!((OS?.state?.user?.roles||[]).includes(app.role))){notify(`${app.label} ใช้ได้เฉพาะผู้ดูแลระบบ`);return false;}
   const entry=window.PanthoriumWindowCatalog?.apps.find(item=>item.id===app.id);
   const commands=window.PanthoriumVoiceCommands;
   if(!entry||!commands){notify(`${app.label} ยังโหลดไม่เสร็จ`);return false;}
@@ -68,7 +70,7 @@ function renderDesktop(){
   if(!isTarget())return false;
   const desktop=document.getElementById('desktop-icons');if(!desktop)return false;
   ensureStyle();removeLegacyFloatingLaunchers();
-  const visibleApps=APPS.filter(app=>window.PanthoriumWindowCatalog?.allowed(window.PanthoriumWindowCatalog.apps.find(item=>item.id===app.id), typeof OS!=='undefined'?OS.state.user:null));
+  const visibleApps=APPS.filter(app=>(!app.role||(OS?.state?.user?.roles||[]).includes(app.role))&&window.PanthoriumWindowCatalog?.allowed(window.PanthoriumWindowCatalog.apps.find(item=>item.id===app.id), typeof OS!=='undefined'?OS.state.user:null));
   const fingerprint=visibleApps.map(app=>`${app.id}:${openerReady(app)?'ready':'pending'}`).join('|');
   desktop.className='desktop-icons staging-admin-desktop-v2';
   desktop.style.display='grid';
