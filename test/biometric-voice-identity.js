@@ -1,6 +1,5 @@
 const assert = require('assert');
 const { BiometricIdentityService } = require('../services/biometricIdentityService');
-const { GUEST_PROFILE_TTL_MS, isExpiredGuestProfile } = require('../services/biometricIdentityRepository');
 
 class Repository {
   constructor() { this.rows = []; }
@@ -14,10 +13,6 @@ const audio = suffix => `data:audio/webm;base64,${'A'.repeat(4100)}${suffix}`;
 const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed ? 1 : 0.01));
 
 (async () => {
-  const now = Date.now();
-  assert.equal(isExpiredGuestProfile({ ownerUserId: 'guest:tab-id', createdAt: new Date(now - GUEST_PROFILE_TTL_MS - 1).toISOString() }, now), true, 'guest voice profiles expire after 24h');
-  assert.equal(isExpiredGuestProfile({ ownerUserId: 'guest:tab-id', createdAt: new Date(now - GUEST_PROFILE_TTL_MS + 1000).toISOString() }, now), false, 'active guest profiles remain during the session window');
-  assert.equal(isExpiredGuestProfile({ ownerUserId: 'account-id', createdAt: new Date(0).toISOString() }, now), false, 'guest expiration does not remove account profiles');
   const originalFetch = global.fetch;
   let nextVector = vector(2);
   global.fetch = async () => ({ ok: true, json: async () => ({ signalPresent: true, embedding: nextVector }) });
@@ -30,6 +25,8 @@ const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed 
     assert.equal(user.encryptedTemplate, undefined);
     const family = await service.enroll({ ownerUserId: 'u1', actorRoles: ['user'], displayName: 'Family', subjectType: 'family', relationship: 'parent', consent: true, samples: [audio(1), audio(2), audio(3)] });
     assert.equal(family.subjectType, 'family');
+    const guestProfile = await service.enroll({ ownerUserId: 'guest:tab-id', actorRoles: ['guest'], displayName: 'Guest', subjectType: 'user', consent: true, samples: [audio(1), audio(2), audio(3)] });
+    assert.equal((await repository.list('guest:tab-id')).some(profile => profile.profileId === guestProfile.profileId), true, 'guest voice profiles remain available with no 24-hour expiry');
     assert.ok(repository.rows[0].encryptedTemplate && !repository.rows[0].encryptedTemplate.includes('0.01'));
     const accepted = await service.verify({ ownerUserId: 'u1', audio: audio(4) });
     assert.equal(accepted.matched, true);
