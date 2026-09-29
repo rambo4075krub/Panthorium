@@ -1533,11 +1533,6 @@
             if (row) { row.classList.add("active"); row.textContent = label; }
             if (announce) toast(label, kind === "processing" || kind === "unresponsive" ? 10000 : 2500);
         };
-        if (!recorderSupported && document.body?.dataset.voiceIdentityRequired === "true") {
-            status("unsupported", "เบราว์เซอร์นี้ไม่รองรับการตรวจเสียงผู้พูด");
-            button.onclick = () => status("unsupported", "เบราว์เซอร์นี้ไม่รองรับการตรวจเสียงผู้พูด");
-            return;
-        }
         if (!SR && !recorderSupported) {
             status("unsupported", "ไม่รองรับคำสั่ง");
             button.onclick = () => status("unsupported", "ไม่รองรับคำสั่ง");
@@ -1627,8 +1622,7 @@
             };
             const transcribeRecorderBlob = async blob => {
                 const audio = await toDataUrl(blob);
-                if (!window.PanthoriumVoiceIdentity?.authorizeAudio) throw new Error("voice_verification_unavailable");
-                const authorization = await window.PanthoriumVoiceIdentity.authorizeAudio(audio);
+                const authorization = await window.PanthoriumVoiceIdentity?.authorizeAudio?.(audio);
                 if (authorization?.required && !authorization.matched) throw new Error(authorization.error || "voice_not_authorized");
                 const transcribeDirect = async () => {
                     const base = OS.config.backendUrl.replace(/\/$/, "");
@@ -2505,8 +2499,7 @@
             for (let offset = 0; offset < bytes.length; offset += step) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + step, bytes.length)));
             const mimeType = String(blob.type || chatRecorderMime).split(";")[0] || "audio/webm";
             const audio = "data:" + mimeType + ";base64," + btoa(binary);
-            if (!window.PanthoriumVoiceIdentity?.authorizeAudio) throw new Error("voice_verification_unavailable");
-            const authorization = await window.PanthoriumVoiceIdentity.authorizeAudio(audio);
+            const authorization = await window.PanthoriumVoiceIdentity?.authorizeAudio?.(audio);
             if (authorization?.required && !authorization.matched) throw new Error(authorization.error || "voice_not_authorized");
             const base = OS.config.backendUrl.replace(/\/$/, "");
             const post = async () => {
@@ -2697,10 +2690,6 @@
                     toast(denied ? "กรุณาอนุญาตไมโครโฟนให้ Panthorium Browser" : "เปิดไมโครโฟนไม่สำเร็จ");
                     window.PanthoriumVoice?.resume();
                 }
-                return;
-            }
-            if (!chatRecorderOk && document.body?.dataset.voiceIdentityRequired === "true") {
-                toast("เบราว์เซอร์นี้ไม่รองรับการตรวจเสียงผู้พูด");
                 return;
             }
             if (!recognition) {

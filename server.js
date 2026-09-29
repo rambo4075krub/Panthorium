@@ -173,7 +173,7 @@ app.use("/api/agent/knowledge", createKnowledgeRouter(authService, agentKnowledg
 app.use("/api/agent/orchestration", createOrchestrationRouter(authService, multiAgent));
 app.use("/api/integrations", createIntegrationsRouter(authService, integrations));
 app.use("/api/production", createProductionRouter(authService, productionIntelligence));
-app.use("/api", createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler, biometrics));
+app.use("/api", createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler, agentAutomation));
 
 const frontendCandidates = [path.join(__dirname, ".."), __dirname];
 const frontendRoot = frontendCandidates.find((directory) => fs.existsSync(path.join(directory, "sentinel.html"))) || __dirname;
@@ -209,7 +209,6 @@ for (const script of shellScripts) {
 
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
-  html = html.replace('<body>', '<body data-voice-identity-required="true">');
   const version = "external-apps-v1";
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
