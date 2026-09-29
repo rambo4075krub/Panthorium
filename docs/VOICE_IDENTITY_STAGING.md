@@ -10,7 +10,10 @@ Do not present `signalPresent` as liveness to users.
 The backend encrypts enrolled templates with `BIOMETRIC_TEMPLATE_KEY` and
 stores them per signed-in owner in Cloud SQL. The raw audio is decoded in
 memory in the speaker service and is not persisted. Enrollment requires
-explicit consent and 3–5 samples. `/api/speech/transcribe` now verifies a
+explicit consent and 3–5 samples. The registration screen shows a shuffled reading prompt for each
+12-second sample, for 36–60 seconds of total speech. The prompt is not
+transcribed or compared with the words spoken; it is sampling guidance, not a
+challenge-response liveness check. `/api/speech/transcribe` verifies a
 signed-in owner's enrolled voice before calling paid transcription. The UI
 also checks before STT. A guest or unenrolled account has no voice access;
 text access remains available. A registered voice never grants an account
