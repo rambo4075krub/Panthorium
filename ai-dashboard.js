@@ -64,6 +64,7 @@
     } catch (e) { status.textContent = e.message === 'authentication_required' ? 'กรุณาเข้าสู่ระบบใหม่เพื่อเปิด AI Platform' : `โหลดข้อมูลไม่สำเร็จ: ${e.message}`; }
   }
   function installLauncher() {
+    if (!(window.PanthoriumAuth?.isAdministrator?.() || (typeof OS !== 'undefined' && (OS.state.user?.roles || []).includes('operator')))) { document.getElementById('phase4-ai-launcher')?.remove(); return; }
     const menu = document.getElementById('sm-apps') || document.querySelector('.start-menu, #start-menu'); if (!menu || document.getElementById('phase4-ai-launcher')) return;
     const btn = document.createElement('button'); btn.id = 'phase4-ai-launcher'; btn.className = 'sm-app'; btn.innerHTML = '<div class="ico">🧠</div><span>AI Platform</span>'; btn.style.cssText = 'border:0;background:transparent;color:inherit;font:inherit'; btn.onclick = () => { openDashboard(); try { closeStartMenu(); } catch (_) {} }; menu.appendChild(btn);
   }

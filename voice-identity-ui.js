@@ -188,7 +188,7 @@
     const menu = document.getElementById('sm-apps') || document.querySelector('.start-menu, #start-menu');
     if (!canManageVoiceProfiles() || window.PanthoriumAuth?.isAdminEntry?.()) { document.getElementById('voice-identity-launcher')?.remove(); return !!menu; }
     if (!menu || document.getElementById('voice-identity-launcher')) return !!menu;
-    const button = document.createElement('button'); button.id = 'voice-identity-launcher'; button.className = 'sm-app'; button.style.cssText = 'border:0;background:transparent;color:inherit;font:inherit'; button.innerHTML = '<div class="ico">🎙️</div><span>Voice Identity</span>'; button.onclick = () => { open(); try { closeStartMenu(); } catch (_) {} }; menu.appendChild(button); return true;
+    const button = document.createElement('button'); button.id = 'voice-identity-launcher'; button.className = 'sm-app'; button.style.cssText = 'border:0;background:transparent;color:inherit;font:inherit'; button.innerHTML = '<div class="ico">🎙️</div><span>Voice Identity</span>'; button.onclick = () => { open(); try { closeStartMenu(); } catch (_) {} }; menu.appendChild(button); window.dispatchEvent(new CustomEvent('panthorium:apps-changed',{detail:{app:'voice-identity'}})); return true;
   }
   function openLogin() { open(); setTimeout(() => document.querySelector('#panthorium-voice-identity [data-login-email]')?.focus(), 0); }
   window.PanthoriumVoiceIdentity = { open, openLogin, refresh, authorizeAudio, profiles };

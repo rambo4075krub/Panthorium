@@ -5,7 +5,7 @@ const { JSDOM } = require('jsdom');
 const source = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const admin = { roles: ['administrator'], permissions: ['chat', 'settings', 'system:read', 'sentinel:command'] };
 const guest = { roles: ['guest'], permissions: ['chat', 'system:read'] };
-const regularUser = { roles: [], permissions: ['chat', 'system:read'] };
+const regularUser = { roles: [], permissions: ['chat', 'system:read', 'settings', 'sentinel:command'] };
 
 async function scenario(role, desktop, legacy = false, adminEntry = role === 'admin') {
   const dom = new JSDOM(source('sentinel.html'), { url: 'https://panthorium.net' + (adminEntry ? '/admin' : '/'), runScripts: 'outside-only', pretendToBeVisual: true });
@@ -40,6 +40,12 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
     w.PanthoriumUILayout.sync();
     w.PanthoriumAccessShell.sync();
     if (desktop) await w.PanthoriumAccessShell.refreshUpdateStatus(true);
+    if (role !== 'admin') {
+      const lateLauncher = w.document.createElement('button'); lateLauncher.id = 'phase6-automation-launcher'; lateLauncher.textContent = 'Agent Automation';
+      w.document.getElementById('sm-apps').appendChild(lateLauncher);
+      await new Promise(resolve => w.setTimeout(resolve, 40));
+      assert.deepEqual([...w.document.querySelectorAll('#sm-apps > *')].map(el => el.querySelector('span')?.textContent.trim() || el.textContent.trim()), ['Sentinel AI', 'Voice Identity'], 'late module injection cannot expand a non-staff Start Menu');
+    }
     if (role === 'admin') {
       const icons = [...w.document.querySelectorAll('#desktop-icons [data-app-id]')];
       assert.equal(icons.length, 14, 'every admin icon is on the desktop on production hosts too');

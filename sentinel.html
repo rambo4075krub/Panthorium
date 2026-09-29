@@ -1254,7 +1254,9 @@
 
     async function requestRemoteChunk(text, lang) {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), Math.max(12000, Math.min(30000, String(text).length * 180)));
+        // The server gives neural TTS two bounded attempts (up to 40s total).
+        // Leave enough time for that before aborting and starting a duplicate request.
+        const timeout = setTimeout(() => controller.abort(), Math.max(45000, Math.min(60000, String(text).length * 260)));
         try {
             const base = OS.config.backendUrl.replace(/\/$/, "");
             const response = await authorizedFetch(base + "/api/speech", {
@@ -1301,7 +1303,7 @@
             };
             const cancel = () => finish(false);
             cancelRemotePlayback = cancel;
-            const timeout = setTimeout(() => finish(false), Math.max(12000, Math.min(30000, String(text).length * 180)));
+            const timeout = setTimeout(() => finish(false), Math.max(45000, Math.min(90000, String(text).length * 500)));
             (async () => {
                 try {
                     audio.pause();
@@ -1420,11 +1422,21 @@
         // Start every neural request together. Fetching only one chunk ahead
         // still left a long silence when a short word finished before the next
         // network response arrived.
-        const preparedRemotePromises = chunks.map(chunk => usesMaleNeural(chunk) ? requestRemoteChunk(chunk.text, chunk.lang) : Promise.resolve(null));
+        const preparedRemotePromises = chunks.map(() => Promise.resolve(null));
+        let nextRemoteChunk = 0;
+        const prefetchRemote = currentIndex => {
+            const through = Math.min(chunks.length - 1, currentIndex + 2);
+            while (nextRemoteChunk <= through) {
+                const index = nextRemoteChunk++;
+                if (usesMaleNeural(chunks[index])) preparedRemotePromises[index] = requestRemoteChunk(chunks[index].text, chunks[index].lang);
+            }
+        };
         const releasePendingRemote = startIndex => preparedRemotePromises.slice(startIndex).forEach(promise => promise.then(releaseRemoteChunk));
+        prefetchRemote(-1);
         for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
             const chunk = chunks[chunkIndex];
             const preparedRemote = await preparedRemotePromises[chunkIndex];
+            prefetchRemote(chunkIndex);
             if (speechRun !== activeSpeechRun) {
                 releaseRemoteChunk(preparedRemote);
                 releasePendingRemote(chunkIndex + 1);

@@ -17,7 +17,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
 
 (async () => {
   const synthesized = [], conversations = [], requests = [], playback = [], revoked = [], recognizers = [];
-  let failProvider = false, failSpeech = false, blockPlayback = false, rejectOnce = '', rejectAlways = '', refreshOK = true, playing = false, chatFailure = null;
+  let failProvider = false, failSpeech = false, blockPlayback = false, rejectOnce = '', rejectAlways = '', refreshOK = true, playing = false, chatFailure = null, ttsInFlight = 0, maxTtsInFlight = 0, fakeTts = false;
   // No network access to an AI or speech provider in CI.
   require('../services/sentinelSpeechAudio').synthesizeSentinelMaleVoice = async (text, lang) => {
     if (failSpeech) throw new Error('fixture TTS outage');
@@ -74,6 +74,12 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
         ? Response.json({ ok: true, user, accessToken: auth.signAccessToken(user) }) : Response.json({ ok: false }, { status: 401 });
       if (pathname === '/api/chat' && chatFailure) return chatFailure();
       if (pathname === rejectOnce || pathname === rejectAlways) { rejectOnce = ''; return Response.json({ ok: false, error: 'authentication_required' }, { status: 401 }); }
+      if (pathname === '/api/speech' && fakeTts) {
+        ttsInFlight += 1; maxTtsInFlight = Math.max(maxTtsInFlight, ttsInFlight);
+        await new Promise(resolve => setTimeout(resolve, 12));
+        ttsInFlight -= 1;
+        return new Response(Buffer.from('fixture-mp3'), { headers: { 'Content-Type': 'audio/mpeg', 'X-Sentinel-Voice-Profile': 'en-US-AndrewMultilingualNeural' } });
+      }
       return fetch(base + pathname, options);
     };
     const inline = [...w.document.scripts].find(script => script.textContent.includes('const OS =')).textContent;
@@ -146,6 +152,14 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     assert.equal(requests.slice(before).filter(r => r.pathname === '/api/chat').length, 1, 'failed refresh must not loop/retry as another user');
     assert.equal(playback.length, 5);
     rejectAlways = ''; refreshOK = true;
+    const longSpeech = 'สวัสดีครับ วันนี้ระบบเสียงกำลังทดสอบการตอบกลับต่อเนื่อง '.repeat(18);
+    const playbackBeforeLongSpeech = playback.length;
+    fakeTts = true;
+    assert.equal(await evaluate(`speak(${JSON.stringify(longSpeech)})`), true, 'a long answer should finish playing through sequential chunks');
+    fakeTts = false;
+    const longSpeechPlaybackCount = playback.length - playbackBeforeLongSpeech;
+    assert(maxTtsInFlight <= 2, 'TTS prefetch is bounded to avoid bursts when answers are long');
+    const playbackBeforeInvalidResponses = playback.length;
     for (const [response, expected] of [
       [() => Response.json({ ok: false }, { status: 403 }), /ไม่มีสิทธิ์/],
       [() => Response.json({ ok: false }, { status: 429 }), /ขีดจำกัด/],
@@ -155,7 +169,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     ]) {
       chatFailure = response; await utter('การเรียนรู้คืออะไร');
       assert.match(w.document.getElementById('toast').textContent, expected);
-      assert.equal(playback.length, 5, 'invalid/forbidden responses must not produce speech');
+      assert.equal(playback.length, playbackBeforeInvalidResponses, 'invalid/forbidden responses must not produce speech');
     }
     chatFailure = null;
 
@@ -176,7 +190,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     transcript(globalMic, 'การเรียนรู้คืออะไร'); globalMic.stop();
     for (let i = 0; i < 400 && w.PanthoriumVoice.state() !== 'listening'; i++) await tick();
     assert.equal(w.PanthoriumVoice.state(), 'listening');
-    assert.equal(playback.length, 6);
+    assert.equal(playback.length, 6 + longSpeechPlaybackCount);
     assert.equal(playing, false);
     w.PanthoriumVoice.pause();
 

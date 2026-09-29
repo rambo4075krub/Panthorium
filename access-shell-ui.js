@@ -10,6 +10,7 @@
   const staff = () => admin() || (user()?.roles || []).includes('operator');
   const admin = () => auth()?.isAdministrator?.() === true;
   let updateStatus = null, checking = null, installing = false, lastChecked = 0;
+  let appMenuObserver = null, observedAppMenu = null;
 
   function style() {
     if (document.getElementById('panthorium-access-style')) return;
@@ -25,6 +26,14 @@
     `;
     el.textContent += restrictedLaunchers.map(id => 'body[data-panthorium-role="guest"] #' + id).concat('body[data-panthorium-role="guest"] [data-production-intelligence="1"]').join(',') + '{display:none!important;}';
     document.head.appendChild(el);
+  }
+  function observeAppMenu() {
+    const apps = document.getElementById('sm-apps');
+    if (!apps || apps === observedAppMenu || typeof MutationObserver === 'undefined') return;
+    appMenuObserver?.disconnect();
+    observedAppMenu = apps;
+    appMenuObserver = new MutationObserver(() => scheduleSync());
+    appMenuObserver.observe(apps, { childList: true });
   }
   function newer(current, next) {
     const a = String(current).split('.').map(Number), b = String(next).split('.').map(Number);
@@ -111,13 +120,14 @@
     document.body.dataset.panthoriumBrowser = isDesktop ? 'desktop' : 'web';
     restrictedLaunchers.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = isStaff ? '' : 'none'; });
     const apps = document.getElementById('sm-apps');
+    observeAppMenu();
     if (apps && !isStaff) {
       const entries = [...apps.children];
       let sentinel = entries.find(el => /Sentinel AI/i.test(el.textContent || ''));
       let voice = entries.find(el => /Voice Identity/i.test(el.textContent || ''));
       if (!sentinel) { sentinel = document.createElement('button'); sentinel.type = 'button'; sentinel.className = 'sm-app'; sentinel.innerHTML = '<div class="ico">🤖</div><span>Sentinel AI</span>'; sentinel.onclick = () => window.PanthoriumVoiceCommands?.windowAction?.('open_sentinel'); }
       if (!voice) { voice = document.createElement('button'); voice.type = 'button'; voice.className = 'sm-app'; voice.innerHTML = '<div class="ico">🎙️</div><span>Voice Identity</span>'; voice.onclick = () => window.PanthoriumVoiceIdentity?.open?.(); }
-      apps.replaceChildren(sentinel, voice);
+      if (apps.children.length !== 2 || apps.children[0] !== sentinel || apps.children[1] !== voice) apps.replaceChildren(sentinel, voice);
     } else if (apps) menu.querySelectorAll('#sm-apps > *').forEach(el => { el.style.display = ''; });
     const settings = document.getElementById('btn-settings-quick');
     if (settings) settings.style.display = isStaff ? '' : 'none';
