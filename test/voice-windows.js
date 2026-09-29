@@ -76,6 +76,8 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     await w.PanthoriumAuth.login('admin', 'fixture');
     w.document.getElementById('desktop').classList.add('active');
     for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    w.PanthoriumStagingAdminDesktop.render();
+    assert(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), 'administrator desktop must show Voice Identity icon');
     w.PanthoriumAIStream.install();
     const command = text => w.callAI(text, { voiceMode: true });
     const isVisible = app => { const el = w.document.querySelector(app.selector); return !!el && w.getComputedStyle(el).display !== 'none'; };
@@ -86,6 +88,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       assert.equal(result.text, `เปิด ${app.label}`, 'on-screen result identifies the command');
       assert.equal(isVisible(app), true, `${app.label} did not appear`);
       const root = w.document.querySelector(app.selector);
+      if (app.id === 'voice-identity') assert(root.querySelector('[data-type] option[value="administrator"]'), 'administrator enrollment option appears on admin page');
       if (app.external) {
         assert.equal(root.querySelector('iframe'), null, `${app.label}: must not embed an iframe`);
         assert(root.querySelector('[data-external-open]'), `${app.label}: real-site opener missing`);
@@ -176,6 +179,11 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     client++;
     const replaceUser = user => { w.nextUser = user; w.nextToken = auth.signAccessToken(user); evaluate('OS.state.user = window.nextUser; OS.config.accessToken = window.nextToken;'); w.dispatchEvent(new w.CustomEvent('panthorium:auth-changed')); };
     replaceUser(guest);
+    w.PanthoriumStagingAdminDesktop.render();
+    assert.equal(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), null, 'guest desktop must not show Voice Identity');
+    assert.equal(await w.PanthoriumVoiceIdentity.open(), false, 'guest cannot open voice registration directly');
+    assert.equal(w.document.getElementById('panthorium-voice-identity'), null, 'guest direct call must not render the enrollment form');
+    assert.equal(w.document.getElementById('voice-identity-launcher'), null, 'guest must not see a Voice Identity start-menu launcher');
     for (const app of catalog.apps) {
       const result = await command(`เปิด ${app.aliases[0]}`);
       assert.equal(result.ok, catalog.allowed(app, guest), `${app.label}: guest permission`);
@@ -184,8 +192,17 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     }
     assert.equal((await w.PanthoriumVoiceCommands.windowAction('open_learning_lab')).ok, false, 'desktop/client calls also need permission');
     replaceUser({ ...admin, roles: ['operator'] });
+    w.PanthoriumStagingAdminDesktop.render();
+    assert.equal(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), null, 'operator must not see the administrator desktop icon');
+    await w.PanthoriumVoiceIdentity.open();
+    const operatorVoiceUi = w.document.getElementById('panthorium-voice-identity');
+    assert(operatorVoiceUi, 'authorized operator may manage user and family voice profiles');
+    assert.equal(operatorVoiceUi.querySelector('[data-type] option[value="administrator"]'), null, 'administrator voice enrollment is hidden from operators');
+    operatorVoiceUi.remove();
     assert.equal((await command('เปิด Security')).ok, false, 'settings permission alone does not grant administrator role');
     replaceUser(admin);
+    w.PanthoriumStagingAdminDesktop.render();
+    assert(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), 'administrator icon returns for administrator account');
     console.log('PASS: guest and operator denied administrator windows by server AND client');
 
     client++;
