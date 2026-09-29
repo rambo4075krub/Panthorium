@@ -65,7 +65,7 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
       if (role === 'guest') {
         assert.notEqual(w.getComputedStyle(w.document.getElementById('sm-apps')).display, 'none', 'Guest Start Menu remains available');
         const voiceLauncher = w.document.createElement('button'); voiceLauncher.id = 'voice-identity-launcher'; voiceLauncher.textContent = 'Voice Identity'; w.document.getElementById('sm-apps').appendChild(voiceLauncher);
-        assert.notEqual(w.getComputedStyle(voiceLauncher).style.display, 'none', 'Guest keeps Voice Identity in Start Menu');
+        assert.notEqual(w.getComputedStyle(voiceLauncher).display, 'none', 'Guest keeps Voice Identity in Start Menu');
         assert.equal(w.document.getElementById('btn-login').textContent, 'เข้าสู่ระบบ');
         assert.equal(w.document.getElementById('btn-logout').textContent, 'ออกจากระบบ');
         w.document.getElementById('btn-logout').onclick();
