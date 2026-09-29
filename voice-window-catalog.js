@@ -9,7 +9,7 @@
   const apps = [
     { id: 'sentinel', key: 'sentinel', label: 'Sentinel AI', permission: 'chat', aliases: ['Sentinel AI', 'เซนทิเนลเอไอ', 'แชต', 'แชท'], selector: '.window[data-id="sentinel"]', opener: 'openSentinel', windowId: 'sentinel' },
     { id: 'settings', key: 'settings', label: 'Settings', permission: 'settings', aliases: ['Settings', 'Setting', 'การตั้งค่า', 'ตั้งค่า'], selector: '.window[data-id="settings"]', opener: 'openSettings', windowId: 'settings' },
-    { id: 'voice-identity', key: 'voice_identity', label: 'Voice Identity', permission: 'settings', aliases: ['Voice Identity', 'จดจำเสียง', 'ลงทะเบียนเสียง', 'เสียงที่อนุญาต'], selector: '#panthorium-voice-identity', opener: 'PanthoriumVoiceIdentity.open', closeButton: '[data-close]', refresher: 'PanthoriumVoiceIdentity.refresh' },
+    { id: 'voice-identity', key: 'voice_identity', label: 'Voice Identity', permission: 'chat', aliases: ['Voice Identity', 'จดจำเสียง', 'ลงทะเบียนเสียง', 'เสียงที่อนุญาต'], selector: '#panthorium-voice-identity', opener: 'PanthoriumVoiceIdentity.open', closeButton: '[data-close]', refresher: 'PanthoriumVoiceIdentity.refresh' },
     { id: 'security', key: 'security_dashboard', label: 'Security', permission: 'settings', role: 'administrator', aliases: ['Security Dashboard', 'Security', 'ซีเคียวริตี้', 'แดชบอร์ดความปลอดภัย', 'ความปลอดภัย'], selector: '.window[data-id="security-dashboard"]', opener: 'PanthoriumSecurityDashboard.open', windowId: 'security-dashboard', refreshButton: '[data-p3-refresh]' },
     { id: 'ai-platform', key: 'ai_dashboard', label: 'AI Platform', permission: 'chat', aliases: ['AI Platform', 'AI Dashboard', 'เอไอแพลตฟอร์ม', 'แดชบอร์ดเอไอ', 'สถานะเอไอ', 'สถานะ Sentinel', 'สถานะเซนทิเนล'], selector: '#phase4-ai-dashboard', opener: 'PanthoriumAI.open', closeButton: '#ai-close', refresher: 'PanthoriumAI.refresh' },
     { id: 'sentinel-agent', key: 'sentinel_agent', label: 'Sentinel Agent', permission: 'chat', aliases: ['Sentinel Agent', 'เซนทิเนลเอเจนต์', 'เซนติเนลเอเจนท์'], selector: '#phase5-agent-ui', opener: 'PanthoriumAgent.open', closeButton: '#agent-close', refresher: 'PanthoriumAgent.history' },
@@ -28,7 +28,7 @@
     { id: 'external-instagram', key: 'external_instagram', label: 'Instagram', permission: 'chat', aliases: ['Instagram', 'อินสตาแกรม', 'ไอจี'], selector: '.window[data-id="external-instagram"]', opener: 'PanthoriumExternalApps.openInstagram', windowId: 'external-instagram', external: true, externalUrl: 'https://www.instagram.com/' },
     { id: 'external-x', key: 'external_x', label: 'X', permission: 'chat', aliases: ['X', 'Twitter', 'ทวิตเตอร์'], selector: '.window[data-id="external-x"]', opener: 'PanthoriumExternalApps.openX', windowId: 'external-x', external: true, externalUrl: 'https://x.com/' }
   ];
-  const guestRestrictedIds = new Set(['settings', 'voice-identity', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control']);
+  const guestRestrictedIds = new Set(['settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control']);
   function allowed(app, user) {
     return !!app && !((user?.roles || []).includes('guest') && guestRestrictedIds.has(app.id)) && (user?.permissions || []).includes(app.permission) && (!app.role || (user?.roles || []).includes(app.role));
   }
