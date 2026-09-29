@@ -38,7 +38,7 @@ const { createBiometricsRouter } = require('../routes/biometrics');
     global.fetch = async (url, options) => String(url).startsWith('https://speaker.example/')
       ? providerFailure ? { ok: false, status: 503, json: async () => ({}) } : { ok: true, json: async () => ({ signalPresent: true, embedding: Array.from({ length: 32 }, (_, i) => i === 0 ? 1 : 0.01) }) }
       : originalFetch(url, options);
-    const app = express(); app.use(express.json({ limit: '2mb' })); app.use(cookieParser());
+    const app = express(); app.use(express.json({ limit: '2mb' })); app.use(cookieParser()); app.use((req, res, next) => { req.requestId = 'test-request-id'; next(); });
     app.use('/api/auth', createAuthRouter(auth, { isProduction: false, refreshTokenDays: 30 }, null, voices, biometrics, otp));
     app.use('/api/biometrics', createBiometricsRouter(auth, biometrics));
     server = app.listen(0, '127.0.0.1');
@@ -53,6 +53,9 @@ const { createBiometricsRouter } = require('../routes/biometrics');
     assert.ok(verified.registrationToken);
     const audio = 'data:audio/webm;codecs=opus;base64,' + 'A'.repeat(4100);
     const body = { email: 'Owner@Example.com', password: 'secure-test-password', confirmPassword: 'mismatch-test-password', registrationToken: verified.registrationToken, rememberMe: true, deviceKey: 'a'.repeat(64), displayName: 'Owner', subjectType: 'user', consent: true, samples: [audio, audio, audio, audio] };
+    const missingProof = await post('/api/auth/register/voice', { ...body, confirmPassword: body.password, registrationToken: 'invalid-token' }, guest.accessToken);
+    assert.equal(missingProof.status, 400, 'registration rejects invalid verification tokens');
+    assert.equal((await missingProof.json()).requestId, 'test-request-id', 'email verification failures return a request ID');
     assert.equal((await post('/api/auth/register/voice', body, guest.accessToken)).status, 400, 'registration rejects mismatched password confirmation');
     body.confirmPassword = body.password;
     providerFailure = true;

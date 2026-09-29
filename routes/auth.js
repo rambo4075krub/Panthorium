@@ -80,7 +80,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
     const email = String(req.body?.email || "").trim().toLowerCase();
     const password = req.body?.password;
     if (password !== req.body?.confirmPassword) return res.status(400).json({ ok: false, error: "password_mismatch" });
-    if (!emailOtp?.verifyRegistrationToken(req.body?.registrationToken, req.user.sub, email)) return res.status(400).json({ ok: false, error: "email_verification_required" });
+    if (!emailOtp?.verifyRegistrationToken(req.body?.registrationToken, req.user.sub, email)) { const reason = typeof req.body?.registrationToken === "string" && req.body.registrationToken ? "invalid_expired_or_context_mismatch" : "missing_token"; console.warn("[AUTH] voice registration proof rejected (" + (req.requestId || "unknown") + "): " + reason); return res.status(400).json({ ok: false, error: "email_verification_required", requestId: req.requestId }); }
     if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ ok: false, error: "valid_email_required" });
     if (typeof password !== "string" || password.length < 10 || password.length > 256) return res.status(400).json({ ok: false, error: "invalid_password" });
     if (!req.body?.existingProfileId && !["user", "family"].includes(req.body?.subjectType)) return res.status(403).json({ ok: false, error: "administrator_role_required" });

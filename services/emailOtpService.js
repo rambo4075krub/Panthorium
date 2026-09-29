@@ -42,7 +42,7 @@ class EmailOtpService {
     if (!validEmail(email) || !/^\d{6}$/.test(String(code || ''))) throw new Error('invalid_otp');
     const key = `register:${guestOwnerId}:${email}`;
     if (!await this.repository.consume(key, this.hash(key, code))) throw new Error('invalid_otp');
-    return jwt.sign({ purpose: 'voice_registration', sub: guestOwnerId, email }, this.config.jwtSecret, { expiresIn: '20m', issuer: 'panthorium', audience: 'panthorium-registration' });
+    return jwt.sign({ purpose: 'voice_registration', sub: guestOwnerId, email }, this.config.jwtSecret, { expiresIn: '1h', issuer: 'panthorium', audience: 'panthorium-registration' });
   }
   verifyRegistrationToken(token, guestOwnerId, emailValue) {
     try {
