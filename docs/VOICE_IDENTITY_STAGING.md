@@ -15,7 +15,11 @@ explicit consent and 3–5 samples. The registration screen shows a shuffled rea
 transcribed or compared with the words spoken; it is sampling guidance, not a
 challenge-response liveness check. `/api/speech/transcribe` verifies a
 signed-in owner's enrolled voice before calling paid transcription. The UI
-also checks before STT. A guest or unenrolled account has no voice access;
+also checks before STT **when `BIOMETRIC_GATE_ENABLED=1`**. The flag defaults
+to 0 so a failed model build or uncalibrated threshold cannot interrupt the
+existing staging microphone. Enroll and evaluate consented voices first; then
+enable the flag in a separate staging revision. With the gate enabled, a guest
+or unenrolled account has no voice access;
 text access remains available. A registered voice never grants an account
 role or administrator permission.
 

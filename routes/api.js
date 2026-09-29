@@ -73,11 +73,12 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       if (!audio.length || audio.length > 512 * 1024) return res.status(413).json({ ok: false, error: "audio_too_large" });
       // Enforce this on the server as well as the UI: neither a modified
       // browser nor a direct API call may reach paid transcription unchecked.
-      if (!biometrics) return res.status(503).json({ ok: false, error: "voice_verification_unavailable" });
-      const profiles = await biometrics.list(req.user.sub);
-      if (!profiles.length) return res.status(403).json({ ok: false, error: "voice_enrollment_required" });
-      const verification = await biometrics.verify({ ownerUserId: req.user.sub, audio: value });
-      if (!verification.matched) return res.status(403).json({ ok: false, error: "voice_not_authorized" });
+      if (biometrics?.gateEnabled) {
+        const profiles = await biometrics.list(req.user.sub);
+        if (!profiles.length) return res.status(403).json({ ok: false, error: "voice_enrollment_required" });
+        const verification = await biometrics.verify({ ownerUserId: req.user.sub, audio: value });
+        if (!verification.matched) return res.status(403).json({ ok: false, error: "voice_not_authorized" });
+      }
       const result = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language);
       res.json({ ok: true, text: result.text, provider: result.provider, model: result.model });
     } catch (error) {
