@@ -32,18 +32,38 @@ class BiometricIdentityService {
   decrypt(value) { if (!this.key) throw new Error('biometric_encryption_not_configured'); const [iv, tag, body] = String(value).split('.'); const decipher = crypto.createDecipheriv('aes-256-gcm', this.key, Buffer.from(iv, 'base64url')); decipher.setAuthTag(Buffer.from(tag, 'base64url')); return JSON.parse(Buffer.concat([decipher.update(Buffer.from(body, 'base64url')), decipher.final()]).toString('utf8')); }
   async extract(audio) {
     if (!this.providerUrl) throw new Error('speaker_verification_not_configured');
-    const headers = { 'Content-Type': 'application/json' };
-    if (this.providerToken) headers.Authorization = `Bearer ${this.providerToken}`;
-    else {
-      // The speaker service is private Cloud Run. Its audience is its root URL,
-      // not the /embed path. No user audio is sent if identity auth fails.
+    const requestUrl = `${this.providerUrl}/embed`;
+    let result;
+    if (this.providerToken) {
+      const response = await fetch(requestUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.providerToken}` },
+        body: JSON.stringify({ audio }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!response.ok) throw new Error(`speaker_verification_http_${response.status}`);
+      result = await response.json();
+    } else {
+      // Let IDTokenClient make the request so it attaches the Google-signed
+      // Authorization header itself. The token audience is the receiving
+      // service root URL, not the /embed path.
       const { GoogleAuth } = require('google-auth-library');
       const client = await new GoogleAuth().getIdTokenClient(this.providerUrl);
-      Object.assign(headers, await client.getRequestHeaders());
+      try {
+        const response = await client.request({
+          url: requestUrl,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          data: { audio },
+          timeout: 30000,
+        });
+        result = response.data;
+      } catch (error) {
+        const status = Number(error?.response?.status);
+        if (status) throw new Error(`speaker_verification_http_${status}`);
+        throw error;
+      }
     }
-    const response = await fetch(`${this.providerUrl}/embed`, { method: 'POST', headers, body: JSON.stringify({ audio }), signal: AbortSignal.timeout(30000) });
-    if (!response.ok) throw new Error(`speaker_verification_http_${response.status}`);
-    const result = await response.json();
     // signalPresent means sufficient non-silent audio. It is not proof that
     // the recording is live; replay resistance requires a separate mechanism.
     if (result?.signalPresent !== true && result?.live !== true) throw new Error('voice_signal_missing');
