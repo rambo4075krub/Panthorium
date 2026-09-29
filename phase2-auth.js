@@ -45,9 +45,18 @@
     if (loginScreen) { loginScreen.classList.remove('active'); loginScreen.style.display = 'none'; }
     desktop?.classList.add('active'); OS.state.loggedIn = true; OS.state.verified = true; updateIdentityUI(); setTimeout(notifyAuthChanged, 100);
   }
+  function stableGuestSessionId() {
+    const pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    try {
+      const key = 'panthorium.guest.voice-session.v1';
+      let id = window.sessionStorage.getItem(key);
+      if (!pattern.test(id || '')) { id = window.crypto?.randomUUID?.(); if (id) window.sessionStorage.setItem(key, id); }
+      return pattern.test(id || '') ? id : undefined;
+    } catch (_) { return undefined; }
+  }
   async function guestSession() {
     const base = OS.config.backendUrl.replace(/\/$/, '');
-    const res = await fetch(base + '/api/auth/guest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', credentials: 'include' });
+    const res = await fetch(base + '/api/auth/guest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guestSessionId: stableGuestSessionId() }), credentials: 'include' });
     if (!res.ok) throw new Error('guest_auth_failed'); const data = await res.json(); OS.config.accessToken = data.accessToken || ''; OS.state.user = data.user || null; updateIdentityUI(); closeForbiddenWindows(); notifyAuthChanged(); return data;
   }
   async function refreshSession() {
