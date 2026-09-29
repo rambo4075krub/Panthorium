@@ -19,7 +19,15 @@ class BiometricIdentityService {
   }
   async init() { await this.repository.init(); }
   status() { return { configured: Boolean(this.providerUrl && this.key), gateEnabled: this.gateEnabled, providerConfigured: Boolean(this.providerUrl), encryptionConfigured: Boolean(this.key), minEnrollmentSamples: 3, maxEnrollmentSamples: 5, allowedSubjects: [...TYPES] }; }
-  validateAudio(audio) { return typeof audio === 'string' && /^data:audio\/[a-z0-9.+-]+;base64,/i.test(audio) && audio.length >= 4000 && audio.length <= 1400000; }
+  validateAudio(audio) {
+    if (typeof audio !== 'string' || audio.length < 4000 || audio.length > 1400000) return false;
+    const comma = audio.indexOf(',');
+    if (comma < 0) return false;
+    // MediaRecorder commonly returns audio/webm;codecs=opus. Keep codec
+    // parameters in the MIME header while still requiring a base64 data URL.
+    const header = audio.slice(0, comma);
+    return /^data:audio\/[a-z0-9.+-]+(?:;[a-z0-9!#$&^_.+-]+=[a-z0-9!#$&^_.+-]+)*;base64$/i.test(header);
+  }
   encrypt(template) { if (!this.key) throw new Error('biometric_encryption_not_configured'); const iv = crypto.randomBytes(12); const cipher = crypto.createCipheriv('aes-256-gcm', this.key, iv); const body = Buffer.concat([cipher.update(JSON.stringify(template)), cipher.final()]); return [iv.toString('base64url'), cipher.getAuthTag().toString('base64url'), body.toString('base64url')].join('.'); }
   decrypt(value) { if (!this.key) throw new Error('biometric_encryption_not_configured'); const [iv, tag, body] = String(value).split('.'); const decipher = crypto.createDecipheriv('aes-256-gcm', this.key, Buffer.from(iv, 'base64url')); decipher.setAuthTag(Buffer.from(tag, 'base64url')); return JSON.parse(Buffer.concat([decipher.update(Buffer.from(body, 'base64url')), decipher.final()]).toString('utf8')); }
   async extract(audio) {
