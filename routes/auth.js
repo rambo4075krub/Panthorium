@@ -67,7 +67,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
     }
   });
   router.post("/password/reset", limiter, async (req, res, next) => {
-    try { await emailOtp.resetPassword(req.body?.email, req.body?.code, req.body?.password); res.json({ ok: true }); }
+    try { if (req.body?.password !== req.body?.confirmPassword) return res.status(400).json({ ok: false, error: "password_mismatch" }); await emailOtp.resetPassword(req.body?.email, req.body?.code, req.body?.password); res.json({ ok: true }); }
     catch (error) {
       if (["invalid_otp", "invalid_password"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
       next(error);
@@ -79,6 +79,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
     if (!biometrics || !biometricRepository) return res.status(503).json({ ok: false, error: "registration_unavailable" });
     const email = String(req.body?.email || "").trim().toLowerCase();
     const password = req.body?.password;
+    if (password !== req.body?.confirmPassword) return res.status(400).json({ ok: false, error: "password_mismatch" });
     if (!emailOtp?.verifyRegistrationToken(req.body?.registrationToken, req.user.sub, email)) return res.status(400).json({ ok: false, error: "email_verification_required" });
     if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ ok: false, error: "valid_email_required" });
     if (typeof password !== "string" || password.length < 10 || password.length > 256) return res.status(400).json({ ok: false, error: "invalid_password" });
@@ -99,7 +100,8 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
     } catch (error) {
       if (["valid_email_required", "invalid_password", "invalid_display_name", "invalid_subject_type", "biometric_consent_required", "invalid_voice_samples", "voice_samples_do_not_match", "device_key_required"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
       if (error.message === "email_exists") return res.status(409).json({ ok: false, error: error.message });
-      next(error);
+      console.error("[AUTH] voice registration failed (" + (req.requestId || "unknown") + "): " + error.message);
+      res.status(503).json({ ok: false, error: "voice_registration_unavailable", requestId: req.requestId });
     }
   });
 

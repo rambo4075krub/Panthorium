@@ -34,8 +34,9 @@ const { createBiometricsRouter } = require('../routes/biometrics');
     assert.equal(await otpRepository.consume('attempts:test', 'correct', 1000010), false, 'five wrong attempts invalidate OTP');
     assert.equal(await otpRepository.issue('expired:test', 'correct', 1000000), true);
     assert.equal(await otpRepository.consume('expired:test', 'correct', 1600001), false, 'OTP expires after ten minutes');
+    let providerFailure = false;
     global.fetch = async (url, options) => String(url).startsWith('https://speaker.example/')
-      ? { ok: true, json: async () => ({ signalPresent: true, embedding: Array.from({ length: 32 }, (_, i) => i === 0 ? 1 : 0.01) }) }
+      ? providerFailure ? { ok: false, status: 503, json: async () => ({}) } : { ok: true, json: async () => ({ signalPresent: true, embedding: Array.from({ length: 32 }, (_, i) => i === 0 ? 1 : 0.01) }) }
       : originalFetch(url, options);
     const app = express(); app.use(express.json({ limit: '2mb' })); app.use(cookieParser());
     app.use('/api/auth', createAuthRouter(auth, { isProduction: false, refreshTokenDays: 30 }, null, voices, biometrics, otp));
@@ -51,7 +52,14 @@ const { createBiometricsRouter } = require('../routes/biometrics');
     const verified = await (await post('/api/auth/email/otp/verify', { email: 'owner@example.com', code: deliveredCode }, guest.accessToken)).json();
     assert.ok(verified.registrationToken);
     const audio = 'data:audio/webm;codecs=opus;base64,' + 'A'.repeat(4100);
-    const body = { email: 'Owner@Example.com', password: 'secure-test-password', registrationToken: verified.registrationToken, rememberMe: true, deviceKey: 'a'.repeat(64), displayName: 'Owner', subjectType: 'user', consent: true, samples: [audio, audio, audio, audio] };
+    const body = { email: 'Owner@Example.com', password: 'secure-test-password', confirmPassword: 'mismatch-test-password', registrationToken: verified.registrationToken, rememberMe: true, deviceKey: 'a'.repeat(64), displayName: 'Owner', subjectType: 'user', consent: true, samples: [audio, audio, audio, audio] };
+    assert.equal((await post('/api/auth/register/voice', body, guest.accessToken)).status, 400, 'registration rejects mismatched password confirmation');
+    body.confirmPassword = body.password;
+    providerFailure = true;
+    const unavailable = await post('/api/auth/register/voice', body, guest.accessToken);
+    assert.equal(unavailable.status, 503, 'speaker service errors are retryable registration failures');
+    assert.equal((await unavailable.json()).error, 'voice_registration_unavailable');
+    providerFailure = false;
     const createdResponse = await post('/api/auth/register/voice', body, guest.accessToken);
     assert.equal(createdResponse.status, 201);
     const created = await createdResponse.json();
@@ -74,7 +82,8 @@ const { createBiometricsRouter } = require('../routes/biometrics');
     assert.equal((await post('/api/auth/password/forgot', { email: 'owner@example.com' })).status, 202);
     const resetCode = deliveredCode;
     assert.equal((await post('/api/auth/password/reset', { email: 'owner@example.com', code: '1234567', password: 'new-secure-password' })).status, 400);
-    assert.equal((await post('/api/auth/password/reset', { email: 'owner@example.com', code: resetCode, password: 'new-secure-password' })).status, 200);
+    assert.equal((await post('/api/auth/password/reset', { email: 'owner@example.com', code: resetCode, password: 'new-secure-password', confirmPassword: 'different-password' })).status, 400, 'reset rejects mismatched confirmation without consuming the OTP');
+    assert.equal((await post('/api/auth/password/reset', { email: 'owner@example.com', code: resetCode, password: 'new-secure-password', confirmPassword: 'new-secure-password' })).status, 200);
     assert.equal((await post('/api/auth/password/reset', { email: 'owner@example.com', code: resetCode, password: 'another-password' })).status, 400, 'OTP is single-use');
     assert.equal((await post('/api/auth/login', { username: 'owner@example.com', password: body.password })).status, 401);
     assert.equal((await post('/api/auth/login', { username: 'owner@example.com', password: 'new-secure-password' })).status, 200);
