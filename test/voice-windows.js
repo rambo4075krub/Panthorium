@@ -244,12 +244,14 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     await tick();
     assert(gw.document.getElementById('voice-identity-launcher'), 'guest start menu keeps the Voice Identity icon');
     await gw.PanthoriumVoiceIdentity.open();
+    await new Promise(resolve => setTimeout(resolve, 0));
     assert.deepEqual([...gw.document.querySelectorAll('[data-type] option')].map(option => option.value), ['user', 'family'], 'guest registration offers user and family only');
     assert(gw.document.querySelector('[data-email][type="email"]'), 'guest voice signup asks for email');
     assert(gw.document.querySelector('[data-password][type="password"]'), 'guest voice signup asks for a password');
     assert(gw.document.querySelector('[data-request-otp]') && gw.document.querySelector('[data-verify-otp]'), 'guest confirms email with OTP');
     assert(gw.document.querySelector('[data-login-email]') && gw.document.querySelector('[data-forgot]'), 'guest can sign in or recover password');
     assert(gw.document.querySelector('[data-remember]') && gw.document.querySelector('[data-login-remember]'), 'remember choice appears on signup and login');
+    assert.match(gw.document.querySelector('#panthorium-voice-identity [data-state]').textContent, /โหมดลงทะเบียน\/ทดสอบ.*ยังปิดอยู่/, 'guest sees that voice gating is still disabled during staged testing');
     gw.close();
     console.log('PASS: guest start menu keeps voice registration and shows only user/family types');
   } finally { w.close(); await new Promise(resolve => server.close(resolve)); }
