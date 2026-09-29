@@ -14,7 +14,7 @@ class Repository {
   async remove(id, owner) { const before = this.rows.length; this.rows = this.rows.filter(row => row.profileId !== id || row.ownerUserId !== owner); return before !== this.rows.length; }
 }
 
-const audio = suffix => `data:audio/webm;base64,${'A'.repeat(4100)}${suffix}`;
+const audio = suffix => `data:audio/webm;codecs=opus;base64,${'A'.repeat(4100)}${suffix}`;
 const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed ? 1 : 0.01));
 
 (async () => {
@@ -30,6 +30,8 @@ const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed 
     assert.equal(user.encryptedTemplate, undefined);
     const family = await service.enroll({ ownerUserId: 'u1', actorRoles: ['user'], displayName: 'Family', subjectType: 'family', relationship: 'parent', consent: true, samples: [audio(1), audio(2), audio(3)] });
     assert.equal(family.subjectType, 'family');
+    const administrator = await service.enroll({ ownerUserId: 'admin-1', actorRoles: ['administrator'], displayName: 'Admin', subjectType: 'administrator', consent: true, samples: [audio(1), audio(2), audio(3)] });
+    assert.equal(administrator.subjectType, 'administrator');
     const deviceKey = 'a'.repeat(64);
     await assert.rejects(() => service.enroll({ ownerUserId: 'guest:tab-id', actorRoles: ['guest'], displayName: 'Guest', subjectType: 'user', consent: true, samples: [audio(1), audio(2), audio(3)], email: 'bad' }), /valid_email_required/);
     const guestProfile = await service.enroll({ ownerUserId: 'guest:tab-id', actorRoles: ['guest'], displayName: 'Guest', subjectType: 'user', consent: true, samples: [audio(1), audio(2), audio(3)], email: 'Guest@Example.com', deviceKey });
