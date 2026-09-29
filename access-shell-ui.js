@@ -18,7 +18,7 @@
       #start-menu .browser-action{display:block;width:calc(100% - 24px);margin:0 12px 12px;padding:12px 10px;border:1px solid rgba(0,255,204,.22);border-radius:10px;background:rgba(0,255,204,.06);color:inherit;font:inherit;text-align:center;cursor:pointer;text-decoration:none;box-sizing:border-box;}
       #start-menu .browser-action:disabled{cursor:default;opacity:.7;}
       body[data-panthorium-role="guest"] #btn-settings-quick,body[data-panthorium-role="guest"] #btn-restart{display:none!important;}
-      body[data-panthorium-role="guest"][data-panthorium-browser="desktop"] #sm-apps{display:none!important;}
+      body[data-panthorium-role="guest"][data-panthorium-browser="desktop"] #sm-apps{display:block!important;}
       #start-menu .sm-footer{display:flex;gap:8px;}
       #start-menu .sm-footer button{flex:1;min-height:38px;}
     `;
