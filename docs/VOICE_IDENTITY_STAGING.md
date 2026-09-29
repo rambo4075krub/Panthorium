@@ -8,9 +8,10 @@ an embedding. It does **not** implement replay or deepfake liveness detection.
 Do not present `signalPresent` as liveness to users.
 
 The backend encrypts enrolled templates with `BIOMETRIC_TEMPLATE_KEY` and
-stores them per signed-in owner in Cloud SQL. The raw audio is decoded in
-memory in the speaker service and is not persisted. Enrollment requires
-explicit consent and 3–5 samples. The registration screen shows a shuffled reading prompt for each
+stores them per owner in Cloud SQL. Guest profiles are scoped to a random
+per-tab guest identity, contain only `user` or `family` subjects, and are
+deleted after 24 hours. The raw audio is decoded in memory in the speaker
+service and is not persisted. Enrollment requires explicit consent and 3–5 samples. The registration screen shows a shuffled reading prompt for each
 12-second sample, for 36–60 seconds of total speech. The prompt is not
 transcribed or compared with the words spoken; it is sampling guidance, not a
 challenge-response liveness check. `/api/speech/transcribe` verifies a
