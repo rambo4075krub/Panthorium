@@ -3,6 +3,7 @@ const express = require('express');
 const { AuthService } = require('../services/authService');
 const { installGuestAccess, restrictedPaths } = require('../middleware/guestAccess');
 const { createApiRouter } = require('../routes/api');
+const { createBiometricsRouter } = require('../routes/biometrics');
 const { ToolRegistry } = require('../services/toolRegistry');
 const { AgentService } = require('../services/agentService');
 const catalog = require('../voice-window-catalog');
@@ -12,10 +13,22 @@ const catalog = require('../voice-window-catalog');
   const auth = new AuthService({ config: { jwtSecret: 'guest-access-test-secret', accessTokenTtl: '1h' }, audit });
   const guest = auth.guest().principal;
   const admin = { id: 'admin-test', roles: ['administrator'], permissions: ['chat', 'settings', 'system:read', 'sentinel:command'] };
-  const excluded = ['settings', 'voice-identity', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control'];
+  const excluded = ['settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control'];
+  const guestSessionId = '123e4567-e89b-42d3-a456-426614174000';
+  assert.equal(auth.guest({ guestSessionId }).principal.id, auth.guest({ guestSessionId }).principal.id, 'same tab session id maps to stable guest profile owner');
+  assert.notEqual(auth.guest().principal.id, auth.guest().principal.id, 'missing guest session id remains random');
   const sentinel = { status: () => ({ ready: true }), providerCatalog: () => [], chat: async () => ({ ok: true, text: 'test reply' }) };
   const agent = new AgentService({ tools: new ToolRegistry({ sentinel }), audit });
+  const biometricOwners = [];
+  const biometrics = {
+    status: () => ({ configured: true, gateEnabled: false }),
+    list: async ownerUserId => { biometricOwners.push(ownerUserId); return []; },
+    enroll: async input => { biometricOwners.push(input.ownerUserId); return { profileId: 'voice-test', ownerUserId: input.ownerUserId, subjectType: input.subjectType }; },
+    remove: async () => true,
+    verify: async ({ ownerUserId }) => { biometricOwners.push(ownerUserId); return { ok: true, matched: false }; }
+  };
   const app = express(); app.use(express.json()); installGuestAccess(app, auth);
+  app.use('/api/biometrics', createBiometricsRouter(auth, biometrics));
   app.use('/api', createApiRouter(sentinel, auth, audit, {}, agent, {}, {}, {}, {}));
   // Verify every namespace is denied before any service side effect.
   let serviceCalls = 0;
@@ -39,6 +52,14 @@ const catalog = require('../voice-window-catalog');
       const res = await call('/api/sentinel/command', guest, { command: 'เปิด ' + entry.aliases[0] });
       assert.equal(res.status, excluded.includes(entry.id) ? 403 : 200, entry.id);
     }
+    assert.equal(catalog.allowed(catalog.apps.find(entry => entry.id === 'voice-identity'), guest), true, 'guest can open voice enrollment');
+    assert.equal((await call('/api/biometrics/status', guest)).status, 200, 'guest can read non-sensitive enrollment status');
+    assert.equal((await call('/api/biometrics/voice/profiles', guest)).status, 200, 'guest can list only its own voice profiles');
+    assert.equal((await call('/api/biometrics/voice/profiles', guest, { subjectType: 'user' })).status, 201, 'guest can enroll user voice');
+    assert.equal((await call('/api/biometrics/voice/profiles', guest, { subjectType: 'family' })).status, 201, 'guest can enroll family voice');
+    assert.equal((await call('/api/biometrics/voice/profiles', guest, { subjectType: 'administrator' })).status, 403, 'guest cannot enroll an administrator voice');
+    assert.equal((await call('/api/biometrics/voice/verify', guest, { audio: 'unused-by-fixture' })).status, 200, 'guest can verify their own temporary profiles');
+    assert(biometricOwners.every(owner => owner === guest.id), 'all guest voice data stays scoped to the guest session id');
     assert.equal((await call('/api/sentinel/command', guest, { command: 'ค้นความรู้ private' })).status, 403);
     assert.equal((await call('/api/chat', guest, { message: 'hello' })).status, 200);
     assert.equal((await call('/api/sentinel/status', guest)).status, 200);

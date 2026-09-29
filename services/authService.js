@@ -165,8 +165,10 @@ class AuthService {
   }
 
   guest(context = {}) {
+    const requestedId = String(context.guestSessionId || '');
+    const guestId = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestedId) ? requestedId.toLowerCase() : crypto.randomUUID();
     const principal = {
-      id: `guest:${crypto.randomUUID()}`,
+      id: `guest:${guestId}`,
       username: "guest",
       roles: ["guest"],
       permissions: ["chat", "system:read"]

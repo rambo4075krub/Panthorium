@@ -20,7 +20,7 @@ function createAuthRouter(authService, config, securityResponse) {
   const requestMeta = (req) => ({ requestId: req.requestId, ip: req.ip || null, userAgent: req.headers["user-agent"] || null });
 
   router.post("/guest", (req, res) => {
-    const session = authService.guest(requestMeta(req));
+    const session = authService.guest({ ...requestMeta(req), guestSessionId: req.body?.guestSessionId });
     res.json({ ok: true, accessToken: session.accessToken, user: session.principal });
   });
 
