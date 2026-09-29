@@ -1,5 +1,6 @@
 const assert = require('assert');
 const crypto = require('crypto');
+const Module = require('module');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -58,6 +59,33 @@ const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed 
     assert.equal(rejected.matched, false);
     const isolated = await service.verify({ ownerUserId: 'different-owner', audio: audio(6) });
     assert.equal(isolated.matched, false);
+    const originalModuleLoad = Module._load;
+    let authenticatedRequest = null;
+    Module._load = function(request, parent, isMain) {
+      if (request === 'google-auth-library') {
+        return { GoogleAuth: class {
+          async getIdTokenClient(audience) {
+            assert.equal(audience, 'https://speaker.private.test', 'ID token audience must be the speaker service root URL');
+            return { request: async options => {
+              authenticatedRequest = options;
+              return { data: { signalPresent: true, embedding: vector(7) } };
+            } };
+          }
+        } };
+      }
+      return originalModuleLoad.call(this, request, parent, isMain);
+    };
+    try {
+      const privateService = new BiometricIdentityService({ repository: new Repository(), providerUrl: 'https://speaker.private.test', encryptionKey: 'test-key' });
+      const embedding = await privateService.extract(audio(7));
+      assert.equal(embedding.length, 32);
+      assert.equal(authenticatedRequest.url, 'https://speaker.private.test/embed');
+      assert.equal(authenticatedRequest.method, 'POST');
+      assert.deepEqual(authenticatedRequest.data, { audio: audio(7) });
+      assert.equal(authenticatedRequest.timeout, 30000);
+    } finally {
+      Module._load = originalModuleLoad;
+    }
     console.log('biometric voice identity tests passed');
   } finally { global.fetch = originalFetch; }
 })().catch(error => { console.error(error); process.exit(1); });
