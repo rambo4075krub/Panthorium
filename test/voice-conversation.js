@@ -124,7 +124,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     rejectOnce = '/api/speech';
     await utter('การเรียนรู้คืออะไร');
     assert.equal(playback.length, 5, 'refresh expired TTS authentication then play');
-    assert.equal(requests.filter(r => r.pathname === '/api/auth/refresh').length, 2);
+    assert.equal(requests.filter(r => r.pathname === '/api/auth/refresh').length, 3, 'restore existing session on boot, then refresh expired chat and speech requests');
 
     failProvider = true;
     await utter('การเรียนรู้คืออะไร');
