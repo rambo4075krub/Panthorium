@@ -35,8 +35,7 @@
     let enrolled;
     try { enrolled = await profiles(); }
     catch (error) {
-      // Guest voice profiles are scoped to a random per-tab guest identity and
-      // automatically expire after 24 hours.
+      // Guest voice profiles are scoped to a random per-tab guest identity.
       if (error?.status === 403) return { required: true, matched: false, error: 'voice_enrollment_required' };
       return { required: true, matched: false, error: 'voice_verification_unavailable' };
     }
