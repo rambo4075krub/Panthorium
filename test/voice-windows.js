@@ -181,16 +181,20 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     replaceUser(guest);
     w.PanthoriumStagingAdminDesktop.render();
     assert.equal(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), null, 'guest desktop must not show Voice Identity');
-    assert.equal(await w.PanthoriumVoiceIdentity.open(), false, 'guest cannot open voice registration directly');
-    assert.equal(w.document.getElementById('panthorium-voice-identity'), null, 'guest direct call must not render the enrollment form');
     assert.equal(w.document.getElementById('voice-identity-launcher'), null, 'guest must not see a Voice Identity start-menu launcher');
     for (const app of catalog.apps) {
       const result = await command(`เปิด ${app.aliases[0]}`);
       assert.equal(result.ok, catalog.allowed(app, guest), `${app.label}: guest permission`);
       assert.equal(isVisible(app), catalog.allowed(app, guest), `${app.label}: guest DOM`);
+      if (app.id === 'voice-identity' && result.ok) assert.equal(w.document.querySelector(app.selector + ' [data-type] option[value="administrator"]'), null, 'guest sees only user/family enrollment types');
       if (result.ok) await command(`ปิด ${app.aliases[0]}`);
     }
     assert.equal((await w.PanthoriumVoiceCommands.windowAction('open_learning_lab')).ok, false, 'desktop/client calls also need permission');
+    await w.PanthoriumVoiceIdentity.open();
+    const guestAdminPageVoiceUi = w.document.getElementById('panthorium-voice-identity');
+    assert(guestAdminPageVoiceUi, 'guest can open user/family enrollment');
+    assert.equal(guestAdminPageVoiceUi.querySelector('[data-type] option[value="administrator"]'), null, 'guest cannot select administrator type');
+    guestAdminPageVoiceUi.remove();
     replaceUser({ ...admin, roles: ['operator'] });
     w.PanthoriumStagingAdminDesktop.render();
     assert.equal(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), null, 'operator must not see the administrator desktop icon');
@@ -230,5 +234,18 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert.equal(mutations.length, 1);
     console.log('PASS: no deletion before confirmation; cancel, replay and account switch protected; completed UI actions not repeated');
     assert(!requests.some(item => item.pathname.startsWith('/api/chat')));
+    const guestDom = new JSDOM('<!doctype html><html><body><div id="sm-apps"></div></body></html>', { url: 'https://panthorium-staging.example.run.app/', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
+    const gw = guestDom.window;
+    gw.OS = { config: { accessToken: 'guest-session-token' }, state: { user: guest } };
+    gw.PanthoriumAuth = { isGuest: () => true, isAdministrator: () => false, isAdminEntry: () => false, hasPermission: permission => permission === 'chat' };
+    gw.fetch = async url => ({ ok: true, status: 200, json: async () => String(url).includes('/status') ? { configured: true, gateEnabled: false } : { profiles: [] } });
+    gw.eval(source('voice-identity-ui.js'));
+    gw.document.dispatchEvent(new gw.Event('DOMContentLoaded'));
+    await tick();
+    assert(gw.document.getElementById('voice-identity-launcher'), 'guest start menu keeps the Voice Identity icon');
+    await gw.PanthoriumVoiceIdentity.open();
+    assert.deepEqual([...gw.document.querySelectorAll('[data-type] option')].map(option => option.value), ['user', 'family'], 'guest registration offers user and family only');
+    gw.close();
+    console.log('PASS: guest start menu keeps voice registration and shows only user/family types');
   } finally { w.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
