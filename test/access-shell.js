@@ -5,12 +5,13 @@ const { JSDOM } = require('jsdom');
 const source = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const admin = { roles: ['administrator'], permissions: ['chat', 'settings', 'system:read', 'sentinel:command'] };
 const guest = { roles: ['guest'], permissions: ['chat', 'system:read'] };
+const regularUser = { roles: [], permissions: ['chat', 'system:read'] };
 
 async function scenario(role, desktop, legacy = false, adminEntry = role === 'admin') {
   const dom = new JSDOM(source('sentinel.html'), { url: 'https://panthorium.net' + (adminEntry ? '/admin' : '/'), runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window;
   let manual = 0, logouts = 0, available = false, fail = false;
-  w.OS = { state: { user: role === 'admin' ? admin : guest }, windows: new Map() };
+  w.OS = { state: { user: role === 'admin' ? admin : role === 'user' ? regularUser : guest }, windows: new Map() };
   w.PanthoriumAuth = { isGuest: () => w.OS.state.user.roles.includes('guest'), isAdministrator: () => w.OS.state.user.roles.includes('administrator'), logout: () => { logouts++; } };
   w.AbortSignal = AbortSignal;
   if (desktop) {
@@ -48,30 +49,31 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
       assert(w.document.getElementById('btn-restart'));
     }
     if (desktop) {
-      assert.equal(w.document.getElementById('panthorium-browser-download'), null, 'no installer hyperlink inside Panthorium');
-      const update = w.document.getElementById('panthorium-browser-update');
-      assert.equal(update.textContent, 'บราวเซอร์เป็นเวอร์ชั่นปัจจุบัน');
-      assert.equal(manual, 0, 'checking status must not invoke an installer');
-      available = true;
-      await w.PanthoriumAccessShell.refreshUpdateStatus(true);
-      assert.equal(update.textContent, 'โปรดอัพเดทบราวเซอร์');
-      await update.onclick();
-      assert.equal(manual, 1);
-      assert.equal(update.textContent, 'โปรดอัพเดทบราวเซอร์', 'deferring an update must not claim it is installed');
-      fail = true;
-      await w.PanthoriumAccessShell.refreshUpdateStatus(true);
-      assert.equal(update.dataset.state, 'unknown', 'offline does not mean current');
-      fail = false;
+      if (role === 'admin') {
+        assert.equal(w.document.getElementById('panthorium-browser-download'), null, 'no installer hyperlink inside admin browser');
+        const update = w.document.getElementById('panthorium-browser-update');
+        assert.equal(update.textContent, 'บราวเซอร์เป็นเวอร์ชั่นปัจจุบัน');
+        assert.equal(manual, 0, 'checking status must not invoke an installer');
+        available = true;
+        await w.PanthoriumAccessShell.refreshUpdateStatus(true);
+        assert.equal(update.textContent, 'โปรดอัพเดทบราวเซอร์');
+        await update.onclick();
+        assert.equal(manual, 1);
+        assert.equal(update.textContent, 'โปรดอัพเดทบราวเซอร์', 'deferring an update must not claim it is installed');
+        fail = true;
+        await w.PanthoriumAccessShell.refreshUpdateStatus(true);
+        assert.equal(update.dataset.state, 'unknown', 'offline does not mean current');
+        fail = false;
+      }
       if (role === 'guest') {
         assert.notEqual(w.getComputedStyle(w.document.getElementById('sm-apps')).display, 'none', 'Guest Start Menu remains available');
-        const voiceLauncher = w.document.createElement('button'); voiceLauncher.id = 'voice-identity-launcher'; voiceLauncher.textContent = 'Voice Identity'; w.document.getElementById('sm-apps').appendChild(voiceLauncher);
-        assert.notEqual(w.getComputedStyle(voiceLauncher).display, 'none', 'Guest keeps Voice Identity in Start Menu');
-        assert.equal(w.document.getElementById('btn-login').textContent, 'เข้าสู่ระบบ');
-        assert.equal(w.document.getElementById('btn-logout').textContent, 'ออกจากระบบ');
+        assert.equal(w.document.getElementById('btn-login'), null);
+        assert.equal(w.document.getElementById('btn-logout').textContent, '🚪 ออกจากระบบ');
+        assert.deepEqual([...w.document.querySelectorAll('#sm-apps > *')].map(el => el.querySelector('span')?.textContent.trim() || el.textContent.trim()), ['Sentinel AI', 'Voice Identity']);
+        assert.equal(w.document.getElementById('panthorium-browser-download').textContent, 'ดาวน์โหลด Panthorium Browser');
         w.document.getElementById('btn-logout').onclick();
         assert.equal(logouts, 1);
-        const visible = [...w.document.querySelectorAll('#start-menu button')].filter(el => !el.closest('#sm-apps') && w.getComputedStyle(el).display !== 'none').map(el => el.id).sort();
-        assert.deepEqual(visible, ['btn-login', 'btn-logout', 'panthorium-browser-update']);
+        assert.equal(w.document.getElementById('panthorium-browser-update'), null);
       }
     } else {
       assert.equal(w.document.getElementById('panthorium-browser-update'), null);
@@ -80,8 +82,8 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
         assert.equal(download.textContent, 'ดาวน์โหลด Panthorium Browser Admin');
         assert.equal(new URL(download.href).search, '?edition=admin');
       } else {
-        assert.equal(w.document.getElementById('btn-logout').textContent, 'ดาวน์โหลด Panthorium Browser');
-        assert.equal(w.document.getElementById('panthorium-browser-download'), null, 'one download action only');
+        assert.equal(w.document.getElementById('btn-logout').textContent, '🚪 ออกจากระบบ');
+        assert.equal(w.document.getElementById('panthorium-browser-download').textContent, 'ดาวน์โหลด Panthorium Browser');
       }
     }
     const forbidden = w.document.createElement('div'); forbidden.id = 'phase4-ai-dashboard'; w.document.body.appendChild(forbidden);
@@ -97,7 +99,7 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
   } finally { w.close(); }
 }
 (async () => {
-  for (const role of ['admin', 'guest']) for (const desktop of [true, false]) await scenario(role, desktop);
+  for (const role of ['admin', 'guest', 'user']) for (const desktop of [true, false]) await scenario(role, desktop);
   await scenario('guest', true, true);
   await scenario('admin', true, true);
   await scenario('guest', true, false, true);

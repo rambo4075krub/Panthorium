@@ -30,7 +30,7 @@
   function updateIdentityUI() {
     const user = OS.state.user;
     const userEl = document.querySelector('.sm-user'); const statusEl = document.getElementById('sm-status'); const footerBtn = document.getElementById('btn-logout'); const settingsBtn = document.getElementById('btn-settings-quick');
-    if (userEl) userEl.textContent = user?.username || 'guest';
+    if (userEl) userEl.textContent = user?.displayName || user?.username || 'guest';
     if (statusEl) statusEl.textContent = `Online · ${roleLabel(user)}`;
     if (settingsBtn) settingsBtn.style.display = hasPermission('settings') ? '' : 'none';
     if (footerBtn) {

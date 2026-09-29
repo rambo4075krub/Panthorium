@@ -20,6 +20,15 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
     maxAge: config.refreshTokenDays * 86400000
   };
   const requestMeta = (req) => ({ requestId: req.requestId, ip: req.ip || null, userAgent: req.headers["user-agent"] || null });
+  const attachDisplayName = async (principal) => {
+    if (!principal || !biometrics || !(principal.sub || principal.id)) return principal;
+    try {
+      const profiles = await biometrics.list(principal.sub || principal.id);
+      const profile = (profiles || []).find(item => item.subjectType === "user" && item.displayName) || (profiles || []).find(item => item.displayName);
+      if (profile) principal.displayName = profile.displayName;
+    } catch (_) {}
+    return principal;
+  };
   const sessionCookieOptions = (rememberMe) => ({ ...cookieOptions, ...(rememberMe ? {} : { maxAge: undefined }) });
   const clearSessionCookieOptions = (({ maxAge, ...options }) => options)(cookieOptions);
   const setSessionCookies = (res, session, rememberMe) => {
@@ -95,6 +104,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
       catch (error) { if (!existing) await biometricRepository.remove(profile.profileId, guestOwnerId); throw error; }
       await biometricRepository.transferGuestProfiles(guestOwnerId, user.id);
       const session = await authService.issueSession(user);
+      session.principal.displayName = profile.displayName;
       setSessionCookies(res, session, req.body?.rememberMe === true);
       res.status(201).json({ ok: true, accessToken: session.accessToken, user: session.principal, profile: { ...profile, ownerUserId: user.id } });
     } catch (error) {
@@ -136,6 +146,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
         }
         return res.status(401).json({ ok: false, error: "invalid_credentials" });
       }
+      await attachDisplayName(session.principal);
       setSessionCookies(res, session, req.body?.rememberMe !== false);
       res.json({ ok: true, accessToken: session.accessToken, user: session.principal });
     } catch (error) {
@@ -144,8 +155,14 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
     }
   });
 
-  router.get("/me", auth, (req, res) => {
-    res.json({ ok: true, user: { id: req.user.sub, username: req.user.username, roles: req.user.roles || [], permissions: req.user.permissions || [] } });
+  router.get("/me", auth, async (req, res, next) => {
+    try {
+      const user = { id: req.user.sub, username: req.user.username, roles: req.user.roles || [], permissions: req.user.permissions || [] };
+      const identity = { ...user, sub: user.id };
+      await attachDisplayName(identity);
+      delete identity.sub;
+      res.json({ ok: true, user: identity });
+    } catch (error) { next(error); }
   });
 
   router.get("/users", auth, adminOnly, async (req, res, next) => {
@@ -199,6 +216,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
     try {
       const session = await authService.refresh(req.cookies?.pt_refresh);
       if (!session) return res.status(401).json({ ok: false, error: "invalid_refresh_token" });
+      await attachDisplayName(session.principal);
       setSessionCookies(res, session, req.cookies?.pt_session !== "1");
       res.json({ ok: true, accessToken: session.accessToken, user: session.principal });
     } catch (error) { next(error); }
