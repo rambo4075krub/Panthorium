@@ -86,8 +86,8 @@
     const state = root.querySelector('[data-state]');
     try {
       const [status, list] = await Promise.all([api('/api/biometrics/status'), profiles(true)]);
-      state.textContent = !status.configured ? 'ยังต้องตั้งค่าบริการ Speaker Verification และกุญแจเข้ารหัสบนเซิร์ฟเวอร์' : status.gateEnabled ? 'ด่านคัดเสียงเปิดใช้งานแล้ว' : 'พร้อมลงทะเบียนและทดสอบเสียง · ด่านคัดเสียงยังไม่เปิด';
-      state.style.color = status.configured ? '#6ee7b7' : '#fbbf24';
+      state.textContent = !status.configured ? 'ยังต้องตั้งค่าบริการ Speaker Verification และกุญแจเข้ารหัสบนเซิร์ฟเวอร์' : status.gateEnabled ? 'ด่านคัดเสียงเปิดใช้งานแล้ว' : 'โหมดลงทะเบียน/ทดสอบ: ด่านยังปิดอยู่ จึงยังไม่กรองเสียงก่อนส่งไปถอดคำพูด';
+      state.style.color = status.configured && status.gateEnabled ? '#6ee7b7' : '#fbbf24';
       const upgrade = root.querySelector('[data-upgrade]'); if (upgrade) upgrade.style.display = list.length ? '' : 'none';
       root.querySelector('[data-list]').innerHTML = list.length ? list.map(item => `<div style="padding:10px;border-bottom:1px solid #243448"><b>${esc(item.displayName)}</b> · ${esc(label(item.subjectType))}<div style="font-size:11px;color:#8ea3b8">ตัวอย่าง ${esc(item.sampleCount)} ครั้ง${item.relationship ? ` · ${esc(item.relationship)}` : ''}</div><button data-remove="${esc(item.profileId)}" style="margin-top:6px">ลบเสียงนี้</button></div>`).join('') : '<div style="color:#94a3b8">ยังไม่มีเสียงที่ลงทะเบียน ระบบจะยังไม่เปิดด่านคัดกรอง</div>';
       root.querySelectorAll('[data-remove]').forEach(button => { button.onclick = async () => { if (!confirm('ลบเสียงที่ลงทะเบียนนี้?')) return; await api(`/api/biometrics/voice/profiles/${encodeURIComponent(button.dataset.remove)}`, { method: 'DELETE' }); profileCache = null; await refresh(root); }; });
