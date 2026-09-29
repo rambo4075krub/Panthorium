@@ -67,6 +67,8 @@ const { createSentinelControlRouter } = require("./routes/sentinelControl");
 const { createBiometricsRouter } = require("./routes/biometrics");
 const { createBiometricIdentityRepository } = require("./services/biometricIdentityRepository");
 const { BiometricIdentityService } = require("./services/biometricIdentityService");
+const { createEmailOtpRepository } = require("./services/emailOtpRepository");
+const { EmailOtpService } = require("./services/emailOtpService");
 const { requestContext } = require("./middleware/requestContext");
 
 const app = express();
@@ -74,10 +76,12 @@ if (config.trustProxy) app.set("trust proxy", 1);
 
 const authRepository = createAuthRepository(config);
 const biometricIdentityRepository = createBiometricIdentityRepository(config);
+const emailOtpRepository = createEmailOtpRepository(config);
 const audit = new AuditService({ file: config.auditFile, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const securityResponse = new SecurityResponseService({ audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const authService = new AuthService({ repository: authRepository, config, audit });
 const biometrics = new BiometricIdentityService({ repository: biometricIdentityRepository, audit, providerUrl: config.biometricSpeakerUrl, providerToken: config.biometricSpeakerToken, encryptionKey: config.biometricTemplateKey, gateEnabled: config.biometricGateEnabled, matchThreshold: config.biometricVoiceThreshold, enrollmentThreshold: config.biometricEnrollmentThreshold });
+const emailOtp = new EmailOtpService({ repository: emailOtpRepository, authService, config });
 const conversations = new ConversationRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const aiOperations = new AiOperationsService({ audit, conversations });
 const agentRuns = new AgentRunRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
@@ -164,7 +168,7 @@ app.use("/api/training/release-gate", createReleaseGateRouter(authService, senti
 app.use("/api/training", createTrainingRouter(authService, sentinelTraining, sentinelBenchmark, sentinelActiveLearning, sentinelShadowEvaluator));
 app.use("/api/governance", createGovernanceRouter(authService, autonomousGovernance));
 app.use("/api/sentinel-control", createSentinelControlRouter(authService, sentinelOrchestrator));
-app.use("/api/auth", createAuthRouter(authService, config, securityResponse));
+app.use("/api/auth", createAuthRouter(authService, config, securityResponse, biometricIdentityRepository, biometrics, emailOtp));
 app.use("/api/biometrics", createBiometricsRouter(authService, biometrics));
 app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
 app.use("/api/agent/automation", createAutomationRouter(authService, agentAutomation));
@@ -346,6 +350,7 @@ async function start() {
   await securityResponse.init();
   await authService.init();
   await biometrics.init();
+  await emailOtp.init();
   await conversations.init();
   await agentRuns.init();
   await agentPending.init();
