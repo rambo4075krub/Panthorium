@@ -6,8 +6,8 @@ const source = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8')
 const admin = { roles: ['administrator'], permissions: ['chat', 'settings', 'system:read', 'sentinel:command'] };
 const guest = { roles: ['guest'], permissions: ['chat', 'system:read'] };
 
-async function scenario(role, desktop, legacy = false) {
-  const dom = new JSDOM(source('sentinel.html'), { url: 'https://panthorium.net' + (role === 'admin' ? '/admin' : '/'), runScripts: 'outside-only', pretendToBeVisual: true });
+async function scenario(role, desktop, legacy = false, adminEntry = role === 'admin') {
+  const dom = new JSDOM(source('sentinel.html'), { url: 'https://panthorium.net' + (adminEntry ? '/admin' : '/'), runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window;
   let manual = 0, logouts = 0, available = false, fail = false;
   w.OS = { state: { user: role === 'admin' ? admin : guest }, windows: new Map() };
@@ -63,7 +63,9 @@ async function scenario(role, desktop, legacy = false) {
       assert.equal(update.dataset.state, 'unknown', 'offline does not mean current');
       fail = false;
       if (role === 'guest') {
-        assert.equal(w.getComputedStyle(w.document.getElementById('sm-apps')).display, 'none');
+        assert.notEqual(w.getComputedStyle(w.document.getElementById('sm-apps')).display, 'none', 'Guest Start Menu remains available');
+        const voiceLauncher = w.document.createElement('button'); voiceLauncher.id = 'voice-identity-launcher'; voiceLauncher.textContent = 'Voice Identity'; w.document.getElementById('sm-apps').appendChild(voiceLauncher);
+        assert.notEqual(w.getComputedStyle(voiceLauncher).style.display, 'none', 'Guest keeps Voice Identity in Start Menu');
         assert.equal(w.document.getElementById('btn-login').textContent, 'เข้าสู่ระบบ');
         assert.equal(w.document.getElementById('btn-logout').textContent, 'ออกจากระบบ');
         w.document.getElementById('btn-logout').onclick();
@@ -86,11 +88,19 @@ async function scenario(role, desktop, legacy = false) {
     w.OS.state.user = guest;
     w.PanthoriumAccessShell.sync();
     assert.equal(w.document.getElementById('phase4-ai-dashboard'), null, 'close privileged panels on account change');
+    if (role === 'guest' && adminEntry) {
+      w.PanthoriumStagingAdminDesktop.sync();
+      w.PanthoriumUILayout.sync();
+      assert.equal(w.document.querySelectorAll('#desktop-icons [data-app-id]').length, 0, 'an /admin URL must not give Guest the administrator desktop');
+      assert.equal(w.getComputedStyle(w.document.getElementById('desktop-icons')).display, 'none', 'Guest desktop stays hidden even on /admin');
+    }
   } finally { w.close(); }
 }
 (async () => {
   for (const role of ['admin', 'guest']) for (const desktop of [true, false]) await scenario(role, desktop);
   await scenario('guest', true, true);
   await scenario('admin', true, true);
-  console.log('Access shell: all four role/browser combinations; 14 admin icons; guest actions; current/new/offline update status; installed 15.0.3 compatibility');
+  await scenario('guest', true, false, true);
+  await scenario('guest', false, false, true);
+  console.log('Access shell: Guest/Admin role checks at / and /admin; 14 admin icons; Guest Voice Identity Start Menu; current/new/offline update status; installed 15.0.3 compatibility');
 })().catch(error => { console.error(error); process.exitCode = 1; });
