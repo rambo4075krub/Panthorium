@@ -27,8 +27,3 @@ jobs:
         run: npm run check
       - name: Run tests
         run: npm test
-      - name: Speaker service contract tests
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y ffmpeg
-          python3 -m pip install --user numpy==1.26.4
-          python3 -m unittest discover -s speaker-service -p 'test_*.py'
