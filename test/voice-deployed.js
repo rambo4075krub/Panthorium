@@ -20,10 +20,14 @@ const { JSDOM } = require('jsdom');
   assert.equal(electronPreflight.headers.get('access-control-allow-origin'), 'null', 'Electron must receive its original null origin');
   const foreignPreflight = await fetch(new URL('/api/auth/login', base), { method: 'OPTIONS', headers: { Origin: 'https://unrelated.example', 'Access-Control-Request-Method': 'POST' } });
   assert.equal(foreignPreflight.status, 403, 'unrelated browser origins must stay denied');
-  const shell = await fetch(new URL('/admin', base));
-  assert.equal(shell.status, 200);
-  const html = await shell.text();
-  assert(html.includes('/voice-window-catalog.js?') && html.includes('/external-apps-ui.js?') && html.includes('/voice-command-client.js?'));
+  let html;
+  for (const route of ['/', '/admin']) {
+    const shell = await fetch(new URL(route, base));
+    assert.equal(shell.status, 200, `${route} guest/admin shell`);
+    const page = await shell.text();
+    assert(page.includes('/voice-window-catalog.js?') && page.includes('/external-apps-ui.js?') && page.includes('/voice-command-client.js?'), `${route} must load the tested voice app assets`);
+    if (route === '/') html = page;
+  }
   const deployedDOM = new JSDOM(html);
   const testedDOM = new JSDOM(fs.readFileSync(path.join(__dirname, '..', 'sentinel.html'), 'utf8'));
   try {
@@ -36,6 +40,11 @@ const { JSDOM } = require('jsdom');
   assert.equal(sessionResponse.status, 200);
   const session = await sessionResponse.json();
   assert(session.accessToken);
+  const guestVoiceStatus = await fetch(new URL('/api/biometrics/status', base), { headers: { Origin: base.origin, Authorization: `Bearer ${session.accessToken}` } });
+  assert.equal(guestVoiceStatus.status, 200, 'guest voice enrollment status API');
+  const guestVoiceProfiles = await fetch(new URL('/api/biometrics/voice/profiles', base), { headers: { Origin: base.origin, Authorization: `Bearer ${session.accessToken}` } });
+  assert.equal(guestVoiceProfiles.status, 200, 'guest voice profiles API');
+  assert.deepEqual((await guestVoiceProfiles.json()).profiles, [], 'new staging guest starts with its own empty voice profile list');
   for (const [command, expected] of [['เปิด Sentinel AI', 'open_sentinel'], ['ปิด Sentinel AI', 'close_sentinel']]) {
     const response = await post('/api/sentinel/command', { command }, session.accessToken);
     assert.equal(response.status, 200, command);
