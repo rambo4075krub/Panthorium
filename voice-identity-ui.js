@@ -7,7 +7,7 @@
   function isAdminEnrollmentContext() { const auth = window.PanthoriumAuth; return auth?.isAdministrator?.() === true && auth?.isAdminEntry?.() === true; }
   function canManageVoiceProfiles() { const auth = window.PanthoriumAuth; return !!auth && (auth.isGuest?.() === true || auth.hasPermission?.('chat') === true || auth.hasPermission?.('settings') === true); }
   function notify(message) { try { if (typeof toast === 'function') toast(message); else console.info('[VoiceIdentity]', message); } catch (_) {} }
-  function errorText(error) { const messages = { password_mismatch: 'รหัสผ่านทั้งสองช่องไม่ตรงกัน', voice_registration_unavailable: 'ระบบตรวจเสียงหรือสร้างบัญชีขัดข้องชั่วคราว กรุณาแจ้งทีมดูแลพร้อมรหัสคำขอ' }; const message = messages[error?.message] || error?.message || 'เกิดข้อผิดพลาด'; return error?.requestId ? `${message} (${error.requestId})` : message; }
+  function errorText(error) { const messages = { password_mismatch: 'รหัสผ่านทั้งสองช่องไม่ตรงกัน', email_verification_required: 'การยืนยันอีเมลหมดอายุหรือไม่ตรงกับ guest session กรุณาส่ง OTP ใหม่และยืนยันอีกครั้ง', voice_registration_unavailable: 'ระบบตรวจเสียงหรือสร้างบัญชีขัดข้องชั่วคราว กรุณาแจ้งทีมดูแลพร้อมรหัสคำขอ' }; const message = messages[error?.message] || error?.message || 'เกิดข้อผิดพลาด'; return error?.requestId ? `${message} (${error.requestId})` : message; }
   function esc(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char])); }
   async function token() {
     if (getOS()?.config?.accessToken) return getOS().config.accessToken;
@@ -154,7 +154,7 @@
           await api('/api/biometrics/voice/profiles', { method: 'POST', body: JSON.stringify({ displayName: root.querySelector('[data-name]').value.trim(), subjectType: root.querySelector('[data-type]').value, relationship: root.querySelector('[data-relationship]').value.trim(), consent: root.querySelector('[data-consent]').checked, samples }) });
           samples.splice(0); prompts = shuffledPrompts(); count.textContent = '0 / 5 ช่วง'; record.disabled = false; root.querySelector('[data-consent]').checked = false; showPrompt(); profileCache = null; formState.textContent = 'บันทึกเสียงสำเร็จ'; await refresh(root);
         }
-      } catch (error) { formState.textContent = `บันทึกไม่สำเร็จ: ${errorText(error)}`; }
+      } catch (error) { if (error.message === 'email_verification_required') { registrationToken = null; root.querySelector('[data-email]').disabled = false; root.querySelector('[data-email-otp-state]').textContent = 'การยืนยันหมดอายุหรือไม่ตรงกับบัญชีนี้ กรุณาส่ง OTP ใหม่แล้วกดยืนยันอีกครั้ง'; } formState.textContent = `บันทึกไม่สำเร็จ: ${errorText(error)}`; }
       updateEnrollAvailability();
     };
     if (guestRegistration) {
