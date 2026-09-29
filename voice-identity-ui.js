@@ -31,13 +31,12 @@
     let enrolled;
     try { enrolled = await profiles(); }
     catch (error) {
-      // Public guest sessions have no durable owner identity to attach a voice
-      // template to. Keep ordinary guest voice usable; enrolled account/admin
-      // sessions remain fail-closed on verification outages.
-      if (error?.status === 403) return { required: false, matched: true, enrollmentRequired: true };
+      // A guest has no durable identity for enrollment. Voice is unavailable
+      // until the person signs in and enrolls with consent.
+      if (error?.status === 403) return { required: true, matched: false, error: 'voice_enrollment_required' };
       return { required: true, matched: false, error: 'voice_verification_unavailable' };
     }
-    if (!enrolled.length) return { required: false, matched: true, enrollmentRequired: true };
+    if (!enrolled.length) return { required: true, matched: false, error: 'voice_enrollment_required' };
     try {
       const result = await api('/api/biometrics/voice/verify', { method: 'POST', body: JSON.stringify({ audio }) });
       return { required: true, matched: result.matched === true, profile: result.profile || null, score: result.score, error: result.matched ? null : 'voice_not_authorized' };

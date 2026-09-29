@@ -23,10 +23,21 @@ class BiometricIdentityService {
   decrypt(value) { if (!this.key) throw new Error('biometric_encryption_not_configured'); const [iv, tag, body] = String(value).split('.'); const decipher = crypto.createDecipheriv('aes-256-gcm', this.key, Buffer.from(iv, 'base64url')); decipher.setAuthTag(Buffer.from(tag, 'base64url')); return JSON.parse(Buffer.concat([decipher.update(Buffer.from(body, 'base64url')), decipher.final()]).toString('utf8')); }
   async extract(audio) {
     if (!this.providerUrl) throw new Error('speaker_verification_not_configured');
-    const response = await fetch(`${this.providerUrl}/embed`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(this.providerToken ? { Authorization: `Bearer ${this.providerToken}` } : {}) }, body: JSON.stringify({ audio }), signal: AbortSignal.timeout(30000) });
+    const headers = { 'Content-Type': 'application/json' };
+    if (this.providerToken) headers.Authorization = `Bearer ${this.providerToken}`;
+    else {
+      // The speaker service is private Cloud Run. Its audience is its root URL,
+      // not the /embed path. No user audio is sent if identity auth fails.
+      const { GoogleAuth } = require('google-auth-library');
+      const client = await new GoogleAuth().getIdTokenClient(this.providerUrl);
+      Object.assign(headers, await client.getRequestHeaders());
+    }
+    const response = await fetch(`${this.providerUrl}/embed`, { method: 'POST', headers, body: JSON.stringify({ audio }), signal: AbortSignal.timeout(30000) });
     if (!response.ok) throw new Error(`speaker_verification_http_${response.status}`);
     const result = await response.json();
-    if (result?.live !== true) throw new Error('voice_liveness_failed');
+    // signalPresent means sufficient non-silent audio. It is not proof that
+    // the recording is live; replay resistance requires a separate mechanism.
+    if (result?.signalPresent !== true && result?.live !== true) throw new Error('voice_signal_missing');
     if (!Array.isArray(result.embedding) || result.embedding.length < 16 || result.embedding.length > 4096) throw new Error('invalid_voice_embedding');
     return result.embedding.map(Number);
   }

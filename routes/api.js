@@ -16,7 +16,7 @@ function validChatBody(body = {}) {
 const windowCatalog = require("../voice-window-catalog");
 function hasVoicePermission(user, permission) { return (user?.permissions || []).includes(permission); }
 
-function createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler) {
+function createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler, biometrics) {
   const router = express.Router(); const auth = requireAuth(authService);
   router.use(['/ai', '/agent'], auth, denyGuest);
   const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
@@ -71,12 +71,19 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       if (!match || match[2].length > 700000) return res.status(400).json({ ok: false, error: "invalid_audio" });
       const audio = Buffer.from(match[2], "base64");
       if (!audio.length || audio.length > 512 * 1024) return res.status(413).json({ ok: false, error: "audio_too_large" });
+      // Enforce this on the server as well as the UI: neither a modified
+      // browser nor a direct API call may reach paid transcription unchecked.
+      if (!biometrics) return res.status(503).json({ ok: false, error: "voice_verification_unavailable" });
+      const profiles = await biometrics.list(req.user.sub);
+      if (!profiles.length) return res.status(403).json({ ok: false, error: "voice_enrollment_required" });
+      const verification = await biometrics.verify({ ownerUserId: req.user.sub, audio: value });
+      if (!verification.matched) return res.status(403).json({ ok: false, error: "voice_not_authorized" });
       const result = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language);
       res.json({ ok: true, text: result.text, provider: result.provider, model: result.model });
     } catch (error) {
       audit.record("sentinel.transcription_failed", { userId: req.user?.sub, error: error.message });
-      const code = error?.code === "transcription_provider_unavailable" ? error.code : "transcription_unavailable";
-      res.status(code === "transcription_provider_unavailable" ? 503 : 502).json({ ok: false, error: code });
+      const code = /speaker_verification|biometric_encryption|voice_signal/.test(error?.message || "") ? "voice_verification_unavailable" : error?.code === "transcription_provider_unavailable" ? error.code : "transcription_unavailable";
+      res.status(code === "transcription_provider_unavailable" || code === "voice_verification_unavailable" ? 503 : 502).json({ ok: false, error: code });
     }
   });
   router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { res.json({ ok: true, runs: await agentRuns.list(req.user.sub, Number(req.query.limit) || 30) }); } catch (error) { next(error); } });
