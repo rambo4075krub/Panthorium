@@ -9,11 +9,38 @@ Do not present `signalPresent` as liveness to users.
 
 The backend encrypts enrolled templates with `BIOMETRIC_TEMPLATE_KEY` and
 stores them per owner in Cloud SQL. Guest profiles are scoped to a random
-per-tab guest identity, contain only `user` or `family` subjects, and do not
-expire automatically; they remain until explicitly deleted or transferred
-when an account-upgrade flow is added. The guest identity currently lives in
-the browser tab session, so keep that tab session available to continue using
-its profiles before account linking is implemented. The raw audio is decoded in memory in the speaker
+per-tab guest identity and contain only `user` or `family` subjects. A guest
+without an enrolled voice gets a new anonymous identity after 24 hours.
+Registration asks for an email, password, and six-digit email OTP. After the
+OTP is verified and voice enrollment succeeds, the backend creates a permanent
+user with a bcrypt password hash and transfers the guest's existing voice
+profiles to that user. The user can sign in by email and password from any
+device. The user's refresh cookie persists for 30 days only when they choose
+to remember the session; browser credential storage is used only with consent.
+The app never stores the raw password in local storage or Cloud SQL.
+
+During registration, the contact email is encrypted with
+`BIOMETRIC_TEMPLATE_KEY`, and a random device credential may be stored in
+browser local storage. Only its SHA-256 hash is stored in Cloud SQL until the
+guest profile is transferred. A recognized device can restore a registered
+guest profile if account creation was interrupted; a bare guest UUID cannot
+reclaim a device-bound owner. Enrolled profiles never expire automatically.
+Password recovery sends a six-digit, single-use OTP that expires in 10 minutes
+and permits at most five attempts. To enable delivery on staging:
+
+1. Add and verify a sending domain in Resend, then create an API key limited to
+   sending email. A verified sending domain is required; no mailbox is needed
+   for the sender address.
+2. Create a Google Secret Manager secret in the staging project for that key
+   and grant the staging Cloud Run runtime service account
+   `roles/secretmanager.secretAccessor` on it.
+3. Set GitHub Actions staging environment variables `STAGING_RESEND_SECRET`
+   to that secret's name and `STAGING_EMAIL_FROM` to an address on the
+   verified domain, then run Deploy Staging.
+
+Without those settings OTP delivery returns 503 and account registration stays
+unavailable.
+The raw audio is decoded in memory in the speaker
 service and is not persisted. Enrollment requires explicit consent and 3–5 samples. The registration screen shows a shuffled reading prompt for each
 12-second sample, for 36–60 seconds of total speech. The prompt is not
 transcribed or compared with the words spoken; it is sampling guidance, not a

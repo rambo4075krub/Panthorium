@@ -42,12 +42,16 @@ class BiometricIdentityService {
     if (!Array.isArray(result.embedding) || result.embedding.length < 16 || result.embedding.length > 4096) throw new Error('invalid_voice_embedding');
     return result.embedding.map(Number);
   }
-  async enroll({ ownerUserId, actorRoles = [], displayName, subjectType, relationship, consent, samples }) {
+  async enroll({ ownerUserId, actorRoles = [], displayName, subjectType, relationship, consent, samples, email, deviceKey }) {
     const name = String(displayName || '').trim();
     if (name.length < 1 || name.length > 80) throw new Error('invalid_display_name');
     if (!TYPES.has(subjectType)) throw new Error('invalid_subject_type');
     if (subjectType === 'administrator' && !actorRoles.includes('administrator')) throw new Error('administrator_role_required');
     if (consent !== true) throw new Error('biometric_consent_required');
+    const guest = actorRoles.includes('guest');
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (guest && (normalizedEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail))) throw new Error('valid_email_required');
+    if (guest && !/^[0-9a-f]{64}$/i.test(String(deviceKey || ''))) throw new Error('device_key_required');
     if (!Array.isArray(samples) || samples.length < 3 || samples.length > 5 || samples.some(sample => !this.validateAudio(sample))) throw new Error('invalid_voice_samples');
     const vectors = [];
     for (const sample of samples) vectors.push(await this.extract(sample));
@@ -55,7 +59,7 @@ class BiometricIdentityService {
     const template = mean(vectors);
     const consistency = Math.min(...vectors.map(vector => cosine(template, vector)));
     if (consistency < this.enrollmentThreshold) throw new Error('voice_samples_do_not_match');
-    const profile = await this.repository.create({ ownerUserId, displayName: name, subjectType, relationship: String(relationship || '').trim().slice(0, 80) || null, encryptedTemplate: this.encrypt(template), templateVersion: 1, sampleCount: vectors.length, consentedAt: new Date().toISOString() });
+    const profile = await this.repository.create({ ownerUserId, displayName: name, subjectType, relationship: String(relationship || '').trim().slice(0, 80) || null, encryptedTemplate: this.encrypt(template), contactEmailCiphertext: guest ? this.encrypt(normalizedEmail) : null, deviceKeyHash: guest ? crypto.createHash('sha256').update(deviceKey.toLowerCase()).digest('hex') : null, templateVersion: 1, sampleCount: vectors.length, consentedAt: new Date().toISOString() });
     this.audit?.record('biometric.voice_enrolled', { ownerUserId, profileId: profile.profileId, subjectType, sampleCount: vectors.length });
     return publicProfile(profile);
   }

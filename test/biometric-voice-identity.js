@@ -1,5 +1,10 @@
 const assert = require('assert');
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { BiometricIdentityService } = require('../services/biometricIdentityService');
+const { JsonBiometricIdentityRepository } = require('../services/biometricIdentityRepository');
 
 class Repository {
   constructor() { this.rows = []; }
@@ -25,8 +30,24 @@ const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed 
     assert.equal(user.encryptedTemplate, undefined);
     const family = await service.enroll({ ownerUserId: 'u1', actorRoles: ['user'], displayName: 'Family', subjectType: 'family', relationship: 'parent', consent: true, samples: [audio(1), audio(2), audio(3)] });
     assert.equal(family.subjectType, 'family');
-    const guestProfile = await service.enroll({ ownerUserId: 'guest:tab-id', actorRoles: ['guest'], displayName: 'Guest', subjectType: 'user', consent: true, samples: [audio(1), audio(2), audio(3)] });
+    const deviceKey = 'a'.repeat(64);
+    await assert.rejects(() => service.enroll({ ownerUserId: 'guest:tab-id', actorRoles: ['guest'], displayName: 'Guest', subjectType: 'user', consent: true, samples: [audio(1), audio(2), audio(3)], email: 'bad' }), /valid_email_required/);
+    const guestProfile = await service.enroll({ ownerUserId: 'guest:tab-id', actorRoles: ['guest'], displayName: 'Guest', subjectType: 'user', consent: true, samples: [audio(1), audio(2), audio(3)], email: 'Guest@Example.com', deviceKey });
     assert.equal((await repository.list('guest:tab-id')).some(profile => profile.profileId === guestProfile.profileId), true, 'guest voice profiles remain available with no 24-hour expiry');
+    assert.equal(guestProfile.contactEmailCiphertext, undefined);
+    assert.equal(guestProfile.deviceKeyHash, undefined);
+    assert.equal(service.decrypt(repository.rows.at(-1).contactEmailCiphertext), 'guest@example.com');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'panthorium-guest-'));
+    try {
+      const persistent = new JsonBiometricIdentityRepository(path.join(dir, 'data.json'));
+      await persistent.init();
+      await persistent.create({ ...repository.rows.at(-1), createdAt: '2000-01-01T00:00:00.000Z' });
+      const reopened = new JsonBiometricIdentityRepository(path.join(dir, 'data.json'));
+      await reopened.init();
+      assert.equal((await reopened.list('guest:tab-id')).length, 1, 'enrolled guest survives restart and 24 hours');
+      assert.equal(await reopened.findGuestOwnerByDeviceKeyHash(crypto.createHash('sha256').update(deviceKey).digest('hex')), 'guest:tab-id');
+      assert.equal(await reopened.isDeviceBoundGuestOwner('guest:tab-id'), true);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
     assert.ok(repository.rows[0].encryptedTemplate && !repository.rows[0].encryptedTemplate.includes('0.01'));
     const accepted = await service.verify({ ownerUserId: 'u1', audio: audio(4) });
     assert.equal(accepted.matched, true);

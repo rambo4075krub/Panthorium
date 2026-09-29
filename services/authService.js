@@ -47,6 +47,8 @@ class AuthService {
     return {
       id: user.id,
       username: user.username,
+      email: user.email || null,
+      emailVerifiedAt: user.emailVerifiedAt || null,
       roles: user.roles || [],
       permissions: user.permissions || [],
       createdAt: user.createdAt || null
@@ -150,7 +152,8 @@ class AuthService {
   }
 
   async login(username, password, context = {}) {
-    const user = await this.repository.findUserByUsername(username);
+    const identifier = String(username || '').trim();
+    const user = identifier.includes('@') ? await this.repository.findUserByEmail(identifier.toLowerCase()) : await this.repository.findUserByUsername(identifier);
     const auditContext = {
       requestId: context.requestId || null,
       ip: context.ip || null,
@@ -162,6 +165,39 @@ class AuthService {
     }
     this.audit.record("auth.login_success", { userId: user.id, username: user.username, ...auditContext });
     return this.issueSession(user);
+  }
+
+  async createVoiceAccount(email, password, actorId) {
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    if (cleanEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) throw new Error("valid_email_required");
+    if (typeof password !== "string" || password.length < 10 || password.length > 256) throw new Error("invalid_password");
+    if (await this.repository.findUserByEmail(cleanEmail)) throw new Error("email_exists");
+    const passwordHash = await bcrypt.hash(password, 12);
+    let user;
+    try {
+      user = await this.repository.createUser({
+        id: crypto.randomUUID(),
+        username: "voice_" + crypto.randomBytes(12).toString("hex"),
+        email: cleanEmail,
+        emailVerifiedAt: new Date().toISOString(),
+        passwordHash,
+        roles: [],
+        permissions: ["chat", "system:read"],
+        createdAt: new Date().toISOString()
+      });
+    } catch (error) {
+      if (error.code === "23505" || error.message === "email_exists") throw new Error("email_exists");
+      throw error;
+    }
+    this.audit.record("auth.voice_account_created", { actorId, userId: user.id });
+    return user;
+  }
+
+  async resetVoiceAccountPassword(id, password) {
+    if (typeof password !== "string" || password.length < 10 || password.length > 256) throw new Error("invalid_password");
+    await this.repository.updateUserPassword(id, await bcrypt.hash(password, 12));
+    await this.repository.revokeUserSessions(id);
+    this.audit.record("auth.voice_password_reset", { userId: id });
   }
 
   guest(context = {}) {
@@ -180,7 +216,7 @@ class AuthService {
   async issueSession(user) {
     const principal = {
       id: user.id,
-      username: user.username,
+      username: user.email || user.username,
       roles: user.roles || [],
       permissions: normalizeSentinelPermissions(user.permissions)
     };

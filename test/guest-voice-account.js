@@ -1,0 +1,87 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const express = require('express');
+const cookieParser = require('cookie-parser');
+const { AuthService } = require('../services/authService');
+const { JsonAuthRepository } = require('../repositories/authRepository');
+const { JsonBiometricIdentityRepository } = require('../services/biometricIdentityRepository');
+const { BiometricIdentityService } = require('../services/biometricIdentityService');
+const { JsonEmailOtpRepository } = require('../services/emailOtpRepository');
+const { EmailOtpService } = require('../services/emailOtpService');
+const { createAuthRouter } = require('../routes/auth');
+const { createBiometricsRouter } = require('../routes/biometrics');
+
+(async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'panthorium-voice-account-'));
+  const file = path.join(directory, 'store.json');
+  const originalFetch = global.fetch;
+  let server;
+  try {
+    const audit = { record() {} };
+    const users = new JsonAuthRepository(file);
+    const voices = new JsonBiometricIdentityRepository(file);
+    const auth = new AuthService({ repository: users, config: { jwtSecret: 'voice-account-test-secret', accessTokenTtl: '15m', refreshTokenDays: 30 }, audit });
+    const biometrics = new BiometricIdentityService({ repository: voices, providerUrl: 'https://speaker.example', providerToken: 'test', encryptionKey: 'test-encryption-key', audit });
+    await auth.init(); await biometrics.init();
+    const otpRepository = new JsonEmailOtpRepository(file);
+    let deliveredCode = null;
+    const otp = new EmailOtpService({ repository: otpRepository, authService: auth, config: { jwtSecret: 'voice-account-test-secret' }, sender: async (_, code) => { deliveredCode = code; } });
+    await otp.init();
+    assert.equal(await otpRepository.issue('attempts:test', 'correct', 1000000), true);
+    for (let n = 0; n < 5; n++) assert.equal(await otpRepository.consume('attempts:test', 'wrong', 1000001 + n), false);
+    assert.equal(await otpRepository.consume('attempts:test', 'correct', 1000010), false, 'five wrong attempts invalidate OTP');
+    assert.equal(await otpRepository.issue('expired:test', 'correct', 1000000), true);
+    assert.equal(await otpRepository.consume('expired:test', 'correct', 1600001), false, 'OTP expires after ten minutes');
+    global.fetch = async (url, options) => String(url).startsWith('https://speaker.example/')
+      ? { ok: true, json: async () => ({ signalPresent: true, embedding: Array.from({ length: 32 }, (_, i) => i === 0 ? 1 : 0.01) }) }
+      : originalFetch(url, options);
+    const app = express(); app.use(express.json({ limit: '2mb' })); app.use(cookieParser());
+    app.use('/api/auth', createAuthRouter(auth, { isProduction: false, refreshTokenDays: 30 }, null, voices, biometrics, otp));
+    app.use('/api/biometrics', createBiometricsRouter(auth, biometrics));
+    server = app.listen(0, '127.0.0.1');
+    await new Promise(resolve => server.once('listening', resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const post = (route, body, token) => fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify(body) });
+    const guest = await (await post('/api/auth/guest', { guestSessionId: '123e4567-e89b-42d3-a456-426614174000' })).json();
+    assert.equal((await post('/api/auth/email/otp/request', { email: 'Owner@Example.com' }, guest.accessToken)).status, 202);
+    assert.match(deliveredCode, /^\d{6}$/);
+    assert.equal((await post('/api/auth/email/otp/verify', { email: 'owner@example.com', code: '00000X' }, guest.accessToken)).status, 400);
+    const verified = await (await post('/api/auth/email/otp/verify', { email: 'owner@example.com', code: deliveredCode }, guest.accessToken)).json();
+    assert.ok(verified.registrationToken);
+    const audio = 'data:audio/webm;base64,' + 'A'.repeat(4100);
+    const body = { email: 'Owner@Example.com', password: 'secure-test-password', registrationToken: verified.registrationToken, rememberMe: true, deviceKey: 'a'.repeat(64), displayName: 'Owner', subjectType: 'user', consent: true, samples: [audio, audio, audio] };
+    const createdResponse = await post('/api/auth/register/voice', body, guest.accessToken);
+    assert.equal(createdResponse.status, 201);
+    const created = await createdResponse.json();
+    assert.equal(created.user.username, 'owner@example.com');
+    assert.equal(created.profile.ownerUserId, created.user.id);
+    assert.ok(createdResponse.headers.get('set-cookie')?.includes('pt_refresh='));
+    const stored = await users.findUserByEmail('owner@example.com');
+    assert.ok(stored.passwordHash && !stored.passwordHash.includes(body.password));
+    assert.ok(stored.emailVerifiedAt);
+    assert.equal((await voices.list(guest.user.id)).length, 0);
+    assert.equal((await voices.list(created.user.id)).length, 1);
+    const signedInFromAnotherDevice = await post('/api/auth/login', { username: 'owner@example.com', password: body.password, rememberMe: false });
+    assert.equal(signedInFromAnotherDevice.status, 200);
+    const remote = await signedInFromAnotherDevice.json();
+    assert.equal(remote.user.id, created.user.id);
+    assert.ok(signedInFromAnotherDevice.headers.get('set-cookie')?.includes('pt_session='));
+    const profilesResponse = await fetch(base + '/api/biometrics/voice/profiles', { headers: { Authorization: 'Bearer ' + remote.accessToken } });
+    assert.equal((await profilesResponse.json()).profiles.length, 1);
+    assert.equal((await post('/api/auth/login', { username: 'owner@example.com', password: 'wrong' })).status, 401);
+    assert.equal((await post('/api/auth/password/forgot', { email: 'owner@example.com' })).status, 202);
+    const resetCode = deliveredCode;
+    assert.equal((await post('/api/auth/password/reset', { email: 'owner@example.com', code: '1234567', password: 'new-secure-password' })).status, 400);
+    assert.equal((await post('/api/auth/password/reset', { email: 'owner@example.com', code: resetCode, password: 'new-secure-password' })).status, 200);
+    assert.equal((await post('/api/auth/password/reset', { email: 'owner@example.com', code: resetCode, password: 'another-password' })).status, 400, 'OTP is single-use');
+    assert.equal((await post('/api/auth/login', { username: 'owner@example.com', password: body.password })).status, 401);
+    assert.equal((await post('/api/auth/login', { username: 'owner@example.com', password: 'new-secure-password' })).status, 200);
+    console.log('Guest voice account: permanent enrollment, transfer, remote email login, password hashing and session choice passed');
+  } finally {
+    global.fetch = originalFetch;
+    if (server) await new Promise(resolve => server.close(resolve));
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });

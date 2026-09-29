@@ -1,9 +1,11 @@
 const assert = require('node:assert/strict');
 const express = require('express');
+const crypto = require('crypto');
 const { AuthService } = require('../services/authService');
 const { installGuestAccess, restrictedPaths } = require('../middleware/guestAccess');
 const { createApiRouter } = require('../routes/api');
 const { createBiometricsRouter } = require('../routes/biometrics');
+const { createAuthRouter } = require('../routes/auth');
 const { ToolRegistry } = require('../services/toolRegistry');
 const { AgentService } = require('../services/agentService');
 const catalog = require('../voice-window-catalog');
@@ -27,7 +29,15 @@ const catalog = require('../voice-window-catalog');
     remove: async () => true,
     verify: async ({ ownerUserId }) => { biometricOwners.push(ownerUserId); return { ok: true, matched: false }; }
   };
+  const deviceKey = 'b'.repeat(64);
+  const deviceHash = crypto.createHash('sha256').update(deviceKey).digest('hex');
+  const protectedGuestId = 'guest:' + guestSessionId;
+  const deviceRepository = {
+    findGuestOwnerByDeviceKeyHash: async hash => hash === deviceHash ? protectedGuestId : null,
+    isDeviceBoundGuestOwner: async owner => owner === protectedGuestId
+  };
   const app = express(); app.use(express.json()); installGuestAccess(app, auth);
+  app.use('/api/auth', createAuthRouter(auth, { isProduction: false, refreshTokenDays: 30 }, null, deviceRepository));
   app.use('/api/biometrics', createBiometricsRouter(auth, biometrics));
   app.use('/api', createApiRouter(sentinel, auth, audit, {}, agent, {}, {}, {}, {}));
   // Verify every namespace is denied before any service side effect.
@@ -38,6 +48,11 @@ const catalog = require('../voice-window-catalog');
   const base = `http://127.0.0.1:${server.address().port}`;
   const call = (url, principal, body) => fetch(base + url, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', ...(principal ? { Authorization: 'Bearer ' + auth.signAccessToken(principal) } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
   try {
+    const noDevice = await (await call('/api/auth/guest', null, { guestSessionId })).json();
+    assert.notEqual(noDevice.user.id, protectedGuestId, 'known voice owner requires its device credential');
+    const recognized = await (await call('/api/auth/guest', null, { guestSessionId: crypto.randomUUID(), deviceKey })).json();
+    assert.equal(recognized.user.id, protectedGuestId, 'remembered device restores guest voice owner');
+    assert.equal(recognized.deviceRecognized, true);
     for (const route of restrictedPaths) {
       const url = route + '/access-check';
       assert.equal((await call(url, null)).status, 401);
@@ -57,6 +72,7 @@ const catalog = require('../voice-window-catalog');
     assert.equal((await call('/api/biometrics/voice/profiles', guest)).status, 200, 'guest can list only its own voice profiles');
     assert.equal((await call('/api/biometrics/voice/profiles', guest, { subjectType: 'user' })).status, 201, 'guest can enroll user voice');
     assert.equal((await call('/api/biometrics/voice/profiles', guest, { subjectType: 'family' })).status, 201, 'guest can enroll family voice');
+    assert.equal((await call('/api/biometrics/voice/profiles', guest, { subjectType: 'user', ownerUserId: admin.id, actorRoles: ['administrator'] })).status, 201, 'request body cannot override authenticated voice owner');
     assert.equal((await call('/api/biometrics/voice/profiles', guest, { subjectType: 'administrator' })).status, 403, 'guest cannot enroll an administrator voice');
     assert.equal((await call('/api/biometrics/voice/verify', guest, { audio: 'unused-by-fixture' })).status, 200, 'guest can verify their own temporary profiles');
     assert(biometricOwners.every(owner => owner === guest.id), 'all guest voice data stays scoped to the guest session id');
