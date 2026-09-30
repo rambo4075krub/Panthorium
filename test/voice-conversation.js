@@ -145,24 +145,24 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     transcript(chatMic, 'การเรียนรู้คืออะไร');
     await chatMic.stop(); // natural end, no second click/silence timer needed
     w.PanthoriumVoice.pause();
-    assert.equal(playback.length, 3, 'window microphone must also answer natural-ended speech');
+    assert.equal(playback.length, 4, 'window microphone must also answer natural-ended speech');
     assert.match(w.document.getElementById('chat-messages').textContent, new RegExp(answer));
 
     rejectOnce = '/api/chat/stream';
     await utter('การเรียนรู้คืออะไร');
-    assert.equal(playback.length, 4, 'refresh expired chat authentication then answer');
+    assert.equal(playback.length, 5, 'refresh expired chat authentication then answer');
     rejectOnce = '/api/speech';
     await utter('การเรียนรู้คืออะไร');
-    assert.equal(playback.length, 5, 'refresh expired TTS authentication then play');
+    assert.equal(playback.length, 6, 'refresh expired TTS authentication then play');
     assert.equal(requests.filter(r => r.pathname === '/api/auth/refresh').length, 3, 'restore existing session on boot, then refresh expired chat and speech requests');
 
     failProvider = true;
     await utter('การเรียนรู้คืออะไร');
-    assert.equal(playback.length, 5, 'never speak an API failure as a successful AI answer');
+    assert.equal(playback.length, 6, 'never speak an API failure as a successful AI answer');
     assert.match(w.document.getElementById('toast').textContent, /no_provider_available/);
     failProvider = false; blockPlayback = true;
     await utter('การเรียนรู้คืออะไร');
-    assert.equal(playback.length, 5);
+    assert.equal(playback.length, 6);
     assert.match(w.document.getElementById('toast').textContent, /เล่นเสียง.*ไม่สำเร็จ/);
     blockPlayback = false; failSpeech = true;
     const failedSpeechAttemptsBefore = speechAttempts;
@@ -176,7 +176,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     await utter('การเรียนรู้คืออะไร');
     assert.match(w.document.getElementById('toast').textContent, /เข้าสู่ระบบ/);
     assert.equal(requests.slice(before).filter(r => r.pathname === '/api/chat/stream').length, 1, 'failed refresh must not retry as another user');
-    assert.equal(playback.length, 5);
+    assert.equal(playback.length, 6);
     rejectAlways = ''; refreshOK = true;
     const longSpeech = 'สวัสดีครับ วันนี้ระบบเสียงกำลังทดสอบการตอบกลับต่อเนื่อง '.repeat(18);
     const playbackBeforeLongSpeech = playback.length;
@@ -227,7 +227,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     transcript(globalMic, 'การเรียนรู้คืออะไร'); globalMic.stop();
     for (let i = 0; i < 400 && w.PanthoriumVoice.state() !== 'listening'; i++) await tick();
     assert.equal(w.PanthoriumVoice.state(), 'listening');
-    assert.equal(playback.length, 7 + longSpeechPlaybackCount);
+    assert.equal(playback.length, 8 + longSpeechPlaybackCount);
     assert.equal(playing, false);
     w.PanthoriumVoice.pause();
 
