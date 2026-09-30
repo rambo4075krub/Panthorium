@@ -150,10 +150,8 @@ class SentinelReleaseGateService {
       }
     };
 
-    if (auto !== false) {
-      report.automation = auto && this.autoGateEnabled ? await this.maybeAutoBenchmark(report) : this.automationStatus();
-      report.releaseBenchmarkJob = this.benchmarkJobStatus();
-    }
+    report.automation = auto && this.autoGateEnabled ? await this.maybeAutoBenchmark(report) : this.automationStatus();
+    report.releaseBenchmarkJob = this.benchmarkJobStatus();
 
     this.lastReport = report;
     if (record) {
