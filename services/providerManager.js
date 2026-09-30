@@ -82,7 +82,7 @@ class ProviderManager {
       form.append("temperature", "0");
       form.append("prompt", "ถอดคำพูดตามเสียงจริง ห้ามแปลหรือสรุป คงภาษาไทยและ English ตามที่พูด รวมทั้งชื่อเฉพาะ Panthorium, Sentinel, Niwat, AI, API และ ProviderManager");
       if (language) form.append("language", String(language).toLowerCase().startsWith("th") ? "th" : "en");
-      const response = await fetch(item.url, { method: "POST", headers: { Authorization: `Bearer ${item.key}` }, body: form, signal: AbortSignal.timeout(30000) });
+      const response = await fetch(item.url, { method: "POST", headers: { Authorization: `Bearer ${item.key}` }, body: form, signal: AbortSignal.timeout(8000) });
       if (!response.ok) throw new Error(`Transcription HTTP ${response.status}`);
       const data = await response.json();
       const text = typeof data.text === "string" ? data.text.trim() : "";

@@ -60,7 +60,8 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
         if (this.src.startsWith('data:')) throw new Error('CSP media-src rejects data:');
         assert(objects.has(this.src), 'audio must use a prepared blob URL');
         if (this.volume !== 0) assert.equal(this.preload, 'auto', 'next TTS clip must be decoded before it reaches playback');
-        if (this.volume === 0) return; // gesture warmup, not an AI reply
+        if (this.volume === 0) { this.unlocked = true; return; }
+        if (!this.unlocked) throw Object.assign(new Error('media element was not unlocked by a gesture'), { name: 'NotAllowedError' });
         if (blockPlayback) throw Object.assign(new Error('autoplay blocked'), { name: 'NotAllowedError' });
         assert.equal(this.volume, 1);
         playback.push({ src: this.src, blob: objects.get(this.src) });
@@ -112,6 +113,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     await new Promise(resolve => setTimeout(resolve, 420));
     assert.equal(globalMic.starts, 1, 'hands-free microphone starts once without a click');
     w.PanthoriumVoice.pause();
+    w.dispatchEvent(new w.Event('pointerdown')); // unlock both reusable audio elements from a user gesture
     const transcript = (mic, text, final = true, confidence = 0.99) => { const result = [{ transcript: text, confidence }]; result.isFinal = final; mic.onresult({ resultIndex: 0, results: [result] }); };
     async function utter(text, final = true) {
       globalMic.start(); transcript(globalMic, text, final); globalMic.stop();

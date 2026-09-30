@@ -1161,11 +1161,14 @@
     }
 
     const voiceAudio = new Audio();
+    const voiceAudioPlayers = [voiceAudio, new Audio()];
+    const reservedVoiceAudioPlayers = new Set();
+    const voiceAudioPlayerWaiters = [];
+    const unlockedVoiceAudioPlayers = new Set();
     let voiceAudioUnlocked = false;
     let voiceAudioUnlocking = false;
     let activeSpeechRun = 0;
     let cancelRemotePlayback = null;
-    const remoteAudioPlayers = new Set();
     let speechInterruptedByUser = false;
     let currentSpeechText = "";
     let interruptedSpeechText = "";
@@ -1193,7 +1196,7 @@
         activeSpeechRun += 1;
         try { cancelRemotePlayback?.(); } catch (_) {}
         cancelRemotePlayback = null;
-        for (const audio of remoteAudioPlayers) { try { audio.pause(); } catch (_) {} }
+        for (const audio of voiceAudioPlayers) { try { audio.pause(); audio.currentTime = 0; } catch (_) {} }
         try { voiceAudio.pause(); voiceAudio.currentTime = 0; } catch (_) {}
         aiSpeechActive = false;
         aiSpeechPulse = 0;
@@ -1203,7 +1206,8 @@
     function unlockVoiceAudio() {
         if (voiceAudioUnlocked || voiceAudioUnlocking || aiSpeechActive) return;
         if (!URL.createObjectURL) return;
-        // 20ms of silent PCM. media-src already allows blob:, not data:.
+        // Warm every reusable player from the user's tap; Android Chrome can
+        // block media elements that first call play() after a network wait.
         const wav = new ArrayBuffer(44 + 320);
         const view = new DataView(wav);
         const label = (offset, value) => [...value].forEach((char, i) => view.setUint8(offset + i, char.charCodeAt(0)));
@@ -1211,25 +1215,31 @@
         view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
         view.setUint32(24, 8000, true); view.setUint32(28, 16000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
         label(36, "data"); view.setUint32(40, 320, true);
-        const warmupUrl = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
         voiceAudioUnlocking = true;
-        voiceAudio.src = warmupUrl;
-        voiceAudio.volume = 0;
-        const finish = () => {
-            // A late warmup promise must not pause a real answer already playing.
-            if (voiceAudio.src === warmupUrl) { voiceAudio.pause(); voiceAudio.currentTime = 0; }
-            voiceAudioUnlocking = false;
+        let remaining = voiceAudioPlayers.length;
+        const finish = (audio, warmupUrl, unlocked) => {
+            if (audio.src === warmupUrl) { audio.pause(); audio.currentTime = 0; }
+            if (unlocked) unlockedVoiceAudioPlayers.add(audio);
             URL.revokeObjectURL(warmupUrl);
+            remaining -= 1;
+            if (!remaining) {
+                voiceAudioUnlocking = false;
+                voiceAudioUnlocked = voiceAudioPlayers.every(player => unlockedVoiceAudioPlayers.has(player));
+            }
         };
-        try { Promise.resolve(voiceAudio.play()).then(() => { voiceAudioUnlocked = true; }).catch(() => {}).finally(finish); }
-        catch (_) { finish(); }
+        for (const audio of voiceAudioPlayers) {
+            const warmupUrl = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
+            audio.preload = "auto"; audio.src = warmupUrl; audio.volume = 0;
+            try { Promise.resolve(audio.play()).then(() => finish(audio, warmupUrl, true), () => finish(audio, warmupUrl, false)); }
+            catch (_) { finish(audio, warmupUrl, false); }
+        }
     }
 
     async function requestRemoteChunk(text, lang) {
         const controller = new AbortController();
         // The server performs one bounded synthesis attempt. Do not keep a
         // second browser retry queued behind a slow first response.
-        const timeout = setTimeout(() => controller.abort(), Math.max(22000, Math.min(25000, String(text).length * 120)));
+        const timeout = setTimeout(() => controller.abort(), Math.max(7000, Math.min(12000, String(text).length * 80)));
         try {
             const base = OS.config.backendUrl.replace(/\/$/, "");
             const response = await authorizedFetch(base + "/api/speech", {
@@ -1245,28 +1255,7 @@
             if (expectedMaleProfile && receivedProfile !== expectedMaleProfile) return null;
             const blob = await response.blob();
             if (!blob.size) return null;
-            const objectUrl = URL.createObjectURL(blob);
-            const audio = new Audio();
-            audio.preload = "auto";
-            audio.src = objectUrl;
-            remoteAudioPlayers.add(audio);
-            await new Promise(resolve => {
-                let settled = false;
-                const finish = () => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timer);
-                    audio.removeEventListener("canplay", finish);
-                    audio.removeEventListener("error", finish);
-                    resolve();
-                };
-                const timer = setTimeout(finish, 1800);
-                audio.addEventListener("canplay", finish, { once: true });
-                audio.addEventListener("error", finish, { once: true });
-                try { audio.load(); } catch (_) {}
-                if (audio.readyState >= 2) finish();
-            });
-            return { objectUrl, audio };
+            return { objectUrl: URL.createObjectURL(blob) };
         } catch (_) {
             return null;
         } finally {
@@ -1274,19 +1263,43 @@
         }
     }
 
+    function reserveVoiceAudioPlayer() {
+        const available = voiceAudioPlayers.find(audio => !reservedVoiceAudioPlayers.has(audio));
+        if (available) { reservedVoiceAudioPlayers.add(available); return Promise.resolve(available); }
+        return new Promise(resolve => voiceAudioPlayerWaiters.push(resolve));
+    }
     function releaseRemoteChunk(prepared) {
         if (prepared?.audio) {
-            remoteAudioPlayers.delete(prepared.audio);
+            const audio = prepared.audio; prepared.audio = null;
             try {
-                prepared.audio.pause();
-                prepared.audio.onended = null;
-                prepared.audio.onerror = null;
-                prepared.audio.ontimeupdate = null;
-                prepared.audio.removeAttribute("src");
-                prepared.audio.load();
+                audio.pause(); audio.onended = null; audio.onerror = null; audio.ontimeupdate = null;
+                audio.removeAttribute("src"); audio.load();
             } catch (_) {}
+            const waiter = voiceAudioPlayerWaiters.shift();
+            if (waiter) waiter(audio); else reservedVoiceAudioPlayers.delete(audio);
         }
         if (prepared?.objectUrl) URL.revokeObjectURL(prepared.objectUrl);
+    }
+    async function preloadRemoteChunk(prepared) {
+        if (!prepared?.objectUrl || prepared.audio) return prepared;
+        const audio = await reserveVoiceAudioPlayer();
+        prepared.audio = audio; audio.preload = "auto"; audio.volume = 0; audio.src = prepared.objectUrl;
+        await new Promise(resolve => {
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true; clearTimeout(timer);
+                audio.removeEventListener("canplay", finish); audio.removeEventListener("error", finish);
+                resolve();
+            };
+            const timer = setTimeout(finish, 1800);
+            audio.addEventListener("canplay", finish, { once: true });
+            audio.addEventListener("error", finish, { once: true });
+            try { audio.load(); } catch (_) {}
+            if (audio.readyState >= 2) finish();
+        });
+        audio.volume = 1;
+        return prepared;
     }
 
     function playRemoteChunk(prepared, text, transcriptRange = {}) {
@@ -1400,8 +1413,15 @@
                 releasePendingRemote(chunkIndex + 1);
                 break;
             }
+            if (!preparedRemotePromises[chunkIndex].__voicePlayerPromise) {
+                preparedRemotePromises[chunkIndex].__voicePlayerPromise = preloadRemoteChunk(preparedRemote);
+            }
+            const currentReady = await preparedRemotePromises[chunkIndex].__voicePlayerPromise;
+            if (chunkIndex + 1 < chunks.length && !preparedRemotePromises[chunkIndex + 1].__voicePlayerPromise) {
+                preparedRemotePromises[chunkIndex + 1].__voicePlayerPromise = preparedRemotePromises[chunkIndex + 1].then(preloadRemoteChunk).catch(() => null);
+            }
             const transcriptRange = { start: chunk.transcriptStartChar, end: chunk.transcriptEndChar };
-            const spoken = speechRun === activeSpeechRun && await playRemoteChunk(preparedRemote, chunk.text, transcriptRange);
+            const spoken = speechRun === activeSpeechRun && await playRemoteChunk(currentReady, chunk.text, transcriptRange);
             spokeAny = spokeAny || spoken;
         }
         if (speechRun === activeSpeechRun) {
@@ -1580,20 +1600,23 @@
         streamingSpeechBuffer = streamingSpeechBuffer.trimStart();
         while (streamingSpeechBuffer) {
             const sentence = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…\n])(?:\s|$)/u);
-            if (streamingSpeechBuffer.length >= 58) {
-                const cut = findSpeechChunkCut(streamingSpeechBuffer, 64);
+            if (sentence && sentence[1].trim().length >= 18) {
+                queueStreamingSpeech(sentence[1]);
+                streamingSpeechBuffer = streamingSpeechBuffer.slice(sentence[1].length).trimStart();
+                continue;
+            }
+            const firstChunk = !streamingSpeechActive;
+            const minimumChunkLength = firstChunk ? 40 : 144;
+            const maximumChunkLength = firstChunk ? 60 : 150;
+            if (streamingSpeechBuffer.length >= minimumChunkLength) {
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength);
                 if (cut) {
                     queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
                     streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
                     continue;
                 }
             }
-            if (sentence && sentence[1].trim().length >= 18) {
-                queueStreamingSpeech(sentence[1]);
-                streamingSpeechBuffer = streamingSpeechBuffer.slice(sentence[1].length).trimStart();
-                continue;
-            }
-            if (flushPartial && streamingSpeechBuffer.length >= 24) {
+            if (flushPartial && streamingSpeechBuffer.length >= (streamingSpeechActive ? 110 : 40)) {
                 const cut = findSpeechChunkCut(streamingSpeechBuffer, streamingSpeechBuffer.length);
                 if (cut) {
                     queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
@@ -1633,7 +1656,7 @@
         streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
         drainStreamingSpeech(false);
         clearTimeout(streamingSpeechTimer);
-        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= 110) drainStreamingSpeech(false, true); }, 850);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 110 : 40)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 850 : 650);
     });
     window.addEventListener("panthorium:ai-stream-end", () => {
         finishStreamingSpeech();
@@ -1881,30 +1904,7 @@
                         statusCode: response.status
                     };
                 };
-                const transcribeWithFallback = async () => {
-                    const useFallback = async () => {
-                        if (electronVoice || !SR) throw new Error("transcription_provider_unavailable");
-                        voiceState = "listening";
-                        return transcribeWithBrowserSpeechRecognition(SR, {
-                            timeoutMs: 12000,
-                            onListening: () => status("listening", "บริการถอดเสียงหลักขัดข้อง กรุณาพูดซ้ำ", false)
-                        });
-                    };
-                    try {
-                        const result = await transcribeDirect();
-                        const code = String(result.data?.error || "");
-                        if (result.statusCode >= 200 && result.statusCode < 300 && result.data?.ok && String(result.data?.text || "").trim()) {
-                            return result;
-                        }
-                        if (["transcription_provider_unavailable", "transcription_uncertain", "transcription_unavailable", "transcription_timeout"].includes(code)) {
-                            return { data: { ok: true, text: await useFallback(), provider: "browser-speech-fallback" }, statusCode: 200 };
-                        }
-                        return result;
-                    } catch (error) {
-                        if (electronVoice || !SR || !["TimeoutError", "AbortError", "TypeError"].includes(error?.name)) throw error;
-                        return { data: { ok: true, text: await useFallback(), provider: "browser-speech-fallback" }, statusCode: 200 };
-                    }
-                };
+                const transcribeWithFallback = () => transcribeDirect();
 
                 let data;
                 let statusCode;

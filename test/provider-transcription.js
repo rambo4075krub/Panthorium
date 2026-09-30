@@ -8,6 +8,9 @@ const { ProviderManager } = require('../services/providerManager');
   manager.keys.openai = 'fixture-openai';
   manager.priority = ['groq', 'openai'];
   const originalFetch = global.fetch;
+  const originalTimeout = AbortSignal.timeout;
+  const timeoutMs = [];
+  AbortSignal.timeout = ms => { timeoutMs.push(ms); return originalTimeout(ms); };
   let calls = [];
   let responses = [];
   global.fetch = async (url, options) => {
@@ -25,6 +28,7 @@ const { ProviderManager } = require('../services/providerManager');
     assert.equal(checked.text, 'เปิด Sentinel');
     assert.equal(checked.crossCheckedBy, 'openai', 'uncertain primary transcript must be independently verified');
     assert.equal(calls.length, 2);
+    assert(timeoutMs.every(ms => ms <= 8000), 'provider timeout must finish before the browser request deadline');
     for (const { form } of calls) {
       assert.equal(form.get('response_format'), 'verbose_json');
       assert.equal(form.get('temperature'), '0');
@@ -78,6 +82,6 @@ const { ProviderManager } = require('../services/providerManager');
     const singleProvider = await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
     assert.equal(singleProvider.text, 'วันนี้อากาศเป็นอย่างไร');
     assert.equal(calls.length, 1, 'a sole provider remains usable when its signal confidence is strong');
-  } finally { global.fetch = originalFetch; }
+  } finally { global.fetch = originalFetch; AbortSignal.timeout = originalTimeout; }
   console.log('Transcription quality: Thai/English prompt, deterministic Whisper, low-confidence cross-check and fail-closed mismatch passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
