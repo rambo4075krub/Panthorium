@@ -32,7 +32,7 @@ async function refresh(){
  const p=document.getElementById('st-release-gate');if(!p||!allowed()||refreshing)return;
  refreshing=true;if(watchTimer)clearTimeout(watchTimer);let delay=10000;
  try{
-  const report=await api('/api/training/release-gate/status?wait=true&auto=false');
+  const report=await api('/api/training/release-gate/status?wait=true&auto=true');
   statusError='';lastReportAt=Date.now();cooldownUntil=lastReportAt+Number(report.automation?.cooldownRemainingMs||0);
   render(report);freshness();
  }catch(error){
