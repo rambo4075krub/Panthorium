@@ -20,12 +20,12 @@
       await sleep(delay);
     }
   }
-  async function streamCall(prompt) {
+  async function streamCall(prompt, { voiceMode = false } = {}) {
     const system = getOS();
     if (window.PanthoriumAuth?.hasPermission && !window.PanthoriumAuth.hasPermission('chat')) return { ok: false, text: 'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat', provider: 'RBAC', via: 'rbac' };
     let token = await ensureToken(); if (!token) throw new Error('authentication_required');
     const base = (system?.config?.backendUrl || '').replace(/\/$/, '');
-    const request = async () => fetch(base + '/api/chat/stream', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-session-id': system.config.sessionId, Accept: 'text/event-stream' }, body: JSON.stringify({ message: prompt, sessionId: system.config.sessionId, mode: 'default' }) });
+    const request = async () => fetch(base + '/api/chat/stream', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-session-id': system.config.sessionId, Accept: 'text/event-stream' }, body: JSON.stringify({ message: prompt, sessionId: system.config.sessionId, mode: 'default', voice: voiceMode }), signal: AbortSignal.timeout(45000) });
     let res = await request();
     if (res.status === 401 && window.PanthoriumAuth?.refreshSession) { const ok = await window.PanthoriumAuth.refreshSession().catch(() => false); if (ok) { token = getOS()?.config?.accessToken || ''; res = await request(); } }
     if (!res.ok || !res.body) throw new Error(`stream_http_${res.status}`);
@@ -42,7 +42,11 @@
         if (event === 'provider') { meta = { ...meta, ...data }; emit('provider', data); }
         if (event === 'delta') {
           const delta = data.delta || ''; if (!delta) continue; sawDelta = true;
-          if (delta.length > 24) await revealBuffered(delta, state, 14);
+          if (voiceMode) {
+            state.text += delta;
+            emit('stream', { delta, text: state.text, simulated: false });
+            emit('stream-delta', { text: delta });
+          } else if (delta.length > 24) await revealBuffered(delta, state, 14);
           else { state.text += delta; emit('stream', { delta, text: state.text, simulated: false }); }
         }
         if (event === 'done') { meta = { ...meta, ...data }; emit('done', { ...meta, text: state.text }); }
@@ -50,7 +54,12 @@
       }
     }
     if (!sawDelta || !state.text) throw new Error('empty_stream');
-    return { ok: true, text: state.text, provider: meta.provider ? `Sentinel · ${meta.provider}` : 'Sentinel', via: 'sentinel-stream', model: meta.model || null, usage: meta.usage || null, latencyMs: meta.latencyMs || null, streaming: meta.streaming || 'unknown' };
+    let streamSpeechOk = false;
+    if (voiceMode) {
+      emit('stream-end', {});
+      streamSpeechOk = await window.PanthoriumVoiceStream?.finish?.() === true;
+    }
+    return { ok: true, text: state.text, provider: meta.provider ? `Sentinel · ${meta.provider}` : 'Sentinel', via: 'sentinel-stream', model: meta.model || null, usage: meta.usage || null, latencyMs: meta.latencyMs || null, streaming: meta.streaming || 'unknown', streamSpoken: voiceMode, streamSpeechOk };
   }
   function installVisualStreaming() {
     if (window.__panthoriumStreamVisualInstalled) return; window.__panthoriumStreamVisualInstalled = true;
@@ -67,10 +76,24 @@
     if (typeof callAI !== 'function') return false;
     const previous = callAI; if (previous.__panthoriumStreaming) return true;
     const wrapped = async function (prompt, options = {}) {
-      // Both voice paths have an explicit completion/speech policy in the shell.
-      // Never swallow conversationalVoice into text-only streaming or lose its
-      // low-latency flag. Typed chat keeps the streaming path below.
-      if (options?.voiceMode === true || options?.conversationalVoice === true) return previous(prompt, options);
+      // Spoken conversations use native streaming and feed sentence-sized
+      // pieces into the speech queue before the complete answer is ready.
+      if (options?.conversationalVoice === true) {
+        try { return await streamCall(prompt, { voiceMode: true }); }
+        catch (error) {
+          console.warn('[Phase4 Voice Stream]', error.message);
+          const raw = String(error?.message || 'voice_stream_failed');
+          const status = /^stream_http_(\d+)$/.exec(raw)?.[1];
+          const code = raw === 'authentication_required' || status === '401' ? 'authentication_required'
+            : status === '403' ? 'permission_denied'
+            : status === '429' ? 'rate_limited'
+            : /TimeoutError|AbortError/.test(error?.name || '') ? 'chat_timeout'
+            : raw === 'empty_stream' ? 'empty_ai_response' : raw;
+          const messages = { authentication_required: 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง', permission_denied: 'บัญชีนี้ไม่มีสิทธิ์ถามข้อมูล AI', rate_limited: 'เรียก AI เกินขีดจำกัด กรุณารอสักครู่', chat_timeout: 'รอคำตอบ AI เกินเวลา กรุณาลองใหม่' };
+          return { ok: false, text: messages[code] || code, error: code, provider: 'Sentinel', via: 'sentinel-stream' };
+        }
+      }
+      if (options?.voiceMode === true) return previous(prompt, options);
       try { const result = await streamCall(prompt); if (result.text) return result; }
       catch (error) {
         console.warn('[Phase4 Stream]', error.message);

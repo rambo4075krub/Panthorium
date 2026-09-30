@@ -12,7 +12,14 @@ async function checkOrder(streamFirst) {
     w.OS = { state: { booted: true }, config: { backendUrl: '' } };
     w.ensureAuth = async () => true;
     w.callAI = async (prompt, options) => { requests.push({ prompt, options }); return { ok: true, text: 'result' }; };
-    w.fetch = async () => ({ ok: true, json: async () => ({}) });
+    const fetches = [];
+    w.TextDecoder = TextDecoder;
+    w.fetch = async (url, init = {}) => {
+      fetches.push({ url: String(url), init });
+      const frame = ['event: delta', 'data: {"delta":"result"}', '', 'event: done', 'data: {}', '', ''].join('\n');
+      const bytes = new TextEncoder().encode(frame); let sent = false;
+      return { ok: true, status: 200, body: { getReader: () => ({ read: async () => sent ? { done: true } : (sent = true, { done: false, value: bytes }) }) }, json: async () => ({}) };
+    };
     if (streamFirst) { w.eval(source('ai-stream-client.js')); w.PanthoriumAIStream.install(); }
     w.eval(source('phase2-auth.js'));
     await new Promise(resolve => setImmediate(resolve));
@@ -23,13 +30,14 @@ async function checkOrder(streamFirst) {
     assert.equal(requests.length, 1);
     assert.equal(requests[0].options?.voiceMode, true, `voiceMode lost (${streamFirst ? 'auth wraps stream' : 'stream wraps auth'})`);
     await w.callAI('การเรียนรู้คืออะไร', { voiceMode: false, conversationalVoice: true });
-    assert.equal(requests.length, 2);
-    assert.equal(requests[1].options?.conversationalVoice, true, 'conversation flag survives either wrapper order');
-    assert.equal(requests[1].options?.voiceMode, false);
+    const streamedRequests = fetches.filter(request => request.url.endsWith('/api/chat/stream'));
+    assert.equal(streamedRequests.length, 1, 'spoken conversation uses the streaming chat route');
+    assert.equal(JSON.parse(streamedRequests[0].init.body).voice, true, 'conversation flag reaches the streamed server request');
     w.OS.state.user.permissions = [];
     assert.equal((await w.callAI('เปิด Learning Lab', { voiceMode: true })).ok, false);
     assert.equal((await w.callAI('การเรียนรู้คืออะไร', { conversationalVoice: true })).ok, false);
-    assert.equal(requests.length, 2, 'RBAC denial must stop both voice request types');
+    assert.equal(requests.length, 1, 'RBAC denial must stop the command request');
+    assert.equal(fetches.filter(request => request.url.endsWith('/api/chat/stream')).length, 1, 'RBAC denial must stop spoken conversation requests');
   } finally { w.close(); }
 }
 

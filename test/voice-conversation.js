@@ -16,7 +16,7 @@ const answer = 'การเรียนรู้คือการพัฒน�
 const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'settings', 'sentinel:command'], roles: ['administrator'] };
 
 (async () => {
-  const synthesized = [], conversations = [], requests = [], playback = [], revoked = [], recognizers = [];
+  const synthesized = [], conversations = [], streamConversations = [], requests = [], playback = [], revoked = [], recognizers = [];
   let failProvider = false, failSpeech = false, blockPlayback = false, rejectOnce = '', rejectAlways = '', refreshOK = true, playing = false, chatFailure = null, ttsInFlight = 0, maxTtsInFlight = 0, fakeTts = false, speechAttempts = 0;
   // No network access to an AI or speech provider in CI.
   require('../services/sentinelSpeechAudio').synthesizeSentinelMaleVoice = async (text, lang) => {
@@ -31,7 +31,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
   const sentinel = {
     status: () => ({ name: 'Sentinel', providers: ['fixture'] }),
     chat: async input => { conversations.push(input); return failProvider ? { ok: false, error: 'no_provider_available' } : { ok: true, text: answer, provider: 'fixture' }; },
-    streamChat: async ({ onDelta }) => { onDelta(answer); return { ok: true, text: answer }; }
+    streamChat: async input => { streamConversations.push(input); if (failProvider) return { ok: false, error: 'no_provider_available', text: 'no_provider_available' }; input.onDelta(answer); return { ok: true, text: answer, provider: 'fixture', streaming: 'native' }; }
   };
   const tools = new ToolRegistry({ sentinel });
   const agent = new AgentService({ tools, audit });
@@ -73,7 +73,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       if (pathname === '/api/auth/logout') return Response.json({ ok: true });
       if (pathname === '/api/auth/login' || pathname === '/api/auth/refresh') return refreshOK
         ? Response.json({ ok: true, user, accessToken: auth.signAccessToken(user) }) : Response.json({ ok: false }, { status: 401 });
-      if (pathname === '/api/chat' && chatFailure) return chatFailure();
+      if ((pathname === '/api/chat' || pathname === '/api/chat/stream') && chatFailure) return chatFailure();
       if (pathname === rejectOnce || pathname === rejectAlways) { rejectOnce = ''; return Response.json({ ok: false, error: 'authentication_required' }, { status: 401 }); }
       if (pathname === '/api/speech' && fakeTts) {
         ttsInFlight += 1; maxTtsInFlight = Math.max(maxTtsInFlight, ttsInFlight);
@@ -104,12 +104,13 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       assert.equal(w.PanthoriumVoice.state(), 'idle', 'voice request must finish'); w.PanthoriumVoice.pause();
     }
     await utter('การเรียนรู้คืออะไร');
-    assert.equal(conversations.length, 1, 'a spoken question must reach /api/chat, not disappear into the streaming wrapper');
-    assert.equal(conversations[0].voiceMode, true, 'low-latency voice flag reaches the actual server service');
-    assert.equal(conversations[0].userId, user.id);
+    assert.equal(streamConversations.length, 1, 'a spoken question must use the low-latency streaming route');
+    assert.equal(streamConversations[0].voiceMode, true, 'low-latency voice flag reaches the actual server service');
+    assert.equal(streamConversations[0].userId, user.id);
     assert.equal(playback.length, 1, 'a successful spoken question must play its answer');
     assert.equal(synthesized[0].text, answer);
-    assert(!requests.some(r => r.pathname === '/api/chat/stream'), 'voice questions bypass text streaming');
+    assert.equal(requests.find(r => r.pathname === '/api/chat/stream')?.body?.voice, true, 'voice streaming is explicit at the API boundary');
+    assert.equal(requests.filter(r => r.pathname === '/api/speech').length, 1, 'the completed stream must not be spoken a second time');
     assert(revoked.includes(playback[0].src), 'release audio blob after playback ends');
     assert(!w.document.querySelector('#sentinel-command-result'), 'never add a result popup over the microphone');
 
@@ -126,7 +127,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     assert.equal(playback.length, 3, 'window microphone must also answer natural-ended speech');
     assert.match(w.document.getElementById('chat-messages').textContent, new RegExp(answer));
 
-    rejectOnce = '/api/chat';
+    rejectOnce = '/api/chat/stream';
     await utter('การเรียนรู้คืออะไร');
     assert.equal(playback.length, 4, 'refresh expired chat authentication then answer');
     rejectOnce = '/api/speech';
@@ -149,11 +150,11 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     assert.equal(speechAttempts - failedSpeechAttemptsBefore, 1, 'a failed TTS request must not trigger a chain of duplicate retries');
     failSpeech = false;
 
-    rejectAlways = '/api/chat'; refreshOK = false;
+    rejectAlways = '/api/chat/stream'; refreshOK = false;
     const before = requests.length;
     await utter('การเรียนรู้คืออะไร');
     assert.match(w.document.getElementById('toast').textContent, /เข้าสู่ระบบ/);
-    assert.equal(requests.slice(before).filter(r => r.pathname === '/api/chat').length, 1, 'failed refresh must not loop/retry as another user');
+    assert.equal(requests.slice(before).filter(r => r.pathname === '/api/chat/stream').length, 1, 'failed refresh must not retry as another user');
     assert.equal(playback.length, 5);
     rejectAlways = ''; refreshOK = true;
     const longSpeech = 'สวัสดีครับ วันนี้ระบบเสียงกำลังทดสอบการตอบกลับต่อเนื่อง '.repeat(18);
@@ -181,7 +182,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       [() => Response.json({ ok: false }, { status: 429 }), /ขีดจำกัด/],
       [() => Response.json({ ok: true, text: '' }), /empty_ai_response/],
       [() => new Response('not json'), /empty_ai_response/],
-      [() => { throw Object.assign(new Error('timeout'), { name: 'TimeoutError' }); }, /chat_timeout/]
+      [() => { throw Object.assign(new Error('timeout'), { name: 'TimeoutError' }); }, /รอคำตอบ AI เกินเวลา/]
     ]) {
       chatFailure = response; await utter('การเรียนรู้คืออะไร');
       assert.match(w.document.getElementById('toast').textContent, expected);
@@ -190,9 +191,9 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     chatFailure = null;
 
     // Unsupported commands stay commands: never convert a failure to AI prose.
-    const chats = conversations.length, audioCount = synthesized.length;
+    const chats = streamConversations.length, audioCount = synthesized.length;
     await utter('เปิดฟังก์ชันที่ไม่มีอยู่');
-    assert.equal(conversations.length, chats);
+    assert.equal(streamConversations.length, chats);
     assert.equal(synthesized.length, audioCount);
     // Text chat retains streaming; the voice fix must not disable it globally.
     const typed = await w.callAI('การเรียนรู้คืออะไร');

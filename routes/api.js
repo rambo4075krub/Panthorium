@@ -99,7 +99,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
   router.post("/chat/stream", auth, requirePermission("chat"), aiLimiter, async (req, res) => {
     const error = validChatBody(req.body || {});
     if (error) return res.status(400).json({ ok: false, error });
-    const { message, sessionId, provider, model } = req.body || {};
+    const { message, sessionId, provider, model, voice } = req.body || {};
     const sid = sessionId || req.headers["x-session-id"] || randomUUID();
     res.status(200).set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders?.();
@@ -113,6 +113,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
         mode: "default",
         provider: provider?.toLowerCase(),
         model,
+        voiceMode: voice === true,
         onProvider: (meta) => event("provider", meta),
         onDelta: (delta) => event("delta", { delta })
       });

@@ -1146,6 +1146,24 @@
     function splitSpeechByLanguage(text) {
         const source = String(text || "").replace(/\s+/g, " ").trim();
         if (!source) return [];
+        const thaiLetters = (source.match(/[\u0E00-\u0E7E]/g) || []).length;
+        const latinLetters = (source.match(/[A-Za-zÀ-ÿ]/g) || []).length;
+        // Thai answers often contain English product names and abbreviations.
+        // Keep those in the same spoken phrase so changing language does not
+        // trigger another remote TTS request and an audible pause.
+        if (thaiLetters && latinLetters) {
+            const lang = thaiLetters >= latinLetters ? "th-TH" : "en-US";
+            const pieces = [];
+            let remaining = source;
+            while (remaining.length > 170) {
+                let cut = remaining.lastIndexOf(" ", 170);
+                if (cut < 80) cut = 170;
+                pieces.push({ text: remaining.slice(0, cut).trim(), lang });
+                remaining = remaining.slice(cut).trim();
+            }
+            if (remaining) pieces.push({ text: remaining, lang });
+            return pieces;
+        }
         // Split inside a sentence when the script changes (Thai + English + 日本語, etc.).
         // The previous implementation classified the whole sentence by its first script.
         const tokens = source.match(/[\u0E00-\u0E7F]+|[\u3040-\u30FF]+|[\uAC00-\uD7AF]+|[\u0600-\u06FF]+|[\u0400-\u04FF]+|[\u4E00-\u9FFF]+|[A-Za-zÀ-ÿ]+|[0-9]+|[^\p{L}\p{N}]+/gu) || [source];
@@ -1187,9 +1205,11 @@
             return score(b) - score(a);
         });
         const confirmedMale = ranked.find(voice => deepVoiceNames.test(voice.name));
-        // Thai and English system voice lists may contain unlabelled female
-        // defaults. Never select an unconfirmed voice for these languages.
-        if (base === "th" || base === "en") return confirmedMale || null;
+        // Prefer the confirmed male voice, but on mobile accept the device's
+        // native Thai voice when it does not expose voice gender. A local Thai
+        // voice starts immediately and sounds clearer than a remote fallback.
+        if (base === "th") return confirmedMale || matching.find(voice => voice.localService) || matching[0] || null;
+        if (base === "en") return confirmedMale || null;
         return confirmedMale || ranked[0] || null;
     }
 
@@ -1220,6 +1240,7 @@
     let speechInterruptedByUser = false;
     function stopSentinelSpeech() {
         speechInterruptedByUser = true;
+        cancelStreamingSpeech();
         activeSpeechRun += 1;
         try { window.speechSynthesis?.cancel(); } catch (_) {}
         try { cancelRemotePlayback?.(); } catch (_) {}
@@ -1420,7 +1441,6 @@
         window.PanthoriumOrb?.setAISpeaking(true);
         window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text } }));
         let spokeAny = false;
-        let previousChunkLanguage = "";
         const usesMaleNeural = chunk => chunk?.lang === "th-TH" || chunk?.lang === "en-US";
         // Start every neural request together. Fetching only one chunk ahead
         // still left a long silence when a short word finished before the next
@@ -1449,16 +1469,6 @@
                 releasePendingRemote(chunkIndex + 1);
                 break;
             }
-            // Give the listener a short, consistent boundary when a sentence
-            // switches scripts. Andrew remains the same speaker on both sides.
-            if (previousChunkLanguage && previousChunkLanguage !== chunk.lang) {
-                await new Promise(resolve => setTimeout(resolve, 15));
-                if (speechRun !== activeSpeechRun) {
-                    releaseRemoteChunk(preparedRemote);
-                    releasePendingRemote(chunkIndex + 1);
-                    break;
-                }
-            }
             const voice = voiceForLanguage(chunk.lang, voices);
             const forceMaleNeural = usesMaleNeural(chunk);
             let spoken = false;
@@ -1478,7 +1488,6 @@
             if (!spoken && (voice || !forceMaleNeural) && speechRun === activeSpeechRun) spoken = await speakNativeChunk(chunk, voice, speechRun);
             if (!spoken && !forceMaleNeural && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange);
             spokeAny = spokeAny || spoken;
-            previousChunkLanguage = chunk.lang;
         }
         if (speechRun === activeSpeechRun) {
             aiSpeechActive = false;
@@ -1514,22 +1523,75 @@
         try { window.speechSynthesis?.resume(); } catch (_) {}
     }, { once: false, passive: true });
 
-    // Stream-safe speech: callers can send deltas without cutting a word or changing voices mid-sentence.
+    // Stream-safe speech: speak stable phrases while a voice answer is still
+    // arriving. Serialize the queue so later fragments never interrupt earlier ones.
     let streamingSpeechBuffer = "";
     let streamingSpeechTimer = null;
+    let streamingSpeechQueue = Promise.resolve();
+    let streamingSpeechGeneration = 0;
+    let streamingSpeechActive = false;
+    let streamingSpeechSucceeded = false;
+    function queueStreamingSpeech(text) {
+        const chunk = String(text || "").trim();
+        if (!chunk) return;
+        streamingSpeechActive = true;
+        const generation = streamingSpeechGeneration;
+        streamingSpeechQueue = streamingSpeechQueue.then(async () => {
+            if (generation !== streamingSpeechGeneration) return false;
+            const succeeded = await speak(chunk);
+            streamingSpeechSucceeded = streamingSpeechSucceeded || succeeded;
+            return succeeded;
+        }).catch(error => { console.warn("[Sentinel stream speech]", error?.message || error); return false; });
+    }
+    function drainStreamingSpeech(force = false) {
+        streamingSpeechBuffer = streamingSpeechBuffer.trimStart();
+        while (streamingSpeechBuffer) {
+            const sentence = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…\n])(?:\s|$)/u);
+            if (sentence && sentence[1].trim().length >= 18) {
+                queueStreamingSpeech(sentence[1]);
+                streamingSpeechBuffer = streamingSpeechBuffer.slice(sentence[1].length).trimStart();
+                continue;
+            }
+            if (streamingSpeechBuffer.length >= 88) {
+                let cut = streamingSpeechBuffer.lastIndexOf(" ", 96);
+                if (cut < 42) cut = 88;
+                queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut));
+                streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
+                continue;
+            }
+            if (force) {
+                queueStreamingSpeech(streamingSpeechBuffer);
+                streamingSpeechBuffer = "";
+            }
+            break;
+        }
+    }
+    async function finishStreamingSpeech() {
+        clearTimeout(streamingSpeechTimer);
+        drainStreamingSpeech(true);
+        await streamingSpeechQueue;
+        streamingSpeechActive = false;
+        const succeeded = streamingSpeechSucceeded;
+        streamingSpeechSucceeded = false;
+        return succeeded;
+    }
+    function cancelStreamingSpeech() {
+        clearTimeout(streamingSpeechTimer);
+        streamingSpeechGeneration += 1;
+        streamingSpeechBuffer = "";
+        streamingSpeechActive = false;
+        streamingSpeechSucceeded = false;
+    }
     window.addEventListener("panthorium:ai-stream-delta", event => {
         streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
+        drainStreamingSpeech(false);
         clearTimeout(streamingSpeechTimer);
-        streamingSpeechTimer = setTimeout(() => {
-            const match = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…])(?:\s|$)/);
-            if (match) { speak(match[1]); streamingSpeechBuffer = streamingSpeechBuffer.slice(match[1].length).trimStart(); }
-        }, 180);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= 24) drainStreamingSpeech(true); }, 320);
     });
     window.addEventListener("panthorium:ai-stream-end", () => {
-        clearTimeout(streamingSpeechTimer);
-        if (streamingSpeechBuffer.trim()) speak(streamingSpeechBuffer);
-        streamingSpeechBuffer = "";
+        finishStreamingSpeech();
     });
+    window.PanthoriumVoiceStream = { finish: finishStreamingSpeech };
 
     // Global voice path: accepts commands without opening Sentinel chat.
     function initGlobalVoice() {
@@ -1558,6 +1620,9 @@
             if (row) { row.classList.add("active"); row.textContent = label; }
             if (announce) toast(label, kind === "processing" || kind === "unresponsive" ? 10000 : 2500);
         };
+        window.addEventListener("panthorium:voice-start", () => {
+            if (voiceState === "processing") status("processing", "กำลังพูดคำตอบ", false);
+        });
         if (!recorderSupported && document.body?.dataset.voiceIdentityRequired === "true") {
             status("unsupported", "เบราว์เซอร์นี้ไม่รองรับการตรวจเสียงผู้พูด");
             button.onclick = () => status("unsupported", "เบราว์เซอร์นี้ไม่รองรับการตรวจเสียงผู้พูด");
@@ -1592,8 +1657,12 @@
                 }
                 if (voiceResponseNeedsSpeech(intent, res)) {
                     voiceState = "speaking";
-                    status("processing", res.confirmationRequired ? res.text : "กำลังเตรียมเสียงตอบ");
-                    if (!(await speakVoiceResponse(res.text))) {
+                    status("processing", res.confirmationRequired ? res.text : res.streamSpoken ? "กำลังพูดคำตอบ" : "กำลังเตรียมเสียงตอบ", false);
+                    if (res.streamSpoken && res.streamSpeechOk === false) {
+                        status("unresponsive", voicePlaybackFailure);
+                        return;
+                    }
+                    if (!res.streamSpoken && !(await speakVoiceResponse(res.text))) {
                         status("unresponsive", voicePlaybackFailure);
                         return;
                     }
@@ -2464,7 +2533,7 @@
                 const reply = (res && res.text && String(res.text).trim()) || "ยังไม่ได้รับคำตอบจาก AI";
                 appendMsg(reply, "ai", false, res?.provider);
                 if (!res?.ok) toast(reply, 10000);
-                else if (voiceResponseNeedsSpeech(intent, res) && !(await speakVoiceResponse(res.text))) toast(voicePlaybackFailure, 10000);
+                else if (voiceResponseNeedsSpeech(intent, res) && ((res.streamSpoken && res.streamSpeechOk === false) || (!res.streamSpoken && !(await speakVoiceResponse(res.text))))) toast(voicePlaybackFailure, 10000);
             } catch (err) {
                 messages.querySelector('.msg.loading, .msg[data-streaming="1"]')?.remove();
                 const reason = err && err.message === "authentication_required"

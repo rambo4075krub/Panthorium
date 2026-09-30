@@ -60,6 +60,7 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
 
   const api = fs.readFileSync('routes/api.js', 'utf8');
   const sentinelService = fs.readFileSync('services/sentinel.js', 'utf8');
+  const gatewayService = fs.readFileSync('services/aiGateway.js', 'utf8');
   const server = fs.readFileSync('server.js', 'utf8');
   const shell = fs.readFileSync('sentinel.html', 'utf8');
   assert(api.includes('router.post("/chat/stream"'), 'Sentinel must expose its SSE chat route');
@@ -70,8 +71,7 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange)'), 'speech must fall back when a native utterance fails');
   assert.equal(SENTINEL_MALE_VOICES['th-TH'], 'th-TH-NiwatNeural', 'Thai speech must use a native Thai male neural voice');
   assert.equal(SENTINEL_MALE_VOICES['en-US'], 'en-US-AndrewMultilingualNeural', 'English speech must use the Andrew multilingual male neural voice');
-  assert(shell.includes('previousChunkLanguage !== chunk.lang'), 'mixed Thai and English speech must pause at each language boundary');
-  assert(shell.includes('setTimeout(resolve, 15)'), 'mixed-language pauses must remain clear without sounding delayed');
+  assert(!shell.includes('previousChunkLanguage !== chunk.lang'), 'language switches must not add artificial silence');
   assert(shell.includes('if (last && last.lang === lang) last.text += token'), 'same-language sentences must remain in one audio request without a network gap');
   assert(shell.includes('const preparedRemotePromises = chunks.map'), 'all language chunks must preload together to eliminate network gaps');
   assert(shell.includes('audio.ontimeupdate = () => updateTranscript(false)'), 'remote Andrew audio must advance the current transcript on desktop and mobile');
@@ -85,8 +85,11 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('u.pitch = 0.9'), 'Sentinel system-voice fallback must keep a natural male pitch');
   assert(shell.includes('u.rate = 1.02'), 'Sentinel system-voice fallback must speak at a natural pace');
   assert(shell.includes('deepVoiceNames'), 'Sentinel must prefer a deep voice available for the response language');
-  assert(shell.includes('femaleVoiceNames'), 'Sentinel must reject explicitly female Thai system voices');
-  assert(shell.includes('if (base === "th" || base === "en") return confirmedMale || null'), 'Thai and English system speech must reject unconfirmed female defaults');
+  assert(shell.includes('femaleVoiceNames'), 'Sentinel should prefer confirmed male system voices when available');
+  assert(shell.includes('if (base === "th") return confirmedMale || matching.find(voice => voice.localService) || matching[0] || null'), 'mobile Thai speech may use a native Thai voice immediately when gender metadata is unavailable');
+  assert(shell.includes('Keep those in the same spoken phrase'), 'mixed Thai-English speech must stay in one language phrase to remove switch gaps');
+  assert(gatewayService.includes('orderedProviders(preferredProvider, streamingFirst = false)'), 'voice streaming should prioritize providers that return native deltas');
+  assert(sentinelService.includes('โหมดตอบด้วยเสียง: เริ่มตอบประเด็นสำคัญทันที'), 'voice answers should be concise and speech-ready');
   assert(shell.includes('const usesMaleNeural = chunk => chunk?.lang === "th-TH" || chunk?.lang === "en-US"'), 'Thai and English must prefer the server male neural voices on every device');
   assert(shell.includes('receivedProfile !== expectedMaleProfile'), 'the client must reject a speech response that is not the expected male profile');
   assert(api.includes('if (lang === "th-TH" || lang === "en-US") throw neuralError'), 'the server must never replace Thai or English male neural speech with an unverified source voice');
