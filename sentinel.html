@@ -1384,9 +1384,11 @@
     let streamingSpeechGeneration = 0;
     let streamingSpeechActive = false;
     let streamingSpeechSucceeded = false;
+    let streamingSpeechInterrupted = false;
     function queueStreamingSpeech(text) {
         const chunk = String(text || "").trim();
         if (!chunk) return;
+        if (!streamingSpeechActive) streamingSpeechInterrupted = false;
         streamingSpeechActive = true;
         const generation = streamingSpeechGeneration;
         streamingSpeechQueue = streamingSpeechQueue.then(async () => {
@@ -1424,8 +1426,9 @@
         drainStreamingSpeech(true);
         await streamingSpeechQueue;
         streamingSpeechActive = false;
-        const succeeded = streamingSpeechSucceeded;
+        const succeeded = streamingSpeechSucceeded || streamingSpeechInterrupted;
         streamingSpeechSucceeded = false;
+        streamingSpeechInterrupted = false;
         return succeeded;
     }
     function cancelStreamingSpeech() {
@@ -1434,6 +1437,7 @@
         streamingSpeechBuffer = "";
         streamingSpeechActive = false;
         streamingSpeechSucceeded = false;
+        streamingSpeechInterrupted = true;
     }
     window.addEventListener("panthorium:ai-stream-delta", event => {
         streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
@@ -1761,6 +1765,13 @@
             };
             button.onclick = async () => {
                 unlockVoiceAudio();
+                if (aiSpeechActive || voiceState === "speaking") {
+                    autoResume = false;
+                    stopSentinelSpeech();
+                    voiceState = "idle";
+                    status("ready", "หยุดเสียงแล้ว กดไมค์เมื่อต้องการพูด", false);
+                    return;
+                }
                 if (voiceState === "speaking") {
                     stopSentinelSpeech();
                     voiceState = "idle";
@@ -1905,6 +1916,13 @@
         button.onclick = async () => {
             unlockVoiceAudio();
             try { window.speechSynthesis?.resume(); } catch (_) {}
+            if (aiSpeechActive || voiceState === "speaking") {
+                autoResume = false;
+                stopSentinelSpeech();
+                voiceState = "idle";
+                status("ready", "หยุดเสียงแล้ว กดไมค์เมื่อต้องการพูด", false);
+                return;
+            }
             if (voiceState === "speaking") {
                 stopSentinelSpeech();
                 voiceState = "idle";

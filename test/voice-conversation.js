@@ -210,6 +210,19 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     assert.equal(playing, false);
     w.PanthoriumVoice.pause();
 
+    // A tap on the global microphone during Sentinel playback is a stop
+    // action only. It must not immediately restart listening in hands-free mode.
+    const startsBeforeSpeechStop = globalMic.starts;
+    evaluate('aiSpeechActive = true;');
+    await w.document.getElementById('global-voice').onclick();
+    assert.equal(evaluate('aiSpeechActive'), false, 'global mic tap cancels active speech');
+    assert.equal(w.PanthoriumVoice.state(), 'idle', 'stopping speech returns the voice control to idle');
+    await new Promise(resolve => setTimeout(resolve, 420));
+    assert.equal(globalMic.starts, startsBeforeSpeechStop, 'stopping speech does not silently restart the microphone');
+    await w.document.getElementById('global-voice').onclick();
+    assert.equal(globalMic.starts, startsBeforeSpeechStop + 1, 'a later explicit tap starts listening again');
+    w.PanthoriumVoice.pause();
+
     // Electron exposes SpeechRecognition even when its remote service fails.
     // An error followed by onend/resume must never create a 350ms retry loop.
     w.panthoriumDesktop = { isElectron: true };
