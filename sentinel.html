@@ -1467,51 +1467,103 @@
     let streamingSpeechActive = false;
     let streamingSpeechSucceeded = false;
     let streamingSpeechInterrupted = false;
-    let streamingSpeechPrimed = false;
+    let streamingSpeechTtsInFlight = 0;
+    const streamingSpeechTtsPending = [];
+    function prepareStreamingSpeech(chunk, generation) {
+        return new Promise(resolve => {
+            streamingSpeechTtsPending.push({ chunk, generation, resolve });
+            pumpStreamingSpeechTts();
+        });
+    }
+    function pumpStreamingSpeechTts() {
+        while (streamingSpeechTtsInFlight < 2 && streamingSpeechTtsPending.length) {
+            const job = streamingSpeechTtsPending.shift();
+            if (job.generation !== streamingSpeechGeneration) { job.resolve(null); continue; }
+            streamingSpeechTtsInFlight += 1;
+            requestRemoteChunk(job.chunk, "th-TH").then(prepared => {
+                if (job.generation !== streamingSpeechGeneration) {
+                    releaseRemoteChunk(prepared);
+                    job.resolve(null);
+                } else job.resolve(prepared);
+            }).catch(() => job.resolve(null)).finally(() => {
+                streamingSpeechTtsInFlight = Math.max(0, streamingSpeechTtsInFlight - 1);
+                pumpStreamingSpeechTts();
+            });
+        }
+    }
+    function findSpeechChunkCut(text, maxLength) {
+        const value = String(text || "");
+        const limit = Math.min(value.length, maxLength);
+        let cut = 0;
+        const boundaryPattern = /[,;:!?…。！？，；：\s]/gu;
+        let match;
+        while ((match = boundaryPattern.exec(value)) && match.index < limit) {
+            const end = match.index + match[0].length;
+            if (end <= limit) cut = end;
+        }
+        if (cut >= 18) return cut;
+        try {
+            if (typeof Intl.Segmenter === "function") {
+                for (const part of new Intl.Segmenter("th", { granularity: "word" }).segment(value)) {
+                    const end = part.index + part.segment.length;
+                    if (end > limit) break;
+                    if (part.isWordLike) cut = end;
+                }
+            }
+        } catch (_) {}
+        if (cut >= 18) return cut;
+        try {
+            if (typeof Intl.Segmenter === "function") {
+                for (const part of new Intl.Segmenter("th", { granularity: "grapheme" }).segment(value)) {
+                    const end = part.index + part.segment.length;
+                    if (end > limit) break;
+                    cut = end;
+                }
+            }
+        } catch (_) {}
+        return cut >= 18 ? cut : 0;
+    }
     function queueStreamingSpeech(text) {
         const chunk = String(text || "").trim();
-        if (!chunk) return;
-        if (!streamingSpeechActive) {
-            streamingSpeechInterrupted = false;
-            streamingSpeechPrimed = false;
-        }
-        if (speechInterruptedByUser) return;
+        if (!chunk || speechInterruptedByUser) return;
+        if (!streamingSpeechActive) streamingSpeechInterrupted = false;
         streamingSpeechActive = true;
         const generation = streamingSpeechGeneration;
-        // Synthesize the first playable phrase as soon as it leaves the stream.
-        // Pass it into speak() so the same phrase is not synthesized twice.
-        const shouldPrime = !streamingSpeechPrimed && chunk.length <= 170;
-        if (shouldPrime) streamingSpeechPrimed = true;
-        const preparedPromise = shouldPrime ? requestRemoteChunk(chunk, "th-TH") : null;
+        // Prepare every phrase before it reaches the playback head. The TTS
+        // pump bounds concurrent provider calls to two, while playback stays serial.
+        const preparedPromise = prepareStreamingSpeech(chunk, generation);
         streamingSpeechQueue = streamingSpeechQueue.then(async () => {
-            if (generation !== streamingSpeechGeneration) {
-                if (preparedPromise) preparedPromise.then(releaseRemoteChunk);
-                return false;
-            }
-            const prepared = preparedPromise ? await preparedPromise : null;
+            const prepared = await preparedPromise;
             if (generation !== streamingSpeechGeneration) { releaseRemoteChunk(prepared); return false; }
-            const succeeded = await speak(chunk, { firstPrepared: prepared, firstPreparedAttempted: shouldPrime });
+            const succeeded = await speak(chunk, { firstPrepared: prepared, firstPreparedAttempted: true });
             streamingSpeechSucceeded = streamingSpeechSucceeded || succeeded;
             return succeeded;
         }).catch(error => { console.warn("[Sentinel stream speech]", error?.message || error); return false; });
     }
-    function drainStreamingSpeech(force = false) {
+    function drainStreamingSpeech(force = false, flushPartial = false) {
         streamingSpeechBuffer = streamingSpeechBuffer.trimStart();
         while (streamingSpeechBuffer) {
             const sentence = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…\n])(?:\s|$)/u);
-            // Do not wait for the end of a long generated sentence. Start
-            // TTS after the first short clause and keep later phrases queued.
             if (streamingSpeechBuffer.length >= 58) {
-                let cut = streamingSpeechBuffer.lastIndexOf(" ", 64);
-                if (cut < 28) cut = 58;
-                queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut));
-                streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
-                continue;
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, 64);
+                if (cut) {
+                    queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
+                    streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
+                    continue;
+                }
             }
             if (sentence && sentence[1].trim().length >= 18) {
                 queueStreamingSpeech(sentence[1]);
                 streamingSpeechBuffer = streamingSpeechBuffer.slice(sentence[1].length).trimStart();
                 continue;
+            }
+            if (flushPartial && streamingSpeechBuffer.length >= 24) {
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, streamingSpeechBuffer.length);
+                if (cut) {
+                    queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
+                    streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
+                    continue;
+                }
             }
             if (force) {
                 queueStreamingSpeech(streamingSpeechBuffer);
@@ -1525,7 +1577,6 @@
         drainStreamingSpeech(true);
         await streamingSpeechQueue;
         streamingSpeechActive = false;
-        streamingSpeechPrimed = false;
         window.dispatchEvent(new CustomEvent("panthorium:voice-stream-finished"));
         const succeeded = streamingSpeechSucceeded || streamingSpeechInterrupted;
         streamingSpeechSucceeded = false;
@@ -1539,13 +1590,14 @@
         streamingSpeechActive = false;
         streamingSpeechSucceeded = false;
         streamingSpeechInterrupted = true;
+        for (const job of streamingSpeechTtsPending.splice(0)) job.resolve(null);
     }
     window.addEventListener("panthorium:ai-stream-delta", event => {
         if (speechInterruptedByUser) return;
         streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
         drainStreamingSpeech(false);
         clearTimeout(streamingSpeechTimer);
-        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= 24) drainStreamingSpeech(true); }, 90);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= 24) drainStreamingSpeech(false, true); }, 90);
     });
     window.addEventListener("panthorium:ai-stream-end", () => {
         finishStreamingSpeech();

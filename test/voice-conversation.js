@@ -127,6 +127,20 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     // A browser that terminates with interim-only text must still get an answer.
     await utter('ช่วยอธิบายการเรียนรู้', false);
     assert.equal(playback.length, 2);
+    // While a streamed phrase is playing, synthesize later phrases ahead of
+    // time so the next clip does not wait for a fresh provider round trip.
+    const ttsCallsBeforePrefetch = requests.filter(r => r.pathname === '/api/speech').length;
+    holdPlayback = true;
+    w.dispatchEvent(new w.CustomEvent('panthorium:ai-stream-delta', { detail: { text: 'การเรียนรู้เกิดจากการรับข้อมูล การทำความเข้าใจ การทดลอง และการทบทวน เมื่อได้รับประสบการณ์ใหม่ ระบบจะปรับปรุงคำตอบให้เหมาะสมมากยิ่งขึ้น โดยพิจารณาบริบทและความต้องการของผู้ใช้เสมอ' } }));
+    for (let i = 0; i < 200 && !(evaluate('aiSpeechActive') && playing); i++) await tick();
+    assert.equal(playing, true, 'first prefetched phrase begins playback');
+    assert(requests.filter(r => r.pathname === '/api/speech').length >= ttsCallsBeforePrefetch + 2, 'the following phrase is synthesized before current playback finishes');
+    const stoppedStream = w.PanthoriumVoiceStream.finish();
+    evaluate('stopSentinelSpeech();');
+    holdPlayback = false;
+    await stoppedStream;
+    assert.equal(playing, false, 'stopping also drains prefetched clips without leaving audio active');
+    evaluate('speechInterruptedByUser = false;');
     // Speech commands spoken during AI playback stop audio and queued segments,
     // without becoming another chat prompt.
     const conversationsBeforeStop = streamConversations.length;
@@ -156,24 +170,24 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     transcript(chatMic, 'การเรียนรู้คืออะไร');
     await chatMic.stop(); // natural end, no second click/silence timer needed
     w.PanthoriumVoice.pause();
-    assert.equal(playback.length, 4, 'window microphone must also answer natural-ended speech');
+    assert.equal(playback.length, 5, 'window microphone must also answer natural-ended speech');
     assert.match(w.document.getElementById('chat-messages').textContent, new RegExp(answer));
 
     rejectOnce = '/api/chat/stream';
     await utter('การเรียนรู้คืออะไร');
-    assert.equal(playback.length, 5, 'refresh expired chat authentication then answer');
+    assert.equal(playback.length, 6, 'refresh expired chat authentication then answer');
     rejectOnce = '/api/speech';
     await utter('การเรียนรู้คืออะไร');
-    assert.equal(playback.length, 6, 'refresh expired TTS authentication then play');
+    assert.equal(playback.length, 7, 'refresh expired TTS authentication then play');
     assert.equal(requests.filter(r => r.pathname === '/api/auth/refresh').length, 3, 'restore existing session on boot, then refresh expired chat and speech requests');
 
     failProvider = true;
     await utter('การเรียนรู้คืออะไร');
-    assert.equal(playback.length, 6, 'never speak an API failure as a successful AI answer');
+    assert.equal(playback.length, 7, 'never speak an API failure as a successful AI answer');
     assert.match(w.document.getElementById('toast').textContent, /no_provider_available/);
     failProvider = false; blockPlayback = true;
     await utter('การเรียนรู้คืออะไร');
-    assert.equal(playback.length, 6);
+    assert.equal(playback.length, 7);
     assert.match(w.document.getElementById('toast').textContent, /เล่นเสียง.*ไม่สำเร็จ/);
     blockPlayback = false; failSpeech = true;
     const failedSpeechAttemptsBefore = speechAttempts;
@@ -187,7 +201,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     await utter('การเรียนรู้คืออะไร');
     assert.match(w.document.getElementById('toast').textContent, /เข้าสู่ระบบ/);
     assert.equal(requests.slice(before).filter(r => r.pathname === '/api/chat/stream').length, 1, 'failed refresh must not retry as another user');
-    assert.equal(playback.length, 6);
+    assert.equal(playback.length, 7);
     rejectAlways = ''; refreshOK = true;
     const longSpeech = 'สวัสดีครับ วันนี้ระบบเสียงกำลังทดสอบการตอบกลับต่อเนื่อง '.repeat(18);
     const playbackBeforeLongSpeech = playback.length;
@@ -238,7 +252,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     transcript(globalMic, 'การเรียนรู้คืออะไร'); globalMic.stop();
     for (let i = 0; i < 400 && w.PanthoriumVoice.state() !== 'listening'; i++) await tick();
     assert.equal(w.PanthoriumVoice.state(), 'listening');
-    assert.equal(playback.length, 8 + longSpeechPlaybackCount);
+    assert.equal(playback.length, 9 + longSpeechPlaybackCount);
     assert.equal(playing, false);
     w.PanthoriumVoice.pause();
 
