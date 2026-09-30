@@ -17,7 +17,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
 
 (async () => {
   const synthesized = [], conversations = [], streamConversations = [], requests = [], playback = [], revoked = [], recognizers = [];
-  let failProvider = false, failSpeech = false, blockPlayback = false, rejectOnce = '', rejectAlways = '', refreshOK = true, playing = false, chatFailure = null, ttsInFlight = 0, maxTtsInFlight = 0, fakeTts = false, speechAttempts = 0;
+  let failProvider = false, failSpeech = false, blockPlayback = false, rejectOnce = '', rejectAlways = '', refreshOK = true, playing = false, holdPlayback = false, chatFailure = null, ttsInFlight = 0, maxTtsInFlight = 0, fakeTts = false, speechAttempts = 0;
   // No network access to an AI or speech provider in CI.
   require('../services/sentinelSpeechAudio').synthesizeSentinelMaleVoice = async (text, lang) => {
     speechAttempts += 1;
@@ -59,7 +59,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
         assert.equal(this.volume, 1);
         playback.push({ src: this.src, blob: objects.get(this.src) });
         playing = true;
-        setTimeout(() => { playing = false; this.onended?.(); }, 25);
+        if (!holdPlayback) setTimeout(() => { playing = false; this.onended?.(); }, 25);
       }
     };
     w.SpeechRecognition = class {
@@ -93,6 +93,8 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       assert.notEqual(w.PanthoriumVoice.state(), 'listening', 'stop the mic before preparing speech');
     });
     const globalMic = recognizers[0];
+    for (const phrase of ['หยุด', 'หยุดพูด', 'ไม่ต้องพูด', 'หยุดเดี๋ยวนี้', 'หยุดเสียง', 'พอ', 'เซา', 'เซาๆ', 'หยุดนะ']) assert.equal(evaluate(`isVoiceStopCommand(${JSON.stringify(phrase)})`), true, `recognize voice stop phrase: ${phrase}`);
+    assert.equal(evaluate(`isVoiceStopCommand('หยุดทำงานได้ไหม')`), false, 'do not interrupt on an ordinary question that mentions stop');
     // Let the shell's one-time mic startup finish before injecting transcripts.
     await new Promise(resolve => setTimeout(resolve, 420));
     assert.equal(globalMic.starts, 1, 'hands-free microphone starts once without a click');
@@ -117,9 +119,28 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     // A browser that terminates with interim-only text must still get an answer.
     await utter('ช่วยอธิบายการเรียนรู้', false);
     assert.equal(playback.length, 2);
+    // Speech commands spoken during AI playback stop audio and queued segments,
+    // without becoming another chat prompt.
+    const conversationsBeforeStop = streamConversations.length;
+    const playbackBeforeStop = playback.length;
+    holdPlayback = true;
+    globalMic.start(); transcript(globalMic, 'ช่วยสรุปเรื่องนี้'); globalMic.stop();
+    for (let i = 0; i < 200 && !(evaluate('aiSpeechActive') && playing); i++) await tick();
+    assert.equal(evaluate('aiSpeechActive'), true, 'the answer is playing before the interrupt command');
+    const interruptionMic = recognizers.at(-1);
+    transcript(interruptionMic, 'เซาๆ');
+    for (let i = 0; i < 250 && evaluate('aiSpeechActive'); i++) await tick();
+    assert.equal(evaluate('aiSpeechActive'), false, 'spoken stop command immediately cancels Sentinel speech');
+    assert.equal(playing, false, 'interrupted audio playback is cancelled');
+    assert.equal(streamConversations.length, conversationsBeforeStop + 1, 'the stop phrase is not submitted as a new chat prompt');
+    assert.equal(playback.length, playbackBeforeStop + 1, 'no later queued speech segment plays after interruption');
+    holdPlayback = false;
+    await new Promise(resolve => setTimeout(resolve, 80));
+    w.PanthoriumVoice.pause();
     // Both microphone entry points use the same routing and real speech code.
+    const chatRecognizerIndex = recognizers.length;
     evaluate('openSentinel();');
-    const chatMic = recognizers[1];
+    const chatMic = recognizers[chatRecognizerIndex];
     await w.document.getElementById('chat-mic').onclick();
     transcript(chatMic, 'การเรียนรู้คืออะไร');
     await chatMic.stop(); // natural end, no second click/silence timer needed

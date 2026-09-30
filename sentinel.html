@@ -1166,8 +1166,21 @@
     let activeSpeechRun = 0;
     let cancelRemotePlayback = null;
     let speechInterruptedByUser = false;
+    let currentSpeechText = "";
+    function normalizeVoiceStopText(text) {
+        return String(text || "").normalize("NFKC").toLowerCase()
+            .replace(/[\s\u200b\u200c\u200d\uFEFF]+/gu, "")
+            .replace(/(?:ครับ|ค่ะ|คะ|นะ|หน่อย)$/u, "")
+            .replace(/[.,!?;:。！？、ฯๆ]+$/gu, "")
+            .replace(/[.,!?;:。！？、]/gu, "");
+    }
+    function isVoiceStopCommand(text) {
+        const normalized = normalizeVoiceStopText(text);
+        return /^(?:หยุด(?:พูด|เดี๋ยวนี้|เสียง|ก่อน|ที|เลย|ได้แล้ว|ต่อ)?|ไม่ต้องพูด(?:แล้ว|ต่อ)?|พอ(?:แล้ว|ที|ก่อน|เถอะ)?|เซา(?:ๆ|เซา)?|เซ้า(?:ๆ|เซ้า)?)$/u.test(normalized);
+    }
     function stopSentinelSpeech() {
         speechInterruptedByUser = true;
+        currentSpeechText = "";
         cancelStreamingSpeech();
         activeSpeechRun += 1;
         try { cancelRemotePlayback?.(); } catch (_) {}
@@ -1296,8 +1309,9 @@
     }
 
     async function speak(text) {
-        speechInterruptedByUser = false;
+        if (speechInterruptedByUser) return false;
         text = voiceSafeText(text);
+        currentSpeechText = text;
         setOrbTranscript(text, 0);
         const speechRun = ++activeSpeechRun;
         const rawChunks = splitSpeechByLanguage(text);
@@ -1344,6 +1358,7 @@
             spokeAny = spokeAny || spoken;
         }
         if (speechRun === activeSpeechRun) {
+            currentSpeechText = "";
             aiSpeechActive = false;
             aiSpeechPulse = 0;
             window.PanthoriumOrb?.setAISpeaking(false);
@@ -1389,6 +1404,7 @@
         const chunk = String(text || "").trim();
         if (!chunk) return;
         if (!streamingSpeechActive) streamingSpeechInterrupted = false;
+        if (speechInterruptedByUser) return;
         streamingSpeechActive = true;
         const generation = streamingSpeechGeneration;
         streamingSpeechQueue = streamingSpeechQueue.then(async () => {
@@ -1440,6 +1456,7 @@
         streamingSpeechInterrupted = true;
     }
     window.addEventListener("panthorium:ai-stream-delta", event => {
+        if (speechInterruptedByUser) return;
         streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
         drainStreamingSpeech(false);
         clearTimeout(streamingSpeechTimer);
@@ -1459,6 +1476,10 @@
         const electronVoice = Boolean(window.panthoriumDesktop?.isElectron);
         const recorderSupported = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
         let recognition = null;
+        let interruptionRecognition = null;
+        let interruptionMonitorEnabled = false;
+        let interruptionRestartTimer = null;
+        let interruptionStartRetries = 0;
         let autoResume = true;
         let recognitionBlocked = false;
         let voiceState = "idle";
@@ -1493,6 +1514,81 @@
 
         // Assigned by the active voice path so processTranscript can resume listening.
         let resumeAfterTranscript = () => {};
+        const startInterruptionRecognition = () => {
+            if (!interruptionMonitorEnabled || !aiSpeechActive || interruptionRecognition || !SR) return;
+            let monitor;
+            try { monitor = new SR(); } catch (_) { interruptionMonitorEnabled = false; return; }
+            interruptionRecognition = monitor;
+            monitor.lang = "th-TH";
+            monitor.continuous = true;
+            monitor.interimResults = true;
+            monitor.maxAlternatives = 1;
+            monitor.onresult = event => {
+                if (!aiSpeechActive || !interruptionMonitorEnabled) return;
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const result = event.results[i];
+                    if (!result?.isFinal) continue;
+                    const text = String(result?.[0]?.transcript || "").trim();
+                    const confidence = Number(result?.[0]?.confidence);
+                    if (!text || (Number.isFinite(confidence) && confidence < 0.55)) continue;
+                    const normalized = normalizeVoiceStopText(text);
+                    const assistantText = normalizeVoiceStopText(currentSpeechText);
+                    if (assistantText.includes(normalized)) continue;
+                    if (!isVoiceStopCommand(text)) continue;
+                    interruptionMonitorEnabled = false;
+                    try { if (typeof monitor.abort === "function") monitor.abort(); else monitor.stop(); } catch (_) {}
+                    stopSentinelSpeech();
+                    status("ready", "หยุดเสียงแล้ว", false);
+                    return;
+                }
+            };
+            monitor.onerror = event => {
+                if (interruptionRecognition !== monitor) return;
+                if (["not-allowed", "service-not-allowed", "audio-capture"].includes(event?.error)) {
+                    interruptionMonitorEnabled = false;
+                }
+            };
+            monitor.onend = () => {
+                if (interruptionRecognition === monitor) interruptionRecognition = null;
+                if (interruptionMonitorEnabled && aiSpeechActive) {
+                    clearTimeout(interruptionRestartTimer);
+                    interruptionRestartTimer = setTimeout(startInterruptionRecognition, 250);
+                }
+            };
+            try {
+                monitor.start();
+                interruptionStartRetries = 0;
+            } catch (_) {
+                interruptionRecognition = null;
+                interruptionStartRetries += 1;
+                if (interruptionStartRetries >= 3) interruptionMonitorEnabled = false;
+                else {
+                    clearTimeout(interruptionRestartTimer);
+                    interruptionRestartTimer = setTimeout(startInterruptionRecognition, 350);
+                }
+            }
+        };
+        const startSpeechInterruptionMonitor = () => {
+            if (!aiSpeechActive) return;
+            interruptionMonitorEnabled = true;
+            interruptionStartRetries = 0;
+            startInterruptionRecognition();
+        };
+        const stopSpeechInterruptionMonitor = () => {
+            interruptionMonitorEnabled = false;
+            clearTimeout(interruptionRestartTimer);
+            interruptionRestartTimer = null;
+            const monitor = interruptionRecognition;
+            interruptionRecognition = null;
+            if (monitor) {
+                monitor.onend = null;
+                monitor.onerror = null;
+                try { if (typeof monitor.abort === "function") monitor.abort(); else monitor.stop(); } catch (_) {}
+            }
+        };
+        window.addEventListener("panthorium:voice-start", startSpeechInterruptionMonitor);
+        window.addEventListener("panthorium:voice-end", stopSpeechInterruptionMonitor);
+
         // Shared transcript handler (Web Speech + MediaRecorder)
         const processTranscript = async text => {
             const value = String(text || "").trim();
@@ -1506,6 +1602,7 @@
             voiceState = "processing";
             status("processing", "กำลังประมวลผล");
             try {
+                speechInterruptedByUser = false;
                 const { intent, response: res } = await requestVoiceInput(value);
                 if (!res || !res.ok || !res.text) {
                     const reason = res?.text || "ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง";
@@ -1515,6 +1612,10 @@
                 if (voiceResponseNeedsSpeech(intent, res)) {
                     voiceState = "speaking";
                     status("processing", res.confirmationRequired ? res.text : res.streamSpoken ? "กำลังพูดคำตอบ" : "กำลังเตรียมเสียงตอบ", false);
+                    if (speechInterruptedByUser) {
+                        status("ready", "หยุดเสียงแล้ว", false);
+                        return;
+                    }
                     if (res.streamSpoken && res.streamSpeechOk === false) {
                         status("unresponsive", voicePlaybackFailure);
                         return;
@@ -2391,6 +2492,7 @@
         async function send({ resumeGlobalVoice = false } = {}) {
             const text = input.value.trim();
             if (!text || sendBusy) return;
+            speechInterruptedByUser = false;
             sendBusy = true;
             window.PanthoriumVoice?.pause();
             unlockVoiceAudio();
