@@ -142,6 +142,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     w.dispatchEvent(new w.CustomEvent('panthorium:ai-stream-delta', { detail: { text: 'การเรียนรู้เกิดจากการรับข้อมูล การทำความเข้าใจ การทดลอง และการทบทวน เมื่อได้รับประสบการณ์ใหม่ ระบบจะปรับปรุงคำตอบให้เหมาะสมมากยิ่งขึ้น โดยพิจารณาบริบทและความต้องการของผู้ใช้เสมอ' } }));
     for (let i = 0; i < 200 && !(evaluate('aiSpeechActive') && playing); i++) await tick();
     assert.equal(playing, true, 'first prefetched phrase begins playback');
+    for (let i = 0; i < 100 && requests.filter(r => r.pathname === '/api/speech').length < ttsCallsBeforePrefetch + 2; i++) await tick();
     assert(requests.filter(r => r.pathname === '/api/speech').length >= ttsCallsBeforePrefetch + 2, 'the following phrase is synthesized before current playback finishes');
     const stoppedStream = w.PanthoriumVoiceStream.finish();
     evaluate('stopSentinelSpeech();');
