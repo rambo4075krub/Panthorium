@@ -1292,7 +1292,7 @@
     function playRemoteChunk(prepared, text, transcriptRange = {}) {
         return new Promise(resolve => {
             if (!prepared?.objectUrl) { resolve(false); return; }
-            const audio = voiceAudio;
+            const audio = prepared.audio || voiceAudio;
             let settled = false;
             const finish = value => {
                 if (settled) return;
