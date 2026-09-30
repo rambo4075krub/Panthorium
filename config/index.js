@@ -37,7 +37,7 @@ module.exports = {
   auditFile: process.env.AUDIT_FILE || path.join(__dirname, "..", "logs", "audit.log"),
   databaseUrl: process.env.DATABASE_URL || "",
   databaseSslMode: process.env.DATABASE_SSL_MODE || (isProduction ? "require" : "disable"),
-  sentinelAutoTraining: process.env.SENTINEL_AUTO_TRAINING !== "0",
+  sentinelAutoTraining: process.env.SENTINEL_AUTO_TRAINING === "1",
   sentinelAutoCapture: process.env.SENTINEL_AUTO_CAPTURE !== "0",
   sentinelAutoScoreThreshold: Number(process.env.SENTINEL_AUTO_SCORE_THRESHOLD || 85),
   sentinelAutoIntervalMs: Number(process.env.SENTINEL_AUTO_INTERVAL_MS || 60000),

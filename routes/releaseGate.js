@@ -19,7 +19,7 @@ function createReleaseGateRouter(authService, releaseGate) {
         // Bounded long polling keeps this request active while background work advances.
         await new Promise(resolve => setTimeout(resolve, 15000));
       }
-      res.json(await releaseGate.status({ record: req.query.record === 'true', auto: req.query.auto !== 'false' }));
+      res.json(await releaseGate.status({ record: req.query.record === 'true', auto: req.query.auto === 'true' }));
     } catch (error) {
       next(error);
     }
@@ -28,10 +28,19 @@ function createReleaseGateRouter(authService, releaseGate) {
   router.post('/check', ...admin, limiter, async (req, res, next) => {
     try {
       if (!releaseGate) return res.status(503).json({ ok: false, error: 'release_gate_unavailable' });
-      res.json(await releaseGate.status({ record: true, auto: req.body?.auto !== false }));
+      res.json(await releaseGate.status({ record: true, auto: req.body?.auto === true }));
     } catch (error) {
       next(error);
     }
+  });
+
+  router.post('/automation/:kind', ...admin, limiter, async (req, res, next) => {
+    try {
+      if (!releaseGate) return res.status(503).json({ ok: false, error: 'release_gate_unavailable' });
+      if (!['gate', 'benchmark'].includes(req.params.kind)) return res.status(400).json({ ok: false, error: 'invalid_automation_kind' });
+      const automation = releaseGate.setAutomationEnabled(req.params.kind, req.body?.enabled === true, { userId: req.user?.sub, requestId: req.requestId });
+      res.json({ ok: true, automation });
+    } catch (error) { next(error); }
   });
 
   router.get('/benchmark/status', ...admin, limiter, async (req, res, next) => {

@@ -47,9 +47,10 @@ class SentinelReleaseGateService {
     activeLearning,
     audit,
     minBenchmarkScore = 80,
-    autoBenchmarkEnabled = process.env.SENTINEL_RELEASE_GATE_AUTO_BENCHMARK !== 'false',
+    autoBenchmarkEnabled = process.env.SENTINEL_RELEASE_GATE_AUTO_BENCHMARK === 'true',
+    autoGateEnabled = process.env.SENTINEL_RELEASE_GATE_AUTO_GATE === 'true',
     autoBenchmarkCooldownMs = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_BENCHMARK_COOLDOWN_MS || 300000),
-    autoImproveEnabled = process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE !== 'false',
+    autoImproveEnabled = process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE === 'true',
     autoImproveMaxRounds = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE_MAX_ROUNDS || 3),
     autoImproveRetryDelayMs = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE_RETRY_MS || 60000),
     autoImproveMaxCases = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE_MAX_CASES || 3),
@@ -61,9 +62,10 @@ class SentinelReleaseGateService {
     this.activeLearning = activeLearning;
     this.audit = audit;
     this.minBenchmarkScore = Math.max(0, Math.min(100, Number(minBenchmarkScore) || 80));
-    this.autoBenchmarkEnabled = autoBenchmarkEnabled !== false;
+    this.autoBenchmarkEnabled = autoBenchmarkEnabled === true;
+    this.autoGateEnabled = autoGateEnabled === true;
     this.autoBenchmarkCooldownMs = Math.max(30000, Number(autoBenchmarkCooldownMs) || 300000);
-    this.autoImproveEnabled = autoImproveEnabled !== false;
+    this.autoImproveEnabled = autoImproveEnabled === true;
     this.autoImproveMaxRounds = Math.max(0, Math.min(10, Number(autoImproveMaxRounds) || 3));
     this.autoImproveRetryDelayMs = Math.max(1000, Number(autoImproveRetryDelayMs) || 60000);
     this.autoImproveMaxCases = Math.max(1, Math.min(10, Number(autoImproveMaxCases) || 3));
@@ -75,6 +77,14 @@ class SentinelReleaseGateService {
     this.benchmarkJob = null;
     this.benchmarkExecution = null;
     this.retryTimer = null;
+  }
+
+  setAutomationEnabled(kind, enabled, { userId = 'administrator', requestId } = {}) {
+    if (kind === 'gate') this.autoGateEnabled = enabled === true;
+    else if (kind === 'benchmark') this.autoBenchmarkEnabled = enabled === true;
+    else throw new Error('invalid_automation_kind');
+    this.audit?.record?.('sentinel.release_gate_automation_toggled', { kind, enabled: enabled === true, userId, requestId });
+    return this.automationStatus();
   }
 
   async status({ record = false, auto = true } = {}) {
@@ -141,7 +151,7 @@ class SentinelReleaseGateService {
     };
 
     if (auto !== false) {
-      report.automation = await this.maybeAutoBenchmark(report);
+      report.automation = auto && this.autoGateEnabled ? await this.maybeAutoBenchmark(report) : this.automationStatus();
       report.releaseBenchmarkJob = this.benchmarkJobStatus();
     }
 
@@ -163,7 +173,8 @@ class SentinelReleaseGateService {
     const remaining = lastAutoAt ? Math.max(0, this.autoBenchmarkCooldownMs - (Date.now() - new Date(lastAutoAt).getTime())) : 0;
     return {
       enabled: this.autoBenchmarkEnabled,
-      state: this.autoBenchmarkEnabled ? 'watching' : 'disabled',
+      autoGateEnabled: this.autoGateEnabled,
+      state: this.autoGateEnabled ? (this.autoBenchmarkEnabled ? 'watching' : 'benchmark_paused') : 'disabled',
       description: 'Auto-runs Benchmark Arena. If Sentinel scores below the gate, it creates provider-taught repair candidates, pushes them through review/shadow/promote, then re-runs benchmark.',
       lastAutoBenchmarkAt: lastAutoAt,
       lastAutoBenchmarkReason: this.lastAutoBenchmarkReason,

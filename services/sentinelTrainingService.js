@@ -72,7 +72,7 @@ class SentinelTrainingService {
     providers,
     audit,
     learning = null,
-    autoEnabled = true,
+    autoEnabled = false,
     autoCapture = true,
     autoScoreThreshold = 85,
     autoIntervalMs = 60000,
@@ -136,6 +136,13 @@ class SentinelTrainingService {
   stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+  setAutoEnabled(enabled, { userId = "administrator", requestId } = {}) {
+    this.autoEnabled = enabled === true;
+    if (this.autoEnabled) this.start();
+    else this.stop();
+    this.audit?.record("sentinel.training_auto_toggled", { enabled: this.autoEnabled, userId, requestId });
+    return this.settings();
   }
   settings() {
     const available = this.providers.available();
