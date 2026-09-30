@@ -1597,7 +1597,7 @@
         streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
         drainStreamingSpeech(false);
         clearTimeout(streamingSpeechTimer);
-        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= 24) drainStreamingSpeech(false, true); }, 90);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= 110) drainStreamingSpeech(false, true); }, 850);
     });
     window.addEventListener("panthorium:ai-stream-end", () => {
         finishStreamingSpeech();
