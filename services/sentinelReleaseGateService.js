@@ -47,10 +47,10 @@ class SentinelReleaseGateService {
     activeLearning,
     audit,
     minBenchmarkScore = 80,
-    autoBenchmarkEnabled = process.env.SENTINEL_RELEASE_GATE_AUTO_BENCHMARK === 'true',
-    autoGateEnabled = process.env.SENTINEL_RELEASE_GATE_AUTO_GATE === 'true',
+    autoBenchmarkEnabled = process.env.SENTINEL_RELEASE_GATE_AUTO_BENCHMARK !== 'false',
+    autoGateEnabled = process.env.SENTINEL_RELEASE_GATE_AUTO_GATE !== 'false',
     autoBenchmarkCooldownMs = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_BENCHMARK_COOLDOWN_MS || 300000),
-    autoImproveEnabled = process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE === 'true',
+    autoImproveEnabled = process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE !== 'false',
     autoImproveMaxRounds = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE_MAX_ROUNDS || 3),
     autoImproveRetryDelayMs = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE_RETRY_MS || 60000),
     autoImproveMaxCases = Number(process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE_MAX_CASES || 3),
@@ -62,10 +62,10 @@ class SentinelReleaseGateService {
     this.activeLearning = activeLearning;
     this.audit = audit;
     this.minBenchmarkScore = Math.max(0, Math.min(100, Number(minBenchmarkScore) || 80));
-    this.autoBenchmarkEnabled = autoBenchmarkEnabled === true;
-    this.autoGateEnabled = autoGateEnabled === true;
+    this.autoBenchmarkEnabled = autoBenchmarkEnabled !== false;
+    this.autoGateEnabled = autoGateEnabled !== false;
     this.autoBenchmarkCooldownMs = Math.max(30000, Number(autoBenchmarkCooldownMs) || 300000);
-    this.autoImproveEnabled = autoImproveEnabled === true;
+    this.autoImproveEnabled = autoImproveEnabled !== false;
     this.autoImproveMaxRounds = Math.max(0, Math.min(10, Number(autoImproveMaxRounds) || 3));
     this.autoImproveRetryDelayMs = Math.max(1000, Number(autoImproveRetryDelayMs) || 60000);
     this.autoImproveMaxCases = Math.max(1, Math.min(10, Number(autoImproveMaxCases) || 3));
