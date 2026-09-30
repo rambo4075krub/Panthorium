@@ -35,8 +35,9 @@ const { ProviderManager } = require('../services/providerManager');
 
     calls = [];
     responses = [response('เปิด Sentinel', -1.1), response('เปิด Setting', -0.2)];
-    await assert.rejects(manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH'), error => error.code === 'transcription_uncertain');
-    assert.equal(calls.length, 2, 'disagreeing transcripts must be withheld from AI processing');
+    const clearer = await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
+    assert.equal(clearer.text, 'เปิด Setting', 'use a substantially clearer independent transcript when the other recognizer is weak');
+    assert.equal(calls.length, 2);
 
     calls = [];
     responses = [response('วันนี้อากาศเป็นอย่างไร', -0.2), response('วันนี้อากาศเป็นอย่างไร', -0.35)];
@@ -56,14 +57,20 @@ const { ProviderManager } = require('../services/providerManager');
 
     calls = [];
     responses = [response('วันนี้อากาศเป็นอย่างไร', -0.8), response('วันนี้อากาศเป็นอย่างไร', -0.75)];
-    await assert.rejects(manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH'), error => error.code === 'transcription_uncertain');
-    assert.equal(calls.length, 2, 'matching words with weak confidence from both recognizers still require a repeat');
+    const consensus = await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
+    assert.equal(consensus.text, 'วันนี้อากาศเป็นอย่างไร', 'matching model outputs should pass even when confidence metadata is low');
+    assert.equal(calls.length, 2);
+
+    calls = [];
+    responses = [response('วันนี้อากาศเป็นอย่างไร', -0.3), response('วันนี้อากาศเป็นอย่างไรบ้าง', -0.4)];
+    const nearMatch = await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
+    assert.equal(nearMatch.text, 'วันนี้อากาศเป็นอย่างไร', 'minor Thai transcript differences should not trigger repeat prompts');
 
     manager.keys.openai = '';
 
     manager.priority = ['groq'];
     calls = [];
-    responses = [response('เปิด Sentinel', -0.7)];
+    responses = [response('เปิด Sentinel', -1.3)];
     await assert.rejects(manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH'), error => error.code === 'transcription_uncertain');
     assert.equal(calls.length, 1);
     calls = [];

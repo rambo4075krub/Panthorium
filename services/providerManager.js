@@ -100,8 +100,19 @@ class ProviderManager {
     };
     const uncertain = () => { const error = new Error("transcription_uncertain"); error.code = error.message; return error; };
     const likelySilence = result => result.noSpeechProbability !== null && result.noSpeechProbability > 0.65;
-    const confidence = result => result.confidence === null ? -Infinity : result.confidence;
+    const confidence = result => result.confidence;
     const normalize = value => String(value).normalize("NFKC").toLowerCase().replace(/[\\s\\p{P}\\p{S}]/gu, "");
+    const similarity = (left, right) => {
+      if (left === right) return 1;
+      if (!left.length || !right.length) return 0;
+      let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+      for (let i = 1; i <= left.length; i += 1) {
+        const current = [i];
+        for (let j = 1; j <= right.length; j += 1) current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + (left[i - 1] === right[j - 1] ? 0 : 1));
+        previous = current;
+      }
+      return 1 - previous[right.length] / Math.max(left.length, right.length);
+    };
 
     // A confident single-model transcript can still be the wrong question.
     // When a second provider is configured, compare both hypotheses in
@@ -112,13 +123,28 @@ class ProviderManager {
       const primary = results[0].status === "fulfilled" ? results[0].value : null;
       const secondary = results[1].status === "fulfilled" ? results[1].value : null;
       if (primary && secondary) {
-        const agreement = normalize(primary.text) === normalize(secondary.text);
-        const atLeastOneClear = confidence(primary) >= -0.55 || confidence(secondary) >= -0.55;
-        if (likelySilence(primary) || likelySilence(secondary) || !agreement || !atLeastOneClear) throw uncertain();
-        return { ...primary, crossCheckedBy: secondary.provider };
+        const firstSilent = likelySilence(primary), secondSilent = likelySilence(secondary);
+        if (firstSilent && secondSilent) throw uncertain();
+        if (firstSilent || secondSilent) {
+          const clearer = firstSilent ? secondary : primary;
+          if (confidence(clearer) !== null && confidence(clearer) < -0.6) throw uncertain();
+          return { ...clearer, crossCheckedBy: firstSilent ? primary.provider : secondary.provider };
+        }
+        const firstText = normalize(primary.text), secondText = normalize(secondary.text);
+        const matchScore = similarity(firstText, secondText);
+        const firstConfidence = confidence(primary), secondConfidence = confidence(secondary);
+        const best = firstConfidence === null || (secondConfidence !== null && secondConfidence > firstConfidence) ? secondary : primary;
+        if (matchScore === 1) return { ...primary, crossCheckedBy: secondary.provider };
+        if (matchScore >= 0.76) return { ...best, crossCheckedBy: best === primary ? secondary.provider : primary.provider };
+        const low = firstConfidence === null || secondConfidence === null ? null : Math.min(firstConfidence, secondConfidence);
+        const high = firstConfidence === null ? secondConfidence : secondConfidence === null ? firstConfidence : Math.max(firstConfidence, secondConfidence);
+        if (high !== null && high >= -0.3 && (low === null || high - low >= 0.5)) {
+          return { ...best, crossCheckDisagreed: true, crossCheckedBy: best === primary ? secondary.provider : primary.provider };
+        }
+        throw uncertain();
       }
       const onlyResult = primary || secondary;
-      if (onlyResult && !likelySilence(onlyResult) && confidence(onlyResult) >= -0.3) {
+      if (onlyResult && !likelySilence(onlyResult) && (confidence(onlyResult) === null || confidence(onlyResult) >= -0.6)) {
         return { ...onlyResult, crossCheckUnavailable: true };
       }
       if (onlyResult) throw uncertain();
@@ -129,7 +155,7 @@ class ProviderManager {
 
     try {
       const result = await transcribeWith(candidates[0]);
-      if (likelySilence(result) || confidence(result) < -0.55) throw uncertain();
+      if (likelySilence(result) || (confidence(result) !== null && confidence(result) < -0.85)) throw uncertain();
       return result;
     } catch (error) {
       if (error.code === "transcription_uncertain") throw error;
