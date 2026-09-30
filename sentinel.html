@@ -1315,7 +1315,7 @@
         return value;
     }
 
-    async function speak(text, { firstPrepared = null } = {}) {
+    async function speak(text, { firstPrepared = null, firstPreparedAttempted = false } = {}) {
         if (speechInterruptedByUser) {
             releaseRemoteChunk(firstPrepared);
             return false;
@@ -1344,8 +1344,8 @@
         // Use the same authenticated system voice for every chunk and prefetch
         // the next two audio pieces while the current one is playing.
         const preparedRemotePromises = chunks.map(() => Promise.resolve(null));
-        if (firstPrepared && chunks.length) preparedRemotePromises[0] = Promise.resolve(firstPrepared);
-        let nextRemoteChunk = firstPrepared ? 1 : 0;
+        if (firstPreparedAttempted && chunks.length) preparedRemotePromises[0] = Promise.resolve(firstPrepared);
+        let nextRemoteChunk = firstPreparedAttempted ? 1 : 0;
         const prefetchRemote = currentIndex => {
             const through = Math.min(chunks.length - 1, currentIndex + 2);
             while (nextRemoteChunk <= through) {
@@ -1434,7 +1434,7 @@
             }
             const prepared = preparedPromise ? await preparedPromise : null;
             if (generation !== streamingSpeechGeneration) { releaseRemoteChunk(prepared); return false; }
-            const succeeded = await speak(chunk, { firstPrepared: prepared });
+            const succeeded = await speak(chunk, { firstPrepared: prepared, firstPreparedAttempted: shouldPrime });
             streamingSpeechSucceeded = streamingSpeechSucceeded || succeeded;
             return succeeded;
         }).catch(error => { console.warn("[Sentinel stream speech]", error?.message || error); return false; });
