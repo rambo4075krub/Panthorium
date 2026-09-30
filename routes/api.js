@@ -74,11 +74,11 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
         if (!verification.matched) return res.status(403).json({ ok: false, error: "voice_not_authorized" });
       }
       const result = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language);
-      res.json({ ok: true, text: result.text, provider: result.provider, model: result.model });
+      res.json({ ok: true, text: result.text, provider: result.provider, model: result.model, confidence: result.confidence, crossCheckedBy: result.crossCheckedBy || null });
     } catch (error) {
       audit.record("sentinel.transcription_failed", { userId: req.user?.sub, error: error.message });
-      const code = /speaker_verification|biometric_encryption|voice_signal/.test(error?.message || "") ? "voice_verification_unavailable" : error?.code === "transcription_provider_unavailable" ? error.code : "transcription_unavailable";
-      res.status(code === "transcription_provider_unavailable" || code === "voice_verification_unavailable" ? 503 : 502).json({ ok: false, error: code });
+      const code = /speaker_verification|biometric_encryption|voice_signal/.test(error?.message || "") ? "voice_verification_unavailable" : ["transcription_provider_unavailable", "transcription_uncertain"].includes(error?.code) ? error.code : "transcription_unavailable";
+      res.status(code === "transcription_uncertain" ? 422 : code === "transcription_provider_unavailable" || code === "voice_verification_unavailable" ? 503 : 502).json({ ok: false, error: code });
     }
   });
   router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { res.json({ ok: true, runs: await agentRuns.list(req.user.sub, Number(req.query.limit) || 30) }); } catch (error) { next(error); } });

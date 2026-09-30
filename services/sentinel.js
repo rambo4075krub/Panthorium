@@ -75,8 +75,10 @@ class Sentinel {
   async chat({ sessionId, userId = "system", message, mode = "default", provider, model, voiceMode = false }) {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message, historyLimit: voiceMode ? 12 : 40 });
-    const trainingContext = this.training ? await this.training.contextFor(message) : '';
-    const memoryContext = await this.memoryContextFor(userId, message, prepared.sid);
+    const [trainingContext, memoryContext] = await Promise.all([
+      this.training ? this.training.contextFor(message) : Promise.resolve(''),
+      this.memoryContextFor(userId, message, prepared.sid)
+    ]);
     const result = this.normalizeVoiceAnswer(await this.gateway.complete({ systemPrompt: this.prompts.build(mode)+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard(), history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid }));
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });
     this.captureTraining({message,result,userId,sessionId:prepared.sid});
@@ -85,8 +87,10 @@ class Sentinel {
   async streamChat({ sessionId, userId = "system", message, mode = "default", provider, model, voiceMode = false, onDelta, onProvider }) {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message, historyLimit: voiceMode ? 12 : 40 });
-    const trainingContext = this.training ? await this.training.contextFor(message) : '';
-    const memoryContext = await this.memoryContextFor(userId, message, prepared.sid);
+    const [trainingContext, memoryContext] = await Promise.all([
+      this.training ? this.training.contextFor(message) : Promise.resolve(''),
+      this.memoryContextFor(userId, message, prepared.sid)
+    ]);
     const voiceHint = voiceMode ? "\n\nโหมดตอบด้วยเสียง: เริ่มตอบประเด็นสำคัญทันที ใช้ภาษาไทยธรรมชาติ กระชับเป็นวลีที่พูดได้ลื่น ไม่เกริ่นซ้ำ ไม่ใช้ตารางหรือ Markdown สำหรับคำถามทั่วไปให้จบใน 1–3 ประโยค หากเป็นงานซับซ้อนให้รักษารายละเอียดที่จำเป็น แต่แบ่งเป็นประโยคสั้นชัดเจน" : '';
     const result = this.normalizeVoiceAnswer(await this.gateway.stream({ systemPrompt: this.prompts.build(mode)+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard() + voiceHint, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, streamingFirst: voiceMode, onDelta, onProvider }));
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });

@@ -5,12 +5,12 @@ const { EdgeTTS } = require("node-edge-tts");
 
 const SENTINEL_MALE_VOICES = Object.freeze({
   "th-TH": "th-TH-NiwatNeural",
-  "en-US": "en-US-AndrewMultilingualNeural",
-  "ja-JP": "ja-JP-KeitaNeural",
-  "ko-KR": "ko-KR-InJoonNeural",
-  "ar-SA": "ar-SA-HamedNeural",
-  "ru-RU": "ru-RU-DmitryNeural",
-  "zh-CN": "zh-CN-YunxiNeural"
+  "en-US": "th-TH-NiwatNeural",
+  "ja-JP": "th-TH-NiwatNeural",
+  "ko-KR": "th-TH-NiwatNeural",
+  "ar-SA": "th-TH-NiwatNeural",
+  "ru-RU": "th-TH-NiwatNeural",
+  "zh-CN": "th-TH-NiwatNeural"
 });
 
 function applySentinelPronunciations(text) {
@@ -27,10 +27,12 @@ async function synthesizeSentinelMaleVoice(text, lang) {
   try {
     const speech = new EdgeTTS({
       voice,
-      lang,
+      // The requested language selects content handling only. A single Thai
+      // system voice is intentional, including when the text contains English.
+      lang: "th-TH",
       outputFormat: "audio-24khz-48kbitrate-mono-mp3",
       // Use the native Thai male voice and a slightly brisk conversational pace.
-      rate: lang === "en-US" ? "-2%" : "+12%",
+      rate: "+12%",
       pitch: "default",
       volume: "default",
       timeout: 20000,

@@ -73,24 +73,52 @@ class ProviderManager {
       error.code = "transcription_provider_unavailable";
       throw error;
     }
+    const transcribeWith = async item => {
+      const form = new FormData();
+      const extension = /mp4/i.test(mimeType) ? "mp4" : /ogg/i.test(mimeType) ? "ogg" : "webm";
+      form.append("file", new Blob([buffer], { type: mimeType }), `panthorium-voice.${extension}`);
+      form.append("model", item.model);
+      form.append("response_format", "verbose_json");
+      form.append("temperature", "0");
+      form.append("prompt", "ถอดคำพูดตามเสียงจริง ห้ามแปลหรือสรุป คงภาษาไทยและ English ตามที่พูด รวมทั้งชื่อเฉพาะ Panthorium, Sentinel, Niwat, AI, API และ ProviderManager");
+      if (language) form.append("language", String(language).toLowerCase().startsWith("th") ? "th" : "en");
+      const response = await fetch(item.url, { method: "POST", headers: { Authorization: `Bearer ${item.key}` }, body: form, signal: AbortSignal.timeout(30000) });
+      if (!response.ok) throw new Error(`Transcription HTTP ${response.status}`);
+      const data = await response.json();
+      const text = typeof data.text === "string" ? data.text.trim() : "";
+      if (!text) throw new Error("empty_transcription");
+      const segments = Array.isArray(data.segments) ? data.segments : [];
+      const logprobs = segments.map(segment => Number(segment.avg_logprob)).filter(Number.isFinite);
+      const noSpeech = segments.map(segment => Number(segment.no_speech_prob)).filter(Number.isFinite);
+      return {
+        text,
+        provider: item.provider,
+        model: data.model || item.model,
+        confidence: logprobs.length ? logprobs.reduce((sum, value) => sum + value, 0) / logprobs.length : null,
+        noSpeechProbability: noSpeech.length ? Math.max(...noSpeech) : null
+      };
+    };
+    let uncertainResult = null;
     for (const item of candidates) {
       try {
-        const form = new FormData();
-        const extension = /mp4/i.test(mimeType) ? "mp4" : /ogg/i.test(mimeType) ? "ogg" : "webm";
-        form.append("file", new Blob([buffer], { type: mimeType }), `panthorium-voice.${extension}`);
-        form.append("model", item.model);
-        form.append("response_format", "json");
-        if (language) form.append("language", String(language).toLowerCase().startsWith("th") ? "th" : "en");
-        const response = await fetch(item.url, { method: "POST", headers: { Authorization: `Bearer ${item.key}` }, body: form, signal: AbortSignal.timeout(30000) });
-        if (!response.ok) throw new Error(`Transcription HTTP ${response.status}`);
-        const data = await response.json();
-        const text = typeof data.text === "string" ? data.text.trim() : "";
-        if (!text) throw new Error("empty_transcription");
-        return { text, provider: item.provider, model: data.model || item.model };
+        const result = await transcribeWith(item);
+        const confidenceLow = result.confidence !== null && result.confidence < -0.85;
+        const likelySilence = result.noSpeechProbability !== null && result.noSpeechProbability > 0.65;
+        if (!uncertainResult && !confidenceLow && !likelySilence) return result;
+        if (!uncertainResult) { uncertainResult = result; continue; }
+        const normalize = value => String(value).normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+        if (normalize(uncertainResult.text) === normalize(result.text)) return { ...uncertainResult, crossCheckedBy: result.provider };
+        const error = new Error("transcription_uncertain"); error.code = "transcription_uncertain"; throw error;
       } catch (error) {
-        if (item === candidates[candidates.length - 1]) throw error;
+        if (error.code === "transcription_uncertain") throw error;
+        if (uncertainResult || item === candidates[candidates.length - 1]) {
+          const uncertain = new Error(uncertainResult ? "transcription_uncertain" : "transcription_provider_unavailable");
+          uncertain.code = uncertainResult ? "transcription_uncertain" : (error.code || "transcription_provider_unavailable");
+          throw uncertain;
+        }
       }
     }
+    if (uncertainResult) { const error = new Error("transcription_uncertain"); error.code = error.message; throw error; }
     throw new Error("transcription_provider_unavailable");
   }
   async call(provider, systemPrompt, history) { const result = await this.callDetailed(provider, systemPrompt, history); return result?.text || null; }

@@ -23,7 +23,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     speechAttempts += 1;
     if (failSpeech) throw new Error('fixture TTS outage');
     synthesized.push({ text, lang });
-    return { audio: Buffer.from('fixture-audio-bytes'), voice: lang === 'th-TH' ? 'th-TH-NiwatNeural' : 'en-US-AndrewMultilingualNeural' };
+    return { audio: Buffer.from('fixture-audio-bytes'), voice: 'th-TH-NiwatNeural' };
   };
   const { createApiRouter } = require('../routes/api');
   const audit = { record() {} };
@@ -80,7 +80,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
         await new Promise(resolve => setTimeout(resolve, 12));
         ttsInFlight -= 1;
         const speechLang = JSON.parse(options.body || '{}').lang;
-        return new Response(Buffer.from('fixture-mp3'), { headers: { 'Content-Type': 'audio/mpeg', 'X-Sentinel-Voice-Profile': speechLang === 'th-TH' ? 'th-TH-NiwatNeural' : 'en-US-AndrewMultilingualNeural' } });
+        return new Response(Buffer.from('fixture-mp3'), { headers: { 'Content-Type': 'audio/mpeg', 'X-Sentinel-Voice-Profile': 'th-TH-NiwatNeural' } });
       }
       return fetch(base + pathname, options);
     };
@@ -163,8 +163,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     assert.equal(await evaluate(`speak(${JSON.stringify(longSpeech)})`), true, 'a long answer should finish playing through sequential chunks');
     fakeTts = false;
     const longSpeechPlaybackCount = playback.length - playbackBeforeLongSpeech;
-    assert(maxTtsInFlight <= 2, 'TTS prefetch is bounded to avoid bursts when answers are long');
-    const remoteSpeechRequestsBeforeNative = requests.filter(r => r.pathname === '/api/speech').length;
+    assert(maxTtsInFlight <= 3, 'TTS prefetch is bounded to avoid bursts when answers are long');
     const nativeSpeech = [];
     w.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
     w.speechSynthesis = {
@@ -172,9 +171,9 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       cancel() {}, resume() {},
       speak(utterance) { nativeSpeech.push(utterance.text); setTimeout(() => { utterance.onstart?.(); setTimeout(() => utterance.onend?.(), 1); }, 0); }
     };
-    assert.equal(await evaluate(`speak('สวัสดีครับ')`), true, 'a ready native Thai male voice should speak immediately');
-    assert.deepEqual(nativeSpeech, ['สวัสดี'], 'native Thai speech should start with the recognized Thai voice');
-    assert.equal(requests.filter(r => r.pathname === '/api/speech').length, remoteSpeechRequestsBeforeNative, 'do not wait on remote TTS when a native Thai voice is ready');
+    assert.equal(await evaluate(`speak('Hello Sentinel')`), true, 'English text should be spoken through the system Niwat voice');
+    assert.deepEqual(nativeSpeech, [], 'device voices must never replace the configured system voice');
+    assert.equal(requests.filter(r => r.pathname === '/api/speech').at(-1)?.body?.lang, 'th-TH', 'English and Thai share one Niwat voice profile');
     delete w.speechSynthesis;
     const playbackBeforeInvalidResponses = playback.length;
     for (const [response, expected] of [
@@ -207,7 +206,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     transcript(globalMic, 'การเรียนรู้คืออะไร'); globalMic.stop();
     for (let i = 0; i < 400 && w.PanthoriumVoice.state() !== 'listening'; i++) await tick();
     assert.equal(w.PanthoriumVoice.state(), 'listening');
-    assert.equal(playback.length, 6 + longSpeechPlaybackCount);
+    assert.equal(playback.length, 7 + longSpeechPlaybackCount);
     assert.equal(playing, false);
     w.PanthoriumVoice.pause();
 

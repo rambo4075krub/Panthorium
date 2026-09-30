@@ -1146,90 +1146,18 @@
     function splitSpeechByLanguage(text) {
         const source = String(text || "").replace(/\s+/g, " ").trim();
         if (!source) return [];
-        const thaiLetters = (source.match(/[\u0E00-\u0E7E]/g) || []).length;
-        const latinLetters = (source.match(/[A-Za-zÀ-ÿ]/g) || []).length;
-        // Thai answers often contain English product names and abbreviations.
-        // Keep those in the same spoken phrase so changing language does not
-        // trigger another remote TTS request and an audible pause.
-        if (thaiLetters && latinLetters) {
-            const lang = thaiLetters >= latinLetters ? "th-TH" : "en-US";
-            const pieces = [];
-            let remaining = source;
-            while (remaining.length > 170) {
-                let cut = remaining.lastIndexOf(" ", 170);
-                if (cut < 80) cut = 170;
-                pieces.push({ text: remaining.slice(0, cut).trim(), lang });
-                remaining = remaining.slice(cut).trim();
-            }
-            if (remaining) pieces.push({ text: remaining, lang });
-            return pieces;
+        // One voice and one pronunciation path for every script: English
+        // words are spoken by the system's Thai male Niwat voice too.
+        const pieces = [];
+        let remaining = source;
+        while (remaining.length > 170) {
+            let cut = remaining.lastIndexOf(" ", 170);
+            if (cut < 80) cut = 170;
+            pieces.push({ text: remaining.slice(0, cut).trim(), lang: "th-TH" });
+            remaining = remaining.slice(cut).trim();
         }
-        // Split inside a sentence when the script changes (Thai + English + 日本語, etc.).
-        // The previous implementation classified the whole sentence by its first script.
-        const tokens = source.match(/[\u0E00-\u0E7F]+|[\u3040-\u30FF]+|[\uAC00-\uD7AF]+|[\u0600-\u06FF]+|[\u0400-\u04FF]+|[\u4E00-\u9FFF]+|[A-Za-zÀ-ÿ]+|[0-9]+|[^\p{L}\p{N}]+/gu) || [source];
-        const chunks = [];
-        for (const token of tokens) {
-            if (/^[\s\p{P}\p{S}\d]+$/u.test(token) && chunks.length) {
-                chunks[chunks.length - 1].text += token;
-                continue;
-            }
-            const lang = languageForText(token);
-            const last = chunks[chunks.length - 1];
-            // Keep consecutive sentences in the same language in one audio
-            // request. Splitting at every full stop created a long network gap
-            // even though the speaker and language had not changed.
-            if (last && last.lang === lang) last.text += token;
-            else chunks.push({ text: token, lang });
-        }
-        return chunks.map(chunk => ({ ...chunk, text: chunk.text.trim() })).filter(chunk => chunk.text).flatMap(chunk => {
-            const pieces = [];
-            let remaining = chunk.text;
-            while (remaining.length > 170) {
-                let cut = remaining.lastIndexOf(" ", 170);
-                if (cut < 80) cut = 170;
-                pieces.push({ text: remaining.slice(0, cut).trim(), lang: chunk.lang });
-                remaining = remaining.slice(cut).trim();
-            }
-            if (remaining) pieces.push({ text: remaining, lang: chunk.lang });
-            return pieces;
-        });
-    }
-
-    function voiceForLanguage(lang, voices) {
-        const base = lang.split("-")[0].toLowerCase();
-        const matching = voices.filter(v => v.lang.toLowerCase() === lang.toLowerCase() || v.lang.toLowerCase().startsWith(base + "-"));
-        const deepVoiceNames = /pattara|niwat|male|man|ชาย|david|mark|guy|daniel|aaron|arthur|oliver|thomas|alex|jorge|paul|fred|ralph/i;
-        const femaleVoiceNames = /premwadee|narisa|kanya|female|woman|หญิง|samantha|zira|susan|victoria|karen|moira|tessa|ava|allison/i;
-        const ranked = matching.filter(voice => !femaleVoiceNames.test(voice.name)).sort((a, b) => {
-            const score = voice => (voice.lang.toLowerCase() === lang.toLowerCase() ? 4 : 0) + (deepVoiceNames.test(voice.name) ? 12 : 0) + (voice.localService ? 1 : 0);
-            return score(b) - score(a);
-        });
-        const confirmedMale = ranked.find(voice => deepVoiceNames.test(voice.name));
-        // Prefer the confirmed male voice, but on mobile accept the device's
-        // native Thai voice when it does not expose voice gender. A local Thai
-        // voice starts immediately and sounds clearer than a remote fallback.
-        if (base === "th") return confirmedMale || matching.find(voice => voice.localService) || matching[0] || null;
-        if (base === "en") return confirmedMale || null;
-        return confirmedMale || ranked[0] || null;
-    }
-
-    function loadSpeechVoices() {
-        const current = speechSynthesis.getVoices();
-        if (current.length) return Promise.resolve(current);
-        return new Promise(resolve => {
-            let done = false;
-            const finish = () => {
-                if (done) return;
-                done = true;
-                speechSynthesis.removeEventListener("voiceschanged", finish);
-                resolve(speechSynthesis.getVoices());
-            };
-            speechSynthesis.addEventListener("voiceschanged", finish);
-            // Do not make an already-visible answer wait a full second for a
-            // system voice catalog. Use a ready native voice now, otherwise
-            // fall through to the server's neural voice.
-            setTimeout(finish, 180);
-        });
+        if (remaining) pieces.push({ text: remaining, lang: "th-TH" });
+        return pieces;
     }
 
     const voiceAudio = new Audio();
@@ -1242,7 +1170,6 @@
         speechInterruptedByUser = true;
         cancelStreamingSpeech();
         activeSpeechRun += 1;
-        try { window.speechSynthesis?.cancel(); } catch (_) {}
         try { cancelRemotePlayback?.(); } catch (_) {}
         cancelRemotePlayback = null;
         try { voiceAudio.pause(); voiceAudio.currentTime = 0; } catch (_) {}
@@ -1291,7 +1218,7 @@
                 signal: controller.signal
             });
             if (!response.ok) return null;
-            const expectedMaleProfile = lang === "th-TH" ? "th-TH-NiwatNeural" : lang === "en-US" ? "en-US-AndrewMultilingualNeural" : "";
+            const expectedMaleProfile = "th-TH-NiwatNeural";
             const receivedProfile = response.headers.get("x-sentinel-voice-profile") || "";
             if (expectedMaleProfile && receivedProfile !== expectedMaleProfile) return null;
             const blob = await response.blob();
@@ -1360,57 +1287,12 @@
         });
     }
 
-    async function speakRemoteChunk(text, lang, transcriptRange) {
-        return playRemoteChunk(await requestRemoteChunk(text, lang), text, transcriptRange);
-    }
-
     function voiceSafeText(text) {
         const value = String(text || "").replace(/^\s*เสียงตอบกลับ\s*[:：-]?\s*/u, "").replace(/\s*(?:ครับ|ค่ะ|คะ)(?=\s|[,.!?;:…。、]|$)/g, "").trim();
         if (/ข้อความเท่านั้น|ไม่มีเสียงพูด|ไม่สามารถพูด|ไม่มีระบบเสียง/i.test(value)) {
             return "รับทราบ ระบบพร้อมรับคำสั่งเสียงและตอบกลับด้วยเสียงแล้ว กรุณาพูดคำสั่งได้เลย";
         }
         return value;
-    }
-
-    function speakNativeChunk(chunk, voice, speechRun) {
-        return new Promise(resolve => {
-            if (!window.speechSynthesis || speechRun !== activeSpeechRun) { resolve(false); return; }
-            const u = new SpeechSynthesisUtterance(chunk.text);
-            let settled = false;
-            let started = false;
-            const finish = value => {
-                if (settled) return;
-                settled = true;
-                clearTimeout(startWatchdog);
-                resolve(value);
-            };
-            u.lang = voice?.lang || chunk.lang;
-            u.voice = voice || null;
-            // Sentinel voice: low, calm and deliberate, similar to a cinematic AI.
-            u.pitch = 0.9;
-            u.rate = 1.02;
-            u.onstart = () => { started = true; };
-            u.onboundary = event => {
-                aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
-                const charIndex = (Number(chunk.transcriptStartChar) || 0) + event.charIndex;
-                window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex } }));
-                showOrbTranscriptForChar(charIndex);
-            };
-            u.onend = () => finish(true);
-            u.onerror = () => finish(false);
-            // Desktop Chromium can accept an utterance without ever starting it.
-            // Detect that silent failure so the remote audio fallback can take over.
-            const startWatchdog = setTimeout(() => {
-                if (!started) {
-                    try { window.speechSynthesis.cancel(); } catch (_) {}
-                    finish(false);
-                }
-            }, 900);
-            try {
-                window.speechSynthesis.resume();
-                window.speechSynthesis.speak(u);
-            } catch (_) { finish(false); }
-        });
     }
 
     async function speak(text) {
@@ -1428,34 +1310,22 @@
             return { ...chunk, transcriptStartChar, transcriptEndChar };
         });
         if (!chunks.length) return false;
-        let voices = [];
-        if (window.speechSynthesis) {
-            voices = await loadSpeechVoices();
-            window.speechSynthesis.cancel();
-        }
         voiceAudio.pause();
-        await new Promise(resolve => setTimeout(resolve, 80));
         if (speechRun !== activeSpeechRun) return false;
         aiSpeechActive = true;
         aiSpeechPulse = 1;
         window.PanthoriumOrb?.setAISpeaking(true);
         window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text } }));
         let spokeAny = false;
-        const usesMaleNeural = chunk => chunk?.lang === "th-TH" || chunk?.lang === "en-US";
-        // Start every neural request together. Fetching only one chunk ahead
-        // still left a long silence when a short word finished before the next
-        // network response arrived.
+        // Use the same authenticated system voice for every chunk and prefetch
+        // the next two audio pieces while the current one is playing.
         const preparedRemotePromises = chunks.map(() => Promise.resolve(null));
-        const remoteAttempted = new Set();
         let nextRemoteChunk = 0;
         const prefetchRemote = currentIndex => {
             const through = Math.min(chunks.length - 1, currentIndex + 2);
             while (nextRemoteChunk <= through) {
                 const index = nextRemoteChunk++;
-                if (usesMaleNeural(chunks[index]) && !voiceForLanguage(chunks[index].lang, voices)) {
-                    remoteAttempted.add(index);
-                    preparedRemotePromises[index] = requestRemoteChunk(chunks[index].text, chunks[index].lang);
-                }
+                preparedRemotePromises[index] = requestRemoteChunk(chunks[index].text, "th-TH");
             }
         };
         const releasePendingRemote = startIndex => preparedRemotePromises.slice(startIndex).forEach(promise => promise.then(releaseRemoteChunk));
@@ -1469,24 +1339,8 @@
                 releasePendingRemote(chunkIndex + 1);
                 break;
             }
-            const voice = voiceForLanguage(chunk.lang, voices);
-            const forceMaleNeural = usesMaleNeural(chunk);
-            let spoken = false;
             const transcriptRange = { start: chunk.transcriptStartChar, end: chunk.transcriptEndChar };
-            if (forceMaleNeural) {
-                // Start speech locally as soon as the text is ready. The
-                // network neural voice is the fallback when this device has no
-                // confirmed native male voice for the requested language.
-                if (voice) spoken = await speakNativeChunk(chunk, voice, speechRun);
-                if (!spoken && speechRun === activeSpeechRun) {
-                    const remoteAudio = preparedRemote || (remoteAttempted.has(chunkIndex) ? null : await requestRemoteChunk(chunk.text, chunk.lang));
-                    spoken = await playRemoteChunk(remoteAudio, chunk.text, transcriptRange);
-                }
-            }
-            // Native speech is a best-effort fallback, never proof of playback.
-            // Preserve the approved male voice requirement for Thai/English.
-            if (!spoken && (voice || !forceMaleNeural) && speechRun === activeSpeechRun) spoken = await speakNativeChunk(chunk, voice, speechRun);
-            if (!spoken && !forceMaleNeural && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange);
+            const spoken = speechRun === activeSpeechRun && await playRemoteChunk(preparedRemote, chunk.text, transcriptRange);
             spokeAny = spokeAny || spoken;
         }
         if (speechRun === activeSpeechRun) {
@@ -1520,7 +1374,6 @@
     // Browsers may keep speech synthesis paused until the first user gesture.
     window.addEventListener("pointerdown", () => {
         unlockVoiceAudio();
-        try { window.speechSynthesis?.resume(); } catch (_) {}
     }, { once: false, passive: true });
 
     // Stream-safe speech: speak stable phrases while a voice answer is still
@@ -1854,6 +1707,7 @@
                             voiceState = "idle";
                             const message = ({
                                 transcription_provider_unavailable: "บริการถอดเสียงยังไม่ได้เชื่อมต่อผู้ให้บริการ AI",
+                                transcription_uncertain: "ฟังคำพูดได้ไม่ชัดหรือผลถอดเสียงไม่ตรงกัน จึงยังไม่ส่งให้ AI กรุณาพูดซ้ำให้ชัดขึ้น",
                                 transcription_unavailable: "บริการถอดเสียงตอบกลับผิดพลาด กรุณาลองอีกครั้ง",
                                 invalid_audio: "รูปแบบหรือขนาดเสียงไม่ถูกต้อง ลองพูดให้สั้นลง",
                                 audio_too_large: "เสียงยาวเกินไป ลองพูดให้สั้นลง",
@@ -2666,7 +2520,7 @@
                     await send({ resumeGlobalVoice: true });
                 } catch (error) {
                     console.warn("[Sentinel chat transcription]", error);
-                    toast(error?.message === "voice_not_authorized" ? "เสียงนี้ไม่ได้รับอนุญาต จึงไม่ส่งให้ Sentinel" : "ถอดเสียงไม่สำเร็จ กรุณาลองใหม่หรือพิมพ์ข้อความ");
+                    toast(error?.message === "voice_not_authorized" ? "เสียงนี้ไม่ได้รับอนุญาต จึงไม่ส่งให้ Sentinel" : error?.message === "transcription_uncertain" ? "ฟังคำพูดได้ไม่ชัดหรือผลถอดเสียงไม่ตรงกัน จึงยังไม่ส่งให้ AI กรุณาพูดซ้ำให้ชัดขึ้น" : "ถอดเสียงไม่สำเร็จ กรุณาลองใหม่หรือพิมพ์ข้อความ");
                     window.PanthoriumVoice?.resume();
                 }
             };
