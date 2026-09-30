@@ -1378,6 +1378,62 @@
         return spokeAny;
     }
 
+    function transcribeWithBrowserSpeechRecognition(SpeechRecognitionCtor, { timeoutMs = 12000, onListening = null } = {}) {
+        if (typeof SpeechRecognitionCtor !== "function") {
+            return Promise.reject(new Error("transcription_provider_unavailable"));
+        }
+        return new Promise((resolve, reject) => {
+            let recognition;
+            let settled = false;
+            const finish = (error, text = "") => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                if (recognition) {
+                    recognition.onresult = null;
+                    recognition.onerror = null;
+                    recognition.onend = null;
+                    try { recognition.stop(); } catch (_) {}
+                }
+                if (error) reject(error);
+                else resolve(text);
+            };
+            const timer = setTimeout(() => finish(new Error("transcription_timeout")), timeoutMs);
+            try {
+                recognition = new SpeechRecognitionCtor();
+                recognition.lang = "th-TH";
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.maxAlternatives = 1;
+                recognition.onresult = event => {
+                    for (let index = event.resultIndex || 0; index < event.results.length; index += 1) {
+                        const result = event.results[index];
+                        if (!result?.isFinal) continue;
+                        const text = String(result?.[0]?.transcript || "").trim();
+                        const confidence = Number(result?.[0]?.confidence);
+                        if (!text || !Number.isFinite(confidence) || confidence < 0.55) {
+                            finish(new Error("transcription_uncertain"));
+                            return;
+                        }
+                        finish(null, text);
+                        return;
+                    }
+                };
+                recognition.onerror = event => {
+                    const error = ["not-allowed", "service-not-allowed", "audio-capture"].includes(event?.error)
+                        ? "microphone_permission_denied"
+                        : "transcription_fallback_unavailable";
+                    finish(new Error(error));
+                };
+                recognition.onend = () => finish(new Error("transcription_uncertain"));
+                onListening?.();
+                recognition.start();
+            } catch (error) {
+                finish(error?.name === "NotAllowedError" ? new Error("microphone_permission_denied") : new Error("transcription_fallback_unavailable"));
+            }
+        });
+    }
+
     function createAdaptiveVoiceDetector() {
         let noiseFloor = 0.008;
         let samples = 0;
@@ -1510,8 +1566,6 @@
         let interruptionMonitorEnabled = false;
         let interruptionRestartTimer = null;
         let interruptionStartRetries = 0;
-        let interimStopCandidate = "";
-        let interimStopCount = 0;
         let autoResume = true;
         let recognitionBlocked = false;
         let voiceState = "idle";
@@ -1559,28 +1613,13 @@
                 if (!sentinelSpeechIsActive() || !interruptionMonitorEnabled) return;
                 for (let i = event.resultIndex; i < event.results.length; i++) {
                     const result = event.results[i];
+                    if (!result?.isFinal) continue;
                     const text = String(result?.[0]?.transcript || "").trim();
                     const confidence = Number(result?.[0]?.confidence);
-                    if (!text) continue;
+                    if (!text || (Number.isFinite(confidence) && confidence < 0.55)) continue;
                     const normalized = normalizeVoiceStopText(text);
                     const assistantText = normalizeVoiceStopText(currentSpeechText);
-                    if (assistantText.includes(normalized) || !isVoiceStopCommand(text)) {
-                        if (result?.isFinal) { interimStopCandidate = ""; interimStopCount = 0; }
-                        continue;
-                    }
-                    const hasConfidence = Number.isFinite(confidence);
-                    const confidenceEnough = !hasConfidence || confidence >= 0.35;
-                    if (!result?.isFinal) {
-                        // Interim recognition can be noisy; require repeated
-                        // exact matches before allowing a quiet spoken command.
-                        if (!confidenceEnough) continue;
-                        interimStopCount = normalized === interimStopCandidate ? interimStopCount + 1 : 1;
-                        interimStopCandidate = normalized;
-                        if (interimStopCount < 3) continue;
-                    } else if (!confidenceEnough &&
-                        !(normalized === interimStopCandidate && interimStopCount >= 3)) {
-                        continue;
-                    }
+                    if (assistantText.includes(normalized) || !isVoiceStopCommand(text)) continue;
                     interruptionMonitorEnabled = false;
                     try { if (typeof monitor.abort === "function") monitor.abort(); else monitor.stop(); } catch (_) {}
                     stopSentinelSpeech();
@@ -1746,13 +1785,37 @@
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ audio, language: "th-TH" }),
-                        signal: AbortSignal.timeout(35000),
+                        signal: AbortSignal.timeout(12000),
                         cache: "no-store"
                     });
                     return {
                         data: await response.json().catch(() => ({})),
                         statusCode: response.status
                     };
+                };
+                const transcribeWithFallback = async () => {
+                    const useFallback = async () => {
+                        if (electronVoice || !SR) throw new Error("transcription_provider_unavailable");
+                        voiceState = "listening";
+                        return transcribeWithBrowserSpeechRecognition(SR, {
+                            timeoutMs: 12000,
+                            onListening: () => status("listening", "บริการถอดเสียงหลักขัดข้อง กรุณาพูดซ้ำ", false)
+                        });
+                    };
+                    try {
+                        const result = await transcribeDirect();
+                        const code = String(result.data?.error || "");
+                        if (result.statusCode >= 200 && result.statusCode < 300 && result.data?.ok && String(result.data?.text || "").trim()) {
+                            return result;
+                        }
+                        if (["transcription_provider_unavailable", "transcription_uncertain", "transcription_unavailable", "transcription_timeout"].includes(code)) {
+                            return { data: { ok: true, text: await useFallback(), provider: "browser-speech-fallback" }, statusCode: 200 };
+                        }
+                        return result;
+                    } catch (error) {
+                        if (electronVoice || !SR || !["TimeoutError", "AbortError", "TypeError"].includes(error?.name)) throw error;
+                        return { data: { ok: true, text: await useFallback(), provider: "browser-speech-fallback" }, statusCode: 200 };
+                    }
                 };
 
                 let data;
@@ -1798,10 +1861,10 @@
                             "[Sentinel transcription bridge fallback]",
                             bridgeError?.message || bridgeError
                         );
-                        ({ data, statusCode } = await transcribeDirect());
+                        ({ data, statusCode } = await transcribeWithFallback());
                     }
                 } else {
-                    ({ data, statusCode } = await transcribeDirect());
+                    ({ data, statusCode } = await transcribeWithFallback());
                 }
 
                 if (
@@ -1869,7 +1932,9 @@
                             console.warn("[Sentinel transcription]", error);
                             voiceState = "idle";
                             const message = ({
-                                transcription_provider_unavailable: "บริการถอดเสียงยังไม่ได้เชื่อมต่อผู้ให้บริการ AI",
+                                transcription_provider_unavailable: "บริการถอดเสียงหลักขัดข้อง กรุณาพูดซ้ำอีกครั้ง",
+                                transcription_fallback_unavailable: "ระบบถอดเสียงสำรองใช้ไม่ได้ กรุณาลองใหม่อีกครั้ง",
+                                microphone_permission_denied: "กรุณาอนุญาตสิทธิ์ไมโครโฟนแล้วลองใหม่",
                                 transcription_uncertain: "โปรดพูดอีกครั้ง",
                                 transcription_unavailable: "บริการถอดเสียงตอบกลับผิดพลาด กรุณาลองอีกครั้ง",
                                 invalid_audio: "รูปแบบหรือขนาดเสียงไม่ถูกต้อง ลองพูดให้สั้นลง",

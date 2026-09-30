@@ -306,6 +306,15 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       for (let i = 0; i < 8; i += 1) detector.observe(0.004, i * 50);
       return detector.observe(0.015, 500) || detector.observe(0.015, 600);
     })()`), true, 'adaptive VAD must still detect a quiet microphone after calibration');
+    const browserTranscript = await evaluate(`transcribeWithBrowserSpeechRecognition(class {
+      start() { this.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'ทดสอบเสียงภาษาไทย', confidence: 0.82 } }] }); }
+      stop() {}
+    }, { timeoutMs: 500 })`);
+    assert.equal(browserTranscript, 'ทดสอบเสียงภาษาไทย', 'browser fallback accepts a clear final Thai transcript');
+    await assert.rejects(evaluate(`transcribeWithBrowserSpeechRecognition(class {
+      start() { this.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'คำถอดเสียงไม่แน่ใจ', confidence: 0.54 } }] }); }
+      stop() {}
+    }, { timeoutMs: 500 })`), /transcription_uncertain/, 'browser fallback asks again below the 0.55 confidence threshold');
     let interrupted = false;
     w.addEventListener('panthorium:voice-end', event => { if (event.detail?.interrupted) interrupted = true; }, { once: true });
     evaluate('aiSpeechActive = true; stopSentinelSpeech();');
