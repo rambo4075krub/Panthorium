@@ -1315,8 +1315,11 @@
         return value;
     }
 
-    async function speak(text) {
-        if (speechInterruptedByUser) return false;
+    async function speak(text, { firstPrepared = null } = {}) {
+        if (speechInterruptedByUser) {
+            releaseRemoteChunk(firstPrepared);
+            return false;
+        }
         text = voiceSafeText(text);
         currentSpeechText = text;
         setOrbTranscript(text, 0);
@@ -1341,7 +1344,8 @@
         // Use the same authenticated system voice for every chunk and prefetch
         // the next two audio pieces while the current one is playing.
         const preparedRemotePromises = chunks.map(() => Promise.resolve(null));
-        let nextRemoteChunk = 0;
+        if (firstPrepared && chunks.length) preparedRemotePromises[0] = Promise.resolve(firstPrepared);
+        let nextRemoteChunk = firstPrepared ? 1 : 0;
         const prefetchRemote = currentIndex => {
             const through = Math.min(chunks.length - 1, currentIndex + 2);
             while (nextRemoteChunk <= through) {
@@ -1407,16 +1411,30 @@
     let streamingSpeechActive = false;
     let streamingSpeechSucceeded = false;
     let streamingSpeechInterrupted = false;
+    let streamingSpeechPrimed = false;
     function queueStreamingSpeech(text) {
         const chunk = String(text || "").trim();
         if (!chunk) return;
-        if (!streamingSpeechActive) streamingSpeechInterrupted = false;
+        if (!streamingSpeechActive) {
+            streamingSpeechInterrupted = false;
+            streamingSpeechPrimed = false;
+        }
         if (speechInterruptedByUser) return;
         streamingSpeechActive = true;
         const generation = streamingSpeechGeneration;
+        // Synthesize the first playable phrase as soon as it leaves the stream.
+        // Pass it into speak() so the same phrase is not synthesized twice.
+        const shouldPrime = !streamingSpeechPrimed && chunk.length <= 170;
+        if (shouldPrime) streamingSpeechPrimed = true;
+        const preparedPromise = shouldPrime ? requestRemoteChunk(chunk, "th-TH") : null;
         streamingSpeechQueue = streamingSpeechQueue.then(async () => {
-            if (generation !== streamingSpeechGeneration) return false;
-            const succeeded = await speak(chunk);
+            if (generation !== streamingSpeechGeneration) {
+                if (preparedPromise) preparedPromise.then(releaseRemoteChunk);
+                return false;
+            }
+            const prepared = preparedPromise ? await preparedPromise : null;
+            if (generation !== streamingSpeechGeneration) { releaseRemoteChunk(prepared); return false; }
+            const succeeded = await speak(chunk, { firstPrepared: prepared });
             streamingSpeechSucceeded = streamingSpeechSucceeded || succeeded;
             return succeeded;
         }).catch(error => { console.warn("[Sentinel stream speech]", error?.message || error); return false; });
@@ -1425,16 +1443,18 @@
         streamingSpeechBuffer = streamingSpeechBuffer.trimStart();
         while (streamingSpeechBuffer) {
             const sentence = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…\n])(?:\s|$)/u);
+            // Do not wait for the end of a long generated sentence. Start
+            // TTS after the first short clause and keep later phrases queued.
+            if (streamingSpeechBuffer.length >= 58) {
+                let cut = streamingSpeechBuffer.lastIndexOf(" ", 64);
+                if (cut < 28) cut = 58;
+                queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut));
+                streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
+                continue;
+            }
             if (sentence && sentence[1].trim().length >= 18) {
                 queueStreamingSpeech(sentence[1]);
                 streamingSpeechBuffer = streamingSpeechBuffer.slice(sentence[1].length).trimStart();
-                continue;
-            }
-            if (streamingSpeechBuffer.length >= 88) {
-                let cut = streamingSpeechBuffer.lastIndexOf(" ", 96);
-                if (cut < 42) cut = 88;
-                queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut));
-                streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
                 continue;
             }
             if (force) {
@@ -1449,6 +1469,7 @@
         drainStreamingSpeech(true);
         await streamingSpeechQueue;
         streamingSpeechActive = false;
+        streamingSpeechPrimed = false;
         window.dispatchEvent(new CustomEvent("panthorium:voice-stream-finished"));
         const succeeded = streamingSpeechSucceeded || streamingSpeechInterrupted;
         streamingSpeechSucceeded = false;
@@ -1468,7 +1489,7 @@
         streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
         drainStreamingSpeech(false);
         clearTimeout(streamingSpeechTimer);
-        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= 24) drainStreamingSpeech(true); }, 320);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= 24) drainStreamingSpeech(true); }, 90);
     });
     window.addEventListener("panthorium:ai-stream-end", () => {
         finishStreamingSpeech();
@@ -1540,17 +1561,25 @@
                     const result = event.results[i];
                     const text = String(result?.[0]?.transcript || "").trim();
                     const confidence = Number(result?.[0]?.confidence);
-                    if (!text || (Number.isFinite(confidence) && confidence < 0.15)) continue;
+                    if (!text) continue;
                     const normalized = normalizeVoiceStopText(text);
                     const assistantText = normalizeVoiceStopText(currentSpeechText);
                     if (assistantText.includes(normalized) || !isVoiceStopCommand(text)) {
                         if (result?.isFinal) { interimStopCandidate = ""; interimStopCount = 0; }
                         continue;
                     }
+                    const hasConfidence = Number.isFinite(confidence);
+                    const confidenceEnough = !hasConfidence || confidence >= 0.35;
                     if (!result?.isFinal) {
+                        // Interim recognition can be noisy; require repeated
+                        // exact matches before allowing a quiet spoken command.
+                        if (!confidenceEnough) continue;
                         interimStopCount = normalized === interimStopCandidate ? interimStopCount + 1 : 1;
                         interimStopCandidate = normalized;
-                        if (interimStopCount < 2) continue;
+                        if (interimStopCount < 3) continue;
+                    } else if (!confidenceEnough &&
+                        !(normalized === interimStopCandidate && interimStopCount >= 3)) {
+                        continue;
                     }
                     interruptionMonitorEnabled = false;
                     try { if (typeof monitor.abort === "function") monitor.abort(); else monitor.stop(); } catch (_) {}

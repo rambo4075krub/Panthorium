@@ -17,7 +17,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
 
 (async () => {
   const synthesized = [], conversations = [], streamConversations = [], requests = [], playback = [], revoked = [], recognizers = [];
-  let failProvider = false, failSpeech = false, blockPlayback = false, rejectOnce = '', rejectAlways = '', refreshOK = true, playing = false, holdPlayback = false, chatFailure = null, ttsInFlight = 0, maxTtsInFlight = 0, fakeTts = false, speechAttempts = 0;
+  let failProvider = false, failSpeech = false, blockPlayback = false, rejectOnce = '', rejectAlways = '', refreshOK = true, playing = false, holdPlayback = false, chatFailure = null, ttsInFlight = 0, maxTtsInFlight = 0, fakeTts = false, speechAttempts = 0, pendingDeltaAt = 0, firstSpeechLatencyMs = null;
   // No network access to an AI or speech provider in CI.
   require('../services/sentinelSpeechAudio').synthesizeSentinelMaleVoice = async (text, lang) => {
     speechAttempts += 1;
@@ -67,8 +67,13 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       start() { this.starts = (this.starts || 0) + 1; assert.equal(playing, false, 'recognition must not restart while the answer is playing'); this.onstart?.(); }
       stop() { return this.onend?.(); }
     };
+    w.addEventListener('panthorium:ai-stream-delta', () => { pendingDeltaAt = Date.now(); });
     w.fetch = async (url, options = {}) => {
       const pathname = new URL(url, base).pathname;
+      if (pathname === '/api/speech' && pendingDeltaAt && firstSpeechLatencyMs === null) {
+        firstSpeechLatencyMs = Date.now() - pendingDeltaAt;
+        pendingDeltaAt = 0;
+      }
       requests.push({ pathname, body: options.body && JSON.parse(options.body), token: new Headers(options.headers).get('Authorization') });
       if (pathname === '/api/auth/logout') return Response.json({ ok: true });
       if (pathname === '/api/auth/login' || pathname === '/api/auth/refresh') return refreshOK
@@ -101,7 +106,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     await new Promise(resolve => setTimeout(resolve, 420));
     assert.equal(globalMic.starts, 1, 'hands-free microphone starts once without a click');
     w.PanthoriumVoice.pause();
-    const transcript = (mic, text, final = true) => { const result = [{ transcript: text, confidence: 0.99 }]; result.isFinal = final; mic.onresult({ resultIndex: 0, results: [result] }); };
+    const transcript = (mic, text, final = true, confidence = 0.99) => { const result = [{ transcript: text, confidence }]; result.isFinal = final; mic.onresult({ resultIndex: 0, results: [result] }); };
     async function utter(text, final = true) {
       globalMic.start(); transcript(globalMic, text, final); globalMic.stop();
       for (let i = 0; i < 400 && w.PanthoriumVoice.state() !== 'idle'; i++) await tick();
@@ -115,6 +120,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     assert.equal(synthesized[0].text, answer);
     assert.equal(requests.find(r => r.pathname === '/api/chat/stream')?.body?.voice, true, 'voice streaming is explicit at the API boundary');
     assert.equal(requests.filter(r => r.pathname === '/api/speech').length, 1, 'the completed stream must not be spoken a second time');
+    assert(firstSpeechLatencyMs !== null && firstSpeechLatencyMs < 500, `streamed text should start TTS promptly (observed ${firstSpeechLatencyMs}ms)`);
     assert(revoked.includes(playback[0].src), 'release audio blob after playback ends');
     assert(!w.document.querySelector('#sentinel-command-result'), 'never add a result popup over the microphone');
 
@@ -130,7 +136,12 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     for (let i = 0; i < 200 && !(evaluate('aiSpeechActive') && playing); i++) await tick();
     assert.equal(evaluate('aiSpeechActive'), true, 'the answer is playing before the interrupt command');
     const interruptionMic = recognizers.at(-1);
-    transcript(interruptionMic, 'เซาๆ');
+    transcript(interruptionMic, 'เซาๆ', true, 0.2);
+    await tick();
+    assert.equal(evaluate('aiSpeechActive'), true, 'a low-confidence one-off false recognition must not chop the answer');
+    transcript(interruptionMic, 'เซาๆ', false, 0.4);
+    transcript(interruptionMic, 'เซาๆ', false, 0.4);
+    transcript(interruptionMic, 'เซาๆ', false, 0.4);
     for (let i = 0; i < 250 && evaluate('aiSpeechActive'); i++) await tick();
     assert.equal(evaluate('aiSpeechActive'), false, 'spoken stop command immediately cancels Sentinel speech');
     assert.equal(playing, false, 'interrupted audio playback is cancelled');
