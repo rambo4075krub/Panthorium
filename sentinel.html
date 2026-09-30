@@ -1167,6 +1167,7 @@
     let cancelRemotePlayback = null;
     let speechInterruptedByUser = false;
     let currentSpeechText = "";
+    const sentinelSpeechIsActive = () => aiSpeechActive || streamingSpeechActive;
     function normalizeVoiceStopText(text) {
         return String(text || "").normalize("NFKC").toLowerCase()
             .replace(/[\s\u200b\u200c\u200d\uFEFF]+/gu, "")
@@ -1442,6 +1443,7 @@
         drainStreamingSpeech(true);
         await streamingSpeechQueue;
         streamingSpeechActive = false;
+        window.dispatchEvent(new CustomEvent("panthorium:voice-stream-finished"));
         const succeeded = streamingSpeechSucceeded || streamingSpeechInterrupted;
         streamingSpeechSucceeded = false;
         streamingSpeechInterrupted = false;
@@ -1515,7 +1517,7 @@
         // Assigned by the active voice path so processTranscript can resume listening.
         let resumeAfterTranscript = () => {};
         const startInterruptionRecognition = () => {
-            if (!interruptionMonitorEnabled || !aiSpeechActive || interruptionRecognition || !SR) return;
+            if (!interruptionMonitorEnabled || !sentinelSpeechIsActive() || interruptionRecognition || !SR) return;
             let monitor;
             try { monitor = new SR(); } catch (_) { interruptionMonitorEnabled = false; return; }
             interruptionRecognition = monitor;
@@ -1524,7 +1526,7 @@
             monitor.interimResults = true;
             monitor.maxAlternatives = 1;
             monitor.onresult = event => {
-                if (!aiSpeechActive || !interruptionMonitorEnabled) return;
+                if (!sentinelSpeechIsActive() || !interruptionMonitorEnabled) return;
                 for (let i = event.resultIndex; i < event.results.length; i++) {
                     const result = event.results[i];
                     if (!result?.isFinal) continue;
@@ -1550,7 +1552,7 @@
             };
             monitor.onend = () => {
                 if (interruptionRecognition === monitor) interruptionRecognition = null;
-                if (interruptionMonitorEnabled && aiSpeechActive) {
+                if (interruptionMonitorEnabled && sentinelSpeechIsActive()) {
                     clearTimeout(interruptionRestartTimer);
                     interruptionRestartTimer = setTimeout(startInterruptionRecognition, 250);
                 }
@@ -1569,12 +1571,13 @@
             }
         };
         const startSpeechInterruptionMonitor = () => {
-            if (!aiSpeechActive) return;
+            if (!sentinelSpeechIsActive()) return;
             interruptionMonitorEnabled = true;
             interruptionStartRetries = 0;
             startInterruptionRecognition();
         };
         const stopSpeechInterruptionMonitor = () => {
+            if (streamingSpeechActive && !speechInterruptedByUser) return;
             interruptionMonitorEnabled = false;
             clearTimeout(interruptionRestartTimer);
             interruptionRestartTimer = null;
@@ -1588,6 +1591,7 @@
         };
         window.addEventListener("panthorium:voice-start", startSpeechInterruptionMonitor);
         window.addEventListener("panthorium:voice-end", stopSpeechInterruptionMonitor);
+        window.addEventListener("panthorium:voice-stream-finished", stopSpeechInterruptionMonitor);
 
         // Shared transcript handler (Web Speech + MediaRecorder)
         const processTranscript = async text => {
