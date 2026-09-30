@@ -136,12 +136,10 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     for (let i = 0; i < 200 && !(evaluate('aiSpeechActive') && playing); i++) await tick();
     assert.equal(evaluate('aiSpeechActive'), true, 'the answer is playing before the interrupt command');
     const interruptionMic = recognizers.at(-1);
-    transcript(interruptionMic, 'เซาๆ', true, 0.2);
+    transcript(interruptionMic, 'เซาๆ', true, 0.54);
     await tick();
-    assert.equal(evaluate('aiSpeechActive'), true, 'a low-confidence one-off false recognition must not chop the answer');
-    transcript(interruptionMic, 'เซาๆ', false, 0.4);
-    transcript(interruptionMic, 'เซาๆ', false, 0.4);
-    transcript(interruptionMic, 'เซาๆ', false, 0.4);
+    assert.equal(evaluate('aiSpeechActive'), true, 'a transcript below 0.55 must not chop the answer');
+    transcript(interruptionMic, 'เซาๆ', true, 0.55);
     for (let i = 0; i < 250 && evaluate('aiSpeechActive'); i++) await tick();
     assert.equal(evaluate('aiSpeechActive'), false, 'spoken stop command immediately cancels Sentinel speech');
     assert.equal(playing, false, 'interrupted audio playback is cancelled');
