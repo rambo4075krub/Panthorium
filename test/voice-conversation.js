@@ -50,10 +50,16 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     w.URL.createObjectURL = blob => { const url = `blob:https://staging.example.test/${objects.size}`; objects.set(url, blob); return url; };
     w.URL.revokeObjectURL = url => revoked.push(url);
     w.Audio = class {
+      constructor() { this.readyState = 4; }
+      load() { this.readyState = 4; }
+      addEventListener() {}
+      removeEventListener() {}
+      removeAttribute(name) { if (name === 'src') this.src = ''; }
       pause() { playing = false; }
       async play() {
         if (this.src.startsWith('data:')) throw new Error('CSP media-src rejects data:');
         assert(objects.has(this.src), 'audio must use a prepared blob URL');
+        if (this.volume !== 0) assert.equal(this.preload, 'auto', 'next TTS clip must be decoded before it reaches playback');
         if (this.volume === 0) return; // gesture warmup, not an AI reply
         if (blockPlayback) throw Object.assign(new Error('autoplay blocked'), { name: 'NotAllowedError' });
         assert.equal(this.volume, 1);

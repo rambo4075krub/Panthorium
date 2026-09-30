@@ -1165,6 +1165,7 @@
     let voiceAudioUnlocking = false;
     let activeSpeechRun = 0;
     let cancelRemotePlayback = null;
+    const remoteAudioPlayers = new Set();
     let speechInterruptedByUser = false;
     let currentSpeechText = "";
     let interruptedSpeechText = "";
@@ -1192,6 +1193,7 @@
         activeSpeechRun += 1;
         try { cancelRemotePlayback?.(); } catch (_) {}
         cancelRemotePlayback = null;
+        for (const audio of remoteAudioPlayers) { try { audio.pause(); } catch (_) {} }
         try { voiceAudio.pause(); voiceAudio.currentTime = 0; } catch (_) {}
         aiSpeechActive = false;
         aiSpeechPulse = 0;
@@ -1243,7 +1245,28 @@
             if (expectedMaleProfile && receivedProfile !== expectedMaleProfile) return null;
             const blob = await response.blob();
             if (!blob.size) return null;
-            return { objectUrl: URL.createObjectURL(blob) };
+            const objectUrl = URL.createObjectURL(blob);
+            const audio = new Audio();
+            audio.preload = "auto";
+            audio.src = objectUrl;
+            remoteAudioPlayers.add(audio);
+            await new Promise(resolve => {
+                let settled = false;
+                const finish = () => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timer);
+                    audio.removeEventListener("canplay", finish);
+                    audio.removeEventListener("error", finish);
+                    resolve();
+                };
+                const timer = setTimeout(finish, 1800);
+                audio.addEventListener("canplay", finish, { once: true });
+                audio.addEventListener("error", finish, { once: true });
+                try { audio.load(); } catch (_) {}
+                if (audio.readyState >= 2) finish();
+            });
+            return { objectUrl, audio };
         } catch (_) {
             return null;
         } finally {
@@ -1252,6 +1275,17 @@
     }
 
     function releaseRemoteChunk(prepared) {
+        if (prepared?.audio) {
+            remoteAudioPlayers.delete(prepared.audio);
+            try {
+                prepared.audio.pause();
+                prepared.audio.onended = null;
+                prepared.audio.onerror = null;
+                prepared.audio.ontimeupdate = null;
+                prepared.audio.removeAttribute("src");
+                prepared.audio.load();
+            } catch (_) {}
+        }
         if (prepared?.objectUrl) URL.revokeObjectURL(prepared.objectUrl);
     }
 
@@ -1277,10 +1311,12 @@
             const timeout = setTimeout(() => finish(false), Math.max(30000, Math.min(60000, String(text).length * 350)));
             (async () => {
                 try {
-                    audio.pause();
-                    audio.currentTime = 0;
-                    audio.src = prepared.objectUrl;
-                    audio.preload = "auto";
+                    if (!prepared.audio) {
+                        audio.pause();
+                        audio.currentTime = 0;
+                        audio.src = prepared.objectUrl;
+                        audio.preload = "auto";
+                    }
                     audio.volume = 1;
                     // Pitch and tone are transformed server-side; keep playback
                     // brisk here without changing the new male register.
