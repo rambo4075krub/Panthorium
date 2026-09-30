@@ -1711,7 +1711,7 @@
                             voiceState = "idle";
                             const message = ({
                                 transcription_provider_unavailable: "บริการถอดเสียงยังไม่ได้เชื่อมต่อผู้ให้บริการ AI",
-                                transcription_uncertain: "ฟังคำพูดได้ไม่ชัดหรือผลถอดเสียงไม่ตรงกัน จึงยังไม่ส่งให้ AI กรุณาพูดซ้ำให้ชัดขึ้น",
+                                transcription_uncertain: "โปรดพูดอีกครั้ง",
                                 transcription_unavailable: "บริการถอดเสียงตอบกลับผิดพลาด กรุณาลองอีกครั้ง",
                                 invalid_audio: "รูปแบบหรือขนาดเสียงไม่ถูกต้อง ลองพูดให้สั้นลง",
                                 audio_too_large: "เสียงยาวเกินไป ลองพูดให้สั้นลง",
@@ -1728,6 +1728,9 @@
                                 ? "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง"
                                 : "ส่งเสียงไปยังบริการถอดเสียงไม่สำเร็จ กรุณาตรวจการเชื่อมต่อ");
                             status("unresponsive", message);
+                            if (String(error?.message || "").startsWith("transcription_uncertain")) {
+                                await speakVoiceResponse("โปรดพูดอีกครั้ง");
+                            }
                             restartListening();
                         }
                     };
@@ -2538,7 +2541,8 @@
                     await send({ resumeGlobalVoice: true });
                 } catch (error) {
                     console.warn("[Sentinel chat transcription]", error);
-                    toast(error?.message === "voice_not_authorized" ? "เสียงนี้ไม่ได้รับอนุญาต จึงไม่ส่งให้ Sentinel" : error?.message === "transcription_uncertain" ? "ฟังคำพูดได้ไม่ชัดหรือผลถอดเสียงไม่ตรงกัน จึงยังไม่ส่งให้ AI กรุณาพูดซ้ำให้ชัดขึ้น" : "ถอดเสียงไม่สำเร็จ กรุณาลองใหม่หรือพิมพ์ข้อความ");
+                    toast(error?.message === "voice_not_authorized" ? "เสียงนี้ไม่ได้รับอนุญาต จึงไม่ส่งให้ Sentinel" : error?.message === "transcription_uncertain" ? "โปรดพูดอีกครั้ง" : "ถอดเสียงไม่สำเร็จ กรุณาลองใหม่หรือพิมพ์ข้อความ");
+                    if (error?.message === "transcription_uncertain") await speakVoiceResponse("โปรดพูดอีกครั้ง");
                     window.PanthoriumVoice?.resume();
                 }
             };
