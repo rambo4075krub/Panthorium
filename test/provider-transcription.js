@@ -54,11 +54,12 @@ const { ProviderManager } = require('../services/providerManager');
     await assert.rejects(manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH'), error => error.code === 'transcription_uncertain');
     assert.equal(calls.length, 2, 'confident model disagreement must be withheld from chat');
 
-    manager.keys.openai = '';
     calls = [];
     responses = [response('วันนี้อากาศเป็นอย่างไร', -0.8), response('วันนี้อากาศเป็นอย่างไร', -0.75)];
     await assert.rejects(manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH'), error => error.code === 'transcription_uncertain');
     assert.equal(calls.length, 2, 'matching words with weak confidence from both recognizers still require a repeat');
+
+    manager.keys.openai = '';
 
     manager.priority = ['groq'];
     calls = [];
