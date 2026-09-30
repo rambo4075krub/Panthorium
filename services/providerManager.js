@@ -98,28 +98,45 @@ class ProviderManager {
         noSpeechProbability: noSpeech.length ? Math.max(...noSpeech) : null
       };
     };
-    let uncertainResult = null;
-    for (const item of candidates) {
-      try {
-        const result = await transcribeWith(item);
-        const confidenceLow = result.confidence !== null && result.confidence < -0.85;
-        const likelySilence = result.noSpeechProbability !== null && result.noSpeechProbability > 0.65;
-        if (!uncertainResult && !confidenceLow && !likelySilence) return result;
-        if (!uncertainResult) { uncertainResult = result; continue; }
-        const normalize = value => String(value).normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
-        if (normalize(uncertainResult.text) === normalize(result.text)) return { ...uncertainResult, crossCheckedBy: result.provider };
-        const error = new Error("transcription_uncertain"); error.code = "transcription_uncertain"; throw error;
-      } catch (error) {
-        if (error.code === "transcription_uncertain") throw error;
-        if (uncertainResult || item === candidates[candidates.length - 1]) {
-          const uncertain = new Error(uncertainResult ? "transcription_uncertain" : "transcription_provider_unavailable");
-          uncertain.code = uncertainResult ? "transcription_uncertain" : (error.code || "transcription_provider_unavailable");
-          throw uncertain;
-        }
+    const uncertain = () => { const error = new Error("transcription_uncertain"); error.code = error.message; return error; };
+    const likelySilence = result => result.noSpeechProbability !== null && result.noSpeechProbability > 0.65;
+    const confidence = result => result.confidence === null ? -Infinity : result.confidence;
+    const normalize = value => String(value).normalize("NFKC").toLowerCase().replace(/[\\s\\p{P}\\p{S}]/gu, "");
+
+    // A confident single-model transcript can still be the wrong question.
+    // When a second provider is configured, compare both hypotheses in
+    // parallel. Disagreement is withheld from the assistant instead of being
+    // silently treated as the user's intent.
+    if (candidates.length > 1) {
+      const results = await Promise.allSettled(candidates.slice(0, 2).map(transcribeWith));
+      const primary = results[0].status === "fulfilled" ? results[0].value : null;
+      const secondary = results[1].status === "fulfilled" ? results[1].value : null;
+      if (primary && secondary) {
+        const agreement = normalize(primary.text) === normalize(secondary.text);
+        const atLeastOneClear = confidence(primary) >= -0.55 || confidence(secondary) >= -0.55;
+        if (likelySilence(primary) || likelySilence(secondary) || !agreement || !atLeastOneClear) throw uncertain();
+        return { ...primary, crossCheckedBy: secondary.provider };
       }
+      const onlyResult = primary || secondary;
+      if (onlyResult && !likelySilence(onlyResult) && confidence(onlyResult) >= -0.3) {
+        return { ...onlyResult, crossCheckUnavailable: true };
+      }
+      if (onlyResult) throw uncertain();
+      const error = new Error("transcription_provider_unavailable");
+      error.code = "transcription_provider_unavailable";
+      throw error;
     }
-    if (uncertainResult) { const error = new Error("transcription_uncertain"); error.code = error.message; throw error; }
-    throw new Error("transcription_provider_unavailable");
+
+    try {
+      const result = await transcribeWith(candidates[0]);
+      if (likelySilence(result) || confidence(result) < -0.55) throw uncertain();
+      return result;
+    } catch (error) {
+      if (error.code === "transcription_uncertain") throw error;
+      const unavailable = new Error("transcription_provider_unavailable");
+      unavailable.code = "transcription_provider_unavailable";
+      throw unavailable;
+    }
   }
   async call(provider, systemPrompt, history) { const result = await this.callDetailed(provider, systemPrompt, history); return result?.text || null; }
   async callDetailed(provider, systemPrompt, history, options = {}) {

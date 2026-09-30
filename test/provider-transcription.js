@@ -39,16 +39,37 @@ const { ProviderManager } = require('../services/providerManager');
     assert.equal(calls.length, 2, 'disagreeing transcripts must be withheld from AI processing');
 
     calls = [];
-    responses = [response('วันนี้อากาศเป็นอย่างไร', -0.2)];
+    responses = [response('วันนี้อากาศเป็นอย่างไร', -0.2), response('วันนี้อากาศเป็นอย่างไร', -0.35)];
     const confident = await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
     assert.equal(confident.text, 'วันนี้อากาศเป็นอย่างไร');
-    assert.equal(calls.length, 1, 'confident speech stays on the fast one-pass path');
+    assert.equal(calls.length, 2, 'even confident speech is verified by a second recognizer to catch plausible mishears');
+
+    calls = [];
+    responses = [response('เปิด Learning Lab', -0.15), response('เปิด Learning Lab', -0.2)];
+    await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
+    assert.equal(calls.length, 2, 'confident matching models can pass');
+
+    calls = [];
+    responses = [response('เปิด Learning Lab', -0.15), response('เปิด Learning Lab settings', -0.2)];
+    await assert.rejects(manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH'), error => error.code === 'transcription_uncertain');
+    assert.equal(calls.length, 2, 'confident model disagreement must be withheld from chat');
 
     manager.keys.openai = '';
     calls = [];
-    responses = [response('เปิด Sentinel', -1.3)];
+    responses = [response('วันนี้อากาศเป็นอย่างไร', -0.8), response('วันนี้อากาศเป็นอย่างไร', -0.75)];
+    await assert.rejects(manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH'), error => error.code === 'transcription_uncertain');
+    assert.equal(calls.length, 2, 'matching words with weak confidence from both recognizers still require a repeat');
+
+    manager.priority = ['groq'];
+    calls = [];
+    responses = [response('เปิด Sentinel', -0.7)];
     await assert.rejects(manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH'), error => error.code === 'transcription_uncertain');
     assert.equal(calls.length, 1);
+    calls = [];
+    responses = [response('วันนี้อากาศเป็นอย่างไร', -0.2)];
+    const singleProvider = await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
+    assert.equal(singleProvider.text, 'วันนี้อากาศเป็นอย่างไร');
+    assert.equal(calls.length, 1, 'a sole provider remains usable when its signal confidence is strong');
   } finally { global.fetch = originalFetch; }
   console.log('Transcription quality: Thai/English prompt, deterministic Whisper, low-confidence cross-check and fail-closed mismatch passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
