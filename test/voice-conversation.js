@@ -17,12 +17,13 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
 
 (async () => {
   const synthesized = [], conversations = [], requests = [], playback = [], revoked = [], recognizers = [];
-  let failProvider = false, failSpeech = false, blockPlayback = false, rejectOnce = '', rejectAlways = '', refreshOK = true, playing = false, chatFailure = null, ttsInFlight = 0, maxTtsInFlight = 0, fakeTts = false;
+  let failProvider = false, failSpeech = false, blockPlayback = false, rejectOnce = '', rejectAlways = '', refreshOK = true, playing = false, chatFailure = null, ttsInFlight = 0, maxTtsInFlight = 0, fakeTts = false, speechAttempts = 0;
   // No network access to an AI or speech provider in CI.
   require('../services/sentinelSpeechAudio').synthesizeSentinelMaleVoice = async (text, lang) => {
+    speechAttempts += 1;
     if (failSpeech) throw new Error('fixture TTS outage');
     synthesized.push({ text, lang });
-    return { audio: Buffer.from('fixture-audio-bytes'), voice: 'en-US-AndrewMultilingualNeural' };
+    return { audio: Buffer.from('fixture-audio-bytes'), voice: lang === 'th-TH' ? 'th-TH-NiwatNeural' : 'en-US-AndrewMultilingualNeural' };
   };
   const { createApiRouter } = require('../routes/api');
   const audit = { record() {} };
@@ -78,7 +79,8 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
         ttsInFlight += 1; maxTtsInFlight = Math.max(maxTtsInFlight, ttsInFlight);
         await new Promise(resolve => setTimeout(resolve, 12));
         ttsInFlight -= 1;
-        return new Response(Buffer.from('fixture-mp3'), { headers: { 'Content-Type': 'audio/mpeg', 'X-Sentinel-Voice-Profile': 'en-US-AndrewMultilingualNeural' } });
+        const speechLang = JSON.parse(options.body || '{}').lang;
+        return new Response(Buffer.from('fixture-mp3'), { headers: { 'Content-Type': 'audio/mpeg', 'X-Sentinel-Voice-Profile': speechLang === 'th-TH' ? 'th-TH-NiwatNeural' : 'en-US-AndrewMultilingualNeural' } });
       }
       return fetch(base + pathname, options);
     };
@@ -141,8 +143,10 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     assert.equal(playback.length, 5);
     assert.match(w.document.getElementById('toast').textContent, /เล่นเสียง.*ไม่สำเร็จ/);
     blockPlayback = false; failSpeech = true;
+    const failedSpeechAttemptsBefore = speechAttempts;
     await utter('การเรียนรู้คืออะไร');
     assert.match(w.document.getElementById('toast').textContent, /เล่นเสียง.*ไม่สำเร็จ/);
+    assert.equal(speechAttempts - failedSpeechAttemptsBefore, 1, 'a failed TTS request must not trigger a chain of duplicate retries');
     failSpeech = false;
 
     rejectAlways = '/api/chat'; refreshOK = false;
@@ -159,6 +163,18 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     fakeTts = false;
     const longSpeechPlaybackCount = playback.length - playbackBeforeLongSpeech;
     assert(maxTtsInFlight <= 2, 'TTS prefetch is bounded to avoid bursts when answers are long');
+    const remoteSpeechRequestsBeforeNative = requests.filter(r => r.pathname === '/api/speech').length;
+    const nativeSpeech = [];
+    w.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+    w.speechSynthesis = {
+      getVoices: () => [{ name: 'Microsoft Niwat Online (Natural) - Thai (Thailand)', lang: 'th-TH', localService: true }],
+      cancel() {}, resume() {},
+      speak(utterance) { nativeSpeech.push(utterance.text); setTimeout(() => { utterance.onstart?.(); setTimeout(() => utterance.onend?.(), 1); }, 0); }
+    };
+    assert.equal(await evaluate(`speak('สวัสดีครับ')`), true, 'a ready native Thai male voice should speak immediately');
+    assert.deepEqual(nativeSpeech, ['สวัสดี'], 'native Thai speech should start with the recognized Thai voice');
+    assert.equal(requests.filter(r => r.pathname === '/api/speech').length, remoteSpeechRequestsBeforeNative, 'do not wait on remote TTS when a native Thai voice is ready');
+    delete w.speechSynthesis;
     const playbackBeforeInvalidResponses = playback.length;
     for (const [response, expected] of [
       [() => Response.json({ ok: false }, { status: 403 }), /ไม่มีสิทธิ์/],

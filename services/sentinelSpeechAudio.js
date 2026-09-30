@@ -4,7 +4,7 @@ const path = require("path");
 const { EdgeTTS } = require("node-edge-tts");
 
 const SENTINEL_MALE_VOICES = Object.freeze({
-  "th-TH": "en-US-AndrewMultilingualNeural",
+  "th-TH": "th-TH-NiwatNeural",
   "en-US": "en-US-AndrewMultilingualNeural",
   "ja-JP": "ja-JP-KeitaNeural",
   "ko-KR": "ko-KR-InJoonNeural",
@@ -29,8 +29,8 @@ async function synthesizeSentinelMaleVoice(text, lang) {
       voice,
       lang,
       outputFormat: "audio-24khz-48kbitrate-mono-mp3",
-      // Keep Thai brisk, but let Andrew articulate English terms more clearly.
-      rate: lang === "en-US" ? "-2%" : "+10%",
+      // Use the native Thai male voice and a slightly brisk conversational pace.
+      rate: lang === "en-US" ? "-2%" : "+12%",
       pitch: "default",
       volume: "default",
       timeout: 20000,

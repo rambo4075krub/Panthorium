@@ -34,17 +34,11 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     try {
       let audio;
       let voiceProfile;
-      let neuralError;
-      for (let attempt = 0; attempt < 2 && !audio; attempt += 1) {
-        try {
-          const neural = await synthesizeSentinelMaleVoice(text, lang);
-          audio = neural.audio;
-          voiceProfile = neural.voice;
-        } catch (error) {
-          neuralError = error;
-        }
-      }
-      if (!audio) {
+      try {
+        const neural = await synthesizeSentinelMaleVoice(text, lang);
+        audio = neural.audio;
+        voiceProfile = neural.voice;
+      } catch (neuralError) {
         audit.record("sentinel.neural_speech_failed", { userId: req.user.sub, lang, error: String(neuralError?.message || neuralError) });
         // The generic source voice is not guaranteed to be male. For Thai and
         // English fail closed so the client can use only a confirmed male

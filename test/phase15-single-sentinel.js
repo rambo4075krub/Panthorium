@@ -68,7 +68,7 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('await new Promise(resolve => setTimeout(resolve, 80))'), 'speech must avoid the Chromium cancel/speak race');
   assert(shell.includes('const startWatchdog = setTimeout'), 'desktop speech must detect silently dropped Chromium utterances');
   assert(shell.includes('await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange)'), 'speech must fall back when a native utterance fails');
-  assert.equal(SENTINEL_MALE_VOICES['th-TH'], 'en-US-AndrewMultilingualNeural', 'Thai speech must use the Andrew multilingual male neural voice');
+  assert.equal(SENTINEL_MALE_VOICES['th-TH'], 'th-TH-NiwatNeural', 'Thai speech must use a native Thai male neural voice');
   assert.equal(SENTINEL_MALE_VOICES['en-US'], 'en-US-AndrewMultilingualNeural', 'English speech must use the Andrew multilingual male neural voice');
   assert(shell.includes('previousChunkLanguage !== chunk.lang'), 'mixed Thai and English speech must pause at each language boundary');
   assert(shell.includes('setTimeout(resolve, 15)'), 'mixed-language pauses must remain clear without sounding delayed');
@@ -77,7 +77,7 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('audio.ontimeupdate = () => updateTranscript(false)'), 'remote Andrew audio must advance the current transcript on desktop and mobile');
   assert(shell.includes('showOrbTranscriptForChar(charIndex)'), 'speech progress must move the active sentence into the center transcript row');
   assert(shell.includes('transcriptStartChar, transcriptEndChar'), 'each synthesized chunk must retain its position in the complete transcript');
-  assert(fs.readFileSync('services/sentinelSpeechAudio.js', 'utf8').includes('lang === "en-US" ? "-2%" : "+10%"'), 'Andrew must speak English slowly while keeping Thai at the approved speed');
+  assert(fs.readFileSync('services/sentinelSpeechAudio.js', 'utf8').includes('lang === "en-US" ? "-2%" : "+12%"'), 'Thai neural speech should use a brisker native-language pace');
   assert(shell.includes('voice: conversationalVoice'), 'spoken questions, not system commands, must identify the low-latency chat path');
   assert(api.includes('voiceMode: voice === true'), 'the speech flag must reach Sentinel without exposing an admin mode');
   assert(sentinelService.includes('historyLimit: voiceMode ? 12 : 40'), 'voice commands must use bounded recent context for faster processing');
@@ -96,7 +96,7 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('base + "/api/speech"'), 'desktop speech playback must avoid cross-origin media restrictions');
   assert(server.includes('mediaSrc: ["\'self\'", "blob:"]'), 'speech media must remain restricted to same-origin and generated blobs');
   assert(shell.includes('function initGlobalVoice()'), 'global user voice commands must remain available');
-  assert(shell.includes('silenceTimer = setTimeout(finishListening, 1400)'), 'global recognition must wait for the user to finish speaking');
+  assert(shell.includes('silenceTimer = setTimeout(finishListening, 1800)'), 'global recognition must wait through natural speech pauses');
   assert(shell.includes('voiceState = "stopping"'), 'recognition must stop before AI processing starts');
   assert(shell.includes('recognition.continuous = !mobileSpeech'), 'mobile speech recognition must use reliable one-command sessions');
   assert(shell.includes('await navigator.mediaDevices.getUserMedia'), 'mobile speech must request microphone access from a direct user gesture');

@@ -1205,7 +1205,10 @@
                 resolve(speechSynthesis.getVoices());
             };
             speechSynthesis.addEventListener("voiceschanged", finish);
-            setTimeout(finish, 1200);
+            // Do not make an already-visible answer wait a full second for a
+            // system voice catalog. Use a ready native voice now, otherwise
+            // fall through to the server's neural voice.
+            setTimeout(finish, 180);
         });
     }
 
@@ -1254,9 +1257,9 @@
 
     async function requestRemoteChunk(text, lang) {
         const controller = new AbortController();
-        // The server gives neural TTS two bounded attempts (up to 40s total).
-        // Leave enough time for that before aborting and starting a duplicate request.
-        const timeout = setTimeout(() => controller.abort(), Math.max(45000, Math.min(60000, String(text).length * 260)));
+        // The server performs one bounded synthesis attempt. Do not keep a
+        // second browser retry queued behind a slow first response.
+        const timeout = setTimeout(() => controller.abort(), Math.max(22000, Math.min(25000, String(text).length * 120)));
         try {
             const base = OS.config.backendUrl.replace(/\/$/, "");
             const response = await authorizedFetch(base + "/api/speech", {
@@ -1267,7 +1270,7 @@
                 signal: controller.signal
             });
             if (!response.ok) return null;
-            const expectedMaleProfile = lang === "th-TH" || lang === "en-US" ? "en-US-AndrewMultilingualNeural" : "";
+            const expectedMaleProfile = lang === "th-TH" ? "th-TH-NiwatNeural" : lang === "en-US" ? "en-US-AndrewMultilingualNeural" : "";
             const receivedProfile = response.headers.get("x-sentinel-voice-profile") || "";
             if (expectedMaleProfile && receivedProfile !== expectedMaleProfile) return null;
             const blob = await response.blob();
@@ -1303,7 +1306,7 @@
             };
             const cancel = () => finish(false);
             cancelRemotePlayback = cancel;
-            const timeout = setTimeout(() => finish(false), Math.max(45000, Math.min(90000, String(text).length * 500)));
+            const timeout = setTimeout(() => finish(false), Math.max(30000, Math.min(60000, String(text).length * 350)));
             (async () => {
                 try {
                     audio.pause();
@@ -1381,7 +1384,7 @@
                     try { window.speechSynthesis.cancel(); } catch (_) {}
                     finish(false);
                 }
-            }, 1800);
+            }, 900);
             try {
                 window.speechSynthesis.resume();
                 window.speechSynthesis.speak(u);
@@ -1423,12 +1426,16 @@
         // still left a long silence when a short word finished before the next
         // network response arrived.
         const preparedRemotePromises = chunks.map(() => Promise.resolve(null));
+        const remoteAttempted = new Set();
         let nextRemoteChunk = 0;
         const prefetchRemote = currentIndex => {
             const through = Math.min(chunks.length - 1, currentIndex + 2);
             while (nextRemoteChunk <= through) {
                 const index = nextRemoteChunk++;
-                if (usesMaleNeural(chunks[index])) preparedRemotePromises[index] = requestRemoteChunk(chunks[index].text, chunks[index].lang);
+                if (usesMaleNeural(chunks[index]) && !voiceForLanguage(chunks[index].lang, voices)) {
+                    remoteAttempted.add(index);
+                    preparedRemotePromises[index] = requestRemoteChunk(chunks[index].text, chunks[index].lang);
+                }
             }
         };
         const releasePendingRemote = startIndex => preparedRemotePromises.slice(startIndex).forEach(promise => promise.then(releaseRemoteChunk));
@@ -1457,8 +1464,14 @@
             let spoken = false;
             const transcriptRange = { start: chunk.transcriptStartChar, end: chunk.transcriptEndChar };
             if (forceMaleNeural) {
-                spoken = await playRemoteChunk(preparedRemote, chunk.text, transcriptRange);
-                if (!spoken && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange);
+                // Start speech locally as soon as the text is ready. The
+                // network neural voice is the fallback when this device has no
+                // confirmed native male voice for the requested language.
+                if (voice) spoken = await speakNativeChunk(chunk, voice, speechRun);
+                if (!spoken && speechRun === activeSpeechRun) {
+                    const remoteAudio = preparedRemote || (remoteAttempted.has(chunkIndex) ? null : await requestRemoteChunk(chunk.text, chunk.lang));
+                    spoken = await playRemoteChunk(remoteAudio, chunk.text, transcriptRange);
+                }
             }
             // Native speech is a best-effort fallback, never proof of playback.
             // Preserve the approved male voice requirement for Thai/English.
@@ -1735,7 +1748,7 @@
                     if (recorderVoiceDetector.observe(level, now - recorderStartedAt)) recorderLastVoiceAt = now;
                 }
                 const quietLongEnough = recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 1400 && now - recorderStartedAt > 700;
-                if (quietLongEnough || now - recorderStartedAt > 15000) { finishRecorder({ discard: false }); return; }
+                if (quietLongEnough || now - recorderStartedAt > 30000) { finishRecorder({ discard: false }); return; }
                 recorderMonitor = setTimeout(monitorRecorder, 100);
             };
             const startRecorder = async () => {
@@ -1913,7 +1926,7 @@
             if (voiceState === "listening") {
                 clearTimeout(silenceTimer);
                 // Wait for a real pause instead of treating the first final phrase as the whole command.
-                silenceTimer = setTimeout(finishListening, 1400);
+                silenceTimer = setTimeout(finishListening, 1800);
             }
         };
         const recognitionFailure = event => {
@@ -2613,7 +2626,7 @@
                     const level = Math.sqrt(sum / chatRecorderData.length);
                     if (chatVoiceDetector.observe(level, now - chatRecorderStartedAt)) chatRecorderLastVoiceAt = now;
                 }
-                if ((chatRecorderLastVoiceAt > 0 && now - chatRecorderLastVoiceAt > 1400 && now - chatRecorderStartedAt > 700) || now - chatRecorderStartedAt > 15000) {
+                if ((chatRecorderLastVoiceAt > 0 && now - chatRecorderLastVoiceAt > 1800 && now - chatRecorderStartedAt > 700) || now - chatRecorderStartedAt > 30000) {
                     try { chatRecorder.stop(); } catch (_) {}
                     return;
                 }
@@ -2641,7 +2654,7 @@
                 clearTimeout(voiceSilenceTimer);
                 voiceSilenceTimer = setTimeout(() => {
                     try { recognition.stop(); } catch (_) {}
-                }, 1400);
+                }, 1800);
             };
             recognition.onstart = () => {
                 voiceRecognitionFailed = false;

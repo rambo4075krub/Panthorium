@@ -64,7 +64,7 @@ class ProviderManager {
   }
   async transcribeAudio(buffer, mimeType = "audio/webm", language = "") {
     const candidates = [
-      { provider: "groq", key: this.keys.groq, url: "https://api.groq.com/openai/v1/audio/transcriptions", model: process.env.GROQ_TRANSCRIBE_MODEL || "whisper-large-v3-turbo" },
+      { provider: "groq", key: this.keys.groq, url: "https://api.groq.com/openai/v1/audio/transcriptions", model: process.env.GROQ_TRANSCRIBE_MODEL || "whisper-large-v3" },
       { provider: "openai", key: this.keys.openai, url: "https://api.openai.com/v1/audio/transcriptions", model: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1" }
     ].filter(item => item.key && this.priority.includes(item.provider))
       .sort((a, b) => this.priority.indexOf(a.provider) - this.priority.indexOf(b.provider));
