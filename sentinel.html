@@ -1167,6 +1167,7 @@
     let cancelRemotePlayback = null;
     let speechInterruptedByUser = false;
     let currentSpeechText = "";
+    let interruptedSpeechText = "";
     const sentinelSpeechIsActive = () => aiSpeechActive || streamingSpeechActive;
     function normalizeVoiceStopText(text) {
         return String(text || "").normalize("NFKC").toLowerCase()
@@ -1179,8 +1180,13 @@
         const normalized = normalizeVoiceStopText(text);
         return /^(?:หยุด(?:พูด|เดี๋ยวนี้|เสียง|ก่อน|ที|เลย|ได้แล้ว|ต่อ)?|ไม่ต้องพูด(?:แล้ว|ต่อ)?|พอ(?:แล้ว|ที|ก่อน|เถอะ)?|เซา(?:ๆ|เซา)?|เซ้า(?:ๆ|เซ้า)?)$/u.test(normalized);
     }
+    function isVoiceContinueCommand(text) {
+        const normalized = normalizeVoiceStopText(text);
+        return /^(?:พูดต่อ(?:ไป|ได้(?:เลย)?|เลย)?|ต่อ(?:ไป|ได้(?:เลย)?|เลย)?|เล่าต่อ(?:ไป|ได้)?|อ่านต่อ(?:ไป|ได้)?|continue(?:speaking|please)?|pleasecontinue|goon|keepgoing|carryon|goahead)$/u.test(normalized);
+    }
     function stopSentinelSpeech() {
         speechInterruptedByUser = true;
+        if (currentSpeechText) interruptedSpeechText = currentSpeechText;
         currentSpeechText = "";
         cancelStreamingSpeech();
         activeSpeechRun += 1;
@@ -1468,6 +1474,7 @@
         finishStreamingSpeech();
     });
     window.PanthoriumVoiceStream = { finish: finishStreamingSpeech };
+    window.PanthoriumVoiceCommands = { isStop: isVoiceStopCommand, isContinue: isVoiceContinueCommand };
 
     // Global voice path: accepts commands without opening Sentinel chat.
     function initGlobalVoice() {
@@ -1482,6 +1489,8 @@
         let interruptionMonitorEnabled = false;
         let interruptionRestartTimer = null;
         let interruptionStartRetries = 0;
+        let interimStopCandidate = "";
+        let interimStopCount = 0;
         let autoResume = true;
         let recognitionBlocked = false;
         let voiceState = "idle";
@@ -1529,14 +1538,20 @@
                 if (!sentinelSpeechIsActive() || !interruptionMonitorEnabled) return;
                 for (let i = event.resultIndex; i < event.results.length; i++) {
                     const result = event.results[i];
-                    if (!result?.isFinal) continue;
                     const text = String(result?.[0]?.transcript || "").trim();
                     const confidence = Number(result?.[0]?.confidence);
-                    if (!text || (Number.isFinite(confidence) && confidence < 0.55)) continue;
+                    if (!text || (Number.isFinite(confidence) && confidence < 0.15)) continue;
                     const normalized = normalizeVoiceStopText(text);
                     const assistantText = normalizeVoiceStopText(currentSpeechText);
-                    if (assistantText.includes(normalized)) continue;
-                    if (!isVoiceStopCommand(text)) continue;
+                    if (assistantText.includes(normalized) || !isVoiceStopCommand(text)) {
+                        if (result?.isFinal) { interimStopCandidate = ""; interimStopCount = 0; }
+                        continue;
+                    }
+                    if (!result?.isFinal) {
+                        interimStopCount = normalized === interimStopCandidate ? interimStopCount + 1 : 1;
+                        interimStopCandidate = normalized;
+                        if (interimStopCount < 2) continue;
+                    }
                     interruptionMonitorEnabled = false;
                     try { if (typeof monitor.abort === "function") monitor.abort(); else monitor.stop(); } catch (_) {}
                     stopSentinelSpeech();
@@ -1606,6 +1621,16 @@
             voiceState = "processing";
             status("processing", "กำลังประมวลผล");
             try {
+                if (interruptedSpeechText && isVoiceContinueCommand(value)) {
+                    const continuation = interruptedSpeechText;
+                    interruptedSpeechText = "";
+                    speechInterruptedByUser = false;
+                    voiceState = "speaking";
+                    status("processing", "พูดต่อ", false);
+                    await speakVoiceResponse(continuation);
+                    status("ready", "พูดต่อจบแล้ว", false);
+                    return;
+                }
                 speechInterruptedByUser = false;
                 const { intent, response: res } = await requestVoiceInput(value);
                 if (!res || !res.ok || !res.text) {

@@ -95,6 +95,8 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     const globalMic = recognizers[0];
     for (const phrase of ['หยุด', 'หยุดพูด', 'ไม่ต้องพูด', 'หยุดเดี๋ยวนี้', 'หยุดเสียง', 'พอ', 'เซา', 'เซาๆ', 'หยุดนะ']) assert.equal(evaluate(`isVoiceStopCommand(${JSON.stringify(phrase)})`), true, `recognize voice stop phrase: ${phrase}`);
     assert.equal(evaluate(`isVoiceStopCommand('หยุดทำงานได้ไหม')`), false, 'do not interrupt on an ordinary question that mentions stop');
+    for (const phrase of ['พูดต่อ', 'พูดต่อไป', 'พูดต่อได้', 'พูดต่อได้เลย', 'เล่าต่อ', 'อ่านต่อ', 'continue', 'continue speaking', 'please continue', 'go on', 'keep going', 'carry on', 'go ahead']) assert.equal(evaluate(`isVoiceContinueCommand(${JSON.stringify(phrase)})`), true, `recognize continue phrase: ${phrase}`);
+    assert.equal(evaluate(`isVoiceContinueCommand('ช่วยอธิบายต่อได้ไหม')`), false, 'do not consume a normal question as a continue command');
     // Let the shell's one-time mic startup finish before injecting transcripts.
     await new Promise(resolve => setTimeout(resolve, 420));
     assert.equal(globalMic.starts, 1, 'hands-free microphone starts once without a click');
