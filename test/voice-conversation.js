@@ -344,6 +344,22 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       start() { this.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'คำถอดเสียงไม่แน่ใจ', confidence: 0.54 } }] }); }
       stop() {}
     }, { timeoutMs: 500 })`), /transcription_uncertain/, 'browser fallback asks again below the 0.55 confidence threshold');
+    // Android/iOS should synthesize the complete streamed answer once, avoiding
+    // repeated short remote audio elements and audible gaps between chunks.
+    const originalUserAgent = w.navigator.userAgent;
+    Object.defineProperty(w.navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/154.0 Mobile Safari/537.36' });
+    const mobileTtsCallsBefore = requests.filter(r => r.pathname === '/api/speech').length;
+    w.dispatchEvent(new w.CustomEvent('panthorium:ai-stream-delta', { detail: { text: 'คำตอบสั้นสำหรับทดสอบเสียงบนมือถือให้พูดต่อเนื่องเป็นคลิปเดียว' } }));
+    await tick();
+    assert.equal(requests.filter(r => r.pathname === '/api/speech').length, mobileTtsCallsBefore, 'mobile waits for full response instead of requesting fragmented TTS');
+    const mobileFinish = w.PanthoriumVoiceStream.finish();
+    for (let i = 0; i < 100 && requests.filter(r => r.pathname === '/api/speech').length < mobileTtsCallsBefore + 1; i++) await tick();
+    const mobileSpeechRequests = requests.filter(r => r.pathname === '/api/speech').slice(mobileTtsCallsBefore);
+    assert.equal(mobileSpeechRequests.length, 1, 'a short mobile answer uses one continuous TTS request');
+    assert.equal(mobileSpeechRequests[0].body.text, 'คำตอบสั้นสำหรับทดสอบเสียงบนมือถือให้พูดต่อเนื่องเป็นคลิปเดียว');
+    evaluate('stopSentinelSpeech(); speechInterruptedByUser = false;');
+    await mobileFinish;
+    Object.defineProperty(w.navigator, 'userAgent', { configurable: true, value: originalUserAgent });
     let interrupted = false;
     w.addEventListener('panthorium:voice-end', event => { if (event.detail?.interrupted) interrupted = true; }, { once: true });
     evaluate('aiSpeechActive = true; stopSentinelSpeech();');

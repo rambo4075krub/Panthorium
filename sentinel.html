@@ -1661,9 +1661,13 @@
     window.addEventListener("panthorium:ai-stream-delta", event => {
         if (speechInterruptedByUser) return;
         streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
-        drainStreamingSpeech(false);
         clearTimeout(streamingSpeechTimer);
-        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 64 : 40)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 450 : 650);
+        // Mobile browsers repeatedly underrun when short phrases require
+        // separate remote TTS requests. Buffer the answer and synthesize it
+        // as one natural clip when the response stream finishes.
+        if (isMobileDevice()) return;
+        drainStreamingSpeech(false);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 120 : 60)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 450 : 650);
     });
     window.addEventListener("panthorium:ai-stream-end", () => {
         finishStreamingSpeech();
