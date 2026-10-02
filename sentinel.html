@@ -1150,9 +1150,9 @@
         // words are spoken by the system's Thai male Niwat voice too.
         const pieces = [];
         let remaining = source;
-        while (remaining.length > 170) {
-            let cut = remaining.lastIndexOf(" ", 170);
-            if (cut < 80) cut = 170;
+        while (remaining.length > 900) {
+            let cut = remaining.lastIndexOf(" ", 700);
+            if (cut < 350) cut = 700;
             pieces.push({ text: remaining.slice(0, cut).trim(), lang: "th-TH" });
             remaining = remaining.slice(cut).trim();
         }
@@ -1239,14 +1239,14 @@
         const controller = new AbortController();
         // The server performs one bounded synthesis attempt. Do not keep a
         // second browser retry queued behind a slow first response.
-        const timeout = setTimeout(() => controller.abort(), Math.max(7000, Math.min(12000, String(text).length * 80)));
+        const timeout = setTimeout(() => controller.abort(), Math.max(12000, Math.min(45000, String(text).length * 45)));
         try {
             const base = OS.config.backendUrl.replace(/\/$/, "");
             const response = await authorizedFetch(base + "/api/speech", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "include",
-                body: JSON.stringify({ text: String(text).slice(0, 180), lang }),
+                body: JSON.stringify({ text: String(text).slice(0, 900), lang }),
                 signal: controller.signal
             });
             if (!response.ok) return null;
@@ -1321,7 +1321,7 @@
             };
             const cancel = () => finish(false);
             cancelRemotePlayback = cancel;
-            const timeout = setTimeout(() => finish(false), Math.max(30000, Math.min(60000, String(text).length * 350)));
+            const timeout = setTimeout(() => finish(false), Math.max(30000, Math.min(300000, String(text).length * 500)));
             (async () => {
                 try {
                     if (!prepared.audio) {
@@ -1640,7 +1640,13 @@
     }
     async function finishStreamingSpeech() {
         clearTimeout(streamingSpeechTimer);
-        drainStreamingSpeech(true);
+        if (isMobileDevice()) {
+            const completeAnswer = streamingSpeechBuffer.trim();
+            streamingSpeechBuffer = "";
+            if (completeAnswer) queueStreamingSpeech(completeAnswer);
+        } else {
+            drainStreamingSpeech(true);
+        }
         await streamingSpeechQueue;
         streamingSpeechActive = false;
         window.dispatchEvent(new CustomEvent("panthorium:voice-stream-finished"));

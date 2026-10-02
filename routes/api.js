@@ -30,7 +30,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
     const lang = typeof req.body?.lang === "string" ? req.body.lang : "";
     const allowedLanguages = new Set(["th-TH", "en-US", "ja-JP", "ko-KR", "ar-SA", "ru-RU", "zh-CN"]);
-    if (!text || text.length > 180 || !allowedLanguages.has(lang)) return res.status(400).json({ ok: false, error: "invalid_speech_request" });
+    if (!text || text.length > 900 || !allowedLanguages.has(lang)) return res.status(400).json({ ok: false, error: "invalid_speech_request" });
     try {
       let audio;
       let voiceProfile;

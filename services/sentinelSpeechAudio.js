@@ -19,7 +19,7 @@ function applySentinelPronunciations(text) {
 
 async function synthesizeSentinelMaleVoice(text, lang) {
   const voice = SENTINEL_MALE_VOICES[lang];
-  if (!voice || typeof text !== "string" || !text.trim() || text.length > 180) {
+  if (!voice || typeof text !== "string" || !text.trim() || text.length > 900) {
     throw new Error("invalid_speech_request");
   }
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "panthorium-voice-"));
@@ -35,12 +35,12 @@ async function synthesizeSentinelMaleVoice(text, lang) {
       rate: "+12%",
       pitch: "default",
       volume: "default",
-      timeout: 20000,
+      timeout: 40000,
       proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY
     });
     await speech.ttsPromise(applySentinelPronunciations(text.trim()), audioPath);
     const audio = await fs.readFile(audioPath);
-    if (!audio.length || audio.length > 1024 * 1024) throw new Error("invalid_speech_audio");
+    if (!audio.length || audio.length > 5 * 1024 * 1024) throw new Error("invalid_speech_audio");
     return { audio, voice };
   } finally {
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
