@@ -151,7 +151,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     for (let i = 0; i < 30 && requests.filter(r => r.pathname === '/api/speech').length < ttsCallsBeforePrefetch + 2; i++) await tick();
     assert(requests.filter(r => r.pathname === '/api/speech').length >= ttsCallsBeforePrefetch + 2, 'the following phrase is synthesized before current playback finishes');
     const prefetchedBodies = requests.filter(r => r.pathname === '/api/speech').slice(ttsCallsBeforePrefetch).map(r => r.body.text);
-    assert(prefetchedBodies[1].length >= 64, 'short sentences are coalesced into a useful later mobile TTS chunk');
+    assert(prefetchedBodies[1].length >= 120, 'short sentences are coalesced into a full-length later mobile TTS chunk');
     const stoppedStream = w.PanthoriumVoiceStream.finish();
     evaluate('stopSentinelSpeech();');
     holdPlayback = false;
