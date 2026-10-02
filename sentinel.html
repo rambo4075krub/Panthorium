@@ -1497,11 +1497,13 @@
         return {
             observe(level, elapsedMs) {
                 const value = Number.isFinite(level) ? level : 0;
-                if (elapsedMs < 450 && value < 0.08) {
+                // Do not learn a loud first syllable as "background noise".
+                // Mobile users often begin speaking as soon as the mic opens.
+                if (elapsedMs < 450 && value < 0.025) {
                     samples += 1;
                     noiseFloor += (value - noiseFloor) / samples;
                 }
-                const threshold = Math.min(0.055, Math.max(0.012, noiseFloor * 2.6));
+                const threshold = Math.min(0.035, Math.max(0.005, noiseFloor * 1.35));
                 if (value >= threshold) voicedFrames += 1;
                 else voicedFrames = Math.max(0, voicedFrames - 1);
                 return voicedFrames >= 2;
@@ -1851,6 +1853,7 @@
             let recorderChunks = [];
             let recorderMime = "audio/webm";
             let recorderContext = null;
+            let recorderSource = null;
             let recorderAnalyser = null;
             let recorderData = null;
             let recorderMonitor = null;
@@ -1867,13 +1870,28 @@
             };
             resumeAfterTranscript = restartListening;
 
+            const primeRecorderAudioContext = () => {
+                const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+                if (!recorderContext && AudioContextCtor) {
+                    try { recorderContext = new AudioContextCtor(); } catch (_) {}
+                }
+                if (recorderContext && recorderContext.state !== "running") {
+                    try { recorderContext.resume?.().catch?.(() => {}); } catch (_) {}
+                }
+            };
+            window.addEventListener("beforeunload", () => {
+                try { recorderContext?.close?.(); } catch (_) {}
+            }, { once: true });
+
             const cleanupRecorder = () => {
                 clearTimeout(recorderMonitor);
                 recorderMonitor = null;
+                try { recorderSource?.disconnect?.(); } catch (_) {}
+                recorderSource = null;
                 recorderAnalyser = null;
                 recorderData = null;
-                if (recorderContext) { try { recorderContext.close(); } catch (_) {} }
-                recorderContext = null;
+                // Keep the context alive between utterances. Mobile browsers
+                // suspend contexts created outside a fresh touch gesture.
                 recorderStream?.getTracks?.().forEach(track => track.stop());
                 recorderStream = null;
             };
@@ -1976,21 +1994,28 @@
             const monitorRecorder = () => {
                 if (!recorder || recorder.state !== "recording") return;
                 const now = performance.now();
-                if (recorderAnalyser && recorderData) {
+                const meterRunning = recorderContext?.state === "running" && recorderAnalyser && recorderData;
+                if (meterRunning) {
                     recorderAnalyser.getByteTimeDomainData(recorderData);
                     let sum = 0;
                     for (const value of recorderData) { const centered = (value - 128) / 128; sum += centered * centered; }
                     const level = Math.sqrt(sum / recorderData.length);
                     if (recorderVoiceDetector.observe(level, now - recorderStartedAt)) recorderLastVoiceAt = now;
                 }
-                const quietLongEnough = recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 1400 && now - recorderStartedAt > 700;
+                const quietLongEnough = meterRunning && recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 1400 && now - recorderStartedAt > 700;
                 if (quietLongEnough || now - recorderStartedAt > 30000) { finishRecorder({ discard: false }); return; }
                 recorderMonitor = setTimeout(monitorRecorder, 100);
             };
             const startRecorder = async () => {
                 if (!autoResume || voiceState !== "idle" || recorder) return;
                 try {
+                    // Resume/create the meter synchronously from the microphone
+                    // gesture before awaiting permission or network work.
+                    primeRecorderAudioContext();
                     recorderStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+                    if (recorderContext && recorderContext.state !== "running") {
+                        try { await recorderContext.resume(); } catch (_) {}
+                    }
                     const supportedMime = typeof MediaRecorder.isTypeSupported === "function"
                         ? ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find(type => MediaRecorder.isTypeSupported(type))
                         : "";
@@ -2009,7 +2034,10 @@
                         userSpeechActive = false;
                         window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
                         if (discard) { discardOnEnd = false; voiceState = "idle"; restartListening(); return; }
-                        if (!chunks.length || !recorderLastVoiceAt) { voiceState = "idle"; status("unresponsive", "ยังไม่ได้ยินเสียง ตรวจสอบไมโครโฟนแล้วลองพูดอีกครั้ง"); restartListening(); return; }
+                        // Submit recorded audio even when a mobile browser has
+                        // suspended its analyser; ASR can validate silence and
+                        // quiet speech more reliably than the local VAD gate.
+                        if (!chunks.length) { voiceState = "idle"; status("unresponsive", "ยังไม่ได้ยินเสียง ตรวจสอบไมโครโฟนแล้วลองพูดอีกครั้ง"); restartListening(); return; }
                         voiceState = "processing";
                         status("processing", "กำลังถอดเสียง");
                         try {
@@ -2055,12 +2083,18 @@
                     userSpeechActive = true;
                     window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
                     status("listening", "กำลังฟัง...", false);
-                    recorderContext = new AudioContext();
-                    const source = recorderContext.createMediaStreamSource(recorderStream);
-                    recorderAnalyser = recorderContext.createAnalyser();
-                    recorderAnalyser.fftSize = 512;
-                    recorderData = new Uint8Array(recorderAnalyser.fftSize);
-                    source.connect(recorderAnalyser);
+                    if (recorderContext?.state === "running") {
+                        recorderSource = recorderContext.createMediaStreamSource(recorderStream);
+                        recorderAnalyser = recorderContext.createAnalyser();
+                        recorderAnalyser.fftSize = 512;
+                        recorderData = new Uint8Array(recorderAnalyser.fftSize);
+                        recorderSource.connect(recorderAnalyser);
+                    } else {
+                        // Keep recording with manual stop/30s safety limit if
+                        // WebAudio metering is unavailable on this device.
+                        recorderAnalyser = null;
+                        recorderData = null;
+                    }
                     recorderMonitor = setTimeout(monitorRecorder, 100);
                 } catch (error) {
                     cleanupRecorder();
@@ -2080,6 +2114,7 @@
             };
             button.onclick = async () => {
                 unlockVoiceAudio();
+                primeRecorderAudioContext();
                 if (aiSpeechActive || voiceState === "speaking") {
                     autoResume = false;
                     stopSentinelSpeech();
