@@ -348,6 +348,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     // repeated short remote audio elements and audible gaps between chunks.
     const originalUserAgent = w.navigator.userAgent;
     Object.defineProperty(w.navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/154.0 Mobile Safari/537.36' });
+    evaluate('speechInterruptedByUser = false;');
     const mobileTtsCallsBefore = requests.filter(r => r.pathname === '/api/speech').length;
     w.dispatchEvent(new w.CustomEvent('panthorium:ai-stream-delta', { detail: { text: 'คำตอบสั้นสำหรับทดสอบเสียงบนมือถือให้พูดต่อเนื่องเป็นคลิปเดียว' } }));
     await tick();
