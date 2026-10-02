@@ -18,6 +18,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
 (async () => {
   const synthesized = [], conversations = [], streamConversations = [], requests = [], playback = [], revoked = [], recognizers = [];
   let failProvider = false, failSpeech = false, blockPlayback = false, rejectOnce = '', rejectAlways = '', refreshOK = true, playing = false, holdPlayback = false, chatFailure = null, ttsInFlight = 0, maxTtsInFlight = 0, fakeTts = false, speechAttempts = 0, pendingDeltaAt = 0, firstSpeechLatencyMs = null;
+  let mobileSpeechFixture = null;
   // No network access to an AI or speech provider in CI.
   require('../services/sentinelSpeechAudio').synthesizeSentinelMaleVoice = async (text, lang) => {
     speechAttempts += 1;
@@ -31,7 +32,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
   const sentinel = {
     status: () => ({ name: 'Sentinel', providers: ['fixture'] }),
     chat: async input => { conversations.push(input); return failProvider ? { ok: false, error: 'no_provider_available' } : { ok: true, text: answer, provider: 'fixture' }; },
-    streamChat: async input => { streamConversations.push(input); if (failProvider) return { ok: false, error: 'no_provider_available', text: 'no_provider_available' }; input.onDelta(answer); return { ok: true, text: answer, provider: 'fixture', streaming: 'native' }; }
+    streamChat: async input => { streamConversations.push(input); if (failProvider) return { ok: false, error: 'no_provider_available', text: 'no_provider_available' }; const text = mobileSpeechFixture || answer; if (mobileSpeechFixture) { for (let i = 0; i < text.length; i += 12) { input.onDelta(text.slice(i, i + 12)); await tick(); } } else input.onDelta(text); return { ok: true, text, provider: 'fixture', streaming: 'native' }; }
   };
   const tools = new ToolRegistry({ sentinel });
   const agent = new AgentService({ tools, audit });
@@ -344,22 +345,22 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       start() { this.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'คำถอดเสียงไม่แน่ใจ', confidence: 0.54 } }] }); }
       stop() {}
     }, { timeoutMs: 500 })`), /transcription_uncertain/, 'browser fallback asks again below the 0.55 confidence threshold');
-    // Android/iOS should synthesize the complete streamed answer once, avoiding
-    // repeated short remote audio elements and audible gaps between chunks.
+    // Exercise the real SSE client with Android UA and deliberately fragmented
+    // provider deltas. TTS must wait until the full answer is received.
     const originalUserAgent = w.navigator.userAgent;
     Object.defineProperty(w.navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/154.0 Mobile Safari/537.36' });
     evaluate('speechInterruptedByUser = false;');
+    mobileSpeechFixture = 'คำตอบบนมือถือที่ระบบต้องรอให้ครบแล้วสร้างเสียงเพียงครั้งเดียวต่อเนื่องจนจบ';
     const mobileTtsCallsBefore = requests.filter(r => r.pathname === '/api/speech').length;
-    w.dispatchEvent(new w.CustomEvent('panthorium:ai-stream-delta', { detail: { text: 'คำตอบสั้นสำหรับทดสอบเสียงบนมือถือให้พูดต่อเนื่องเป็นคลิปเดียว' } }));
-    await tick();
-    assert.equal(requests.filter(r => r.pathname === '/api/speech').length, mobileTtsCallsBefore, 'mobile waits for full response instead of requesting fragmented TTS');
-    const mobileFinish = w.PanthoriumVoiceStream.finish();
-    for (let i = 0; i < 100 && requests.filter(r => r.pathname === '/api/speech').length < mobileTtsCallsBefore + 1; i++) await tick();
+    const mobileVoiceCall = w.PanthoriumAIStream.call('คำถามทดสอบ', { voiceMode: true });
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(requests.filter(r => r.pathname === '/api/speech').length, mobileTtsCallsBefore, 'mobile must not request TTS while streamed text is incomplete');
+    const mobileResult = await mobileVoiceCall;
+    mobileSpeechFixture = null;
     const mobileSpeechRequests = requests.filter(r => r.pathname === '/api/speech').slice(mobileTtsCallsBefore);
     assert.equal(mobileSpeechRequests.length, 1, 'a short mobile answer uses one continuous TTS request');
-    assert.equal(mobileSpeechRequests[0].body.text, 'คำตอบสั้นสำหรับทดสอบเสียงบนมือถือให้พูดต่อเนื่องเป็นคลิปเดียว');
-    evaluate('stopSentinelSpeech(); speechInterruptedByUser = false;');
-    await mobileFinish;
+    assert.equal(mobileSpeechRequests[0].body.text, mobileResult.text, 'the sole mobile TTS request receives the complete answer');
+    assert.equal(mobileResult.streamSpeechOk, true);
     Object.defineProperty(w.navigator, 'userAgent', { configurable: true, value: originalUserAgent });
     let interrupted = false;
     w.addEventListener('panthorium:voice-end', event => { if (event.detail?.interrupted) interrupted = true; }, { once: true });
