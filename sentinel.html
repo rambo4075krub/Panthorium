@@ -1669,9 +1669,8 @@
         drainStreamingSpeech(false);
         streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 120 : 60)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 450 : 650);
     });
-    window.addEventListener("panthorium:ai-stream-end", () => {
-        finishStreamingSpeech();
-    });
+    // The SSE caller owns stream completion and awaits this method directly.
+    // Do not finish here as well; racing two finish calls can consume success state.
     window.PanthoriumVoiceStream = { finish: finishStreamingSpeech };
     window.PanthoriumVoiceCommands = { isStop: isVoiceStopCommand, isContinue: isVoiceContinueCommand };
 

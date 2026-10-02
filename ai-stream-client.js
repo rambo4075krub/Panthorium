@@ -78,8 +78,8 @@
     if (typeof callAI !== 'function') return false;
     const previous = callAI; if (previous.__panthoriumStreaming) return true;
     const wrapped = async function (prompt, options = {}) {
-      // Spoken conversations use native streaming and feed sentence-sized
-      // pieces into the speech queue before the complete answer is ready.
+      // Spoken conversations use native streaming. Mobile TTS is deferred until
+      // the complete answer is ready to avoid fragmented playback.
       if (options?.conversationalVoice === true) {
         try { return await streamCall(prompt, { voiceMode: true }); }
         catch (error) {
