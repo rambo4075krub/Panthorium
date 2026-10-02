@@ -1608,8 +1608,11 @@
                 continue;
             }
             const firstChunk = !streamingSpeechActive;
-            const minimumChunkLength = firstChunk ? 40 : 144;
-            const maximumChunkLength = firstChunk ? 60 : 150;
+            // Keep later phrases small enough to synthesize while the
+            // current clip is still playing; large buffers create audible gaps
+            // on mobile networks and slower TTS responses.
+            const minimumChunkLength = firstChunk ? 40 : 72;
+            const maximumChunkLength = firstChunk ? 60 : 100;
             if (streamingSpeechBuffer.length >= minimumChunkLength) {
                 const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength);
                 if (cut) {
@@ -1618,7 +1621,7 @@
                     continue;
                 }
             }
-            if (flushPartial && streamingSpeechBuffer.length >= (streamingSpeechActive ? 110 : 40)) {
+            if (flushPartial && streamingSpeechBuffer.length >= (streamingSpeechActive ? 64 : 40)) {
                 const cut = findSpeechChunkCut(streamingSpeechBuffer, streamingSpeechBuffer.length);
                 if (cut) {
                     queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
@@ -1658,7 +1661,7 @@
         streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
         drainStreamingSpeech(false);
         clearTimeout(streamingSpeechTimer);
-        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 110 : 40)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 850 : 650);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 64 : 40)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 450 : 650);
     });
     window.addEventListener("panthorium:ai-stream-end", () => {
         finishStreamingSpeech();
