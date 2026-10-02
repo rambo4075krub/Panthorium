@@ -44,12 +44,6 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
   const dom = new JSDOM(source('sentinel.html'), { url: 'https://staging.example.test/admin', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
   const w = dom.window;
   const evaluate = code => vm.runInContext(code, dom.getInternalVMContext());
-  const quietDetector = evaluate("createAdaptiveVoiceDetector()");
-  quietDetector.observe(0.018, 500);
-  assert.equal(quietDetector.observe(0.018, 600), true, 'quiet mobile speech must cross the adaptive voice threshold');
-  const immediateSpeechDetector = evaluate("createAdaptiveVoiceDetector()");
-  immediateSpeechDetector.observe(0.04, 50);
-  assert.equal(immediateSpeechDetector.observe(0.04, 150), true, 'speech starting immediately must not be learned as ambient noise');
   const objects = new Map();
   try {
     Object.assign(w, { Headers, AbortSignal, AbortController, Blob, TextDecoder, TextEncoder });
@@ -104,6 +98,12 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     };
     const inline = [...w.document.scripts].find(script => script.textContent.includes('const OS =')).textContent;
     evaluate(inline.replace(/\n    boot\(\);/, '\n    OS.state.booted = true;'));
+  const quietDetector = evaluate("createAdaptiveVoiceDetector()");
+  quietDetector.observe(0.018, 500);
+  assert.equal(quietDetector.observe(0.018, 600), true, 'quiet mobile speech must cross the adaptive voice threshold');
+  const immediateSpeechDetector = evaluate("createAdaptiveVoiceDetector()");
+  immediateSpeechDetector.observe(0.04, 50);
+  assert.equal(immediateSpeechDetector.observe(0.04, 150), true, 'speech starting immediately must not be learned as ambient noise');
     for (const file of ['phase2-auth.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'ai-stream-client.js']) evaluate(source(file));
     await tick(); await w.PanthoriumAuth.login('admin', 'fixture'); w.PanthoriumAIStream.install();
     evaluate('initGlobalVoice();');

@@ -2135,8 +2135,13 @@
                 autoResume = true;
                 await startRecorder();
             };
-            autoResume = true;
-            setTimeout(() => { if (autoResume && !recognitionBlocked) startRecorder(); }, 400);
+            const mobileRecorder = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+            // On phones, opening AudioContext after an automatic page-load
+            // start leaves Android's WebAudio meter suspended. Start from the
+            // mic tap so VAD is live and the utterance is not held for 30s.
+            autoResume = !mobileRecorder;
+            if (mobileRecorder) status("ready", "แตะไมโครโฟนเพื่อพูด", false);
+            else setTimeout(() => { if (autoResume && !recognitionBlocked) startRecorder(); }, 400);
             return;
         }
 
