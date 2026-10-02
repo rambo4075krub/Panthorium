@@ -1549,7 +1549,7 @@
             });
         }
     }
-    function findSpeechChunkCut(text, maxLength) {
+    function findSpeechChunkCut(text, maxLength, minimumLength = 18) {
         const value = String(text || "");
         const limit = Math.min(value.length, maxLength);
         let cut = 0;
@@ -1557,29 +1557,29 @@
         let match;
         while ((match = boundaryPattern.exec(value)) && match.index < limit) {
             const end = match.index + match[0].length;
-            if (end <= limit) cut = end;
+            if (end <= limit && end >= minimumLength) cut = end;
         }
-        if (cut >= 18) return cut;
+        if (cut >= minimumLength) return cut;
         try {
             if (typeof Intl.Segmenter === "function") {
                 for (const part of new Intl.Segmenter("th", { granularity: "word" }).segment(value)) {
                     const end = part.index + part.segment.length;
                     if (end > limit) break;
-                    if (part.isWordLike) cut = end;
+                    if (part.isWordLike && end >= minimumLength) cut = end;
                 }
             }
         } catch (_) {}
-        if (cut >= 18) return cut;
+        if (cut >= minimumLength) return cut;
         try {
             if (typeof Intl.Segmenter === "function") {
                 for (const part of new Intl.Segmenter("th", { granularity: "grapheme" }).segment(value)) {
                     const end = part.index + part.segment.length;
                     if (end > limit) break;
-                    cut = end;
+                    if (end >= minimumLength) cut = end;
                 }
             }
         } catch (_) {}
-        return cut >= 18 ? cut : 0;
+        return cut >= minimumLength ? cut : 0;
     }
     function queueStreamingSpeech(text) {
         const chunk = String(text || "").trim();
@@ -1602,7 +1602,9 @@
         streamingSpeechBuffer = streamingSpeechBuffer.trimStart();
         while (streamingSpeechBuffer) {
             const sentence = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…\n])(?:\s|$)/u);
-            if (sentence && sentence[1].trim().length >= 18) {
+            const sentenceLength = sentence ? sentence[1].trim().length : 0;
+            const minimumSentenceLength = streamingSpeechActive ? 64 : 18;
+            if (sentence && sentenceLength >= minimumSentenceLength) {
                 queueStreamingSpeech(sentence[1]);
                 streamingSpeechBuffer = streamingSpeechBuffer.slice(sentence[1].length).trimStart();
                 continue;
@@ -1614,7 +1616,7 @@
             const minimumChunkLength = firstChunk ? 40 : 72;
             const maximumChunkLength = firstChunk ? 60 : 100;
             if (streamingSpeechBuffer.length >= minimumChunkLength) {
-                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength);
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength, firstChunk ? 18 : 64);
                 if (cut) {
                     queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
                     streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
@@ -1622,7 +1624,7 @@
                 }
             }
             if (flushPartial && streamingSpeechBuffer.length >= (streamingSpeechActive ? 64 : 40)) {
-                const cut = findSpeechChunkCut(streamingSpeechBuffer, streamingSpeechBuffer.length);
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, streamingSpeechBuffer.length, streamingSpeechActive ? 64 : 18);
                 if (cut) {
                     queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
                     streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();

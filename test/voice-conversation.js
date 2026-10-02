@@ -145,11 +145,13 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     // time so the next clip does not wait for a fresh provider round trip.
     const ttsCallsBeforePrefetch = requests.filter(r => r.pathname === '/api/speech').length;
     holdPlayback = true;
-    w.dispatchEvent(new w.CustomEvent('panthorium:ai-stream-delta', { detail: { text: 'การเรียนรู้เกิดจากการรับข้อมูล การทำความเข้าใจ การทดลอง และการทบทวน เมื่อได้รับประสบการณ์ใหม่ ระบบจะปรับปรุงคำตอบให้เหมาะสมมากยิ่งขึ้น โดยพิจารณาบริบทและความต้องการของผู้ใช้เสมอ' } }));
+    w.dispatchEvent(new w.CustomEvent('panthorium:ai-stream-delta', { detail: { text: 'การเรียนรู้เกิดจากการรับข้อมูลและสังเกตอย่างต่อเนื่อง ประโยคสั้นแรกมีข้อมูลครบถ้วน. ประโยคสั้นที่สองยังมีข้อมูลครบถ้วน. เมื่อได้รับประสบการณ์ใหม่ ระบบจะปรับปรุงคำตอบให้เหมาะสมมากยิ่งขึ้น โดยพิจารณาบริบทและความต้องการของผู้ใช้เสมอ' } }));
     for (let i = 0; i < 200 && !(evaluate('aiSpeechActive') && playing); i++) await tick();
     assert.equal(playing, true, 'first prefetched phrase begins playback');
     for (let i = 0; i < 30 && requests.filter(r => r.pathname === '/api/speech').length < ttsCallsBeforePrefetch + 2; i++) await tick();
     assert(requests.filter(r => r.pathname === '/api/speech').length >= ttsCallsBeforePrefetch + 2, 'the following phrase is synthesized before current playback finishes');
+    const prefetchedBodies = requests.filter(r => r.pathname === '/api/speech').slice(ttsCallsBeforePrefetch).map(r => r.body.text);
+    assert(prefetchedBodies[1].length >= 64, 'short sentences are coalesced into a useful later mobile TTS chunk');
     const stoppedStream = w.PanthoriumVoiceStream.finish();
     evaluate('stopSentinelSpeech();');
     holdPlayback = false;
