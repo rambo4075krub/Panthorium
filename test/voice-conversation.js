@@ -361,7 +361,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     const originalUserAgent = w.navigator.userAgent;
     Object.defineProperty(w.navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/154.0 Mobile Safari/537.36' });
     evaluate('speechInterruptedByUser = false;');
-    mobileSpeechFixture = Array.from({ length: 9 }, (_, index) => `คำตอบยาวข้อ ${index + 1} ต้องเริ่มพูดระหว่างข้อความกำลังไหลมา เพื่อลดเวลารอเสียงบนมือถือ.`).join(' ');
+    mobileSpeechFixture = Array.from({ length: 12 }, (_, index) => `คำตอบยาวข้อ ${index + 1} ต้องเริ่มพูดระหว่างข้อความกำลังไหลมา เพื่อลดเวลารอเสียงบนมือถือ.`).join(' ');
     const mobileTtsCallsBefore = requests.filter(r => r.pathname === '/api/speech').length;
     const mobileVoiceCall = w.PanthoriumAIStream.call('คำถามทดสอบ', { voiceMode: true });
     await new Promise(resolve => setTimeout(resolve, 140));
