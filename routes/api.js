@@ -77,6 +77,18 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       res.json({ ok: true, text: result.text, provider: result.provider, model: result.model, confidence: result.confidence, crossCheckedBy: result.crossCheckedBy || null });
     } catch (error) {
       audit.record("sentinel.transcription_failed", { userId: req.user?.sub, error: error.message });
+      const safeMessage = String(error?.message || "unknown_error")
+        .replace(/Bearer\\s+[^\\s]+/gi, "Bearer [redacted]")
+        .replace(/(key|token|secret)\\s*[=:]\\s*[^\\s,;]+/gi, "$1=[redacted]")
+        .slice(0, 500);
+      console.error(JSON.stringify({
+        event: "sentinel.transcription_failed",
+        requestId: req.requestId || null,
+        code: error?.code || null,
+        status: error?.status || null,
+        name: error?.name || "Error",
+        message: safeMessage
+      }));
       const code = /speaker_verification|biometric_encryption|voice_signal/.test(error?.message || "") ? "voice_verification_unavailable" : ["transcription_provider_unavailable", "transcription_uncertain"].includes(error?.code) ? error.code : "transcription_unavailable";
       res.status(code === "transcription_uncertain" ? 422 : code === "transcription_provider_unavailable" || code === "voice_verification_unavailable" ? 503 : 502).json({ ok: false, error: code });
     }
