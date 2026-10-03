@@ -22,7 +22,6 @@
   }
   async function streamCall(prompt, { voiceMode = false } = {}) {
     const system = getOS();
-    const deferMobileSpeech = voiceMode && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
     if (window.PanthoriumAuth?.hasPermission && !window.PanthoriumAuth.hasPermission('chat')) return { ok: false, text: 'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat', provider: 'RBAC', via: 'rbac' };
     let token = await ensureToken(); if (!token) throw new Error('authentication_required');
     const base = (system?.config?.backendUrl || '').replace(/\/$/, '');
@@ -46,7 +45,7 @@
           if (voiceMode) {
             state.text += delta;
             emit('stream', { delta, text: state.text, simulated: false });
-            if (!deferMobileSpeech) emit('stream-delta', { text: delta });
+            emit('stream-delta', { text: delta });
           } else if (delta.length > 24) await revealBuffered(delta, state, 14);
           else { state.text += delta; emit('stream', { delta, text: state.text, simulated: false }); }
         }
@@ -57,7 +56,6 @@
     if (!sawDelta || !state.text) throw new Error('empty_stream');
     let streamSpeechOk = false;
     if (voiceMode) {
-      if (deferMobileSpeech) emit('stream-delta', { text: state.text });
       emit('stream-end', {});
       streamSpeechOk = await window.PanthoriumVoiceStream?.finish?.() === true;
     }
