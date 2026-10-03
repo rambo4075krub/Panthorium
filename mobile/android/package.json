@@ -1,0 +1,20 @@
+{
+  "name": "panthorium-android-preview",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Android preview wrapper for Panthorium Browser",
+  "scripts": {
+    "android:add": "cap add android",
+    "android:sync": "cap sync android",
+    "android:prepare": "node scripts/prepare-android.js",
+    "android:debug": "npm run android:sync && npm run android:prepare && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/core": "8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2",
+    "typescript": "5.9.3"
+  }
+}

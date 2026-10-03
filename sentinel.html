@@ -49,10 +49,9 @@
         #boot-screen.hidden { opacity: 0; pointer-events: none; }
         .boot-logo {
             width: 120px; height: 120px;
-            border: 3px solid var(--accent);
             border-radius: 50%;
             display: flex; align-items: center; justify-content: center;
-            animation: pulse 2s ease-in-out infinite;
+            animation: none;
             margin-bottom: 28px;
         }
         .boot-logo inner {
@@ -107,11 +106,9 @@
         .login-avatar {
             width: 90px; height: 90px;
             border-radius: 50%;
-            border: 2px solid var(--accent);
             margin: 0 auto 20px;
             display: flex; align-items: center; justify-content: center;
             font-size: 36px;
-            background: rgba(0,255,204,0.08);
         }
         .login-title { font-size: 20px; margin-bottom: 6px; }
         .login-sub { font-size: 13px; color: var(--text-dim); margin-bottom: 28px; }
@@ -351,8 +348,6 @@
         .sm-avatar {
             width: 40px; height: 40px;
             border-radius: 50%;
-            background: rgba(0,255,204,0.15);
-            border: 1px solid var(--accent);
             display: flex; align-items: center; justify-content: center;
             font-size: 18px;
         }
@@ -661,7 +656,6 @@
         }
         .about-logo {
             width: 80px; height: 80px;
-            border: 2px solid var(--accent);
             border-radius: 50%;
             margin: 0 auto 16px;
             display: flex; align-items: center; justify-content: center;
@@ -709,7 +703,7 @@
 
     <!-- BOOT -->
     <div id="boot-screen">
-        <div class="boot-logo"><img src="/panthorium-logo.svg" data-panthorium-logo alt="Panthorium" style="width:100%;height:100%;object-fit:contain;"></div>
+        <div class="boot-logo"><img src="/panthorium-logo-mark.svg" alt="Panthorium" style="width:100%;height:100%;object-fit:contain;"></div>
         <div class="boot-title">PANTHORIUM</div>
         <div class="boot-sub">OPERATING SYSTEM</div>
         <div class="boot-progress"><div class="boot-bar" id="boot-bar"></div></div>
@@ -1673,7 +1667,7 @@
         while (streamingSpeechBuffer) {
             const sentence = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…\n])(?:\s|$)/u);
             const sentenceLength = sentence ? sentence[1].trim().length : 0;
-            const minimumSentenceLength = streamingSpeechActive ? 120 : 30;
+            const minimumSentenceLength = streamingSpeechActive ? 120 : 24;
             if (sentence && sentenceLength >= minimumSentenceLength) {
                 queueStreamingSpeech(sentence[1]);
                 streamingSpeechBuffer = streamingSpeechBuffer.slice(sentence[1].length).trimStart();
@@ -1683,10 +1677,10 @@
             // Keep later phrases small enough to synthesize while the
             // current clip is still playing; large buffers create audible gaps
             // on mobile networks and slower TTS responses.
-            const minimumChunkLength = firstChunk ? 32 : 120;
+            const minimumChunkLength = firstChunk ? 24 : 120;
             const maximumChunkLength = firstChunk ? 80 : 160;
             if (streamingSpeechBuffer.length >= minimumChunkLength) {
-                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength, firstChunk ? 24 : 120);
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength, firstChunk ? 18 : 120);
                 if (cut) {
                     queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
                     streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
@@ -1735,7 +1729,7 @@
         // Queue speech while text is still arriving so the first audio does
         // not wait for the complete answer to be synthesized on mobile.
         drainStreamingSpeech(false);
-        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 120 : 24)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 400 : 220);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 120 : 18)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 400 : 140);
     });
     // The SSE caller owns stream completion and awaits this method directly.
     // Do not finish here as well; racing two finish calls can consume success state.
@@ -3588,9 +3582,9 @@
         const aspect = width / height;
         const halfVerticalFov = camera.fov * Math.PI / 360;
         const halfHorizontalFov = Math.atan(Math.tan(halfVerticalFov) * aspect);
-        const compactDistance = 1.22 / Math.tan(Math.min(halfVerticalFov, halfHorizontalFov));
+        const compactDistance = 1.28 / Math.tan(Math.min(halfVerticalFov, halfHorizontalFov));
         camera.aspect = aspect;
-        camera.position.set(0, 0, compact ? Math.max(4.65, compactDistance) : 4.65);
+        camera.position.set(0, 0, compact ? Math.max(4.85, compactDistance) : 4.65);
         camera.lookAt(0, 0, 0);
         camera.updateProjectionMatrix();
         if (orbGroup) orbGroup.position.y = compact ? .5 : .27;
