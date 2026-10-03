@@ -92,7 +92,7 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   assert(shell.includes('base + "/api/speech"'), 'desktop speech playback must avoid cross-origin media restrictions');
   assert(server.includes('mediaSrc: ["\'self\'", "blob:"]'), 'speech media must remain restricted to same-origin and generated blobs');
   assert(shell.includes('function initGlobalVoice()'), 'global user voice commands must remain available');
-  assert(shell.includes('silenceTimer = setTimeout(finishListening, 1800)'), 'global recognition must wait through natural speech pauses');
+  assert(shell.includes('silenceTimer = setTimeout(finishListening, 850)'), 'global recognition should submit promptly after a natural speech pause');
   assert(shell.includes('voiceState = "stopping"'), 'recognition must stop before AI processing starts');
   assert(shell.includes('recognition.continuous = !mobileSpeech'), 'mobile speech recognition must use reliable one-command sessions');
   assert(shell.includes('await navigator.mediaDevices.getUserMedia'), 'mobile speech must request microphone access from a direct user gesture');
