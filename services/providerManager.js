@@ -69,12 +69,13 @@ class ProviderManager {
         const job = await response.json();
         if (job.state !== "JOB_STATE_SUCCEEDED") throw new Error(`vertex_tuning_job_state_${String(job.state || "unknown").toLowerCase()}`);
         const endpoint = String(job.tunedModel?.endpoint || "");
-        const prefix = `projects/${project}/locations/`;
-        if (!endpoint.startsWith(prefix)) throw new Error("vertex_tuned_endpoint_project_mismatch");
-        const remainder = endpoint.slice(prefix.length).split("/");
-        if (remainder.length !== 3 || remainder[1] !== "endpoints" || !/^\d+$/.test(remainder[2])) throw new Error("vertex_tuned_endpoint_resource_invalid");
-        this.vertex.location = remainder[0];
-        this.vertex.endpointId = remainder[2];
+        // Vertex can return the project number when the request used the project ID.
+        // The authenticated tuning job response is the canonical serving resource.
+        const resource = /^projects\/([A-Za-z0-9.-]+)\/locations\/([a-z0-9-]+)\/endpoints\/(\d+)$/.exec(endpoint);
+        if (!resource) throw new Error("vertex_tuned_endpoint_resource_invalid");
+        this.vertex.project = resource[1];
+        this.vertex.location = resource[2];
+        this.vertex.endpointId = resource[3];
       })().catch((error) => {
         this.vertexEndpointPromise = null;
         throw error;

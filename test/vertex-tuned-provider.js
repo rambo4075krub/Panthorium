@@ -32,7 +32,7 @@ const assert = require('assert');
     if (String(url).includes('/tuningJobs/job-456')) {
       return new Response(JSON.stringify({
         state: 'JOB_STATE_SUCCEEDED',
-        tunedModel: { endpoint: 'projects/test-project/locations/eu/endpoints/999999999' }
+        tunedModel: { endpoint: 'projects/123456789012/locations/eu/endpoints/999999999' }
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     if (String(url).startsWith('http://metadata.google.internal/')) {
@@ -95,10 +95,11 @@ const assert = require('assert');
     const beforeResolve = requests.length;
     const resolvedResult = await resolvedManager.callDetailed('vertex', 'Resolve endpoint', [{ role: 'user', content: 'Hello' }]);
     assert.equal(resolvedResult.text, 'Sentinel direct response');
+    assert.equal(resolvedManager.vertex.project, '123456789012');
     assert.equal(resolvedManager.vertex.location, 'eu');
     assert.equal(resolvedManager.vertex.endpointId, '999999999');
     assert(requests.slice(beforeResolve).some((request) => request.url.includes('/locations/europe-west4/tuningJobs/job-456')));
-    assert(requests.slice(beforeResolve).some((request) => request.url.includes('aiplatform.eu.rep.googleapis.com/v1/projects/test-project/locations/eu/endpoints/999999999:generateContent')));
+    assert(requests.slice(beforeResolve).some((request) => request.url.includes('aiplatform.eu.rep.googleapis.com/v1/projects/123456789012/locations/eu/endpoints/999999999:generateContent')));
 
     // Test direct VERTEX_ACCESS_TOKEN override
     process.env.VERTEX_ACCESS_TOKEN = 'manual-direct-token';
