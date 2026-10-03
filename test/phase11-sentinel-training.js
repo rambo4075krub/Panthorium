@@ -8,6 +8,7 @@ const{Sentinel}=require('../services/sentinel');
   const repository=new SentinelTrainingRepository();
   const training=new SentinelTrainingService({repository,providers:{available:()=>[],catalog:()=>[]}});
   const user={sub:'admin-test'};
+  assert.equal(training.settings().enabled,false,'automatic training starts disabled after server restart');
   const added=await training.addExample({prompt:'Panthorium คืออะไร',answer:'Panthorium คือระบบปฏิบัติการ AI',tags:['panthorium'],user});
   assert.equal(added.ok,true);
   assert.equal(await training.contextFor('Panthorium คืออะไร'),'');
@@ -33,7 +34,7 @@ const{Sentinel}=require('../services/sentinel');
       return{text:'คำตอบคุณภาพสูงและปลอดภัยสำหรับใช้ฝึก Sentinel',model:'teacher-test'};
     }
   };
-  const automatic=new SentinelTrainingService({repository:autoRepository,providers:autoProviders,autoScoreThreshold:85});
+  const automatic=new SentinelTrainingService({repository:autoRepository,providers:autoProviders,autoScoreThreshold:85,autoEnabled:true});
   const autoAdded=await automatic.addExample({prompt:'อธิบายระบบอัตโนมัติ',answer:'ระบบจะตรวจ ให้คะแนน และอนุมัติข้อมูลที่มีคุณภาพโดยอัตโนมัติ',user});
   assert.equal(autoAdded.example.status,'approved');
   assert.equal(autoAdded.example.qualityScore,94);

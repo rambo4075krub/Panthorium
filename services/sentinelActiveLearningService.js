@@ -98,10 +98,9 @@ class SentinelActiveLearningService {
       );
       CREATE INDEX IF NOT EXISTS idx_panthorium_active_learning_status ON panthorium_active_learning_runs(status, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_panthorium_active_learning_started ON panthorium_active_learning_runs(started_at DESC);`);
-      await this.resumeRunningRun();
-      if (process.env.SENTINEL_ACTIVE_LEARNING_NEVER === '1') {
-        await this.enableNever({ userId: 'system:startup', requestId: 'startup-never-mode' });
-      }
+      // Persisted runs are history only after a process restart. Never
+      // resume a training loop without a fresh administrator action.
+      await this.interruptPersistedRunsOnStartup();
     }
   }
 
@@ -121,30 +120,19 @@ class SentinelActiveLearningService {
     };
   }
 
-  async resumeRunningRun() {
-    const result = await this.pool.query(`SELECT * FROM panthorium_active_learning_runs WHERE status IN ('running','paused') ORDER BY updated_at DESC LIMIT 1`);
-    if (!result.rows[0]) return;
-    const run = this.map(result.rows[0]);
-    if (!run.options?.never && Date.now() >= new Date(run.stopAt).getTime()) {
-      await this.finish(run, 'expired');
-      return;
-    }
-    this.session = run;
-    if (run.status === 'paused') {
-      const remaining = new Date(run.stats?.resumeAt || 0).getTime() - Date.now();
-      if (remaining > 0) {
-        this.schedule(remaining);
-        return;
-      }
-      await this.resumeFromPause();
-      return;
-    }
-    const violation = this.guardrailViolation(run);
-    if (violation) {
-      await this.finish(run, 'guarded', { reason: violation.reason });
-      return;
-    }
-    this.schedule(2500);
+  async interruptPersistedRunsOnStartup() {
+    if (!this.pool) return { interrupted: 0 };
+    const result = await this.pool.query(`UPDATE panthorium_active_learning_runs
+      SET status = 'interrupted',
+          stopped_at = COALESCE(stopped_at, NOW()),
+          last_error = 'server_restart_manual_start_required',
+          stats = COALESCE(stats, '{}'::jsonb) || '{"stopReason":"server_restart_manual_start_required"}'::jsonb,
+          updated_at = NOW()
+      WHERE status IN ('running', 'paused')
+      RETURNING run_id`);
+    const interrupted = result.rowCount ?? result.rows?.length ?? 0;
+    if (interrupted) this.audit?.record('sentinel.active_learning_interrupted_on_startup', { count: interrupted });
+    return { interrupted };
   }
 
   async save(run) {

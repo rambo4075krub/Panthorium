@@ -82,6 +82,25 @@ const providers = {
   assert.equal(service.session.status, 'activated');
   assert.equal(promoted, true);
 
+  service.shutdown();
+
+  const restartService = new SentinelActiveLearningService({ training, learning, providers });
+  const startupQueries = [];
+  restartService.pool = { async query(sql) {
+    startupQueries.push(String(sql));
+    if (String(sql).includes('UPDATE panthorium_active_learning_runs')) return { rowCount: 1, rows: [{ run_id: 'stale-run' }] };
+    return { rowCount: 0, rows: [] };
+  } };
+  const previousNever = process.env.SENTINEL_ACTIVE_LEARNING_NEVER;
+  process.env.SENTINEL_ACTIVE_LEARNING_NEVER = '1';
+  await restartService.init();
+  assert.equal(restartService.session, null, 'a persisted run must not resume on startup');
+  assert.equal(restartService.timer, null, 'startup must not schedule training');
+  assert(startupQueries.some(sql => sql.includes("status = 'interrupted'")), 'old running rows must be marked interrupted');
+  restartService.shutdown();
+  if (previousNever == null) delete process.env.SENTINEL_ACTIVE_LEARNING_NEVER;
+  else process.env.SENTINEL_ACTIVE_LEARNING_NEVER = previousNever;
+
   const status = await service.status();
   assert.equal(status.running, false);
   assert.equal(status.run.status, 'activated');

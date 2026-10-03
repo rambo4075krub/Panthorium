@@ -72,7 +72,7 @@ class SentinelTrainingService {
     providers,
     audit,
     learning = null,
-    autoEnabled = true,
+    autoEnabled = false,
     autoCapture = true,
     autoScoreThreshold = 85,
     autoIntervalMs = 60000,
