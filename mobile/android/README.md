@@ -29,6 +29,7 @@ Google Play updates require a production Android App Bundle signed with the same
 ## Current scope
 
 - Android shell for staging smoke tests
+- Panthorium icon with its original red/orange mark inside a teal ring; everything outside the circle is transparent
 - User-initiated microphone permission declaration
 - Existing Panthorium web UI, authentication, and API behavior
 

@@ -9,20 +9,25 @@
     :root { color-scheme: dark; font: 16px system-ui, sans-serif; background: #08090c; color: #f4f5f7; }
     body { min-height: 100vh; display: grid; place-items: center; margin: 0; padding: 24px; text-align: center; }
     main { max-width: 28rem; }
-    .orb { width: 3.6rem; height: 3.6rem; margin: 0 auto 1.25rem; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff3bf, #ff9d22 48%, #a93d00); box-shadow: 0 0 48px #ff8f2440; }
+    .orb { width: 5.8rem; height: 5.8rem; margin: 0 auto 1.25rem; }
+    .orb svg { display: block; width: 100%; height: 100%; filter: drop-shadow(0 0 5px #00e8c677); }
     h1 { font-size: 1.35rem; margin: 0 0 .5rem; }
     p { color: #b7bdc8; line-height: 1.6; }
   </style>
 </head>
 <body>
   <main>
-    <div class="orb" aria-hidden="true"><svg viewBox="0 0 256 256" aria-label="Panthorium logo" role="img" width="100%" height="100%">
-<g transform="matrix(0.72 0 0 0.72 35.84 35.84)">
-<path d="M64 2 L128 82 L64 164 Z" fill="#ff1111"/>
-<path d="M192 2 L128 82 L192 164 Z" fill="#ff7a1a"/>
-<path d="M64 92 L192 2 L192 164 L64 254 Z" fill="#ff6f1a"/>
-<path d="M64 254 L128 174 L192 254 L192 164 Z" fill="#ff1111"/>
-</g></svg></div>
+    <div class="orb" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Panthorium logo" width="100%" height="100%">
+  <circle cx="128" cy="128" r="100" fill="#003f40"/>
+  <circle cx="128" cy="128" r="100" fill="none" stroke="#00e8c6" stroke-width="5"/>
+  <g transform="matrix(0.52 0 0 0.52 61.44 61.44)">
+    <path d="M64 2 L128 82 L64 164 Z" fill="#ff1111"/>
+    <path d="M192 2 L128 82 L192 164 Z" fill="#ff7a1a"/>
+    <path d="M64 92 L192 2 L192 164 L64 254 Z" fill="#ff6f1a"/>
+    <path d="M64 254 L128 174 L192 254 L192 164 Z" fill="#ff1111"/>
+  </g>
+</svg>
+</div>
     <h1>กำลังเชื่อมต่อ Panthorium</h1>
     <p>โปรดตรวจสอบอินเทอร์เน็ต แล้วเปิดแอปอีกครั้ง</p>
   </main>
