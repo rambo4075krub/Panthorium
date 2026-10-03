@@ -7,18 +7,24 @@ const androidRoot = path.resolve(process.argv[2] || path.join(__dirname, '..', '
 const manifestPath = path.join(androidRoot, 'app', 'src', 'main', 'AndroidManifest.xml');
 
 if (!fs.existsSync(manifestPath)) {
-  throw new Error(`Android manifest not found at ${manifestPath}. Run "npx cap add android" first.`);
+  throw new Error('Android manifest not found at ' + manifestPath + '. Run "npx cap add android" first.');
 }
 
 let manifest = fs.readFileSync(manifestPath, 'utf8');
 const permissions = ['android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS'];
 for (const permission of permissions) {
-  const escaped = permission.replaceAll('.', '\\.');
-  if (!new RegExp(`<uses-permission\\b[^>]*android:name=["']${escaped}["']`).test(manifest)) {
+  const escaped = permission.replaceAll('.', '\\\\.');
+  const declared = new RegExp("<uses-permission\\\\b[^>]*android:name=[\\"']" + escaped + "[\\"']").test(manifest);
+  if (!declared) {
     manifest = manifest.replace(
       /(<application\\b)/,
-      `    <uses-permission android:name="${permission}" />\\n    $1`
+      '    <uses-permission android:name="' + permission + '" />\\n    $1'
     );
+  }
+}
+for (const permission of permissions) {
+  if (!manifest.includes('android:name="' + permission + '"')) {
+    throw new Error('Failed to add required Android permission: ' + permission);
   }
 }
 fs.writeFileSync(manifestPath, manifest);
