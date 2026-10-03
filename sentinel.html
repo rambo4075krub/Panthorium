@@ -1673,7 +1673,7 @@
         while (streamingSpeechBuffer) {
             const sentence = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…\n])(?:\s|$)/u);
             const sentenceLength = sentence ? sentence[1].trim().length : 0;
-            const minimumSentenceLength = streamingSpeechActive ? 120 : 30;
+            const minimumSentenceLength = streamingSpeechActive ? 120 : 24;
             if (sentence && sentenceLength >= minimumSentenceLength) {
                 queueStreamingSpeech(sentence[1]);
                 streamingSpeechBuffer = streamingSpeechBuffer.slice(sentence[1].length).trimStart();
@@ -1683,10 +1683,10 @@
             // Keep later phrases small enough to synthesize while the
             // current clip is still playing; large buffers create audible gaps
             // on mobile networks and slower TTS responses.
-            const minimumChunkLength = firstChunk ? 32 : 120;
+            const minimumChunkLength = firstChunk ? 24 : 120;
             const maximumChunkLength = firstChunk ? 80 : 160;
             if (streamingSpeechBuffer.length >= minimumChunkLength) {
-                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength, firstChunk ? 24 : 120);
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength, firstChunk ? 18 : 120);
                 if (cut) {
                     queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
                     streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
@@ -1735,7 +1735,7 @@
         // Queue speech while text is still arriving so the first audio does
         // not wait for the complete answer to be synthesized on mobile.
         drainStreamingSpeech(false);
-        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 120 : 24)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 400 : 220);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 120 : 18)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 400 : 140);
     });
     // The SSE caller owns stream completion and awaits this method directly.
     // Do not finish here as well; racing two finish calls can consume success state.
@@ -3588,9 +3588,9 @@
         const aspect = width / height;
         const halfVerticalFov = camera.fov * Math.PI / 360;
         const halfHorizontalFov = Math.atan(Math.tan(halfVerticalFov) * aspect);
-        const compactDistance = 1.22 / Math.tan(Math.min(halfVerticalFov, halfHorizontalFov));
+        const compactDistance = 1.28 / Math.tan(Math.min(halfVerticalFov, halfHorizontalFov));
         camera.aspect = aspect;
-        camera.position.set(0, 0, compact ? Math.max(4.65, compactDistance) : 4.65);
+        camera.position.set(0, 0, compact ? Math.max(4.85, compactDistance) : 4.65);
         camera.lookAt(0, 0, 0);
         camera.updateProjectionMatrix();
         if (orbGroup) orbGroup.position.y = compact ? .5 : .27;

@@ -20,6 +20,12 @@ The APK is created at `android/app/build/outputs/apk/debug/app-debug.apk`. Insta
 
 Set `PANTHORIUM_MOBILE_START_URL` to another HTTPS environment when needed. Do not put credentials or API keys in this value.
 
+## App updates and multi-device testing
+
+The Android application ID stays `com.panthorium.browser`. The preparation script writes a positive, increasing Android `versionCode` for each GitHub Actions build and updates `versionName`; this is required for Google Play to recognize a newer release. Install the same preview build separately on a phone and tablet, then sign in to the same Panthorium account to test server-synced data and the responsive layout.
+
+Google Play updates require a production Android App Bundle signed with the same Play App Signing identity for this application ID. The current downloadable APK is a debug preview and is not a Play Store update package. Repeated CI debug APKs may have different debug signing keys, so they are for fresh installs and cross-device smoke tests; use a Play internal-testing track or a stable private signing key for seamless APK-over-APK updates. Never commit a release keystore or credentials.
+
 ## Current scope
 
 - Android shell for staging smoke tests
