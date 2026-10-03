@@ -78,7 +78,7 @@ class ProviderManager {
     const defaultAudioHost = audioLocation === "eu" || audioLocation === "us"
       ? `aiplatform.${audioLocation}.rep.googleapis.com`
       : `${audioLocation}-aiplatform.googleapis.com`;
-    const configuredHost = process.env.SENTINEL_VERTEX_AUDIO_HOST || process.env.VERTEX_HOST || defaultAudioHost;
+    const configuredHost = process.env.SENTINEL_VERTEX_AUDIO_HOST || defaultAudioHost;
     const host = configuredHost.startsWith("http") ? configuredHost : `https://${configuredHost}`;
     const url = `${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(audioLocation)}/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
     const languageName = String(language).toLowerCase().startsWith("th") ? "Thai" : String(language).toLowerCase().startsWith("en") ? "English" : "the spoken language";
