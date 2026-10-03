@@ -47,7 +47,7 @@
   function applyBranding() {
     installLogoStyles();
     // The SVG owns its circular border, interior color and transparent outer area.
-    document.querySelectorAll('.boot-logo, .login-avatar, .sm-avatar, .about-logo, [data-panthorium-logo-frame]')
+    document.querySelectorAll('.login-avatar, .sm-avatar, .about-logo, [data-panthorium-logo-frame]')
       .forEach(ensureLogo);
   }
 
