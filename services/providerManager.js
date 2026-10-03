@@ -200,6 +200,7 @@ class ProviderManager {
     throw new Error("vertex_adc_token_missing");
   }
   async callVertexTuned(systemPrompt, history) {
+    await this.resolveTunedVertexEndpoint();
     const { project, location, endpointId, maxOutputTokens } = this.vertex;
     const host = process.env.VERTEX_HOST
       ? (process.env.VERTEX_HOST.startsWith("http") ? process.env.VERTEX_HOST : `https://${process.env.VERTEX_HOST}`)
@@ -229,6 +230,7 @@ class ProviderManager {
     };
   }
   async streamVertexTuned(systemPrompt, history, onDelta = () => {}) {
+    await this.resolveTunedVertexEndpoint();
     const { project, location, endpointId, maxOutputTokens } = this.vertex;
     const host = process.env.VERTEX_HOST
       ? (process.env.VERTEX_HOST.startsWith("http") ? process.env.VERTEX_HOST : `https://${process.env.VERTEX_HOST}`)
