@@ -1673,7 +1673,7 @@
         while (streamingSpeechBuffer) {
             const sentence = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…\n])(?:\s|$)/u);
             const sentenceLength = sentence ? sentence[1].trim().length : 0;
-            const minimumSentenceLength = streamingSpeechActive ? 90 : 30;
+            const minimumSentenceLength = streamingSpeechActive ? 120 : 30;
             if (sentence && sentenceLength >= minimumSentenceLength) {
                 queueStreamingSpeech(sentence[1]);
                 streamingSpeechBuffer = streamingSpeechBuffer.slice(sentence[1].length).trimStart();
@@ -1683,18 +1683,18 @@
             // Keep later phrases small enough to synthesize while the
             // current clip is still playing; large buffers create audible gaps
             // on mobile networks and slower TTS responses.
-            const minimumChunkLength = firstChunk ? 32 : 90;
-            const maximumChunkLength = firstChunk ? 80 : 140;
+            const minimumChunkLength = firstChunk ? 32 : 120;
+            const maximumChunkLength = firstChunk ? 80 : 160;
             if (streamingSpeechBuffer.length >= minimumChunkLength) {
-                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength, firstChunk ? 24 : 80);
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength, firstChunk ? 24 : 120);
                 if (cut) {
                     queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
                     streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
                     continue;
                 }
             }
-            if (flushPartial && streamingSpeechBuffer.length >= (streamingSpeechActive ? 90 : 24)) {
-                const cut = findSpeechChunkCut(streamingSpeechBuffer, streamingSpeechBuffer.length, streamingSpeechActive ? 80 : 24);
+            if (flushPartial && streamingSpeechBuffer.length >= (streamingSpeechActive ? 120 : 24)) {
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, streamingSpeechBuffer.length, streamingSpeechActive ? 120 : 24);
                 if (cut) {
                     queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
                     streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
@@ -1735,7 +1735,7 @@
         // Queue speech while text is still arriving so the first audio does
         // not wait for the complete answer to be synthesized on mobile.
         drainStreamingSpeech(false);
-        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 90 : 24)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 300 : 220);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 120 : 24)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 400 : 220);
     });
     // The SSE caller owns stream completion and awaits this method directly.
     // Do not finish here as well; racing two finish calls can consume success state.
