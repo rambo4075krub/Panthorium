@@ -64,5 +64,56 @@ const { JSDOM } = require('jsdom');
   if (chat.provider !== 'vertex') console.error('Vertex fallback diagnostic:', JSON.stringify(chat.providerFailureCodes || []));
   assert.equal(chat.provider, 'vertex', `tuned Vertex endpoint unavailable (fallback: ${chat.provider || 'none'})`);
   assert(chat.text?.trim(), 'guest chat answer must be nonempty');
-  console.log('Staging: browser and Electron CORS passed; command assets loaded; guest command and tuned Vertex chat answered. Live microphone/TTS acceptance is still required.');
+
+  const streamStartedAt = Date.now();
+  const streamResponse = await fetch(new URL('/api/chat/stream', base), {
+    method: 'POST',
+    headers: { Origin: base.origin, 'Content-Type': 'application/json', Authorization: `Bearer ${session.accessToken}` },
+    body: JSON.stringify({ message: 'ตอบสั้นที่สุดว่า Sentinel พร้อม', sessionId: 'staging-guest-stream-smoke', provider: 'vertex' }),
+    signal: AbortSignal.timeout(90000)
+  });
+  assert.equal(streamResponse.status, 200, 'guest streaming chat HTTP status');
+  assert(streamResponse.body, 'guest streaming chat must return an SSE body');
+  const reader = streamResponse.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let streamText = '';
+  let firstDeltaMs = null;
+  let streamDone = null;
+  let streamError = null;
+  const consumeFrames = (frames) => {
+    for (const frame of frames) {
+      let event = 'message';
+      let data = null;
+      for (const line of frame.split(/\\r?\\n/)) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        if (line.startsWith('data:')) { try { data = JSON.parse(line.slice(5).trim()); } catch (_) {} }
+      }
+      if (!data) continue;
+      if (event === 'delta') {
+        if (firstDeltaMs === null) firstDeltaMs = Date.now() - streamStartedAt;
+        streamText += data.delta || '';
+      } else if (event === 'done') streamDone = data;
+      else if (event === 'error') streamError = data.error || 'stream_failed';
+    }
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split(/\\r?\\n\\r?\\n/);
+    buffer = frames.pop() || '';
+    consumeFrames(frames);
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) consumeFrames([buffer]);
+  assert.equal(streamError, null, `guest streaming chat failed: ${streamError || ''}`);
+  assert(streamDone, 'guest stream must finish with a done event');
+  assert.equal(streamDone.provider, 'vertex');
+  assert.equal(streamDone.model, 'sentinel-v4');
+  assert.equal(streamDone.streaming, 'native');
+  assert(streamText.trim(), 'guest stream must contain answer deltas');
+  assert(firstDeltaMs !== null && firstDeltaMs < 30000, `first Sentinel V4 delta took ${firstDeltaMs}ms; expected under 30000ms`);
+  console.log(`Staging stream: provider=vertex model=sentinel-v4 firstDeltaMs=${firstDeltaMs} streaming=native`);
+  console.log('Staging: browser and Electron CORS passed; command assets loaded; guest command and tuned Vertex chat/stream answered. Live microphone/TTS acceptance is still required.');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });
