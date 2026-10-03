@@ -63,9 +63,35 @@ async function checkAdminRefresh() {
   } finally { w.close(); }
 }
 
+async function checkGuestRejectsAdminCookie() {
+  const dom = new JSDOM('<div id="desktop"></div>', { url: 'https://example.test/', runScripts: 'outside-only' });
+  const w = dom.window;
+  try {
+    const requests = [];
+    w.OS = { state: { booted: true, user: null }, config: { backendUrl: 'https://example.test', accessToken: '' } };
+    w.ensureAuth = async () => false;
+    w.callAI = async () => ({ ok: true, text: 'answered' });
+    w.fetch = async url => {
+      const path = String(url);
+      requests.push(path);
+      if (path.endsWith('/api/auth/refresh')) return { ok: true, json: async () => ({ accessToken: 'admin-cookie-token', user: { sub: 'admin', roles: ['administrator'], permissions: ['chat', 'settings'] } }) };
+      if (path.endsWith('/api/auth/guest')) return { ok: true, json: async () => ({ accessToken: 'guest-token', user: { id: 'guest:public', roles: ['guest'], permissions: ['chat'] } }) };
+      return { ok: true, json: async () => ({}) };
+    };
+    w.eval(source('phase2-auth.js'));
+    for (let i = 0; i < 20 && !w.OS.state.user; i++) await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(requests.slice(0, 2).map(url => url.split('/').at(-1)), ['refresh', 'guest']);
+    assert.deepEqual(w.OS.state.user.roles, ['guest'], 'a stale Admin cookie cannot make the public root an Admin shell');
+    assert.equal(w.OS.config.accessToken, 'guest-token', 'Guest chat uses a Guest token after the stale Admin refresh cookie');
+    assert.equal(w.PanthoriumAuth.isAdministrator(), false);
+    assert.equal(w.PanthoriumAuth.isGuest(), true);
+  } finally { w.close(); }
+}
+
 (async () => {
   await checkOrder(false);
   await checkOrder(true);
   await checkAdminRefresh();
+  await checkGuestRejectsAdminCookie();
   console.log('Voice options survive both auth/stream wrapper orders; RBAC denial preserved');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'panthorium-os-v6-voice-routing-fix';
+const CACHE_NAME = 'panthorium-os-v7-guest-auth-single-audio';
 const STATIC_ASSETS = ['./manifest.json'];
 
 self.addEventListener('install', (event) => {

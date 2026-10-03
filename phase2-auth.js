@@ -4,13 +4,13 @@
 
   function isAdminEntry() { return ADMIN_PATHS.has(window.location.pathname.toLowerCase()); }
   function hasPermission(permission) { return (OS?.state?.user?.permissions || []).includes(permission); }
-  function isAdministrator() { return !!OS?.state?.user?.roles?.includes('administrator'); }
+  function isAdministrator() { return !isGuest() && !!OS?.state?.user?.roles?.includes('administrator'); }
   function isGuest() { return !!OS?.state?.user?.roles?.includes('guest'); }
   function roleLabel(user) {
     const roles = user?.roles || [];
+    if (roles.includes('guest')) return 'Guest';
     if (roles.includes('administrator')) return 'Administrator';
     if (roles.includes('operator')) return 'Operator';
-    if (roles.includes('guest')) return 'Guest';
     return 'User';
   }
   function notifyAuthChanged() {
@@ -95,6 +95,7 @@
   }
   function acceptSession(data) {
     if (!data?.accessToken || !data?.user) throw new Error('invalid_auth_response');
+    if (!isAdminEntry() && data.user.roles?.includes('administrator')) throw new Error('admin_entry_required');
     OS.config.accessToken = data.accessToken; OS.state.user = data.user; updateIdentityUI(); notifyAuthChanged(); return data;
   }
   async function refreshSession() {
@@ -105,7 +106,11 @@
       return false;
     }
     const base = OS.config.backendUrl.replace(/\/$/, ''); const res = await fetch(base + '/api/auth/refresh', { method: 'POST', credentials: 'include' }); if (!res.ok) return false;
-    const data = await res.json(); OS.config.accessToken = data.accessToken || ''; OS.state.user = data.user || null; updateIdentityUI(); closeForbiddenWindows(); notifyAuthChanged(); return !!OS.config.accessToken;
+    const data = await res.json();
+    // A shared browser may still carry an Admin refresh cookie on the public
+    // Guest route. Never install an administrator token outside /admin.
+    if (!isAdminEntry() && data.user?.roles?.includes('administrator')) return false;
+    OS.config.accessToken = data.accessToken || ''; OS.state.user = data.user || null; updateIdentityUI(); closeForbiddenWindows(); notifyAuthChanged(); return !!OS.config.accessToken;
   }
   async function fetchIdentity() {
     if (!OS.config.accessToken) return null; const base = OS.config.backendUrl.replace(/\/$/, ''); const res = await fetch(base + '/api/auth/me', { headers: { Authorization: `Bearer ${OS.config.accessToken}` }, credentials: 'include' }); if (!res.ok) return null;
@@ -135,9 +140,8 @@
     if (OS.config.accessToken && OS.state.user && !force) return true;
     if (authInFlight) return authInFlight;
     authInFlight = (async () => {
-      // Never create a guest identity on the administrator entrance.
-      // Restore an admin session from its refresh cookie if the page lost its token.
-      // Never switch an admin to guest.
+      // /admin restores only an administrator session. The public root may
+      // restore non-admin members, but an Admin cookie must never grant access there.
       if (isAdminEntry()) return await refreshSession() && isAdministrator();
       if (!isGuest() && await refreshSession()) return true;
       await guestSession();

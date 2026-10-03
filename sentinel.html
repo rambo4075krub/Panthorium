@@ -1150,9 +1150,9 @@
         // words are spoken by the system's Thai male Niwat voice too.
         const pieces = [];
         let remaining = source;
-        while (remaining.length > 900) {
-            let cut = remaining.lastIndexOf(" ", 700);
-            if (cut < 350) cut = 700;
+        while (remaining.length > 6000) {
+            let cut = remaining.lastIndexOf(" ", 5500);
+            if (cut < 3000) cut = 5500;
             pieces.push({ text: remaining.slice(0, cut).trim(), lang: "th-TH" });
             remaining = remaining.slice(cut).trim();
         }
@@ -1239,14 +1239,14 @@
         const controller = new AbortController();
         // The server performs one bounded synthesis attempt. Do not keep a
         // second browser retry queued behind a slow first response.
-        const timeout = setTimeout(() => controller.abort(), Math.max(12000, Math.min(45000, String(text).length * 45)));
+        const timeout = setTimeout(() => controller.abort(), Math.max(20000, Math.min(300000, String(text).length * 80)));
         try {
             const base = OS.config.backendUrl.replace(/\/$/, "");
             const response = await authorizedFetch(base + "/api/speech", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "include",
-                body: JSON.stringify({ text: String(text).slice(0, 900), lang }),
+                body: JSON.stringify({ text: String(text).slice(0, 6000), lang }),
                 signal: controller.signal
             });
             if (!response.ok) return null;
@@ -1321,7 +1321,7 @@
             };
             const cancel = () => finish(false);
             cancelRemotePlayback = cancel;
-            const timeout = setTimeout(() => finish(false), Math.max(30000, Math.min(300000, String(text).length * 500)));
+            const timeout = setTimeout(() => finish(false), Math.max(30000, Math.min(1200000, String(text).length * 500)));
             (async () => {
                 try {
                     if (!prepared.audio) {
@@ -2617,8 +2617,9 @@
     // ---------- Apps Definition ----------
     const BROWSER_RELEASE_URL = "/browser-download.html";
     function browserDownloadUrl() {
+        const roles = typeof OS !== "undefined" && Array.isArray(OS.state?.user?.roles) ? OS.state.user.roles : [];
         const isAdmin = window.PanthoriumAuth?.isAdministrator?.() === true
-            || (typeof OS !== "undefined" && Array.isArray(OS.state?.user?.roles) && OS.state.user.roles.includes("admin"));
+            || (roles.includes("admin") && !roles.includes("guest"));
         return BROWSER_RELEASE_URL + (isAdmin ? "?edition=admin" : "?edition=user");
     }
     const isAdminShell = /^\/admin(?:\/|$)/i.test(window.location.pathname);
@@ -3655,7 +3656,7 @@
 
     // ---------- PWA ----------
     if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("./sw.js?v=orb-display-fix-v3-voice").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=guest-auth-single-audio-v1").catch(() => {});
     }
 
     async function checkRemoteRelease() {

@@ -21,7 +21,7 @@ const APPS=[
 let renderedFingerprint='';
 
 // The /admin route is only an entry point; the URL itself never grants desktop privileges.
-function isTarget(){return auth()?.isAdministrator?.()===true;}
+function isTarget(){const roles=OS?.state?.user?.roles||[];return !roles.includes('guest')&&auth()?.isAdministrator?.()===true;}
 
 function auth(){return window.PanthoriumAuth||null;}
 function closeMenu(){document.getElementById('start-menu')?.classList.remove('open');}

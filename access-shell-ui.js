@@ -7,7 +7,7 @@
   const auth = () => window.PanthoriumAuth;
   const user = () => typeof OS !== 'undefined' ? OS.state.user : null;
   const guest = () => !user() || user().roles?.includes('guest');
-  const staff = () => admin() || (user()?.roles || []).includes('operator');
+  const staff = () => !guest() && (admin() || (user()?.roles || []).includes('operator'));
   const admin = () => auth()?.isAdministrator?.() === true;
   let updateStatus = null, checking = null, installing = false, lastChecked = 0;
   let appMenuObserver = null, observedAppMenu = null;

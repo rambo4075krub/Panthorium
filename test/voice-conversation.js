@@ -6,6 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const express = require('express');
 const { JSDOM, VirtualConsole } = require('jsdom');
+const { splitSentinelSpeechText } = require('../services/sentinelSpeechAudio');
 const { AuthService } = require('../services/authService');
 const { ToolRegistry } = require('../services/toolRegistry');
 const { AgentService } = require('../services/agentService');
@@ -350,7 +351,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     const originalUserAgent = w.navigator.userAgent;
     Object.defineProperty(w.navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/154.0 Mobile Safari/537.36' });
     evaluate('speechInterruptedByUser = false;');
-    mobileSpeechFixture = ('คำตอบประโยคแรกบนมือถือควรรอจนข้อความทั้งหมดมาถึงก่อนเริ่มสร้างเสียงต่อเนื่องให้จบ. ' + 'ประโยคที่สองเป็นส่วนเดียวกันของคำตอบและต้องรวมอยู่ในคำขอเสียงครั้งเดียวโดยไม่แยกคลิป. ' + 'ประโยคสุดท้ายยืนยันว่าข้อความหลายประโยคถูกส่งให้ระบบเสียงครบชุดในครั้งเดียว.');
+    mobileSpeechFixture = Array.from({ length: 9 }, (_, index) => `คำตอบยาวข้อ ${index + 1} ต้องรวมข้อความทุกประโยคหลัง AI ส่งครบ ก่อนสร้างไฟล์เสียงเดียวเพื่อไม่ให้เกิดช่วงเงียบระหว่างคลิป.`).join(' ');
     const mobileTtsCallsBefore = requests.filter(r => r.pathname === '/api/speech').length;
     const mobileVoiceCall = w.PanthoriumAIStream.call('คำถามทดสอบ', { voiceMode: true });
     await new Promise(resolve => setTimeout(resolve, 25));
@@ -358,7 +359,8 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     const mobileResult = await mobileVoiceCall;
     mobileSpeechFixture = null;
     const mobileSpeechRequests = requests.filter(r => r.pathname === '/api/speech').slice(mobileTtsCallsBefore);
-    assert.equal(mobileSpeechRequests.length, 1, 'a short mobile answer uses one continuous TTS request');
+    assert.equal(mobileResult.text.length > 900, true, 'fixture is long enough to cross the old mobile TTS split limit');
+    assert.equal(mobileSpeechRequests.length, 1, 'a complete mobile answer over 900 characters uses one continuous TTS request');
     assert.equal(mobileSpeechRequests[0].body.text, mobileResult.text, 'the sole mobile TTS request receives the complete answer');
     assert.equal(mobileResult.streamSpeechOk, true);
     Object.defineProperty(w.navigator, 'userAgent', { configurable: true, value: originalUserAgent });
@@ -367,6 +369,11 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     evaluate('aiSpeechActive = true; stopSentinelSpeech();');
     assert.equal(evaluate('aiSpeechActive'), false, 'barge-in must stop the current Sentinel speech state');
     assert.equal(interrupted, true, 'barge-in must emit an interrupted voice-end event');
-    console.log('PASS: both mics → real authenticated chat route (voice=true) → TTS route → audio ended; interim input, expired sessions, provider/TTS/playback failures, silent command failure and typed streaming');
+    const multiSegmentText = 'ภาษาไทย'.repeat(900);
+    const providerSegments = splitSentinelSpeechText(multiSegmentText);
+    assert(providerSegments.length > 1, 'long complete answers are split only inside the server TTS provider');
+    assert(providerSegments.every(segment => Buffer.byteLength(segment, 'utf8') <= 3500));
+    assert.equal(providerSegments.join(''), multiSegmentText, 'server TTS segments preserve the full answer without omissions');
+    console.log('PASS: mobile waits for the complete answer and makes one TTS request; long text is joined into one server-side audio response');
   } finally { w.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
