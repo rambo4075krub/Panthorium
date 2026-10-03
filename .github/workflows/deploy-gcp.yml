@@ -13,7 +13,7 @@ env:
   VERTEX_PROJECT_ID: ${{ vars.SENTINEL_VERTEX_PROJECT_ID || '' }}
   VERTEX_LOCATION: ${{ vars.SENTINEL_VERTEX_LOCATION || '' }}
   VERTEX_ENDPOINT_ID: ${{ vars.SENTINEL_VERTEX_ENDPOINT_ID || '' }}
-  VERTEX_MODEL: ${{ vars.SENTINEL_VERTEX_MODEL || 'sentinel-v3' }}
+  VERTEX_MODEL: ${{ vars.SENTINEL_VERTEX_MODEL || 'sentinel-v4' }}
 
 jobs:
   deploy:
@@ -24,15 +24,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate optional Vertex endpoint settings
+      - name: Require production Sentinel V4 on Vertex AI
         run: |
           set -euo pipefail
-          configured=0
           for name in VERTEX_PROJECT_ID VERTEX_LOCATION VERTEX_ENDPOINT_ID; do
-            if [ -n "${!name}" ]; then configured=$((configured + 1)); fi
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required repository variable: SENTINEL_VERTEX_${name#VERTEX_}. Configure the production Sentinel V4 Vertex endpoint before deployment."
+              exit 1
+            fi
           done
-          if [ "$configured" -ne 0 ] && [ "$configured" -ne 3 ]; then
-            echo "::error::Set all three repository variables SENTINEL_VERTEX_PROJECT_ID, SENTINEL_VERTEX_LOCATION, and SENTINEL_VERTEX_ENDPOINT_ID, or leave all three empty."
+          if [ "$VERTEX_MODEL" != "sentinel-v4" ]; then
+            echo "::error::SENTINEL_VERTEX_MODEL must be sentinel-v4 (received: $VERTEX_MODEL)."
             exit 1
           fi
 
@@ -78,10 +80,7 @@ jobs:
       - name: Deploy to Cloud Run
         run: |
           IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
-          ENV_VARS="^@^NODE_ENV=production@HOST=0.0.0.0@AI_PRIORITY=vertex,groq,openai,gemini,anthropic"
-          if [ -n "$VERTEX_PROJECT_ID" ]; then
-            ENV_VARS="$ENV_VARS@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL"
-          fi
+          ENV_VARS="^@^NODE_ENV=production@HOST=0.0.0.0@AI_PRIORITY=vertex@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL"
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image "$IMAGE_URI" \
             --region ${{ env.REGION }} \
