@@ -23,7 +23,7 @@ jobs:
       EMAIL_FROM_ADDRESS: ${{ vars.STAGING_EMAIL_FROM || '' }}
       VERTEX_PROJECT: project-0f6aa7d0-6055-420f-842
       VERTEX_TUNING_JOB_LOCATION: europe-west4
-      VERTEX_TUNING_JOB_ID: '2083408577099202560'
+      VERTEX_TUNING_JOB_ID: '3837217584332144640'
       VERTEX_MODEL: sentinel-v4
       REGION: asia-southeast1
       SERVICE: panthorium-backend-staging
