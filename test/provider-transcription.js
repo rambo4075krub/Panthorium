@@ -3,85 +3,51 @@ const assert = require('node:assert/strict');
 const { ProviderManager } = require('../services/providerManager');
 
 (async () => {
-  const manager = new ProviderManager();
-  manager.keys.groq = 'fixture-groq';
-  manager.keys.openai = 'fixture-openai';
-  manager.priority = ['groq', 'openai'];
-  const originalFetch = global.fetch;
-  const originalTimeout = AbortSignal.timeout;
-  const timeoutMs = [];
-  AbortSignal.timeout = ms => { timeoutMs.push(ms); return originalTimeout(ms); };
-  let calls = [];
-  let responses = [];
-  global.fetch = async (url, options) => {
-    calls.push({ url, form: options.body });
-    return Response.json(responses.shift());
-  };
-  const response = (text, avgLogprob, noSpeechProb = 0.01) => ({
-    text,
-    model: 'fixture-whisper',
-    segments: [{ avg_logprob: avgLogprob, no_speech_prob: noSpeechProb }]
+  const names = ['SENTINEL_VERTEX_PROJECT_ID','SENTINEL_VERTEX_LOCATION','SENTINEL_VERTEX_ENDPOINT_ID','SENTINEL_VERTEX_AUDIO_MODEL','AI_PRIORITY'];
+  const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  Object.assign(process.env, {
+    SENTINEL_VERTEX_PROJECT_ID: 'fixture-project',
+    SENTINEL_VERTEX_LOCATION: 'europe-west4',
+    SENTINEL_VERTEX_ENDPOINT_ID: 'sentinel-endpoint',
+    SENTINEL_VERTEX_AUDIO_MODEL: 'gemini-2.5-flash-lite',
+    AI_PRIORITY: 'vertex'
   });
-  try {
-    responses = [response('เปิด Sentinel', -1.1), response('เปิด Sentinel', -0.2)];
-    const checked = await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
-    assert.equal(checked.text, 'เปิด Sentinel');
-    assert.equal(checked.crossCheckedBy, 'openai', 'uncertain primary transcript must be independently verified');
-    assert.equal(calls.length, 2);
-    assert(timeoutMs.every(ms => ms <= 8000), 'provider timeout must finish before the browser request deadline');
-    for (const { form } of calls) {
-      assert.equal(form.get('response_format'), 'verbose_json');
-      assert.equal(form.get('temperature'), '0');
-      assert.equal(form.get('language'), 'th');
-      assert.match(form.get('prompt'), /ห้ามแปลหรือสรุป/);
-      assert.match(form.get('prompt'), /Panthorium.*Sentinel.*Niwat/);
+  const manager = new ProviderManager();
+  const originalFetch = global.fetch;
+  const calls = [];
+  const outputs = ['เปิด Sentinel', 'TRANSCRIPTION_UNCERTAIN'];
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    if (String(url).startsWith('http://metadata.google.internal/')) {
+      return Response.json({ access_token: 'fixture-vertex-token', expires_in: 3600 });
     }
-
-    calls = [];
-    responses = [response('เปิด Sentinel', -1.1), response('เปิด Setting', -0.2)];
-    const clearer = await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
-    assert.equal(clearer.text, 'เปิด Setting', 'use a substantially clearer independent transcript when the other recognizer is weak');
-    assert.equal(calls.length, 2);
-
-    calls = [];
-    responses = [response('วันนี้อากาศเป็นอย่างไร', -0.2), response('วันนี้อากาศเป็นอย่างไร', -0.35)];
-    const confident = await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
-    assert.equal(confident.text, 'วันนี้อากาศเป็นอย่างไร');
-    assert.equal(calls.length, 2, 'even confident speech is verified by a second recognizer to catch plausible mishears');
-
-    calls = [];
-    responses = [response('เปิด Learning Lab', -0.15), response('เปิด Learning Lab', -0.2)];
-    await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
-    assert.equal(calls.length, 2, 'confident matching models can pass');
-
-    calls = [];
-    responses = [response('เปิด Learning Lab', -0.15), response('เปิด Learning Lab settings', -0.2)];
-    await assert.rejects(manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH'), error => error.code === 'transcription_uncertain');
-    assert.equal(calls.length, 2, 'confident model disagreement must be withheld from chat');
-
-    calls = [];
-    responses = [response('วันนี้อากาศเป็นอย่างไร', -0.8), response('วันนี้อากาศเป็นอย่างไร', -0.75)];
-    const consensus = await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
-    assert.equal(consensus.text, 'วันนี้อากาศเป็นอย่างไร', 'matching model outputs should pass even when confidence metadata is low');
-    assert.equal(calls.length, 2);
-
-    calls = [];
-    responses = [response('วันนี้อากาศเป็นอย่างไร', -0.3), response('วันนี้อากาศเป็นอย่างไรบ้าง', -0.4)];
-    const nearMatch = await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
-    assert.equal(nearMatch.text, 'วันนี้อากาศเป็นอย่างไร', 'minor Thai transcript differences should not trigger repeat prompts');
-
-    manager.keys.openai = '';
-
-    manager.priority = ['groq'];
-    calls = [];
-    responses = [response('เปิด Sentinel', -1.3)];
-    await assert.rejects(manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH'), error => error.code === 'transcription_uncertain');
-    assert.equal(calls.length, 1);
-    calls = [];
-    responses = [response('วันนี้อากาศเป็นอย่างไร', -0.2)];
-    const singleProvider = await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
-    assert.equal(singleProvider.text, 'วันนี้อากาศเป็นอย่างไร');
-    assert.equal(calls.length, 1, 'a sole provider remains usable when its signal confidence is strong');
-  } finally { global.fetch = originalFetch; AbortSignal.timeout = originalTimeout; }
-  console.log('Transcription quality: Thai/English prompt, deterministic Whisper, low-confidence cross-check and fail-closed mismatch passed');
+    return Response.json({ candidates: [{ content: { parts: [{ text: outputs.shift() }] } }] });
+  };
+  try {
+    const transcript = await manager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm;codecs=opus', 'th-TH');
+    assert.equal(transcript.text, 'เปิด Sentinel');
+    assert.equal(transcript.provider, 'vertex');
+    assert.equal(transcript.model, 'gemini-2.5-flash-lite');
+    const request = calls.find(item => item.url.includes('/publishers/google/models/'));
+    assert(request, 'speech recognition must call a Vertex publisher model');
+    assert(request.url.includes('/locations/europe-west4/publishers/google/models/gemini-2.5-flash-lite:generateContent'));
+    assert.equal(request.options.headers.Authorization, 'Bearer fixture-vertex-token');
+    const payload = JSON.parse(request.options.body);
+    assert.equal(payload.contents[0].parts[1].inlineData.mimeType, 'audio/webm');
+    assert.equal(payload.contents[0].parts[1].inlineData.data, Buffer.from('fixture audio').toString('base64'));
+    assert.match(payload.contents[0].parts[0].text, /Transcribe the attached audio exactly in Thai/);
+    assert.match(payload.contents[0].parts[0].text, /TRANSCRIPTION_UNCERTAIN/);
+    assert(!calls.some(item => /api\.(groq|openai)\.com/.test(item.url)), 'transcription must not call revoked provider APIs');
+    await assert.rejects(
+      manager.transcribeAudio(Buffer.from('silence'), 'audio/webm', 'th'),
+      error => error.code === 'transcription_uncertain'
+    );
+    assert.equal(calls.filter(item => item.url.includes('/publishers/google/models/')).length, 2);
+    console.log('Vertex-only audio transcription tests passed');
+  } finally {
+    global.fetch = originalFetch;
+    for (const name of names) {
+      if (previous[name] == null) delete process.env[name]; else process.env[name] = previous[name];
+    }
+  }
 })().catch(error => { console.error(error); process.exitCode = 1; });

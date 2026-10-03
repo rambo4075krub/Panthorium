@@ -63,106 +63,47 @@ class ProviderManager {
     return requested === configured ? configured : null;
   }
   async transcribeAudio(buffer, mimeType = "audio/webm", language = "") {
-    const candidates = [
-      { provider: "groq", key: this.keys.groq, url: "https://api.groq.com/openai/v1/audio/transcriptions", model: process.env.GROQ_TRANSCRIBE_MODEL || "whisper-large-v3" },
-      { provider: "openai", key: this.keys.openai, url: "https://api.openai.com/v1/audio/transcriptions", model: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1" }
-    ].filter(item => item.key && this.priority.includes(item.provider))
-      .sort((a, b) => this.priority.indexOf(a.provider) - this.priority.indexOf(b.provider));
-    if (!candidates.length) {
-      const error = new Error("transcription_provider_unavailable");
-      error.code = "transcription_provider_unavailable";
-      throw error;
-    }
-    const transcribeWith = async item => {
-      const form = new FormData();
-      const extension = /mp4/i.test(mimeType) ? "mp4" : /ogg/i.test(mimeType) ? "ogg" : "webm";
-      form.append("file", new Blob([buffer], { type: mimeType }), `panthorium-voice.${extension}`);
-      form.append("model", item.model);
-      form.append("response_format", "verbose_json");
-      form.append("temperature", "0");
-      form.append("prompt", "ถอดคำพูดตามเสียงจริง ห้ามแปลหรือสรุป คงภาษาไทยและ English ตามที่พูด รวมทั้งชื่อเฉพาะ Panthorium, Sentinel, Niwat, AI, API และ ProviderManager");
-      if (language) form.append("language", String(language).toLowerCase().startsWith("th") ? "th" : "en");
-      const response = await fetch(item.url, { method: "POST", headers: { Authorization: `Bearer ${item.key}` }, body: form, signal: AbortSignal.timeout(8000) });
-      if (!response.ok) throw new Error(`Transcription HTTP ${response.status}`);
-      const data = await response.json();
-      const text = typeof data.text === "string" ? data.text.trim() : "";
-      if (!text) throw new Error("empty_transcription");
-      const segments = Array.isArray(data.segments) ? data.segments : [];
-      const logprobs = segments.map(segment => Number(segment.avg_logprob)).filter(Number.isFinite);
-      const noSpeech = segments.map(segment => Number(segment.no_speech_prob)).filter(Number.isFinite);
-      return {
-        text,
-        provider: item.provider,
-        model: data.model || item.model,
-        confidence: logprobs.length ? logprobs.reduce((sum, value) => sum + value, 0) / logprobs.length : null,
-        noSpeechProbability: noSpeech.length ? Math.max(...noSpeech) : null
-      };
+    const unavailable = (code = "transcription_provider_unavailable") => {
+      const error = new Error(code); error.code = code; return error;
     };
-    const uncertain = () => { const error = new Error("transcription_uncertain"); error.code = error.message; return error; };
-    const likelySilence = result => result.noSpeechProbability !== null && result.noSpeechProbability > 0.65;
-    const confidence = result => result.confidence;
-    const normalize = value => String(value).normalize("NFKC").toLowerCase().replace(/[\\s\\p{P}\\p{S}]/gu, "");
-    const similarity = (left, right) => {
-      if (left === right) return 1;
-      if (!left.length || !right.length) return 0;
-      let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
-      for (let i = 1; i <= left.length; i += 1) {
-        const current = [i];
-        for (let j = 1; j <= right.length; j += 1) current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + (left[i - 1] === right[j - 1] ? 0 : 1));
-        previous = current;
-      }
-      return 1 - previous[right.length] / Math.max(left.length, right.length);
-    };
-
-    // A confident single-model transcript can still be the wrong question.
-    // When a second provider is configured, compare both hypotheses in
-    // parallel. Disagreement is withheld from the assistant instead of being
-    // silently treated as the user's intent.
-    if (candidates.length > 1) {
-      const results = await Promise.allSettled(candidates.slice(0, 2).map(transcribeWith));
-      const primary = results[0].status === "fulfilled" ? results[0].value : null;
-      const secondary = results[1].status === "fulfilled" ? results[1].value : null;
-      if (primary && secondary) {
-        const firstSilent = likelySilence(primary), secondSilent = likelySilence(secondary);
-        if (firstSilent && secondSilent) throw uncertain();
-        if (firstSilent || secondSilent) {
-          const clearer = firstSilent ? secondary : primary;
-          if (confidence(clearer) !== null && confidence(clearer) < -0.6) throw uncertain();
-          return { ...clearer, crossCheckedBy: firstSilent ? primary.provider : secondary.provider };
-        }
-        const firstText = normalize(primary.text), secondText = normalize(secondary.text);
-        const matchScore = similarity(firstText, secondText);
-        const firstConfidence = confidence(primary), secondConfidence = confidence(secondary);
-        const best = firstConfidence === null || (secondConfidence !== null && secondConfidence > firstConfidence) ? secondary : primary;
-        if (matchScore === 1) return { ...primary, crossCheckedBy: secondary.provider };
-        if (matchScore >= 0.76) return { ...best, crossCheckedBy: best === primary ? secondary.provider : primary.provider };
-        const low = firstConfidence === null || secondConfidence === null ? null : Math.min(firstConfidence, secondConfidence);
-        const high = firstConfidence === null ? secondConfidence : secondConfidence === null ? firstConfidence : Math.max(firstConfidence, secondConfidence);
-        if (high !== null && high >= -0.3 && (low === null || high - low >= 0.5)) {
-          return { ...best, crossCheckDisagreed: true, crossCheckedBy: best === primary ? secondary.provider : primary.provider };
-        }
-        throw uncertain();
-      }
-      const onlyResult = primary || secondary;
-      if (onlyResult && !likelySilence(onlyResult) && (confidence(onlyResult) === null || confidence(onlyResult) >= -0.6)) {
-        return { ...onlyResult, crossCheckUnavailable: true };
-      }
-      if (onlyResult) throw uncertain();
-      const error = new Error("transcription_provider_unavailable");
-      error.code = "transcription_provider_unavailable";
-      throw error;
+    if (!this.vertexConfigured()) throw unavailable();
+    const contentType = String(mimeType || "audio/webm").split(";")[0].trim().toLowerCase();
+    const supported = new Set(["audio/x-aac", "audio/flac", "audio/mp3", "audio/m4a", "audio/mpeg", "audio/mpga", "audio/mp4", "audio/ogg", "audio/pcm", "audio/wav", "audio/webm"]);
+    if (!supported.has(contentType)) {
+      const error = new Error("unsupported_audio_format"); error.code = error.message; throw error;
     }
-
-    try {
-      const result = await transcribeWith(candidates[0]);
-      if (likelySilence(result) || (confidence(result) !== null && confidence(result) < -0.85)) throw uncertain();
-      return result;
-    } catch (error) {
-      if (error.code === "transcription_uncertain") throw error;
-      const unavailable = new Error("transcription_provider_unavailable");
-      unavailable.code = "transcription_provider_unavailable";
-      throw unavailable;
-    }
+    const { project, location } = this.vertex;
+    const model = String(process.env.SENTINEL_VERTEX_AUDIO_MODEL || "gemini-2.5-flash-lite").trim();
+    const configuredHost = process.env.SENTINEL_VERTEX_AUDIO_HOST || process.env.VERTEX_HOST || `${location}-aiplatform.googleapis.com`;
+    const host = configuredHost.startsWith("http") ? configuredHost : `https://${configuredHost}`;
+    const url = `${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
+    const languageName = String(language).toLowerCase().startsWith("th") ? "Thai" : String(language).toLowerCase().startsWith("en") ? "English" : "the spoken language";
+    const prompt = [
+      `Transcribe the attached audio exactly in ${languageName}.`,
+      "Return only the words that are clearly spoken. Do not translate, summarize, explain, or add speaker labels.",
+      "Preserve Thai and English as spoken, including names Panthorium, Sentinel, Niwat, AI, API, and ProviderManager.",
+      "If there is no intelligible speech or you cannot determine the words, return exactly: TRANSCRIPTION_UNCERTAIN"
+    ].join(" ");
+    const response = await fetchProvider(async () => fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${await this.vertexAccessToken()}`,
+        "X-Goog-User-Project": String(project)
+      },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [
+          { text: prompt },
+          { inlineData: { mimeType: contentType, data: Buffer.from(buffer).toString("base64") } }
+        ] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 1024 }
+      }),
+      signal: AbortSignal.timeout(20000)
+    }), 1);
+    const data = await response.json();
+    const text = (data.candidates?.[0]?.content?.parts || []).filter(part => part.text && !part.thought).map(part => part.text).join("").trim();
+    if (!text || /^TRANSCRIPTION_UNCERTAIN[.!]?$/i.test(text)) throw unavailable("transcription_uncertain");
+    return { text, provider: "vertex", model: data.modelVersion || model, confidence: null, noSpeechProbability: null };
   }
   async call(provider, systemPrompt, history) { const result = await this.callDetailed(provider, systemPrompt, history); return result?.text || null; }
   async callDetailed(provider, systemPrompt, history, options = {}) {
