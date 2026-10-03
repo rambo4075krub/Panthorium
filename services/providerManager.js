@@ -73,13 +73,14 @@ class ProviderManager {
       const error = new Error("unsupported_audio_format"); error.code = error.message; throw error;
     }
     const { project, location } = this.vertex;
+    const audioLocation = String(process.env.SENTINEL_VERTEX_AUDIO_LOCATION || (location === "eu" ? "europe-west4" : location)).trim();
     const model = String(process.env.SENTINEL_VERTEX_AUDIO_MODEL || "gemini-2.5-flash-lite").trim();
-    const defaultAudioHost = location === "eu" || location === "us"
-      ? `aiplatform.${location}.rep.googleapis.com`
-      : `${location}-aiplatform.googleapis.com`;
+    const defaultAudioHost = audioLocation === "eu" || audioLocation === "us"
+      ? `aiplatform.${audioLocation}.rep.googleapis.com`
+      : `${audioLocation}-aiplatform.googleapis.com`;
     const configuredHost = process.env.SENTINEL_VERTEX_AUDIO_HOST || process.env.VERTEX_HOST || defaultAudioHost;
     const host = configuredHost.startsWith("http") ? configuredHost : `https://${configuredHost}`;
-    const url = `${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
+    const url = `${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(audioLocation)}/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
     const languageName = String(language).toLowerCase().startsWith("th") ? "Thai" : String(language).toLowerCase().startsWith("en") ? "English" : "the spoken language";
     const prompt = [
       `Transcribe the attached audio exactly in ${languageName}.`,
