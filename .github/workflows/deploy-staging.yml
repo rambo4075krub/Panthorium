@@ -22,8 +22,8 @@ jobs:
       RESEND_SECRET: ${{ vars.STAGING_RESEND_SECRET || '' }}
       EMAIL_FROM_ADDRESS: ${{ vars.STAGING_EMAIL_FROM || '' }}
       VERTEX_PROJECT: project-0f6aa7d0-6055-420f-842
-      VERTEX_LOCATION: europe-west4
-      VERTEX_ENDPOINT_ID: '8246935342645510144'
+      VERTEX_TUNING_JOB_LOCATION: europe-west4
+      VERTEX_TUNING_JOB_ID: '2083408577099202560'
       VERTEX_MODEL: sentinel-v4
       REGION: asia-southeast1
       SERVICE: panthorium-backend-staging
@@ -50,11 +50,11 @@ jobs:
           [[ "$RUNTIME_SA" == *"@$PROJECT.iam.gserviceaccount.com" ]]
           [[ "$SQL_INSTANCE" == "$PROJECT:$REGION:"* ]]
           configured=0
-          for name in VERTEX_PROJECT VERTEX_LOCATION VERTEX_ENDPOINT_ID; do
+          for name in VERTEX_PROJECT VERTEX_TUNING_JOB_LOCATION VERTEX_TUNING_JOB_ID; do
             if [ -n "${!name}" ]; then configured=$((configured + 1)); fi
           done
           if [ "$configured" -ne 0 ] && [ "$configured" -ne 3 ]; then
-            echo "::error::Configure all three optional staging Vertex variables or leave all three empty"
+            echo "::error::Configure the Vertex project and tuning job resource"
             exit 1
           fi
       - uses: actions/setup-node@v4
@@ -81,6 +81,29 @@ jobs:
       - name: Build and deploy isolated staging
         run: |
           set -euo pipefail
+          # A tuning job's region is not always the serving endpoint's location.
+          # Resolve the exact endpoint returned by the successful tuning job.
+          TOKEN="$(gcloud auth print-access-token)"
+          TUNING_JOB_URL="https://${VERTEX_TUNING_JOB_LOCATION}-aiplatform.googleapis.com/v1beta1/projects/${VERTEX_PROJECT}/locations/${VERTEX_TUNING_JOB_LOCATION}/tuningJobs/${VERTEX_TUNING_JOB_ID}"
+          if ! TUNING_JOB_JSON="$(curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" "$TUNING_JOB_URL")"; then
+            echo "::error::Could not read Sentinel V4 tuning job; verify the job ID and staging deployer permission aiplatform.tuningJobs.get"
+            exit 1
+          fi
+          unset TOKEN
+          TUNING_STATE="$(jq -r '.state // "UNKNOWN"' <<<"$TUNING_JOB_JSON")"
+          TUNED_ENDPOINT="$(jq -r '.tunedModel.endpoint // empty' <<<"$TUNING_JOB_JSON")"
+          if [[ "$TUNING_STATE" != "JOB_STATE_SUCCEEDED" || -z "$TUNED_ENDPOINT" ]]; then
+            echo "::error::Sentinel V4 tuning job is not SUCCEEDED or has no tunedModel.endpoint (state=$TUNING_STATE)"
+            exit 1
+          fi
+          if [[ "$TUNED_ENDPOINT" =~ ^projects/${VERTEX_PROJECT}/locations/([a-z0-9-]+)/endpoints/([0-9]+)$ ]]; then
+            VERTEX_LOCATION="${BASH_REMATCH[1]}"
+            VERTEX_ENDPOINT_ID="${BASH_REMATCH[2]}"
+          else
+            echo "::error::Tuning job returned an endpoint outside the configured Vertex project"
+            exit 1
+          fi
+          echo "Resolved Sentinel V4 endpoint: projects/$VERTEX_PROJECT/locations/$VERTEX_LOCATION/endpoints/$VERTEX_ENDPOINT_ID"
           IMAGE="$REGION-docker.pkg.dev/$PROJECT/panthorium-staging/backend:$GITHUB_SHA"
           gcloud builds submit --project="$PROJECT" --region="$REGION" --config=cloudbuild.staging.yaml --service-account="projects/$PROJECT/serviceAccounts/124818950958-compute@developer.gserviceaccount.com" --gcs-source-staging-dir="gs://${PROJECT}_cloudbuild/source" --substitutions="_IMAGE_URI=$IMAGE" --quiet .
           gcloud run deploy "$SERVICE" --project="$PROJECT" --region="$REGION" \
