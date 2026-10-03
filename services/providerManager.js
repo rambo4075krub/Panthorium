@@ -62,7 +62,7 @@ class ProviderManager {
       this.vertexEndpointPromise = (async () => {
         const { project, tuningJobId, tuningJobLocation } = this.vertex;
         const url = `https://${tuningJobLocation}-aiplatform.googleapis.com/v1beta1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(tuningJobLocation)}/tuningJobs/${encodeURIComponent(tuningJobId)}`;
-        const response = await fetchProvider(() => fetch(url, {
+        const response = await fetchProvider(async () => fetch(url, {
           headers: { Authorization: `Bearer ${await this.vertexAccessToken()}`, "X-Goog-User-Project": String(project) },
           signal: AbortSignal.timeout(15000)
         }), 1);
