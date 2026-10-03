@@ -1,4 +1,4 @@
-const CACHE_NAME = 'panthorium-os-v7-guest-auth-single-audio';
+const CACHE_NAME = 'panthorium-os-v8-logo-safe-inset';
 const STATIC_ASSETS = ['./manifest.json'];
 
 self.addEventListener('install', (event) => {
