@@ -157,10 +157,17 @@
     if (originalOpenSettings) { const guarded = function(){ if (!hasPermission('settings')) return permissionDenied('settings'); return originalOpenSettings(); }; openSettings = guarded; if (typeof APP_LIST !== 'undefined' && Array.isArray(APP_LIST)) { const app = APP_LIST.find(a => a.id === 'settings'); if (app) app.open = guarded; } }
     const originalCallAI = typeof callAI === 'function' ? callAI : null; if (originalCallAI) callAI = async function(prompt, options = {}){ if (!(await phase2EnsureAuth())) return { ok:false,text:'เชื่อมต่อเซสชันไม่สำเร็จ กรุณาลองอีกครั้ง',provider:'Auth',via:'auth' }; if (!hasPermission('chat')) return { ok:false,text:'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat',provider:'RBAC',via:'rbac' }; return originalCallAI(prompt, options); };
   }
+  function hidePublicLoginScreen() {
+    if (isAdminEntry()) return;
+    const loginScreen = document.getElementById('login-screen');
+    if (loginScreen) { loginScreen.classList.remove('active'); loginScreen.style.display = 'none'; }
+  }
   async function initializePhase2() {
+    hidePublicLoginScreen();
     OS.state.user = null; ensureAuth = phase2EnsureAuth; for (let i=0;i<40&&!OS.state.booted;i++) await sleep(100); installPermissionGuards(); OS.config.accessToken=''; OS.state.user=null; OS.state.loggedIn=false; OS.state.verified=false;
     if (isAdminEntry()) { if (await phase2EnsureAuth()) activateDesktop(); else showLogin(); return; }
-    try { if (await phase2EnsureAuth()) activateDesktop(); } catch (error) { console.error('[Phase2 Auth] guest entry failed', error); }
+    try { if (await phase2EnsureAuth()) activateDesktop(); else hidePublicLoginScreen(); }
+    catch (error) { hidePublicLoginScreen(); console.error('[Phase2 Auth] guest entry failed', error); }
   }
   window.PanthoriumAuth = { ensureSession: phase2EnsureAuth, login, acceptSession, savePassword, logout, refreshSession, guestSession, fetchIdentity, rememberVoiceDevice, rememberedDeviceKey, hasPermission, isAdministrator, isGuest, isAdminEntry };
   document.addEventListener('visibilitychange', () => {

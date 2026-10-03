@@ -721,7 +721,7 @@
 
     <!-- DESKTOP -->
     <div id="desktop">
-        <div id="version-badge" aria-label="เวอร์ชัน">15.0.4</div>
+        <div id="version-badge" aria-label="เวอร์ชัน">15.0.7</div>
         <canvas id="bg-canvas"></canvas>
         <section id="orb-transcript" tabindex="0" role="region" aria-label="ข้อความประกอบเสียงตอบของ AI">
             <div class="orb-transcript-line previous" data-orb-line="previous" aria-label="ประโยคก่อนหน้า"></div>
@@ -783,7 +783,7 @@
     const OS = {
         // Web OS shell build (shown in About). Browser app version is releaseVersion.
         version: "1.1.0",
-        releaseVersion: "15.0.4",
+        releaseVersion: "15.0.7",
         state: {
             booted: false,
             loggedIn: false,
@@ -1874,6 +1874,55 @@
             let recorderStartedAt = 0;
             let recorderLastVoiceAt = 0;
             let recorderVoiceDetector = createAdaptiveVoiceDetector();
+            let endpointRecognition = null;
+            let endpointRestartTimer = null;
+            let endpointDisabled = false;
+            let endpointLastSpeechAt = 0;
+            const stopSpeechEndpoint = () => {
+                clearTimeout(endpointRestartTimer);
+                endpointRestartTimer = null;
+                const current = endpointRecognition;
+                endpointRecognition = null;
+                if (!current) return;
+                current.onresult = null;
+                current.onerror = null;
+                current.onend = null;
+                try { current.abort?.(); } catch (_) { try { current.stop?.(); } catch (_) {} }
+            };
+            const startSpeechEndpoint = () => {
+                const EndpointRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!isMobileDevice() || !EndpointRecognition || endpointDisabled || endpointRecognition || voiceState !== "listening" || !autoResume) return;
+                let endpoint;
+                try { endpoint = new EndpointRecognition(); } catch (_) { endpointDisabled = true; return; }
+                endpointRecognition = endpoint;
+                endpoint.lang = "th-TH";
+                endpoint.continuous = true;
+                endpoint.interimResults = true;
+                endpoint.maxAlternatives = 1;
+                endpoint.onresult = event => {
+                    if (voiceState !== "listening") return;
+                    for (let i = event.resultIndex || 0; i < (event.results || []).length; i++) {
+                        const transcript = String(event.results[i]?.[0]?.transcript || "").trim();
+                        if (!transcript) continue;
+                        // This recognizer only detects speech end on Android; the
+                        // server STT remains authoritative for the final transcript.
+                        endpointLastSpeechAt = performance.now();
+                        recorderLastVoiceAt = endpointLastSpeechAt;
+                    }
+                };
+                endpoint.onerror = event => {
+                    if (["not-allowed", "service-not-allowed", "audio-capture", "network"].includes(event?.error)) endpointDisabled = true;
+                };
+                endpoint.onend = () => {
+                    if (endpointRecognition !== endpoint) return;
+                    endpointRecognition = null;
+                    if (voiceState === "listening" && autoResume && !endpointDisabled) {
+                        endpointRestartTimer = setTimeout(startSpeechEndpoint, endpointLastSpeechAt ? 220 : 900);
+                    }
+                };
+                try { endpoint.start(); }
+                catch (_) { endpointRecognition = null; endpointDisabled = true; }
+            };
 
             const restartListening = () => {
                 if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
@@ -1899,6 +1948,7 @@
 
             const cleanupRecorder = () => {
                 clearTimeout(recorderMonitor);
+                stopSpeechEndpoint();
                 recorderMonitor = null;
                 try { recorderSource?.disconnect?.(); } catch (_) {}
                 recorderSource = null;
@@ -2000,6 +2050,7 @@
             const finishRecorder = ({ discard = false } = {}) => {
                 if (!recorder || recorder.state !== "recording") return;
                 clearTimeout(recorderMonitor);
+                stopSpeechEndpoint();
                 discardOnEnd = discard;
                 voiceState = "stopping";
                 if (!discard) status("processing", "ฟังจบแล้ว กำลังเตรียมประมวลผล");
@@ -2016,8 +2067,9 @@
                     const level = Math.sqrt(sum / recorderData.length);
                     if (recorderVoiceDetector.observe(level, now - recorderStartedAt)) recorderLastVoiceAt = now;
                 }
-                const quietLongEnough = meterRunning && recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 1400 && now - recorderStartedAt > 700;
-                if (quietLongEnough || now - recorderStartedAt > 30000) { finishRecorder({ discard: false }); return; }
+                const meteredSilence = meterRunning && recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 1400;
+                const endpointSilence = endpointLastSpeechAt > 0 && now - endpointLastSpeechAt > 1600;
+                if ((meteredSilence || endpointSilence) && now - recorderStartedAt > 700 || now - recorderStartedAt > 30000) { finishRecorder({ discard: false }); return; }
                 recorderMonitor = setTimeout(monitorRecorder, 100);
             };
             const startRecorder = async () => {
@@ -2091,6 +2143,8 @@
                     recorder.start(250);
                     recorderStartedAt = performance.now();
                     recorderLastVoiceAt = 0;
+                    endpointLastSpeechAt = 0;
+                    endpointDisabled = false;
                     recorderVoiceDetector = createAdaptiveVoiceDetector();
                     voiceState = "listening";
                     discardOnEnd = false;
@@ -2110,6 +2164,7 @@
                         recorderData = null;
                     }
                     recorderMonitor = setTimeout(monitorRecorder, 100);
+                    if (recorderContext?.state !== "running") startSpeechEndpoint();
                 } catch (error) {
                     cleanupRecorder();
                     autoResume = false;
@@ -3368,6 +3423,7 @@
     let scene, camera, renderer, orbGroup, orb, orbMaterial, orbCore, orbHalo;
     let orbPulse = 0;
     let orbLastFrame = performance.now();
+    let orbLastRenderAt = 0;
     let orbAIActive = false;
     let orbAIEnergy = 0;
     let orbVoiceEnergy = 0;
@@ -3478,7 +3534,7 @@
         camera.updateProjectionMatrix();
         if (orbGroup) orbGroup.position.y = compact ? .5 : .27;
         renderer.setSize(width, height);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.innerWidth < 700 ? 1.25 : 2));
         if (orbMaterial) orbMaterial.uniforms.uPixel.value = renderer.getPixelRatio();
     }
 
@@ -3490,8 +3546,8 @@
         camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, .1, 100);
         camera.position.set(0, 0, 4.65);
 
-        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: window.innerWidth < 700 ? "low-power" : "high-performance" });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.innerWidth < 700 ? 1.25 : 2));
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setClearColor(0x01030a, 1);
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -3501,7 +3557,7 @@
         orbGroup.position.y = .27;
         scene.add(orbGroup);
 
-        const particleCount = window.innerWidth < 700 ? 11880 : 23100;
+        const particleCount = window.innerWidth < 700 ? 5400 : 23100;
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(particleCount * 3);
         const seeds = new Float32Array(particleCount);
@@ -3616,6 +3672,11 @@
     function animateBg(now = performance.now()) {
         requestAnimationFrame(animateBg);
         if (orbContextLost || document.hidden) return;
+        const mobileFrameInterval = window.innerWidth < 700
+            ? (orbAIActive || aiSpeechActive || userSpeechActive ? 1000 / 24 : 1000 / 30)
+            : 0;
+        if (mobileFrameInterval && now - orbLastRenderAt < mobileFrameInterval) return;
+        orbLastRenderAt = now;
         const delta = Math.min((now - orbLastFrame) / 1000, .05);
         orbLastFrame = now;
         const time = now * .001;

@@ -64,7 +64,7 @@ async function checkAdminRefresh() {
 }
 
 async function checkGuestRejectsAdminCookie() {
-  const dom = new JSDOM('<div id="desktop"></div>', { url: 'https://example.test/', runScripts: 'outside-only' });
+  const dom = new JSDOM('<div id="login-screen" class="active" style="display:flex"></div><div id="desktop"></div>', { url: 'https://example.test/', runScripts: 'outside-only' });
   const w = dom.window;
   try {
     const requests = [];
@@ -85,6 +85,8 @@ async function checkGuestRejectsAdminCookie() {
     assert.equal(w.OS.config.accessToken, 'guest-token', 'Guest chat uses a Guest token after the stale Admin refresh cookie');
     assert.equal(w.PanthoriumAuth.isAdministrator(), false);
     assert.equal(w.PanthoriumAuth.isGuest(), true);
+    assert.equal(w.document.getElementById('login-screen').classList.contains('active'), false, 'the public Guest route must not show the Admin login screen');
+    assert.equal(w.document.getElementById('login-screen').style.display, 'none', 'the public Guest route keeps the Admin login hidden');
   } finally { w.close(); }
 }
 
