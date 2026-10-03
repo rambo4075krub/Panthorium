@@ -78,7 +78,7 @@ jobs:
       - name: Deploy to Cloud Run
         run: |
           IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
-          ENV_VARS="^@^NODE_ENV=production@HOST=0.0.0.0@AI_PRIORITY=vertex,groq,openai,gemini,anthropic"
+          ENV_VARS="^@^NODE_ENV=production@HOST=0.0.0.0@AI_PRIORITY=vertex,groq,openai,gemini,anthropic@SENTINEL_AUTO_TRAINING=0@SENTINEL_ACTIVE_LEARNING_NEVER=0"
           if [ -n "$VERTEX_PROJECT_ID" ]; then
             ENV_VARS="$ENV_VARS@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL"
           fi
