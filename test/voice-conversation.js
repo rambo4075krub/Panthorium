@@ -357,23 +357,24 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       stop() {}
     }, { timeoutMs: 500 })`), /transcription_uncertain/, 'browser fallback asks again below the 0.55 confidence threshold');
     // Exercise the real SSE client with Android UA and deliberately fragmented
-    // provider deltas. TTS must wait until the full answer is received.
+    // provider deltas. TTS must begin before the full answer has arrived.
     const originalUserAgent = w.navigator.userAgent;
     Object.defineProperty(w.navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/154.0 Mobile Safari/537.36' });
     evaluate('speechInterruptedByUser = false;');
-    mobileSpeechFixture = Array.from({ length: 9 }, (_, index) => `คำตอบยาวข้อ ${index + 1} ต้องรวมข้อความทุกประโยคหลัง AI ส่งครบ ก่อนสร้างไฟล์เสียงเดียวเพื่อไม่ให้เกิดช่วงเงียบระหว่างคลิป.`).join(' ');
+    mobileSpeechFixture = Array.from({ length: 9 }, (_, index) => `คำตอบยาวข้อ ${index + 1} ต้องเริ่มพูดระหว่างข้อความกำลังไหลมา เพื่อลดเวลารอเสียงบนมือถือ.`).join(' ');
     const mobileTtsCallsBefore = requests.filter(r => r.pathname === '/api/speech').length;
     const mobileVoiceCall = w.PanthoriumAIStream.call('คำถามทดสอบ', { voiceMode: true });
-    await new Promise(resolve => setTimeout(resolve, 25));
-    assert.equal(requests.filter(r => r.pathname === '/api/speech').length, mobileTtsCallsBefore, 'mobile must not request TTS while streamed text is incomplete');
+    await new Promise(resolve => setTimeout(resolve, 140));
+    const earlyMobileSpeechRequests = requests.filter(r => r.pathname === '/api/speech').slice(mobileTtsCallsBefore);
+    assert.ok(earlyMobileSpeechRequests.length > 0, 'mobile starts TTS before the streamed answer is complete');
+    assert.ok(earlyMobileSpeechRequests[0].body.text.length < mobileSpeechFixture.length, 'first mobile TTS request contains only an early phrase');
     const mobileResult = await mobileVoiceCall;
     mobileSpeechFixture = null;
     const mobileSpeechRequests = requests.filter(r => r.pathname === '/api/speech').slice(mobileTtsCallsBefore);
-    assert.equal(mobileResult.text.length > 900, true, 'fixture is long enough to cross the old mobile TTS split limit');
-    assert.equal(mobileSpeechRequests.length, 1, 'a complete mobile answer over 900 characters uses one continuous TTS request');
-    assert.equal(mobileSpeechRequests[0].body.text, mobileResult.text, 'the sole mobile TTS request receives the complete answer');
+    assert.equal(mobileResult.text.length > 900, true, 'fixture is long enough to verify streamed chunking');
+    assert.ok(mobileSpeechRequests.length > 1, 'a long mobile answer is synthesized in short phrases');
     assert.equal(mobileResult.streamSpeechOk, true);
-    assert.equal(mobileAudioSources, 1, 'mobile TTS must play as a single Web Audio buffer on the audio render thread');
+    assert.ok(mobileAudioSources > 0, 'mobile TTS plays through the Web Audio render thread');
     Object.defineProperty(w.navigator, 'userAgent', { configurable: true, value: originalUserAgent });
     let interrupted = false;
     w.addEventListener('panthorium:voice-end', event => { if (event.detail?.interrupted) interrupted = true; }, { once: true });
