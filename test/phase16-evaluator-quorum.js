@@ -17,6 +17,7 @@ function service(callDetailed, options = {}) {
     providers: { available: () => ['openai', 'gemini', 'anthropic'], catalog: () => [], callDetailed },
     evaluatorProviders: ['openai', 'gemini', 'anthropic'],
     minEvaluators: 2,
+    autoEnabled: true,
     audit: { record() {} },
     ...options
   });
@@ -65,7 +66,8 @@ function service(callDetailed, options = {}) {
     providers: { available: () => ['openai'], catalog: () => [], callDetailed: async () => { calls++; return judgeText(); } },
     evaluatorProviders: ['openai', 'gemini', 'anthropic'],
     minEvaluators: 2,
-    audit: { record() {} }
+    audit: { record() {} },
+    autoEnabled: true
   });
   const refused = await understaffed.addExample({ prompt: 'ทดสอบกรรมการพร้อมใช้ไม่พอ', answer: 'ต้องไม่ผ่านเมื่อมีกรรมการพร้อมใช้รายเดียว', user });
   assert.equal(refused.example.status, 'rejected');
