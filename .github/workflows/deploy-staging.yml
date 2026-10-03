@@ -81,36 +81,13 @@ jobs:
       - name: Build and deploy isolated staging
         run: |
           set -euo pipefail
-          # A tuning job's region is not always the serving endpoint's location.
-          # Resolve the exact endpoint returned by the successful tuning job.
-          TOKEN="$(gcloud auth print-access-token)"
-          TUNING_JOB_URL="https://${VERTEX_TUNING_JOB_LOCATION}-aiplatform.googleapis.com/v1beta1/projects/${VERTEX_PROJECT}/locations/${VERTEX_TUNING_JOB_LOCATION}/tuningJobs/${VERTEX_TUNING_JOB_ID}"
-          if ! TUNING_JOB_JSON="$(curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" "$TUNING_JOB_URL")"; then
-            echo "::error::Could not read Sentinel V4 tuning job; verify the job ID and staging deployer permission aiplatform.tuningJobs.get"
-            exit 1
-          fi
-          unset TOKEN
-          TUNING_STATE="$(jq -r '.state // "UNKNOWN"' <<<"$TUNING_JOB_JSON")"
-          TUNED_ENDPOINT="$(jq -r '.tunedModel.endpoint // empty' <<<"$TUNING_JOB_JSON")"
-          if [[ "$TUNING_STATE" != "JOB_STATE_SUCCEEDED" || -z "$TUNED_ENDPOINT" ]]; then
-            echo "::error::Sentinel V4 tuning job is not SUCCEEDED or has no tunedModel.endpoint (state=$TUNING_STATE)"
-            exit 1
-          fi
-          if [[ "$TUNED_ENDPOINT" =~ ^projects/${VERTEX_PROJECT}/locations/([a-z0-9-]+)/endpoints/([0-9]+)$ ]]; then
-            VERTEX_LOCATION="${BASH_REMATCH[1]}"
-            VERTEX_ENDPOINT_ID="${BASH_REMATCH[2]}"
-          else
-            echo "::error::Tuning job returned an endpoint outside the configured Vertex project"
-            exit 1
-          fi
-          echo "Resolved Sentinel V4 endpoint: projects/$VERTEX_PROJECT/locations/$VERTEX_LOCATION/endpoints/$VERTEX_ENDPOINT_ID"
           IMAGE="$REGION-docker.pkg.dev/$PROJECT/panthorium-staging/backend:$GITHUB_SHA"
           gcloud builds submit --project="$PROJECT" --region="$REGION" --config=cloudbuild.staging.yaml --service-account="projects/$PROJECT/serviceAccounts/124818950958-compute@developer.gserviceaccount.com" --gcs-source-staging-dir="gs://${PROJECT}_cloudbuild/source" --substitutions="_IMAGE_URI=$IMAGE" --quiet .
           gcloud run deploy "$SERVICE" --project="$PROJECT" --region="$REGION" \
             --image="$IMAGE" --service-account="$RUNTIME_SA" --allow-unauthenticated \
             --port=8787 --max-instances=1 --min-instances=0 --cpu-throttling \
             --set-cloudsql-instances="$SQL_INSTANCE" \
-            --update-env-vars="^@^NODE_ENV=production@HOST=0.0.0.0@TRUST_PROXY=1@DATABASE_SSL_MODE=disable@ALLOW_ELECTRON_ORIGIN=1@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_RELEASE_GATE_AUTO_GATE=0@SENTINEL_RELEASE_GATE_AUTO_BENCHMARK=0@SENTINEL_RELEASE_GATE_AUTO_IMPROVE=0@PANTHORIUM_GOVERNANCE_MODE=off@PANTHORIUM_SENTINEL_CONTROL_MODE=off@AI_PRIORITY=vertex@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@SENTINEL_VERTEX_AUDIO_MODEL=gemini-2.5-flash-lite@SENTINEL_VERTEX_AUDIO_LOCATION=europe-west4@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex@SENTINEL_MIN_EVALUATORS=1@SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=1" \
+            --update-env-vars="^@^NODE_ENV=production@HOST=0.0.0.0@TRUST_PROXY=1@DATABASE_SSL_MODE=disable@ALLOW_ELECTRON_ORIGIN=1@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_RELEASE_GATE_AUTO_GATE=0@SENTINEL_RELEASE_GATE_AUTO_BENCHMARK=0@SENTINEL_RELEASE_GATE_AUTO_IMPROVE=0@PANTHORIUM_GOVERNANCE_MODE=off@PANTHORIUM_SENTINEL_CONTROL_MODE=off@AI_PRIORITY=vertex@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT@SENTINEL_VERTEX_LOCATION=$VERTEX_TUNING_JOB_LOCATION@SENTINEL_VERTEX_TUNING_JOB_LOCATION=$VERTEX_TUNING_JOB_LOCATION@SENTINEL_VERTEX_TUNING_JOB_ID=$VERTEX_TUNING_JOB_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@SENTINEL_VERTEX_AUDIO_MODEL=gemini-2.5-flash-lite@SENTINEL_VERTEX_AUDIO_LOCATION=europe-west4@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex@SENTINEL_MIN_EVALUATORS=1@SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=1" \
             --update-secrets="DATABASE_URL=panthorium-staging-database-url:latest,JWT_SECRET=panthorium-staging-jwt:latest,ADMIN_PASSWORD=panthorium-staging-admin-password:latest" \
             --remove-secrets=GROQ_API_KEY,OPENAI_API_KEY,GEMINI_API_KEY,ANTHROPIC_API_KEY --quiet
           if [ -n "$RESEND_SECRET" ]; then
