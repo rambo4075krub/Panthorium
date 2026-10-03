@@ -13,12 +13,10 @@ if (!fs.existsSync(manifestPath)) {
 let manifest = fs.readFileSync(manifestPath, 'utf8');
 const permissions = ['android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS'];
 for (const permission of permissions) {
-  const escaped = permission.replaceAll('.', '\\\\.');
-  const declared = new RegExp("<uses-permission\\\\b[^>]*android:name=[\\"']" + escaped + "[\\"']").test(manifest);
-  if (!declared) {
+  if (!manifest.includes('android:name="' + permission + '"')) {
     manifest = manifest.replace(
-      /(<application\\b)/,
-      '    <uses-permission android:name="' + permission + '" />\\n    $1'
+      /(<application\b)/,
+      '    <uses-permission android:name="' + permission + '" />\n    $1'
     );
   }
 }
