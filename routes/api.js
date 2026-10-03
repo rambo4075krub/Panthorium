@@ -78,8 +78,8 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     } catch (error) {
       audit.record("sentinel.transcription_failed", { userId: req.user?.sub, error: error.message });
       const safeMessage = String(error?.message || "unknown_error")
-        .replace(/Bearer\\s+[^\\s]+/gi, "Bearer [redacted]")
-        .replace(/(key|token|secret)\\s*[=:]\\s*[^\\s,;]+/gi, "$1=[redacted]")
+        .replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]")
+        .replace(/(key|token|secret)\s*[=:]\s*[^\s,;]+/gi, "$1=[redacted]")
         .slice(0, 500);
       console.error(JSON.stringify({
         event: "sentinel.transcription_failed",
