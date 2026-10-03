@@ -2,7 +2,7 @@ const { ProviderCircuitBreaker } = require('./providerCircuitBreaker');
 const { ConcurrencyGate } = require('./concurrencyGate');
 function classifyProviderFailure(error) {
   const message=String(error||'').toLowerCase();
-  if(/permission_denied|permission denied|not authorized|iam permission/.test(message))return'permission_denied';
+  if(/permission_denied|permission denied|permission.{0,80}denied|not authorized|iam permission/.test(message))return'permission_denied';
   if(/service_disabled|has not been used|api.{0,20}disabled|not enabled/.test(message))return'api_not_enabled';
   if(/billing|consumer invalid|billing account/.test(message))return'billing_or_project';
   if(/endpoint.{0,50}(not found|does not exist)|not found/.test(message))return'endpoint_not_found';

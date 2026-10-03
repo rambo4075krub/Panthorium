@@ -47,12 +47,41 @@ class ProviderManager {
       // deployment migration; staging uses the explicit SENTINEL_* names.
       project: process.env.SENTINEL_VERTEX_PROJECT_ID || process.env.VERTEX_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "",
       location: process.env.SENTINEL_VERTEX_LOCATION || process.env.VERTEX_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || (process.env.VERTEX_ENDPOINT_ID ? "us" : ""),
-      endpointId: process.env.SENTINEL_VERTEX_ENDPOINT_ID || process.env.VERTEX_ENDPOINT_ID || "",
+      endpointId: process.env.SENTINEL_VERTEX_TUNING_JOB_ID ? "" : (process.env.SENTINEL_VERTEX_ENDPOINT_ID || process.env.VERTEX_ENDPOINT_ID || ""),
+      tuningJobId: process.env.SENTINEL_VERTEX_TUNING_JOB_ID || "",
+      tuningJobLocation: process.env.SENTINEL_VERTEX_TUNING_JOB_LOCATION || process.env.SENTINEL_VERTEX_LOCATION || process.env.VERTEX_LOCATION || "europe-west4",
       maxOutputTokens: Math.max(128, Math.min(8192, Number(process.env.SENTINEL_VERTEX_MAX_OUTPUT_TOKENS) || 4096))
     };
+    this.vertexEndpointPromise = null;
     this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite", anthropic: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001", vertex: process.env.SENTINEL_VERTEX_MODEL || process.env.VERTEX_MODEL || "sentinel-v3" };
   }
-  vertexConfigured() { return Boolean(this.vertex.project && this.vertex.location && this.vertex.endpointId); }
+  vertexConfigured() { return Boolean(this.vertex.project && (this.vertex.tuningJobId ? this.vertex.tuningJobLocation : (this.vertex.location && this.vertex.endpointId))); }
+  async resolveTunedVertexEndpoint() {
+    if (!this.vertex.tuningJobId || this.vertex.endpointId) return;
+    if (!this.vertexEndpointPromise) {
+      this.vertexEndpointPromise = (async () => {
+        const { project, tuningJobId, tuningJobLocation } = this.vertex;
+        const url = `https://${tuningJobLocation}-aiplatform.googleapis.com/v1beta1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(tuningJobLocation)}/tuningJobs/${encodeURIComponent(tuningJobId)}`;
+        const response = await fetchProvider(async () => fetch(url, {
+          headers: { Authorization: `Bearer ${await this.vertexAccessToken()}`, "X-Goog-User-Project": String(project) },
+          signal: AbortSignal.timeout(15000)
+        }), 1);
+        const job = await response.json();
+        if (job.state !== "JOB_STATE_SUCCEEDED") throw new Error(`vertex_tuning_job_state_${String(job.state || "unknown").toLowerCase()}`);
+        const endpoint = String(job.tunedModel?.endpoint || "");
+        const prefix = `projects/${project}/locations/`;
+        if (!endpoint.startsWith(prefix)) throw new Error("vertex_tuned_endpoint_project_mismatch");
+        const remainder = endpoint.slice(prefix.length).split("/");
+        if (remainder.length !== 3 || remainder[1] !== "endpoints" || !/^\d+$/.test(remainder[2])) throw new Error("vertex_tuned_endpoint_resource_invalid");
+        this.vertex.location = remainder[0];
+        this.vertex.endpointId = remainder[2];
+      })().catch((error) => {
+        this.vertexEndpointPromise = null;
+        throw error;
+      });
+    }
+    return this.vertexEndpointPromise;
+  }
   available() { return this.priority.filter((p) => p === "vertex" ? this.vertexConfigured() : Boolean(this.keys[p])); }
   catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: provider === "vertex" ? this.vertexConfigured() : Boolean(this.keys[provider]), priority, streaming: provider === "vertex" || provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
   resolveModel(provider, requestedModel) {
@@ -171,6 +200,7 @@ class ProviderManager {
     throw new Error("vertex_adc_token_missing");
   }
   async callVertexTuned(systemPrompt, history) {
+    await this.resolveTunedVertexEndpoint();
     const { project, location, endpointId, maxOutputTokens } = this.vertex;
     const host = process.env.VERTEX_HOST
       ? (process.env.VERTEX_HOST.startsWith("http") ? process.env.VERTEX_HOST : `https://${process.env.VERTEX_HOST}`)
@@ -200,6 +230,7 @@ class ProviderManager {
     };
   }
   async streamVertexTuned(systemPrompt, history, onDelta = () => {}) {
+    await this.resolveTunedVertexEndpoint();
     const { project, location, endpointId, maxOutputTokens } = this.vertex;
     const host = process.env.VERTEX_HOST
       ? (process.env.VERTEX_HOST.startsWith("http") ? process.env.VERTEX_HOST : `https://${process.env.VERTEX_HOST}`)

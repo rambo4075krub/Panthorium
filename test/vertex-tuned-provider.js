@@ -5,6 +5,8 @@ const assert = require('assert');
     SENTINEL_VERTEX_PROJECT_ID: process.env.SENTINEL_VERTEX_PROJECT_ID,
     SENTINEL_VERTEX_LOCATION: process.env.SENTINEL_VERTEX_LOCATION,
     SENTINEL_VERTEX_ENDPOINT_ID: process.env.SENTINEL_VERTEX_ENDPOINT_ID,
+    SENTINEL_VERTEX_TUNING_JOB_ID: process.env.SENTINEL_VERTEX_TUNING_JOB_ID,
+    SENTINEL_VERTEX_TUNING_JOB_LOCATION: process.env.SENTINEL_VERTEX_TUNING_JOB_LOCATION,
     SENTINEL_VERTEX_MODEL: process.env.SENTINEL_VERTEX_MODEL,
     AI_PRIORITY: process.env.AI_PRIORITY,
     VERTEX_PROJECT: process.env.VERTEX_PROJECT,
@@ -16,6 +18,8 @@ const assert = require('assert');
     SENTINEL_VERTEX_PROJECT_ID: 'test-project',
     SENTINEL_VERTEX_LOCATION: 'europe-west4',
     SENTINEL_VERTEX_ENDPOINT_ID: 'endpoint-123',
+    SENTINEL_VERTEX_TUNING_JOB_ID: '',
+    SENTINEL_VERTEX_TUNING_JOB_LOCATION: '',
     SENTINEL_VERTEX_MODEL: 'sentinel-v4',
     AI_PRIORITY: 'vertex'
   });
@@ -25,6 +29,12 @@ const assert = require('assert');
   const requests = [];
   global.fetch = async (url, options = {}) => {
     requests.push({ url: String(url), options });
+    if (String(url).includes('/tuningJobs/job-456')) {
+      return new Response(JSON.stringify({
+        state: 'JOB_STATE_SUCCEEDED',
+        tunedModel: { endpoint: 'projects/test-project/locations/eu/endpoints/999999999' }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
     if (String(url).startsWith('http://metadata.google.internal/')) {
       return new Response(JSON.stringify({ access_token: 'short-lived-test-token', expires_in: 3600 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
@@ -74,6 +84,22 @@ const assert = require('assert');
     assert.equal(requests[3].options.headers.Accept, 'text/event-stream');
     assert.equal(streamResult.usage.totalTokens, 18);
     
+    // Resolve the serving location and endpoint ID from the succeeded tuning job.
+    Object.assign(process.env, {
+      SENTINEL_VERTEX_ENDPOINT_ID: '',
+      SENTINEL_VERTEX_TUNING_JOB_ID: 'job-456',
+      SENTINEL_VERTEX_TUNING_JOB_LOCATION: 'europe-west4'
+    });
+    const resolvedManager = new ProviderManager();
+    assert.equal(resolvedManager.vertexConfigured(), true);
+    const beforeResolve = requests.length;
+    const resolvedResult = await resolvedManager.callDetailed('vertex', 'Resolve endpoint', [{ role: 'user', content: 'Hello' }]);
+    assert.equal(resolvedResult.text, 'Sentinel direct response');
+    assert.equal(resolvedManager.vertex.location, 'eu');
+    assert.equal(resolvedManager.vertex.endpointId, '999999999');
+    assert(requests.slice(beforeResolve).some((request) => request.url.includes('/locations/europe-west4/tuningJobs/job-456')));
+    assert(requests.slice(beforeResolve).some((request) => request.url.includes('aiplatform.eu.rep.googleapis.com/v1/projects/test-project/locations/eu/endpoints/999999999:generateContent')));
+
     // Test direct VERTEX_ACCESS_TOKEN override
     process.env.VERTEX_ACCESS_TOKEN = 'manual-direct-token';
     const overrideManager = new ProviderManager();
@@ -85,6 +111,8 @@ const assert = require('assert');
     delete process.env.SENTINEL_VERTEX_PROJECT_ID;
     delete process.env.SENTINEL_VERTEX_LOCATION;
     delete process.env.SENTINEL_VERTEX_ENDPOINT_ID;
+    delete process.env.SENTINEL_VERTEX_TUNING_JOB_ID;
+    delete process.env.SENTINEL_VERTEX_TUNING_JOB_LOCATION;
     delete process.env.SENTINEL_VERTEX_MODEL;
     process.env.VERTEX_PROJECT = 'legacy-project';
     process.env.VERTEX_LOCATION = 'eu';
