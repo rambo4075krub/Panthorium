@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { ProviderManager } = require('../services/providerManager');
 
 (async () => {
-  const names = ['SENTINEL_VERTEX_PROJECT_ID','SENTINEL_VERTEX_LOCATION','SENTINEL_VERTEX_ENDPOINT_ID','SENTINEL_VERTEX_AUDIO_MODEL','SENTINEL_VERTEX_AUDIO_HOST','VERTEX_HOST','AI_PRIORITY'];
+  const names = ['SENTINEL_VERTEX_PROJECT_ID','SENTINEL_VERTEX_LOCATION','SENTINEL_VERTEX_ENDPOINT_ID','SENTINEL_VERTEX_AUDIO_MODEL','SENTINEL_VERTEX_AUDIO_HOST','SENTINEL_VERTEX_AUDIO_LOCATION','VERTEX_HOST','AI_PRIORITY'];
   const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
   Object.assign(process.env, {
     SENTINEL_VERTEX_PROJECT_ID: 'fixture-project',
@@ -11,6 +11,7 @@ const { ProviderManager } = require('../services/providerManager');
     SENTINEL_VERTEX_ENDPOINT_ID: 'sentinel-endpoint',
     SENTINEL_VERTEX_AUDIO_MODEL: 'gemini-2.5-flash-lite',
     SENTINEL_VERTEX_AUDIO_HOST: '',
+    SENTINEL_VERTEX_AUDIO_LOCATION: '',
     VERTEX_HOST: '',
     AI_PRIORITY: 'vertex'
   });
@@ -52,7 +53,8 @@ const { ProviderManager } = require('../services/providerManager');
     const euTranscript = await euManager.transcribeAudio(Buffer.from('fixture audio'), 'audio/webm', 'th-TH');
     assert.equal(euTranscript.text, 'ทดสอบ EU');
     const euRequest = calls.filter(item => item.url.includes('/publishers/google/models/')).at(-1);
-    assert(euRequest.url.startsWith('https://aiplatform.eu.rep.googleapis.com/'), 'EU multi-region must use the valid Vertex rep.googleapis.com host');
+    assert(euRequest.url.startsWith('https://europe-west4-aiplatform.googleapis.com/'), 'Gemini 2.5 Flash-Lite must use a supported EU region');
+    assert(euRequest.url.includes('/locations/europe-west4/'), 'audio request should use the supported europe-west4 model location');
 
     console.log('Vertex-only audio transcription tests passed');
   } finally {
