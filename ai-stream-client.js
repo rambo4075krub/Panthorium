@@ -3,6 +3,7 @@
   function getOS() { try { return typeof OS !== 'undefined' ? OS : null; } catch (_) { return null; } }
   function emit(type, detail) { try { window.dispatchEvent(new CustomEvent(`panthorium:ai-${type}`, { detail })); } catch (_) {} }
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const VOICE_SPEECH_CHAR_LIMIT = 360;
   async function ensureToken() {
     const system = getOS(); if (system?.config?.accessToken) return system.config.accessToken;
     if (window.PanthoriumAuth?.refreshSession) {
@@ -29,7 +30,7 @@
     let res = await request();
     if (res.status === 401 && window.PanthoriumAuth?.refreshSession) { const ok = await window.PanthoriumAuth.refreshSession().catch(() => false); if (ok) { token = getOS()?.config?.accessToken || ''; res = await request(); } }
     if (!res.ok || !res.body) throw new Error(`stream_http_${res.status}`);
-    const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; const state = { text: '' }; let meta = {}; let sawDelta = false;
+    const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; const state = { text: '', speechText: '' }; let meta = {}; let sawDelta = false;
     emit('status', { text: 'กำลังเชื่อมต่อ Sentinel...' });
     while (true) {
       const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true });
@@ -45,7 +46,27 @@
           if (voiceMode) {
             state.text += delta;
             emit('stream', { delta, text: state.text, simulated: false });
-            emit('stream-delta', { text: delta });
+            if (state.speechText.length < VOICE_SPEECH_CHAR_LIMIT) {
+              const priorSpeech = state.speechText;
+              const remaining = VOICE_SPEECH_CHAR_LIMIT - priorSpeech.length;
+              let speechDelta = delta.slice(0, remaining);
+              if (delta.length > remaining) {
+                const candidate = priorSpeech + speechDelta;
+                let cut = 0;
+                const terminal = /[.!?。！？…\n]/gu;
+                for (const match of candidate.matchAll(terminal)) cut = match.index + match[0].length;
+                if (cut < VOICE_SPEECH_CHAR_LIMIT - 80) {
+                  const space = candidate.lastIndexOf(' ', VOICE_SPEECH_CHAR_LIMIT - 1);
+                  if (space > VOICE_SPEECH_CHAR_LIMIT - 80) cut = space;
+                }
+                if (!cut) cut = candidate.length;
+                speechDelta = candidate.slice(priorSpeech.length, cut);
+              }
+              if (speechDelta) {
+                state.speechText += speechDelta;
+                emit('stream-delta', { text: speechDelta });
+              }
+            }
           } else if (delta.length > 24) await revealBuffered(delta, state, 14);
           else { state.text += delta; emit('stream', { delta, text: state.text, simulated: false }); }
         }
@@ -76,8 +97,7 @@
     if (typeof callAI !== 'function') return false;
     const previous = callAI; if (previous.__panthoriumStreaming) return true;
     const wrapped = async function (prompt, options = {}) {
-      // Spoken conversations use native streaming. Mobile TTS is deferred until
-      // the complete answer is ready to avoid fragmented playback.
+      // Spoken conversations stream text and start TTS on the first short phrase.
       if (options?.conversationalVoice === true) {
         try { return await streamCall(prompt, { voiceMode: true }); }
         catch (error) {
