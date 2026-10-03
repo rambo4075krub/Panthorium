@@ -25,7 +25,7 @@ assert(uiLayout.includes("orbGroup.position.y = compact ? .5 : .27"), 'layout sy
 assert(!uiLayout.includes('var radius = 90'), 'layout sync must not restore the removed legacy sphere camera distance');
 
 assert(shell.includes('Interactive Procedural Energy Orb'), 'desktop should use the new procedural energy orb');
-assert(shell.includes('window.innerWidth < 700 ? 11880 : 23100'), 'orb should use responsive particle counts');
+assert(shell.includes('window.innerWidth < 700 ? 5400 : 23100'), 'orb should use responsive particle counts');
 assert(shell.includes('new THREE.ShaderMaterial'), 'orb particles should use the procedural shader');
 assert(shell.includes('8.86578/-mv.z'), 'orb should retain the enlarged point size');
 assert(shell.includes('redSheen=.008'), 'orb should retain the subtle red sheen');
