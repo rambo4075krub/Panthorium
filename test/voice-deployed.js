@@ -20,10 +20,14 @@ const { JSDOM } = require('jsdom');
   assert.equal(electronPreflight.headers.get('access-control-allow-origin'), 'null', 'Electron must receive its original null origin');
   const foreignPreflight = await fetch(new URL('/api/auth/login', base), { method: 'OPTIONS', headers: { Origin: 'https://unrelated.example', 'Access-Control-Request-Method': 'POST' } });
   assert.equal(foreignPreflight.status, 403, 'unrelated browser origins must stay denied');
-  const shell = await fetch(new URL('/admin', base));
-  assert.equal(shell.status, 200);
-  const html = await shell.text();
-  assert(html.includes('/voice-window-catalog.js?') && html.includes('/external-apps-ui.js?') && html.includes('/voice-command-client.js?'));
+  let html;
+  for (const route of ['/', '/admin']) {
+    const shell = await fetch(new URL(route, base));
+    assert.equal(shell.status, 200, `${route} guest/admin shell`);
+    const page = await shell.text();
+    assert(page.includes('/voice-window-catalog.js?') && page.includes('/external-apps-ui.js?') && page.includes('/voice-command-client.js?'), `${route} must load the tested voice app assets`);
+    if (route === '/') html = page;
+  }
   const deployedDOM = new JSDOM(html);
   const testedDOM = new JSDOM(fs.readFileSync(path.join(__dirname, '..', 'sentinel.html'), 'utf8'));
   try {
@@ -36,6 +40,11 @@ const { JSDOM } = require('jsdom');
   assert.equal(sessionResponse.status, 200);
   const session = await sessionResponse.json();
   assert(session.accessToken);
+  const guestVoiceStatus = await fetch(new URL('/api/biometrics/status', base), { headers: { Origin: base.origin, Authorization: `Bearer ${session.accessToken}` } });
+  assert.equal(guestVoiceStatus.status, 200, 'guest voice enrollment status API');
+  const guestVoiceProfiles = await fetch(new URL('/api/biometrics/voice/profiles', base), { headers: { Origin: base.origin, Authorization: `Bearer ${session.accessToken}` } });
+  assert.equal(guestVoiceProfiles.status, 200, 'guest voice profiles API');
+  assert.deepEqual((await guestVoiceProfiles.json()).profiles, [], 'new staging guest starts with its own empty voice profile list');
   for (const [command, expected] of [['เปิด Sentinel AI', 'open_sentinel'], ['ปิด Sentinel AI', 'close_sentinel']]) {
     const response = await post('/api/sentinel/command', { command }, session.accessToken);
     assert.equal(response.status, 200, command);
@@ -51,9 +60,61 @@ const { JSDOM } = require('jsdom');
   const chatResponse = await fetch(new URL('/api/chat', base), { method: 'POST', headers: { Origin: base.origin, 'Content-Type': 'application/json', Authorization: `Bearer ${session.accessToken}` }, body: JSON.stringify({ message: 'ตอบสั้น ๆ ว่า Sentinel พร้อมทดสอบ', sessionId: 'staging-guest-smoke', provider: 'vertex' }), signal: AbortSignal.timeout(90000) });
   assert.equal(chatResponse.status, 200, 'guest chat HTTP status');
   const chat = await chatResponse.json();
-  assert.equal(chat.ok, true, `guest AI chat failed: ${chat.error || 'unknown'}`);
+  if (!chat.ok && Array.isArray(chat.providerFailureCodes)) console.error('Vertex guest chat diagnostics:', JSON.stringify(chat.providerFailureCodes));
+  assert.equal(chat.ok, true, `guest AI chat failed: ${chat.error || 'unknown'}${chat.providerFailureCodes ? ` (${JSON.stringify(chat.providerFailureCodes)})` : ''}`);
   if (chat.provider !== 'vertex') console.error('Vertex fallback diagnostic:', JSON.stringify(chat.providerFailureCodes || []));
   assert.equal(chat.provider, 'vertex', `tuned Vertex endpoint unavailable (fallback: ${chat.provider || 'none'})`);
   assert(chat.text?.trim(), 'guest chat answer must be nonempty');
-  console.log('Staging: browser and Electron CORS passed; command assets loaded; guest command and tuned Vertex chat answered. Live microphone/TTS acceptance is still required.');
+
+  const streamStartedAt = Date.now();
+  const streamResponse = await fetch(new URL('/api/chat/stream', base), {
+    method: 'POST',
+    headers: { Origin: base.origin, 'Content-Type': 'application/json', Authorization: `Bearer ${session.accessToken}` },
+    body: JSON.stringify({ message: 'ตอบสั้นที่สุดว่า Sentinel พร้อม', sessionId: 'staging-guest-stream-smoke', provider: 'vertex' }),
+    signal: AbortSignal.timeout(90000)
+  });
+  assert.equal(streamResponse.status, 200, 'guest streaming chat HTTP status');
+  assert(streamResponse.body, 'guest streaming chat must return an SSE body');
+  const reader = streamResponse.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let streamText = '';
+  let firstDeltaMs = null;
+  let streamDone = null;
+  let streamError = null;
+  const consumeFrames = (frames) => {
+    for (const frame of frames) {
+      let event = 'message';
+      let data = null;
+      for (const line of frame.replaceAll(String.fromCharCode(13), '').split(String.fromCharCode(10))) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        if (line.startsWith('data:')) { try { data = JSON.parse(line.slice(5).trim()); } catch (_) {} }
+      }
+      if (!data) continue;
+      if (event === 'delta') {
+        if (firstDeltaMs === null) firstDeltaMs = Date.now() - streamStartedAt;
+        streamText += data.delta || '';
+      } else if (event === 'done') streamDone = data;
+      else if (event === 'error') streamError = data.error || 'stream_failed';
+    }
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.replaceAll(String.fromCharCode(13), '').split(String.fromCharCode(10, 10));
+    buffer = frames.pop() || '';
+    consumeFrames(frames);
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) consumeFrames([buffer]);
+  assert.equal(streamError, null, `guest streaming chat failed: ${streamError || ''}`);
+  assert(streamDone, 'guest stream must finish with a done event');
+  assert.equal(streamDone.provider, 'vertex');
+  assert.equal(streamDone.model, 'sentinel-v4');
+  assert.equal(streamDone.streaming, 'native');
+  assert(streamText.trim(), 'guest stream must contain answer deltas');
+  assert(firstDeltaMs !== null && firstDeltaMs < 30000, `first Sentinel V4 delta took ${firstDeltaMs}ms; expected under 30000ms`);
+  console.log(`Staging stream: provider=vertex model=sentinel-v4 firstDeltaMs=${firstDeltaMs} streaming=native`);
+  console.log('Staging: browser and Electron CORS passed; command assets loaded; guest command and tuned Vertex chat/stream answered. Live microphone/TTS acceptance is still required.');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

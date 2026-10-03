@@ -19,6 +19,11 @@ assert.doesNotMatch(desktop, /setInterval\(/, 'Desktop Manager V2 must not poll 
 assert.doesNotMatch(desktop, /new MutationObserver/, 'Desktop Manager V2 must not repair the DOM through observers');
 assert.match(desktop, /#start-menu #sm-apps\{display:none!important;\}/, 'Staging Admin Start Menu must hide app grid');
 assert.match(desktop, /รีสตาร์ท/, 'Staging Admin Start Menu must keep restart action');
+assert.match(desktop, /id:'voice-identity',icon:'🎙️',label:'Voice Identity',role:'administrator'/, 'Admin desktop must expose Voice Identity registration only to administrators');
+const voiceUi = read('voice-identity-ui.js');
+assert.match(voiceUi, /isAdminEnrollmentContext\(\)/, 'Administrator enrollment must be role and admin-entry gated');
+assert.match(voiceUi, /auth\.isGuest\?\.\(\) === true/, 'Guest accounts can open voice registration');
+assert.match(voiceUi, /!root\.querySelector\('\[data-consent\]'\)\.checked/, 'Enrollment must remain disabled until biometric consent is checked');
 
 assert.doesNotMatch(access, /setInterval\(/, 'Access shell must be event-driven, not polling');
 assert.doesNotMatch(layout, /setInterval\(/, 'UI layout must not poll sync loops');

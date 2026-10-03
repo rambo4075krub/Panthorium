@@ -47,14 +47,44 @@ class ProviderManager {
       // deployment migration; staging uses the explicit SENTINEL_* names.
       project: process.env.SENTINEL_VERTEX_PROJECT_ID || process.env.VERTEX_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "",
       location: process.env.SENTINEL_VERTEX_LOCATION || process.env.VERTEX_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || (process.env.VERTEX_ENDPOINT_ID ? "us" : ""),
-      endpointId: process.env.SENTINEL_VERTEX_ENDPOINT_ID || process.env.VERTEX_ENDPOINT_ID || "",
+      endpointId: process.env.SENTINEL_VERTEX_TUNING_JOB_ID ? "" : (process.env.SENTINEL_VERTEX_ENDPOINT_ID || process.env.VERTEX_ENDPOINT_ID || ""),
+      tuningJobId: process.env.SENTINEL_VERTEX_TUNING_JOB_ID || "",
+      tuningJobLocation: process.env.SENTINEL_VERTEX_TUNING_JOB_LOCATION || process.env.SENTINEL_VERTEX_LOCATION || process.env.VERTEX_LOCATION || "europe-west4",
       maxOutputTokens: Math.max(128, Math.min(8192, Number(process.env.SENTINEL_VERTEX_MAX_OUTPUT_TOKENS) || 4096))
     };
+    this.vertexEndpointPromise = null;
     this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite", anthropic: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001", vertex: process.env.SENTINEL_VERTEX_MODEL || process.env.VERTEX_MODEL || "sentinel-v3" };
   }
-  vertexConfigured() { return Boolean(this.vertex.project && this.vertex.location && this.vertex.endpointId); }
+  vertexConfigured() { return Boolean(this.vertex.project && (this.vertex.tuningJobId ? this.vertex.tuningJobLocation : (this.vertex.location && this.vertex.endpointId))); }
+  async resolveTunedVertexEndpoint() {
+    if (!this.vertex.tuningJobId || this.vertex.endpointId) return;
+    if (!this.vertexEndpointPromise) {
+      this.vertexEndpointPromise = (async () => {
+        const { project, tuningJobId, tuningJobLocation } = this.vertex;
+        const url = `https://${tuningJobLocation}-aiplatform.googleapis.com/v1beta1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(tuningJobLocation)}/tuningJobs/${encodeURIComponent(tuningJobId)}`;
+        const response = await fetchProvider(async () => fetch(url, {
+          headers: { Authorization: `Bearer ${await this.vertexAccessToken()}`, "X-Goog-User-Project": String(project) },
+          signal: AbortSignal.timeout(15000)
+        }), 1);
+        const job = await response.json();
+        if (job.state !== "JOB_STATE_SUCCEEDED") throw new Error(`vertex_tuning_job_state_${String(job.state || "unknown").toLowerCase()}`);
+        const endpoint = String(job.tunedModel?.endpoint || "");
+        // Vertex can return the project number when the request used the project ID.
+        // The authenticated tuning job response is the canonical serving resource.
+        const resource = /^projects\/([A-Za-z0-9.-]+)\/locations\/([a-z0-9-]+)\/endpoints\/(\d+)$/.exec(endpoint);
+        if (!resource) throw new Error("vertex_tuned_endpoint_resource_invalid");
+        this.vertex.project = resource[1];
+        this.vertex.location = resource[2];
+        this.vertex.endpointId = resource[3];
+      })().catch((error) => {
+        this.vertexEndpointPromise = null;
+        throw error;
+      });
+    }
+    return this.vertexEndpointPromise;
+  }
   available() { return this.priority.filter((p) => p === "vertex" ? this.vertexConfigured() : Boolean(this.keys[p])); }
-  catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: provider === "vertex" ? this.vertexConfigured() : Boolean(this.keys[provider]), priority, streaming: provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
+  catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: provider === "vertex" ? this.vertexConfigured() : Boolean(this.keys[provider]), priority, streaming: provider === "vertex" || provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
   resolveModel(provider, requestedModel) {
     const configured = this.models[provider];
     if (!configured) return null;
@@ -63,35 +93,51 @@ class ProviderManager {
     return requested === configured ? configured : null;
   }
   async transcribeAudio(buffer, mimeType = "audio/webm", language = "") {
-    const candidates = [
-      { provider: "groq", key: this.keys.groq, url: "https://api.groq.com/openai/v1/audio/transcriptions", model: process.env.GROQ_TRANSCRIBE_MODEL || "whisper-large-v3-turbo" },
-      { provider: "openai", key: this.keys.openai, url: "https://api.openai.com/v1/audio/transcriptions", model: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1" }
-    ].filter(item => item.key && this.priority.includes(item.provider))
-      .sort((a, b) => this.priority.indexOf(a.provider) - this.priority.indexOf(b.provider));
-    if (!candidates.length) {
-      const error = new Error("transcription_provider_unavailable");
-      error.code = "transcription_provider_unavailable";
-      throw error;
+    const unavailable = (code = "transcription_provider_unavailable") => {
+      const error = new Error(code); error.code = code; return error;
+    };
+    if (!this.vertexConfigured()) throw unavailable();
+    const contentType = String(mimeType || "audio/webm").split(";")[0].trim().toLowerCase();
+    const supported = new Set(["audio/x-aac", "audio/flac", "audio/mp3", "audio/m4a", "audio/mpeg", "audio/mpga", "audio/mp4", "audio/ogg", "audio/pcm", "audio/wav", "audio/webm"]);
+    if (!supported.has(contentType)) {
+      const error = new Error("unsupported_audio_format"); error.code = error.message; throw error;
     }
-    for (const item of candidates) {
-      try {
-        const form = new FormData();
-        const extension = /mp4/i.test(mimeType) ? "mp4" : /ogg/i.test(mimeType) ? "ogg" : "webm";
-        form.append("file", new Blob([buffer], { type: mimeType }), `panthorium-voice.${extension}`);
-        form.append("model", item.model);
-        form.append("response_format", "json");
-        if (language) form.append("language", String(language).toLowerCase().startsWith("th") ? "th" : "en");
-        const response = await fetch(item.url, { method: "POST", headers: { Authorization: `Bearer ${item.key}` }, body: form, signal: AbortSignal.timeout(30000) });
-        if (!response.ok) throw new Error(`Transcription HTTP ${response.status}`);
-        const data = await response.json();
-        const text = typeof data.text === "string" ? data.text.trim() : "";
-        if (!text) throw new Error("empty_transcription");
-        return { text, provider: item.provider, model: data.model || item.model };
-      } catch (error) {
-        if (item === candidates[candidates.length - 1]) throw error;
-      }
-    }
-    throw new Error("transcription_provider_unavailable");
+    const { project, location } = this.vertex;
+    const audioLocation = String(process.env.SENTINEL_VERTEX_AUDIO_LOCATION || (location === "eu" ? "europe-west4" : location)).trim();
+    const model = String(process.env.SENTINEL_VERTEX_AUDIO_MODEL || "gemini-2.5-flash-lite").trim();
+    const defaultAudioHost = audioLocation === "eu" || audioLocation === "us"
+      ? `aiplatform.${audioLocation}.rep.googleapis.com`
+      : `${audioLocation}-aiplatform.googleapis.com`;
+    const configuredHost = process.env.SENTINEL_VERTEX_AUDIO_HOST || defaultAudioHost;
+    const host = configuredHost.startsWith("http") ? configuredHost : `https://${configuredHost}`;
+    const url = `${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(audioLocation)}/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
+    const languageName = String(language).toLowerCase().startsWith("th") ? "Thai" : String(language).toLowerCase().startsWith("en") ? "English" : "the spoken language";
+    const prompt = [
+      `Transcribe the attached audio exactly in ${languageName}.`,
+      "Return only the words that are clearly spoken. Do not translate, summarize, explain, or add speaker labels.",
+      "Preserve Thai and English as spoken, including names Panthorium, Sentinel, Niwat, AI, API, and ProviderManager.",
+      "If there is no intelligible speech or you cannot determine the words, return exactly: TRANSCRIPTION_UNCERTAIN"
+    ].join(" ");
+    const response = await fetchProvider(async () => fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${await this.vertexAccessToken()}`,
+        "X-Goog-User-Project": String(project)
+      },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [
+          { text: prompt },
+          { inlineData: { mimeType: contentType, data: Buffer.from(buffer).toString("base64") } }
+        ] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 1024 }
+      }),
+      signal: AbortSignal.timeout(20000)
+    }), 1);
+    const data = await response.json();
+    const text = (data.candidates?.[0]?.content?.parts || []).filter(part => part.text && !part.thought).map(part => part.text).join("").trim();
+    if (!text || /^TRANSCRIPTION_UNCERTAIN[.!]?$/i.test(text)) throw unavailable("transcription_uncertain");
+    return { text, provider: "vertex", model: data.modelVersion || model, confidence: null, noSpeechProbability: null };
   }
   async call(provider, systemPrompt, history) { const result = await this.callDetailed(provider, systemPrompt, history); return result?.text || null; }
   async callDetailed(provider, systemPrompt, history, options = {}) {
@@ -155,6 +201,7 @@ class ProviderManager {
     throw new Error("vertex_adc_token_missing");
   }
   async callVertexTuned(systemPrompt, history) {
+    await this.resolveTunedVertexEndpoint();
     const { project, location, endpointId, maxOutputTokens } = this.vertex;
     const host = process.env.VERTEX_HOST
       ? (process.env.VERTEX_HOST.startsWith("http") ? process.env.VERTEX_HOST : `https://${process.env.VERTEX_HOST}`)
@@ -183,14 +230,77 @@ class ProviderManager {
       usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null
     };
   }
+  async streamVertexTuned(systemPrompt, history, onDelta = () => {}) {
+    await this.resolveTunedVertexEndpoint();
+    const { project, location, endpointId, maxOutputTokens } = this.vertex;
+    const host = process.env.VERTEX_HOST
+      ? (process.env.VERTEX_HOST.startsWith("http") ? process.env.VERTEX_HOST : `https://${process.env.VERTEX_HOST}`)
+      : (location === "eu" || location === "us"
+        ? `https://aiplatform.${location}.rep.googleapis.com`
+        : `https://${location}-aiplatform.googleapis.com`);
+    const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: String(m.content || "") }] }));
+    const url = `${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(location)}/endpoints/${encodeURIComponent(endpointId)}:streamGenerateContent?alt=sse`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${await this.vertexAccessToken()}`,
+        "X-Goog-User-Project": String(project)
+      },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: systemPrompt }] }, contents, generationConfig: { temperature: 0.65, maxOutputTokens } }),
+      signal: AbortSignal.timeout(60000)
+    });
+    if (!response.ok) throw await providerError(response);
+    if (!response.body) throw new Error("vertex_stream_unavailable");
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let text = "";
+    let usage = null;
+    let truncated = false;
+    const model = this.models.vertex;
+    const consumeFrame = (frame) => {
+      const payloads = frame.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).filter(Boolean);
+      for (const payload of payloads) {
+        if (payload === "[DONE]") continue;
+        let data;
+        try { data = JSON.parse(payload); } catch (_) { continue; }
+        const candidate = data.candidates?.[0];
+        if (candidate?.finishReason === "MAX_TOKENS") truncated = true;
+        const metadata = data.usageMetadata;
+        if (metadata) usage = {
+          inputTokens: metadata.promptTokenCount || 0,
+          outputTokens: (metadata.candidatesTokenCount || 0) + (metadata.thoughtsTokenCount || 0),
+          totalTokens: metadata.totalTokenCount || 0
+        };
+        for (const part of candidate?.content?.parts || []) {
+          if (typeof part.text !== "string" || !part.text || part.thought) continue;
+          text += part.text;
+          onDelta(part.text);
+        }
+      }
+    };
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split(/\r?\n\r?\n/);
+      buffer = frames.pop() || "";
+      for (const frame of frames) consumeFrame(frame);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) consumeFrame(buffer);
+    if (!text.trim()) throw new Error("vertex_stream_empty");
+    return { text: text.trim(), model, usage, streaming: "native", truncated };
+  }
   async streamDetailed(provider, systemPrompt, history, options = {}, onDelta = () => {}) {
     if (provider === "vertex") {
       if (!this.vertexConfigured()) return null;
       const model = this.resolveModel(provider, options.model);
       if (!model) throw new Error("model_not_allowed");
-      const result = await this.callDetailed(provider, systemPrompt, history, { model });
-      if (result?.text) onDelta(result.text);
-      return { ...result, streaming: "buffered" };
+      return this.streamVertexTuned(systemPrompt, history, onDelta);
     }
     const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
     if (provider === "groq") return this.streamOpenAICompatible(GROQ_CHAT_URL, key, model, systemPrompt, history, onDelta, false);

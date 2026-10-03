@@ -16,7 +16,7 @@ function validChatBody(body = {}) {
 const windowCatalog = require("../voice-window-catalog");
 function hasVoicePermission(user, permission) { return (user?.permissions || []).includes(permission); }
 
-function createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler) {
+function createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler, biometrics) {
   const router = express.Router(); const auth = requireAuth(authService);
   router.use(['/ai', '/agent'], auth, denyGuest);
   const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
@@ -30,21 +30,15 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
     const lang = typeof req.body?.lang === "string" ? req.body.lang : "";
     const allowedLanguages = new Set(["th-TH", "en-US", "ja-JP", "ko-KR", "ar-SA", "ru-RU", "zh-CN"]);
-    if (!text || text.length > 180 || !allowedLanguages.has(lang)) return res.status(400).json({ ok: false, error: "invalid_speech_request" });
+    if (!text || text.length > 6000 || !allowedLanguages.has(lang)) return res.status(400).json({ ok: false, error: "invalid_speech_request" });
     try {
       let audio;
       let voiceProfile;
-      let neuralError;
-      for (let attempt = 0; attempt < 2 && !audio; attempt += 1) {
-        try {
-          const neural = await synthesizeSentinelMaleVoice(text, lang);
-          audio = neural.audio;
-          voiceProfile = neural.voice;
-        } catch (error) {
-          neuralError = error;
-        }
-      }
-      if (!audio) {
+      try {
+        const neural = await synthesizeSentinelMaleVoice(text, lang);
+        audio = neural.audio;
+        voiceProfile = neural.voice;
+      } catch (neuralError) {
         audit.record("sentinel.neural_speech_failed", { userId: req.user.sub, lang, error: String(neuralError?.message || neuralError) });
         // The generic source voice is not guaranteed to be male. For Thai and
         // English fail closed so the client can use only a confirmed male
@@ -71,12 +65,32 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       if (!match || match[2].length > 700000) return res.status(400).json({ ok: false, error: "invalid_audio" });
       const audio = Buffer.from(match[2], "base64");
       if (!audio.length || audio.length > 512 * 1024) return res.status(413).json({ ok: false, error: "audio_too_large" });
+      // Enforce this on the server as well as the UI: neither a modified
+      // browser nor a direct API call may reach paid transcription unchecked.
+      if (biometrics?.gateEnabled) {
+        const profiles = await biometrics.list(req.user.sub);
+        if (!profiles.length) return res.status(403).json({ ok: false, error: "voice_enrollment_required" });
+        const verification = await biometrics.verify({ ownerUserId: req.user.sub, audio: value });
+        if (!verification.matched) return res.status(403).json({ ok: false, error: "voice_not_authorized" });
+      }
       const result = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language);
-      res.json({ ok: true, text: result.text, provider: result.provider, model: result.model });
+      res.json({ ok: true, text: result.text, provider: result.provider, model: result.model, confidence: result.confidence, crossCheckedBy: result.crossCheckedBy || null });
     } catch (error) {
       audit.record("sentinel.transcription_failed", { userId: req.user?.sub, error: error.message });
-      const code = error?.code === "transcription_provider_unavailable" ? error.code : "transcription_unavailable";
-      res.status(code === "transcription_provider_unavailable" ? 503 : 502).json({ ok: false, error: code });
+      const safeMessage = String(error?.message || "unknown_error")
+        .replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]")
+        .replace(/(key|token|secret)\s*[=:]\s*[^\s,;]+/gi, "$1=[redacted]")
+        .slice(0, 500);
+      console.error(JSON.stringify({
+        event: "sentinel.transcription_failed",
+        requestId: req.requestId || null,
+        code: error?.code || null,
+        status: error?.status || null,
+        name: error?.name || "Error",
+        message: safeMessage
+      }));
+      const code = /speaker_verification|biometric_encryption|voice_signal/.test(error?.message || "") ? "voice_verification_unavailable" : ["transcription_provider_unavailable", "transcription_uncertain"].includes(error?.code) ? error.code : "transcription_unavailable";
+      res.status(code === "transcription_uncertain" ? 422 : code === "transcription_provider_unavailable" || code === "voice_verification_unavailable" ? 503 : 502).json({ ok: false, error: code });
     }
   });
   router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { res.json({ ok: true, runs: await agentRuns.list(req.user.sub, Number(req.query.limit) || 30) }); } catch (error) { next(error); } });
@@ -97,7 +111,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
   router.post("/chat/stream", auth, requirePermission("chat"), aiLimiter, async (req, res) => {
     const error = validChatBody(req.body || {});
     if (error) return res.status(400).json({ ok: false, error });
-    const { message, sessionId, provider, model } = req.body || {};
+    const { message, sessionId, provider, model, voice } = req.body || {};
     const sid = sessionId || req.headers["x-session-id"] || randomUUID();
     res.status(200).set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders?.();
@@ -111,6 +125,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
         mode: "default",
         provider: provider?.toLowerCase(),
         model,
+        voiceMode: voice === true,
         onProvider: (meta) => event("provider", meta),
         onDelta: (delta) => event("delta", { delta })
       });

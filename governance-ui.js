@@ -3,7 +3,7 @@
 const WINDOW_ID='panthorium-governance-dashboard';
 function os(){try{return typeof OS!=='undefined'?OS:null;}catch(_){return null;}}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));}
-function allowed(){return window.PanthoriumAuth?.hasPermission?.('settings')===true;}
+function allowed(){const user=typeof OS!=='undefined'?OS.state.user:null;return !!((user?.roles||[]).some(role=>['administrator','operator'].includes(role))&&window.PanthoriumAuth?.hasPermission?.('settings')===true);}
 function notify(message){if(typeof toast==='function')toast(message);else console.log('[Governance]',message);}
 async function refreshToken(){const s=os();if(s?.config?.accessToken)return s.config.accessToken;if(window.PanthoriumAuth?.refreshSession){const ok=await window.PanthoriumAuth.refreshSession().catch(()=>false);if(ok)return os()?.config?.accessToken||'';}return'';}
 async function api(path,options={},retry=true){let token=os()?.config?.accessToken||'';if(!token)token=await refreshToken();const headers={...(options.body?{'Content-Type':'application/json'}:{}),...(options.headers||{})};if(token)headers.Authorization=`Bearer ${token}`;const response=await fetch(path,{...options,headers,credentials:'include'});const data=await response.json().catch(()=>({}));if(response.status===401&&retry&&window.PanthoriumAuth?.refreshSession){const ok=await window.PanthoriumAuth.refreshSession().catch(()=>false);if(ok)return api(path,options,false);}if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);return data;}

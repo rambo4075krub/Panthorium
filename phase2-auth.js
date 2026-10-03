@@ -4,13 +4,13 @@
 
   function isAdminEntry() { return ADMIN_PATHS.has(window.location.pathname.toLowerCase()); }
   function hasPermission(permission) { return (OS?.state?.user?.permissions || []).includes(permission); }
-  function isAdministrator() { return !!OS?.state?.user?.roles?.includes('administrator'); }
+  function isAdministrator() { return !isGuest() && !!OS?.state?.user?.roles?.includes('administrator'); }
   function isGuest() { return !!OS?.state?.user?.roles?.includes('guest'); }
   function roleLabel(user) {
     const roles = user?.roles || [];
+    if (roles.includes('guest')) return 'Guest';
     if (roles.includes('administrator')) return 'Administrator';
     if (roles.includes('operator')) return 'Operator';
-    if (roles.includes('guest')) return 'Guest';
     return 'User';
   }
   function notifyAuthChanged() {
@@ -30,11 +30,11 @@
   function updateIdentityUI() {
     const user = OS.state.user;
     const userEl = document.querySelector('.sm-user'); const statusEl = document.getElementById('sm-status'); const footerBtn = document.getElementById('btn-logout'); const settingsBtn = document.getElementById('btn-settings-quick');
-    if (userEl) userEl.textContent = user?.username || 'guest';
+    if (userEl) userEl.textContent = user?.displayName || user?.username || 'guest';
     if (statusEl) statusEl.textContent = `Online · ${roleLabel(user)}`;
     if (settingsBtn) settingsBtn.style.display = hasPermission('settings') ? '' : 'none';
     if (footerBtn) {
-      if (isGuest()) { footerBtn.textContent = '🔐 เข้าสู่ระบบผู้ดูแล'; footerBtn.title = 'ไปหน้าผู้ดูแล'; footerBtn.onclick = () => { window.location.href = '/admin'; }; }
+      if (isGuest()) { footerBtn.textContent = '🔐 เข้าสู่ระบบ'; footerBtn.title = 'เข้าสู่บัญชีด้วยอีเมล'; footerBtn.onclick = () => { window.PanthoriumVoiceIdentity?.openLogin?.(); }; }
       else { footerBtn.textContent = '🚪 ออกจากระบบ'; footerBtn.title = 'ออกจากระบบ'; footerBtn.onclick = () => logout(); }
     }
     if (isAdministrator()) ensureSecurityScript();
@@ -45,10 +45,58 @@
     if (loginScreen) { loginScreen.classList.remove('active'); loginScreen.style.display = 'none'; }
     desktop?.classList.add('active'); OS.state.loggedIn = true; OS.state.verified = true; updateIdentityUI(); setTimeout(notifyAuthChanged, 100);
   }
+  const GUEST_SESSION_KEY = 'panthorium.guest.voice-session.v1';
+  const VOICE_DEVICE_KEY = 'panthorium.guest.voice-device.v1';
+  const GUEST_LIFETIME_MS = 24 * 60 * 60 * 1000;
+  let guestExpiryTimer = null;
+  function rememberedDeviceKey() {
+    try { const key = window.localStorage.getItem(VOICE_DEVICE_KEY); return /^[0-9a-f]{64}$/i.test(key || '') ? key : null; }
+    catch (_) { return null; }
+  }
+  function stableGuestSessionId() {
+    const pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    try {
+      const raw = window.sessionStorage.getItem(GUEST_SESSION_KEY);
+      let entry;
+      try { entry = JSON.parse(raw); } catch (_) { entry = { id: raw, createdAt: Date.now() }; }
+      if (!entry || !pattern.test(entry.id || '') || !Number.isFinite(entry.createdAt) ||
+          (!rememberedDeviceKey() && Date.now() - entry.createdAt >= GUEST_LIFETIME_MS)) {
+        entry = { id: window.crypto?.randomUUID?.(), createdAt: Date.now() };
+      }
+      if (pattern.test(entry.id || '')) window.sessionStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(entry));
+      return pattern.test(entry.id || '') ? entry.id : undefined;
+    } catch (_) { return undefined; }
+  }
+  function rememberVoiceDevice(key) {
+    if (!/^[0-9a-f]{64}$/i.test(key || '')) throw new Error('invalid_device_key');
+    window.localStorage.setItem(VOICE_DEVICE_KEY, key.toLowerCase());
+    if (guestExpiryTimer) clearTimeout(guestExpiryTimer);
+  }
+  function scheduleGuestExpiry() {
+    if (guestExpiryTimer) clearTimeout(guestExpiryTimer);
+    if (rememberedDeviceKey() || !isGuest() || isAdminEntry()) return;
+    try {
+      const entry = JSON.parse(window.sessionStorage.getItem(GUEST_SESSION_KEY));
+      const remaining = entry.createdAt + GUEST_LIFETIME_MS - Date.now();
+      guestExpiryTimer = setTimeout(() => { guestExpiryTimer = null; if (isGuest() && !rememberedDeviceKey()) guestSession().catch(error => console.error('[Phase2 Auth] guest expiry', error)); }, Math.max(1, remaining));
+    } catch (_) {}
+  }
   async function guestSession() {
     const base = OS.config.backendUrl.replace(/\/$/, '');
-    const res = await fetch(base + '/api/auth/guest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', credentials: 'include' });
-    if (!res.ok) throw new Error('guest_auth_failed'); const data = await res.json(); OS.config.accessToken = data.accessToken || ''; OS.state.user = data.user || null; updateIdentityUI(); closeForbiddenWindows(); notifyAuthChanged(); return data;
+    const deviceKey = rememberedDeviceKey();
+    const res = await fetch(base + '/api/auth/guest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guestSessionId: stableGuestSessionId(), deviceKey }), credentials: 'include' });
+    if (!res.ok) throw new Error('guest_auth_failed'); const data = await res.json();
+    if (deviceKey && !data.deviceRecognized) try { window.localStorage.removeItem(VOICE_DEVICE_KEY); } catch (_) {}
+    if (data.user?.id?.startsWith('guest:')) {
+      const id = data.user.id.slice(6);
+      try { const old = JSON.parse(window.sessionStorage.getItem(GUEST_SESSION_KEY)); window.sessionStorage.setItem(GUEST_SESSION_KEY, JSON.stringify({ id, createdAt: old?.id === id ? old.createdAt : Date.now() })); } catch (_) {}
+    }
+    OS.config.accessToken = data.accessToken || ''; OS.state.user = data.user || null; updateIdentityUI(); closeForbiddenWindows(); notifyAuthChanged(); scheduleGuestExpiry(); return data;
+  }
+  function acceptSession(data) {
+    if (!data?.accessToken || !data?.user) throw new Error('invalid_auth_response');
+    if (!isAdminEntry() && data.user.roles?.includes('administrator')) throw new Error('admin_entry_required');
+    OS.config.accessToken = data.accessToken; OS.state.user = data.user; updateIdentityUI(); notifyAuthChanged(); return data;
   }
   async function refreshSession() {
     if (isGuest() && !isAdminEntry()) {
@@ -58,15 +106,24 @@
       return false;
     }
     const base = OS.config.backendUrl.replace(/\/$/, ''); const res = await fetch(base + '/api/auth/refresh', { method: 'POST', credentials: 'include' }); if (!res.ok) return false;
-    const data = await res.json(); OS.config.accessToken = data.accessToken || ''; OS.state.user = data.user || null; updateIdentityUI(); closeForbiddenWindows(); notifyAuthChanged(); return !!OS.config.accessToken;
+    const data = await res.json();
+    // A shared browser may still carry an Admin refresh cookie on the public
+    // Guest route. Never install an administrator token outside /admin.
+    if (!isAdminEntry() && data.user?.roles?.includes('administrator')) return false;
+    OS.config.accessToken = data.accessToken || ''; OS.state.user = data.user || null; updateIdentityUI(); closeForbiddenWindows(); notifyAuthChanged(); return !!OS.config.accessToken;
   }
   async function fetchIdentity() {
     if (!OS.config.accessToken) return null; const base = OS.config.backendUrl.replace(/\/$/, ''); const res = await fetch(base + '/api/auth/me', { headers: { Authorization: `Bearer ${OS.config.accessToken}` }, credentials: 'include' }); if (!res.ok) return null;
     const data = await res.json(); OS.state.user = data.user || OS.state.user; updateIdentityUI(); closeForbiddenWindows(); notifyAuthChanged(); return data.user || null;
   }
-  async function login(username, password) {
-    const base = OS.config.backendUrl.replace(/\/$/, ''); const res = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }), credentials: 'include' });
-    const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.error || 'login_failed'); if (!data.accessToken || !data.user) throw new Error('invalid_auth_response'); OS.config.accessToken = data.accessToken; OS.state.user = data.user; updateIdentityUI(); notifyAuthChanged(); return data;
+  async function login(username, password, rememberMe = true) {
+    const base = OS.config.backendUrl.replace(/\/$/, ''); const res = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password, rememberMe }), credentials: 'include' });
+    const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.error || 'login_failed'); return acceptSession(data);
+  }
+  async function savePassword(email, password, selected) {
+    if (!selected || !navigator.credentials?.store || !window.PasswordCredential) return;
+    try { await navigator.credentials.store(new PasswordCredential({ id: email, password, name: email })); }
+    catch (error) { console.info('[Phase2 Auth] browser password save unavailable', error); }
   }
   async function revokeServerSession() { const base = OS.config.backendUrl.replace(/\/$/, ''); await fetch(base + '/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => null); }
   async function logout() { await revokeServerSession(); OS.config.accessToken = ''; OS.state.user = null; OS.state.loggedIn = false; OS.state.verified = false; closeForbiddenWindows(); notifyAuthChanged(); document.getElementById('desktop')?.classList.remove('active'); if (isAdminEntry()) showLogin(); else { await guestSession(); activateDesktop(); } }
@@ -83,11 +140,10 @@
     if (OS.config.accessToken && OS.state.user && !force) return true;
     if (authInFlight) return authInFlight;
     authInFlight = (async () => {
-      // Never create a guest identity on the administrator entrance.
-      // Restore an admin session from its refresh cookie if the page lost its token.
-      // Never switch an admin to guest.
-      if (isAdminEntry()) return await refreshSession();
-      if (force && OS.state.user && await refreshSession()) return true;
+      // /admin restores only an administrator session. The public root may
+      // restore non-admin members, but an Admin cookie must never grant access there.
+      if (isAdminEntry()) return await refreshSession() && isAdministrator();
+      if (!isGuest() && await refreshSession()) return true;
       await guestSession();
       return Boolean(OS.config.accessToken && hasPermission('chat'));
     })().catch(error => { console.error('[Phase2 Auth] session unavailable', error); return false; })
@@ -101,11 +157,23 @@
     if (originalOpenSettings) { const guarded = function(){ if (!hasPermission('settings')) return permissionDenied('settings'); return originalOpenSettings(); }; openSettings = guarded; if (typeof APP_LIST !== 'undefined' && Array.isArray(APP_LIST)) { const app = APP_LIST.find(a => a.id === 'settings'); if (app) app.open = guarded; } }
     const originalCallAI = typeof callAI === 'function' ? callAI : null; if (originalCallAI) callAI = async function(prompt, options = {}){ if (!(await phase2EnsureAuth())) return { ok:false,text:'เชื่อมต่อเซสชันไม่สำเร็จ กรุณาลองอีกครั้ง',provider:'Auth',via:'auth' }; if (!hasPermission('chat')) return { ok:false,text:'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat',provider:'RBAC',via:'rbac' }; return originalCallAI(prompt, options); };
   }
-  async function initializePhase2() {
-    OS.state.user = null; ensureAuth = phase2EnsureAuth; for (let i=0;i<40&&!OS.state.booted;i++) await sleep(100); installPermissionGuards(); await revokeServerSession(); OS.config.accessToken=''; OS.state.user=null; OS.state.loggedIn=false; OS.state.verified=false;
-    if (isAdminEntry()) { showLogin(); return; }
-    try { if (await phase2EnsureAuth()) activateDesktop(); } catch (error) { console.error('[Phase2 Auth] guest entry failed', error); }
+  function hidePublicLoginScreen() {
+    if (isAdminEntry()) return;
+    const loginScreen = document.getElementById('login-screen');
+    if (loginScreen) { loginScreen.classList.remove('active'); loginScreen.style.display = 'none'; }
   }
-  window.PanthoriumAuth = { ensureSession: phase2EnsureAuth, login, logout, refreshSession, guestSession, fetchIdentity, hasPermission, isAdministrator, isGuest, isAdminEntry };
+  async function initializePhase2() {
+    hidePublicLoginScreen();
+    OS.state.user = null; ensureAuth = phase2EnsureAuth; for (let i=0;i<40&&!OS.state.booted;i++) await sleep(100); installPermissionGuards(); OS.config.accessToken=''; OS.state.user=null; OS.state.loggedIn=false; OS.state.verified=false;
+    if (isAdminEntry()) { if (await phase2EnsureAuth()) activateDesktop(); else showLogin(); return; }
+    try { if (await phase2EnsureAuth()) activateDesktop(); else hidePublicLoginScreen(); }
+    catch (error) { hidePublicLoginScreen(); console.error('[Phase2 Auth] guest entry failed', error); }
+  }
+  window.PanthoriumAuth = { ensureSession: phase2EnsureAuth, login, acceptSession, savePassword, logout, refreshSession, guestSession, fetchIdentity, rememberVoiceDevice, rememberedDeviceKey, hasPermission, isAdministrator, isGuest, isAdminEntry };
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && isGuest() && !rememberedDeviceKey()) {
+      try { const entry = JSON.parse(window.sessionStorage.getItem(GUEST_SESSION_KEY)); if (Date.now() - entry.createdAt >= GUEST_LIFETIME_MS) guestSession().catch(error => console.error('[Phase2 Auth] guest expiry', error)); } catch (_) {}
+    }
+  });
   initializePhase2().catch(error => console.error('[Phase2 Auth]', error));
 })();

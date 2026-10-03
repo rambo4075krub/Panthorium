@@ -64,15 +64,24 @@ const { createTrainingRouter } = require("./routes/training");
 const { createReleaseGateRouter } = require("./routes/releaseGate");
 const { createGovernanceRouter } = require("./routes/governance");
 const { createSentinelControlRouter } = require("./routes/sentinelControl");
+const { createBiometricsRouter } = require("./routes/biometrics");
+const { createBiometricIdentityRepository } = require("./services/biometricIdentityRepository");
+const { BiometricIdentityService } = require("./services/biometricIdentityService");
+const { createEmailOtpRepository } = require("./services/emailOtpRepository");
+const { EmailOtpService } = require("./services/emailOtpService");
 const { requestContext } = require("./middleware/requestContext");
 
 const app = express();
 if (config.trustProxy) app.set("trust proxy", 1);
 
 const authRepository = createAuthRepository(config);
+const biometricIdentityRepository = createBiometricIdentityRepository(config);
+const emailOtpRepository = createEmailOtpRepository(config);
 const audit = new AuditService({ file: config.auditFile, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const securityResponse = new SecurityResponseService({ audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const authService = new AuthService({ repository: authRepository, config, audit });
+const biometrics = new BiometricIdentityService({ repository: biometricIdentityRepository, audit, providerUrl: config.biometricSpeakerUrl, providerToken: config.biometricSpeakerToken, encryptionKey: config.biometricTemplateKey, gateEnabled: config.biometricGateEnabled, matchThreshold: config.biometricVoiceThreshold, enrollmentThreshold: config.biometricEnrollmentThreshold });
+const emailOtp = new EmailOtpService({ repository: emailOtpRepository, authService, config });
 const conversations = new ConversationRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const aiOperations = new AiOperationsService({ audit, conversations });
 const agentRuns = new AgentRunRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
@@ -119,9 +128,9 @@ const sentinelBenchmark = new SentinelBenchmarkService({ sentinel, providers: se
 const { SentinelShadowEvaluator } = require('./services/sentinelShadowEvaluator');
 const sentinelShadowEvaluator=new SentinelShadowEvaluator({sentinel,benchmark:sentinelBenchmark,providers:sentinel.providers,learning:sentinelLearning,audit});
 const sentinelActiveLearning = new SentinelActiveLearningService({ training: sentinelTraining, learning: sentinelLearning, providers: sentinel.providers, shadowEvaluator:sentinelShadowEvaluator, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
-const sentinelReleaseGate = new SentinelReleaseGateService({ training: sentinelTraining, learning: sentinelLearning, benchmark: sentinelBenchmark, activeLearning: sentinelActiveLearning, audit, minBenchmarkScore: Number(process.env.SENTINEL_RELEASE_GATE_MIN_BENCHMARK_SCORE || 80) });
-const autonomousGovernance = new AutonomousGovernanceService({ production: productionIntelligence, releaseGate: sentinelReleaseGate, benchmark: sentinelBenchmark, activeLearning: sentinelActiveLearning, learning: sentinelLearning, training: sentinelTraining, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, mode: process.env.PANTHORIUM_GOVERNANCE_MODE || 'observe', intervalMs: process.env.PANTHORIUM_GOVERNANCE_INTERVAL_MS || 300000 });
-const sentinelOrchestrator = new SentinelOrchestratorService({ sentinel, training: sentinelTraining, learning: sentinelLearning, releaseGate: sentinelReleaseGate, benchmark: sentinelBenchmark, activeLearning: sentinelActiveLearning, governance: autonomousGovernance, production: productionIntelligence, providers: sentinel.providers, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, mode: process.env.PANTHORIUM_SENTINEL_CONTROL_MODE || 'observe', intervalMs: process.env.PANTHORIUM_SENTINEL_CONTROL_INTERVAL_MS || 300000 });
+const sentinelReleaseGate = new SentinelReleaseGateService({ training: sentinelTraining, learning: sentinelLearning, benchmark: sentinelBenchmark, activeLearning: sentinelActiveLearning, audit, minBenchmarkScore: Number(process.env.SENTINEL_RELEASE_GATE_MIN_BENCHMARK_SCORE || 80), autoGateEnabled: process.env.SENTINEL_RELEASE_GATE_AUTO_GATE === '1', autoBenchmarkEnabled: process.env.SENTINEL_RELEASE_GATE_AUTO_BENCHMARK === '1', autoImproveEnabled: process.env.SENTINEL_RELEASE_GATE_AUTO_IMPROVE === '1' });
+const autonomousGovernance = new AutonomousGovernanceService({ production: productionIntelligence, releaseGate: sentinelReleaseGate, benchmark: sentinelBenchmark, activeLearning: sentinelActiveLearning, learning: sentinelLearning, training: sentinelTraining, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, mode: process.env.PANTHORIUM_GOVERNANCE_MODE || 'off', intervalMs: process.env.PANTHORIUM_GOVERNANCE_INTERVAL_MS || 300000 });
+const sentinelOrchestrator = new SentinelOrchestratorService({ sentinel, training: sentinelTraining, learning: sentinelLearning, releaseGate: sentinelReleaseGate, benchmark: sentinelBenchmark, activeLearning: sentinelActiveLearning, governance: autonomousGovernance, production: productionIntelligence, providers: sentinel.providers, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, mode: process.env.PANTHORIUM_SENTINEL_CONTROL_MODE || 'off', intervalMs: process.env.PANTHORIUM_SENTINEL_CONTROL_INTERVAL_MS || 300000 });
 sentinelLearning.recovery = sentinelRecovery;
 sentinel.training = sentinelTraining;
 sentinel.sentinelControl = sentinelOrchestrator;
@@ -159,7 +168,8 @@ app.use("/api/training/release-gate", createReleaseGateRouter(authService, senti
 app.use("/api/training", createTrainingRouter(authService, sentinelTraining, sentinelBenchmark, sentinelActiveLearning, sentinelShadowEvaluator));
 app.use("/api/governance", createGovernanceRouter(authService, autonomousGovernance));
 app.use("/api/sentinel-control", createSentinelControlRouter(authService, sentinelOrchestrator));
-app.use("/api/auth", createAuthRouter(authService, config, securityResponse));
+app.use("/api/auth", createAuthRouter(authService, config, securityResponse, biometricIdentityRepository, biometrics, emailOtp));
+app.use("/api/biometrics", createBiometricsRouter(authService, biometrics));
 app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
 app.use("/api/agent/automation", createAutomationRouter(authService, agentAutomation));
 app.use("/api/agent/memory", createMemoryRouter(authService, agentMemory));
@@ -167,7 +177,7 @@ app.use("/api/agent/knowledge", createKnowledgeRouter(authService, agentKnowledg
 app.use("/api/agent/orchestration", createOrchestrationRouter(authService, multiAgent));
 app.use("/api/integrations", createIntegrationsRouter(authService, integrations));
 app.use("/api/production", createProductionRouter(authService, productionIntelligence));
-app.use("/api", createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler, agentAutomation));
+app.use("/api", createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler, biometrics));
 
 const frontendCandidates = [path.join(__dirname, ".."), __dirname];
 const frontendRoot = frontendCandidates.find((directory) => fs.existsSync(path.join(directory, "sentinel.html"))) || __dirname;
@@ -189,7 +199,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-window-catalog.js", "external-apps-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "external-apps-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js"];
 for (const script of shellScripts) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -203,7 +213,8 @@ for (const script of shellScripts) {
 
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
-  const version = "external-apps-v1";
+  html = html.replace('<body>', `<body data-voice-identity-required="${config.biometricGateEnabled ? 'true' : 'false'}">`);
+  const version = `${require("./package.json").version}-guest-auth-single-audio-v1`;
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
   }
@@ -338,6 +349,8 @@ async function start() {
   await audit.init();
   await securityResponse.init();
   await authService.init();
+  await biometrics.init();
+  await emailOtp.init();
   await conversations.init();
   await agentRuns.init();
   await agentPending.init();
@@ -410,4 +423,4 @@ if (require.main === module) {
   }).catch((error) => { console.error("[BOOT]", error); process.exit(1); });
 }
 
-module.exports = { app, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
+module.exports = { app, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };

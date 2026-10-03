@@ -75,7 +75,9 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     load('phase2-auth.js'); await tick();
     await w.PanthoriumAuth.login('admin', 'fixture');
     w.document.getElementById('desktop').classList.add('active');
-    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    w.PanthoriumStagingAdminDesktop.render();
+    assert(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), 'administrator desktop must show Voice Identity icon');
     w.PanthoriumAIStream.install();
     const command = text => w.callAI(text, { voiceMode: true });
     const isVisible = app => { const el = w.document.querySelector(app.selector); return !!el && w.getComputedStyle(el).display !== 'none'; };
@@ -86,6 +88,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       assert.equal(result.text, `เปิด ${app.label}`, 'on-screen result identifies the command');
       assert.equal(isVisible(app), true, `${app.label} did not appear`);
       const root = w.document.querySelector(app.selector);
+      if (app.id === 'voice-identity') assert(root.querySelector('[data-type] option[value="administrator"]'), 'administrator enrollment option appears on admin page');
       if (app.external) {
         assert.equal(root.querySelector('iframe'), null, `${app.label}: must not embed an iframe`);
         assert(root.querySelector('[data-external-open]'), `${app.label}: real-site opener missing`);
@@ -176,16 +179,34 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     client++;
     const replaceUser = user => { w.nextUser = user; w.nextToken = auth.signAccessToken(user); evaluate('OS.state.user = window.nextUser; OS.config.accessToken = window.nextToken;'); w.dispatchEvent(new w.CustomEvent('panthorium:auth-changed')); };
     replaceUser(guest);
+    w.PanthoriumStagingAdminDesktop.render();
+    assert.equal(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), null, 'guest desktop must not show Voice Identity');
+    assert.equal(w.document.getElementById('voice-identity-launcher'), null, 'guest must not see a Voice Identity start-menu launcher');
     for (const app of catalog.apps) {
       const result = await command(`เปิด ${app.aliases[0]}`);
       assert.equal(result.ok, catalog.allowed(app, guest), `${app.label}: guest permission`);
       assert.equal(isVisible(app), catalog.allowed(app, guest), `${app.label}: guest DOM`);
+      if (app.id === 'voice-identity' && result.ok) assert.equal(w.document.querySelector(app.selector + ' [data-type] option[value="administrator"]'), null, 'guest sees only user/family enrollment types');
       if (result.ok) await command(`ปิด ${app.aliases[0]}`);
     }
     assert.equal((await w.PanthoriumVoiceCommands.windowAction('open_learning_lab')).ok, false, 'desktop/client calls also need permission');
+    await w.PanthoriumVoiceIdentity.open();
+    const guestAdminPageVoiceUi = w.document.getElementById('panthorium-voice-identity');
+    assert(guestAdminPageVoiceUi, 'guest can open user/family enrollment');
+    assert.equal(guestAdminPageVoiceUi.querySelector('[data-type] option[value="administrator"]'), null, 'guest cannot select administrator type');
+    guestAdminPageVoiceUi.remove();
     replaceUser({ ...admin, roles: ['operator'] });
+    w.PanthoriumStagingAdminDesktop.render();
+    assert.equal(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), null, 'operator must not see the administrator desktop icon');
+    await w.PanthoriumVoiceIdentity.open();
+    const operatorVoiceUi = w.document.getElementById('panthorium-voice-identity');
+    assert(operatorVoiceUi, 'authorized operator may manage user and family voice profiles');
+    assert.equal(operatorVoiceUi.querySelector('[data-type] option[value="administrator"]'), null, 'administrator voice enrollment is hidden from operators');
+    operatorVoiceUi.remove();
     assert.equal((await command('เปิด Security')).ok, false, 'settings permission alone does not grant administrator role');
     replaceUser(admin);
+    w.PanthoriumStagingAdminDesktop.render();
+    assert(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), 'administrator icon returns for administrator account');
     console.log('PASS: guest and operator denied administrator windows by server AND client');
 
     client++;
@@ -213,5 +234,27 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert.equal(mutations.length, 1);
     console.log('PASS: no deletion before confirmation; cancel, replay and account switch protected; completed UI actions not repeated');
     assert(!requests.some(item => item.pathname.startsWith('/api/chat')));
+    const guestDom = new JSDOM('<!doctype html><html><body><div id="sm-apps"></div></body></html>', { url: 'https://panthorium-staging.example.run.app/', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
+    const gw = guestDom.window;
+    gw.OS = { config: { accessToken: 'guest-session-token' }, state: { user: guest } };
+    gw.PanthoriumAuth = { isGuest: () => true, isAdministrator: () => false, isAdminEntry: () => false, hasPermission: permission => permission === 'chat' };
+    gw.fetch = async url => ({ ok: true, status: 200, json: async () => String(url).includes('/status') ? { configured: true, gateEnabled: false } : { profiles: [] } });
+    gw.eval(source('voice-identity-ui.js'));
+    gw.document.dispatchEvent(new gw.Event('DOMContentLoaded'));
+    await tick();
+    assert(gw.document.getElementById('voice-identity-launcher'), 'guest start menu keeps the Voice Identity icon');
+    await gw.PanthoriumVoiceIdentity.open();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual([...gw.document.querySelectorAll('[data-type] option')].map(option => option.value), ['user', 'family'], 'guest registration offers user and family only');
+    assert(gw.document.querySelector('[data-email][type="email"]'), 'guest voice signup asks for email');
+    assert(gw.document.querySelector('[data-password][type="password"]'), 'guest voice signup asks for a password');
+    assert(gw.document.querySelector('[data-password-confirm][type="password"]'), 'guest voice signup confirms the password');
+    assert(gw.document.querySelector('[data-request-otp]') && gw.document.querySelector('[data-verify-otp]'), 'guest confirms email with OTP');
+    assert(gw.document.querySelector('[data-login-email]') && gw.document.querySelector('[data-forgot]'), 'guest can sign in or recover password');
+    assert(gw.document.querySelector('[data-reset-email][type="email"]') && gw.document.querySelector('[data-reset-password-confirm][type="password"]'), 'password recovery has an email and password confirmation field');
+    assert(gw.document.querySelector('[data-remember]') && gw.document.querySelector('[data-login-remember]'), 'remember choice appears on signup and login');
+    assert.match(gw.document.querySelector('#panthorium-voice-identity [data-state]').textContent, /โหมดลงทะเบียน\/ทดสอบ.*ยังปิดอยู่/, 'guest sees that voice gating is still disabled during staged testing');
+    gw.close();
+    console.log('PASS: guest start menu keeps voice registration and shows only user/family types');
   } finally { w.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

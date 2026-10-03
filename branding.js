@@ -1,30 +1,49 @@
 (() => {
   const logo = '/panthorium-logo.svg';
 
-  function applyBranding() {
-    const bootLogo = document.querySelector('.boot-logo');
-    if (bootLogo && !bootLogo.querySelector('img[data-panthorium-logo]')) {
-      bootLogo.style.border = 'none';
-      bootLogo.style.borderRadius = '0';
-      bootLogo.style.width = '132px';
-      bootLogo.style.height = '132px';
-      bootLogo.style.boxShadow = 'none';
-      bootLogo.innerHTML = `<img data-panthorium-logo src="${logo}" alt="Panthorium" style="width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 0 18px rgba(255,90,20,.32));">`;
+  function installLogoStyles() {
+    if (document.getElementById('panthorium-logo-fit-style')) return;
+    const style = document.createElement('style');
+    style.id = 'panthorium-logo-fit-style';
+    style.textContent = `
+      .panthorium-logo-frame {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        overflow: hidden !important;
+      }
+      .panthorium-logo-frame > img[data-panthorium-logo] {
+        display: block !important;
+        width: 100% !important;
+        height: 100% !important;
+        max-width: 100% !important;
+        max-height: 100% !important;
+        object-fit: contain !important;
+        flex: 0 0 auto !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensureLogo(container) {
+    if (!container) return;
+    let image = container.querySelector('img[data-panthorium-logo]');
+    if (!image) {
+      image = document.createElement('img');
+      image.dataset.panthoriumLogo = '';
+      image.src = logo;
+      image.alt = 'Panthorium';
+      container.replaceChildren(image);
     }
+    container.classList.add('panthorium-logo-frame');
+  }
 
-    document.querySelectorAll('.login-avatar').forEach((avatar) => {
-      if (avatar.querySelector('img[data-panthorium-logo]')) return;
-      avatar.style.border = 'none';
-      avatar.style.background = 'transparent';
-      avatar.innerHTML = `<img data-panthorium-logo src="${logo}" alt="Panthorium" style="width:74px;height:74px;object-fit:contain;">`;
-    });
-
-    document.querySelectorAll('.sm-avatar').forEach((avatar) => {
-      if (avatar.querySelector('img[data-panthorium-logo]')) return;
-      avatar.style.border = 'none';
-      avatar.style.background = 'transparent';
-      avatar.innerHTML = `<img data-panthorium-logo src="${logo}" alt="Panthorium" style="width:32px;height:32px;object-fit:contain;">`;
-    });
+  function applyBranding() {
+    installLogoStyles();
+    // Keep the circular frame styles from the shell. The SVG has its own
+    // centered safe inset, so its mark stays inside rings at every size.
+    document.querySelectorAll('.boot-logo, .login-avatar, .sm-avatar, .about-logo, [data-panthorium-logo-frame]')
+      .forEach(ensureLogo);
   }
 
   applyBranding();

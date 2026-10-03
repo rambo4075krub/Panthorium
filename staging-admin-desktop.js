@@ -1,9 +1,9 @@
 (function(){
 'use strict';
 
-const TARGET_PATH=/^\/admin(?:\/|\.html)?$/;
 const APPS=[
   {id:'sentinel',icon:'🤖',label:'Sentinel AI',openers:['openSentinel']},
+  {id:'voice-identity',icon:'🎙️',label:'Voice Identity',role:'administrator',openers:['PanthoriumVoiceIdentity.open']},
   {id:'settings',icon:'⚙️',label:'ตั้งค่า',openers:['openSettings']},
   {id:'security',icon:'🛡️',label:'Security',openers:['PanthoriumSecurityDashboard.open','openSecurityDashboard'],launcherId:'phase3-security-start'},
   {id:'ai-platform',icon:'🧠',label:'AI Platform',openers:['PanthoriumAI.open'],launcherId:'phase4-ai-launcher'},
@@ -20,7 +20,8 @@ const APPS=[
 
 let renderedFingerprint='';
 
-function isTarget(){return TARGET_PATH.test(location.pathname)||auth()?.isAdministrator?.()===true;}
+// The /admin route is only an entry point; the URL itself never grants desktop privileges.
+function isTarget(){const roles=OS?.state?.user?.roles||[];return !roles.includes('guest')&&auth()?.isAdministrator?.()===true;}
 
 function auth(){return window.PanthoriumAuth||null;}
 function closeMenu(){document.getElementById('start-menu')?.classList.remove('open');}
@@ -28,8 +29,10 @@ function notify(message){try{if(typeof toast==='function')toast(message);else co
 function resolve(path){return String(path||'').split('.').reduce((obj,key)=>obj&&obj[key],window);}
 function openerReady(app){return (app.openers||[]).some(path=>typeof resolve(path)==='function')||!!(app.launcherId&&document.getElementById(app.launcherId));}
 function removeLegacyFloatingLaunchers(){document.querySelectorAll('[data-production-intelligence="1"]').forEach(node=>{if(!node.closest('#sm-apps'))node.remove();});}
+function hideDesktop(){const desktop=document.getElementById('desktop-icons');if(!desktop)return;desktop.replaceChildren();desktop.style.display='none';desktop.classList.remove('staging-admin-desktop-v2');delete desktop.dataset.desktopManager;}
 async function openApp(app){
   closeMenu();
+  if(app.role&&!((OS?.state?.user?.roles||[]).includes(app.role))){notify(`${app.label} ใช้ได้เฉพาะผู้ดูแลระบบ`);return false;}
   const entry=window.PanthoriumWindowCatalog?.apps.find(item=>item.id===app.id);
   const commands=window.PanthoriumVoiceCommands;
   if(!entry||!commands){notify(`${app.label} ยังโหลดไม่เสร็จ`);return false;}
@@ -65,10 +68,10 @@ function createIcon(app){
   button.append(icon,label);button.onclick=()=>openApp(app);return button;
 }
 function renderDesktop(){
-  if(!isTarget())return false;
+  if(!isTarget()){hideDesktop();return false;}
   const desktop=document.getElementById('desktop-icons');if(!desktop)return false;
   ensureStyle();removeLegacyFloatingLaunchers();
-  const visibleApps=APPS.filter(app=>window.PanthoriumWindowCatalog?.allowed(window.PanthoriumWindowCatalog.apps.find(item=>item.id===app.id), typeof OS!=='undefined'?OS.state.user:null));
+  const visibleApps=APPS.filter(app=>(!app.role||(OS?.state?.user?.roles||[]).includes(app.role))&&window.PanthoriumWindowCatalog?.allowed(window.PanthoriumWindowCatalog.apps.find(item=>item.id===app.id), typeof OS!=='undefined'?OS.state.user:null));
   const fingerprint=visibleApps.map(app=>`${app.id}:${openerReady(app)?'ready':'pending'}`).join('|');
   desktop.className='desktop-icons staging-admin-desktop-v2';
   desktop.style.display='grid';
@@ -90,7 +93,7 @@ function configureStartMenu(){
   if(!restart){restart=document.createElement('button');restart.id='btn-restart';restart.type='button';restart.textContent='🔄 รีสตาร์ท';restart.title='รีสตาร์ท Panthorium';restart.onclick=()=>{closeMenu();location.reload();};footer.insertBefore(restart,footer.firstChild);}
   window.PanthoriumAccessShell?.sync?.();
 }
-function sync(){if(!isTarget())return;removeLegacyFloatingLaunchers();configureStartMenu();renderDesktop();}
+function sync(){if(!isTarget()){removeLegacyFloatingLaunchers();hideDesktop();return;}removeLegacyFloatingLaunchers();configureStartMenu();renderDesktop();}
 function syncAfterShell(){requestAnimationFrame(()=>{sync();requestAnimationFrame(sync);});}
 
 window.addEventListener('panthorium:auth-changed',syncAfterShell);

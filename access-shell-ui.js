@@ -7,8 +7,10 @@
   const auth = () => window.PanthoriumAuth;
   const user = () => typeof OS !== 'undefined' ? OS.state.user : null;
   const guest = () => !user() || user().roles?.includes('guest');
+  const staff = () => !guest() && (admin() || (user()?.roles || []).includes('operator'));
   const admin = () => auth()?.isAdministrator?.() === true;
   let updateStatus = null, checking = null, installing = false, lastChecked = 0;
+  let appMenuObserver = null, observedAppMenu = null;
 
   function style() {
     if (document.getElementById('panthorium-access-style')) return;
@@ -17,13 +19,21 @@
     el.textContent = `
       #start-menu .browser-action{display:block;width:calc(100% - 24px);margin:0 12px 12px;padding:12px 10px;border:1px solid rgba(0,255,204,.22);border-radius:10px;background:rgba(0,255,204,.06);color:inherit;font:inherit;text-align:center;cursor:pointer;text-decoration:none;box-sizing:border-box;}
       #start-menu .browser-action:disabled{cursor:default;opacity:.7;}
-      body[data-panthorium-role="guest"] #btn-settings-quick,body[data-panthorium-role="guest"] #btn-restart{display:none!important;}
-      body[data-panthorium-role="guest"][data-panthorium-browser="desktop"] #sm-apps{display:none!important;}
+      body[data-panthorium-role="user"] #btn-settings-quick,body[data-panthorium-role="guest"] #btn-settings-quick,body[data-panthorium-role="user"] #btn-restart,body[data-panthorium-role="guest"] #btn-restart{display:none!important;}
+      body[data-panthorium-role="guest"][data-panthorium-browser="desktop"] #sm-apps{display:block!important;}
       #start-menu .sm-footer{display:flex;gap:8px;}
       #start-menu .sm-footer button{flex:1;min-height:38px;}
     `;
     el.textContent += restrictedLaunchers.map(id => 'body[data-panthorium-role="guest"] #' + id).concat('body[data-panthorium-role="guest"] [data-production-intelligence="1"]').join(',') + '{display:none!important;}';
     document.head.appendChild(el);
+  }
+  function observeAppMenu() {
+    const apps = document.getElementById('sm-apps');
+    if (!apps || apps === observedAppMenu || typeof MutationObserver === 'undefined') return;
+    appMenuObserver?.disconnect();
+    observedAppMenu = apps;
+    appMenuObserver = new MutationObserver(() => scheduleSync());
+    appMenuObserver.observe(apps, { childList: true });
   }
   function newer(current, next) {
     const a = String(current).split('.').map(Number), b = String(next).split('.').map(Number);
@@ -105,51 +115,56 @@
     const menu = document.getElementById('start-menu');
     if (!menu) return;
     style();
-    const isGuest = guest(), isDesktop = electron();
+    const isGuest = guest(), isDesktop = electron(), isStaff = staff();
     document.body.dataset.panthoriumRole = isGuest ? 'guest' : admin() ? 'admin' : 'user';
     document.body.dataset.panthoriumBrowser = isDesktop ? 'desktop' : 'web';
-    restrictedLaunchers.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = isGuest ? 'none' : ''; });
-    menu.querySelectorAll('#sm-apps > *').forEach(el => { if (restrictedLabels.test(el.textContent || '')) el.style.display = isGuest ? 'none' : ''; });
+    restrictedLaunchers.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = isStaff ? '' : 'none'; });
+    const apps = document.getElementById('sm-apps');
+    observeAppMenu();
+    if (apps && !isStaff) {
+      const entries = [...apps.children];
+      let sentinel = entries.find(el => /Sentinel AI/i.test(el.textContent || ''));
+      let voice = entries.find(el => /Voice Identity/i.test(el.textContent || ''));
+      if (!sentinel) { sentinel = document.createElement('button'); sentinel.type = 'button'; sentinel.className = 'sm-app'; sentinel.innerHTML = '<div class="ico">🤖</div><span>Sentinel AI</span>'; sentinel.onclick = () => window.PanthoriumVoiceCommands?.windowAction?.('open_sentinel'); }
+      if (!voice) { voice = document.createElement('button'); voice.type = 'button'; voice.className = 'sm-app'; voice.innerHTML = '<div class="ico">🎙️</div><span>Voice Identity</span>'; voice.onclick = () => window.PanthoriumVoiceIdentity?.open?.(); }
+      if (apps.children.length !== 2 || apps.children[0] !== sentinel || apps.children[1] !== voice) apps.replaceChildren(sentinel, voice);
+    } else if (apps) menu.querySelectorAll('#sm-apps > *').forEach(el => { el.style.display = ''; });
     const settings = document.getElementById('btn-settings-quick');
-    if (settings) settings.style.display = isGuest || admin() ? 'none' : '';
+    if (settings) settings.style.display = isStaff ? '' : 'none';
     const footer = menu.querySelector('.sm-footer');
     const logout = document.getElementById('btn-logout');
-    let login = document.getElementById('btn-login');
-    if (isGuest && isDesktop && footer) {
-      if (!login) { login = document.createElement('button'); login.id = 'btn-login'; login.type = 'button'; footer.prepend(login); }
-      login.textContent = 'เข้าสู่ระบบ';
-      login.onclick = () => { location.href = '/admin'; };
-    } else login?.remove();
+    document.getElementById('btn-login')?.remove();
     if (logout) {
       logout.style.display = '';
-      logout.textContent = isGuest && !isDesktop ? 'ดาวน์โหลด Panthorium Browser' : 'ออกจากระบบ';
-      logout.title = logout.textContent;
-      logout.onclick = isGuest && !isDesktop ? () => { location.href = '/browser-download.html'; } : () => auth()?.logout?.();
+      logout.textContent = '🚪 ออกจากระบบ';
+      logout.title = 'ออกจากระบบ';
+      logout.onclick = () => auth()?.logout?.();
     }
-    if (isDesktop) {
-      // Inside the installed browser: only update controls — no installer hyperlink.
+    if (isDesktop && isStaff) {
+      // Admin retains in-app update controls.
       document.getElementById('panthorium-browser-download')?.remove();
       let update = document.getElementById('panthorium-browser-update');
       if (!update) { update = document.createElement('button'); update.id = 'panthorium-browser-update'; update.type = 'button'; update.className = 'browser-action'; update.onclick = updateBrowser; menu.appendChild(update); }
       renderUpdateStatus();
       refreshUpdateStatus();
-    } else {
+    } else if (!isDesktop) {
+      document.getElementById('panthorium-browser-update')?.remove();
+    }
+    if (!isStaff || (!isDesktop && admin())) {
       document.getElementById('panthorium-browser-update')?.remove();
       let download = document.getElementById('panthorium-browser-download');
-      if (admin()) {
-        if (!download) {
-          download = document.createElement('a');
-          download.id = 'panthorium-browser-download';
-          download.className = 'browser-action';
-          download.target = '_blank';
-          download.rel = 'noopener';
-          menu.appendChild(download);
-        }
-        download.textContent = 'ดาวน์โหลด Panthorium Browser Admin';
-        download.href = '/browser-download.html?edition=admin';
-      } else if (download) {
-        download.remove();
+      if (!download) {
+        download = document.createElement('a');
+        download.id = 'panthorium-browser-download';
+        download.className = 'browser-action';
+        download.target = '_blank';
+        download.rel = 'noopener';
+        menu.appendChild(download);
       }
+      download.textContent = admin() ? 'ดาวน์โหลด Panthorium Browser Admin' : 'ดาวน์โหลด Panthorium Browser';
+      download.href = admin() ? '/browser-download.html?edition=admin' : '/browser-download.html';
+    } else {
+      document.getElementById('panthorium-browser-download')?.remove();
     }
     restrictWindows();
   }

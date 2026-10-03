@@ -9,9 +9,9 @@ assert(shell.includes('id="bg-canvas"'), 'prototype orb must render in the deskt
 assert(shell.includes('new THREE.PerspectiveCamera(42'), 'prototype camera field of view must be preserved');
 assert(shell.includes('camera.position.set(0, 0, 4.65)'), 'prototype camera position must be preserved');
 assert(shell.includes('antialias: true'), 'prototype WebGL antialiasing must be preserved');
-assert(shell.includes('Math.min(window.devicePixelRatio, 2)'), 'prototype pixel density must be preserved');
+assert(shell.includes('renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))'), 'prototype pixel ratio must be preserved');
 assert(shell.includes('renderer.setClearColor(0x01030a, 1)'), 'prototype clear color must be preserved');
-assert(shell.includes('window.innerWidth < 700 ? 11880 : 23100'), 'prototype responsive particle counts must be preserved');
+assert(shell.includes('window.innerWidth < 700 ? 12360 : 23100'), 'mobile particle count should increase by approximately two percent per increase');
 assert(shell.includes('new THREE.SphereGeometry(.77, 64, 64)'), 'prototype core geometry must be preserved');
 assert(shell.includes('new Float32Array(750 * 3)'), 'prototype star count must be preserved');
 assert(shell.includes('8.86578/-mv.z'), 'prototype particle point size must be preserved');

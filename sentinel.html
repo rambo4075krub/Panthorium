@@ -721,7 +721,7 @@
 
     <!-- DESKTOP -->
     <div id="desktop">
-        <div id="version-badge" aria-label="เวอร์ชัน">15.0.4</div>
+        <div id="version-badge" aria-label="เวอร์ชัน">15.0.8</div>
         <canvas id="bg-canvas"></canvas>
         <section id="orb-transcript" tabindex="0" role="region" aria-label="ข้อความประกอบเสียงตอบของ AI">
             <div class="orb-transcript-line previous" data-orb-line="previous" aria-label="ประโยคก่อนหน้า"></div>
@@ -783,7 +783,7 @@
     const OS = {
         // Web OS shell build (shown in About). Browser app version is releaseVersion.
         version: "1.1.0",
-        releaseVersion: "15.0.4",
+        releaseVersion: "15.0.8",
         state: {
             booted: false,
             loggedIn: false,
@@ -1146,77 +1146,77 @@
     function splitSpeechByLanguage(text) {
         const source = String(text || "").replace(/\s+/g, " ").trim();
         if (!source) return [];
-        // Split inside a sentence when the script changes (Thai + English + 日本語, etc.).
-        // The previous implementation classified the whole sentence by its first script.
-        const tokens = source.match(/[\u0E00-\u0E7F]+|[\u3040-\u30FF]+|[\uAC00-\uD7AF]+|[\u0600-\u06FF]+|[\u0400-\u04FF]+|[\u4E00-\u9FFF]+|[A-Za-zÀ-ÿ]+|[0-9]+|[^\p{L}\p{N}]+/gu) || [source];
-        const chunks = [];
-        for (const token of tokens) {
-            if (/^[\s\p{P}\p{S}\d]+$/u.test(token) && chunks.length) {
-                chunks[chunks.length - 1].text += token;
-                continue;
-            }
-            const lang = languageForText(token);
-            const last = chunks[chunks.length - 1];
-            // Keep consecutive sentences in the same language in one audio
-            // request. Splitting at every full stop created a long network gap
-            // even though the speaker and language had not changed.
-            if (last && last.lang === lang) last.text += token;
-            else chunks.push({ text: token, lang });
+        // One voice and one pronunciation path for every script: English
+        // words are spoken by the system's Thai male Niwat voice too.
+        const pieces = [];
+        let remaining = source;
+        while (remaining.length > 6000) {
+            let cut = remaining.lastIndexOf(" ", 5500);
+            if (cut < 3000) cut = 5500;
+            pieces.push({ text: remaining.slice(0, cut).trim(), lang: "th-TH" });
+            remaining = remaining.slice(cut).trim();
         }
-        return chunks.map(chunk => ({ ...chunk, text: chunk.text.trim() })).filter(chunk => chunk.text).flatMap(chunk => {
-            const pieces = [];
-            let remaining = chunk.text;
-            while (remaining.length > 170) {
-                let cut = remaining.lastIndexOf(" ", 170);
-                if (cut < 80) cut = 170;
-                pieces.push({ text: remaining.slice(0, cut).trim(), lang: chunk.lang });
-                remaining = remaining.slice(cut).trim();
-            }
-            if (remaining) pieces.push({ text: remaining, lang: chunk.lang });
-            return pieces;
-        });
-    }
-
-    function voiceForLanguage(lang, voices) {
-        const base = lang.split("-")[0].toLowerCase();
-        const matching = voices.filter(v => v.lang.toLowerCase() === lang.toLowerCase() || v.lang.toLowerCase().startsWith(base + "-"));
-        const deepVoiceNames = /pattara|niwat|male|man|ชาย|david|mark|guy|daniel|aaron|arthur|oliver|thomas|alex|jorge|paul|fred|ralph/i;
-        const femaleVoiceNames = /premwadee|narisa|kanya|female|woman|หญิง|samantha|zira|susan|victoria|karen|moira|tessa|ava|allison/i;
-        const ranked = matching.filter(voice => !femaleVoiceNames.test(voice.name)).sort((a, b) => {
-            const score = voice => (voice.lang.toLowerCase() === lang.toLowerCase() ? 4 : 0) + (deepVoiceNames.test(voice.name) ? 12 : 0) + (voice.localService ? 1 : 0);
-            return score(b) - score(a);
-        });
-        const confirmedMale = ranked.find(voice => deepVoiceNames.test(voice.name));
-        // Thai and English system voice lists may contain unlabelled female
-        // defaults. Never select an unconfirmed voice for these languages.
-        if (base === "th" || base === "en") return confirmedMale || null;
-        return confirmedMale || ranked[0] || null;
-    }
-
-    function loadSpeechVoices() {
-        const current = speechSynthesis.getVoices();
-        if (current.length) return Promise.resolve(current);
-        return new Promise(resolve => {
-            let done = false;
-            const finish = () => {
-                if (done) return;
-                done = true;
-                speechSynthesis.removeEventListener("voiceschanged", finish);
-                resolve(speechSynthesis.getVoices());
-            };
-            speechSynthesis.addEventListener("voiceschanged", finish);
-            setTimeout(finish, 1200);
-        });
+        if (remaining) pieces.push({ text: remaining, lang: "th-TH" });
+        return pieces;
     }
 
     const voiceAudio = new Audio();
+    let voicePlaybackContext = null;
+    let voicePlaybackSource = null;
+    const voiceAudioPlayers = [voiceAudio, new Audio()];
+    const reservedVoiceAudioPlayers = new Set();
+    const voiceAudioPlayerWaiters = [];
+    const unlockedVoiceAudioPlayers = new Set();
     let voiceAudioUnlocked = false;
     let voiceAudioUnlocking = false;
     let activeSpeechRun = 0;
+    let cancelRemotePlayback = null;
+    let speechInterruptedByUser = false;
+    let currentSpeechText = "";
+    let interruptedSpeechText = "";
+    const sentinelSpeechIsActive = () => aiSpeechActive || streamingSpeechActive;
+    function normalizeVoiceStopText(text) {
+        return String(text || "").normalize("NFKC").toLowerCase()
+            .replace(/[\s\u200b\u200c\u200d\uFEFF]+/gu, "")
+            .replace(/(?:ครับ|ค่ะ|คะ|นะ|หน่อย)$/u, "")
+            .replace(/[.,!?;:。！？、ฯๆ]+$/gu, "")
+            .replace(/[.,!?;:。！？、]/gu, "");
+    }
+    function isVoiceStopCommand(text) {
+        const normalized = normalizeVoiceStopText(text);
+        return /^(?:หยุด(?:พูด|เดี๋ยวนี้|เสียง|ก่อน|ที|เลย|ได้แล้ว|ต่อ)?|ไม่ต้องพูด(?:แล้ว|ต่อ)?|พอ(?:แล้ว|ที|ก่อน|เถอะ)?|เซา(?:ๆ|เซา)?|เซ้า(?:ๆ|เซ้า)?)$/u.test(normalized);
+    }
+    function isVoiceContinueCommand(text) {
+        const normalized = normalizeVoiceStopText(text);
+        return /^(?:พูดต่อ(?:ไป|ได้(?:เลย)?|เลย)?|ต่อ(?:ไป|ได้(?:เลย)?|เลย)?|เล่าต่อ(?:ไป|ได้)?|อ่านต่อ(?:ไป|ได้)?|continue(?:speaking|please)?|pleasecontinue|goon|keepgoing|carryon|goahead)$/u.test(normalized);
+    }
+    function stopSentinelSpeech() {
+        speechInterruptedByUser = true;
+        if (currentSpeechText) interruptedSpeechText = currentSpeechText;
+        currentSpeechText = "";
+        cancelStreamingSpeech();
+        activeSpeechRun += 1;
+        try { cancelRemotePlayback?.(); } catch (_) {}
+        cancelRemotePlayback = null;
+        for (const audio of voiceAudioPlayers) { try { audio.pause(); audio.currentTime = 0; } catch (_) {} }
+        try { voiceAudio.pause(); voiceAudio.currentTime = 0; } catch (_) {}
+        try { voicePlaybackSource?.stop(); } catch (_) {}
+        voicePlaybackSource = null;
+        aiSpeechActive = false;
+        aiSpeechPulse = 0;
+        window.PanthoriumOrb?.setAISpeaking(false);
+        window.dispatchEvent(new CustomEvent("panthorium:voice-end", { detail: { interrupted: true } }));
+    }
     function unlockVoiceAudio() {
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        if (!voicePlaybackContext && AudioContextCtor) {
+            try { voicePlaybackContext = new AudioContextCtor(); } catch (_) {}
+        }
+        if (voicePlaybackContext?.state === "suspended") voicePlaybackContext.resume().catch(() => {});
         if (voiceAudioUnlocked || voiceAudioUnlocking || aiSpeechActive) return;
         if (!URL.createObjectURL) return;
-        // 20ms of silent PCM. media-src already allows blob:, not data:.
+        // Warm every reusable player from the user's tap; Android Chrome can
+        // block media elements that first call play() after a network wait.
         const wav = new ArrayBuffer(44 + 320);
         const view = new DataView(wav);
         const label = (offset, value) => [...value].forEach((char, i) => view.setUint8(offset + i, char.charCodeAt(0)));
@@ -1224,39 +1224,47 @@
         view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
         view.setUint32(24, 8000, true); view.setUint32(28, 16000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
         label(36, "data"); view.setUint32(40, 320, true);
-        const warmupUrl = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
         voiceAudioUnlocking = true;
-        voiceAudio.src = warmupUrl;
-        voiceAudio.volume = 0;
-        const finish = () => {
-            // A late warmup promise must not pause a real answer already playing.
-            if (voiceAudio.src === warmupUrl) { voiceAudio.pause(); voiceAudio.currentTime = 0; }
-            voiceAudioUnlocking = false;
+        let remaining = voiceAudioPlayers.length;
+        const finish = (audio, warmupUrl, unlocked) => {
+            if (audio.src === warmupUrl) { audio.pause(); audio.currentTime = 0; }
+            if (unlocked) unlockedVoiceAudioPlayers.add(audio);
             URL.revokeObjectURL(warmupUrl);
+            remaining -= 1;
+            if (!remaining) {
+                voiceAudioUnlocking = false;
+                voiceAudioUnlocked = voiceAudioPlayers.every(player => unlockedVoiceAudioPlayers.has(player));
+            }
         };
-        try { Promise.resolve(voiceAudio.play()).then(() => { voiceAudioUnlocked = true; }).catch(() => {}).finally(finish); }
-        catch (_) { finish(); }
+        for (const audio of voiceAudioPlayers) {
+            const warmupUrl = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
+            audio.preload = "auto"; audio.src = warmupUrl; audio.volume = 0;
+            try { Promise.resolve(audio.play()).then(() => finish(audio, warmupUrl, true), () => finish(audio, warmupUrl, false)); }
+            catch (_) { finish(audio, warmupUrl, false); }
+        }
     }
 
     async function requestRemoteChunk(text, lang) {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), Math.max(12000, Math.min(30000, String(text).length * 180)));
+        // The server performs one bounded synthesis attempt. Do not keep a
+        // second browser retry queued behind a slow first response.
+        const timeout = setTimeout(() => controller.abort(), Math.max(20000, Math.min(300000, String(text).length * 80)));
         try {
             const base = OS.config.backendUrl.replace(/\/$/, "");
             const response = await authorizedFetch(base + "/api/speech", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "include",
-                body: JSON.stringify({ text: String(text).slice(0, 180), lang }),
+                body: JSON.stringify({ text: String(text).slice(0, 6000), lang }),
                 signal: controller.signal
             });
             if (!response.ok) return null;
-            const expectedMaleProfile = lang === "th-TH" || lang === "en-US" ? "en-US-AndrewMultilingualNeural" : "";
+            const expectedMaleProfile = "th-TH-NiwatNeural";
             const receivedProfile = response.headers.get("x-sentinel-voice-profile") || "";
             if (expectedMaleProfile && receivedProfile !== expectedMaleProfile) return null;
             const blob = await response.blob();
             if (!blob.size) return null;
-            return { objectUrl: URL.createObjectURL(blob) };
+            return { objectUrl: URL.createObjectURL(blob), blob };
         } catch (_) {
             return null;
         } finally {
@@ -1264,14 +1272,110 @@
         }
     }
 
+    function reserveVoiceAudioPlayer() {
+        const available = voiceAudioPlayers.find(audio => !reservedVoiceAudioPlayers.has(audio));
+        if (available) { reservedVoiceAudioPlayers.add(available); return Promise.resolve(available); }
+        return new Promise(resolve => voiceAudioPlayerWaiters.push(resolve));
+    }
     function releaseRemoteChunk(prepared) {
+        if (prepared?.audio) {
+            const audio = prepared.audio; prepared.audio = null;
+            try {
+                audio.pause(); audio.onended = null; audio.onerror = null; audio.ontimeupdate = null;
+                audio.removeAttribute("src"); audio.load();
+            } catch (_) {}
+            const waiter = voiceAudioPlayerWaiters.shift();
+            if (waiter) waiter(audio); else reservedVoiceAudioPlayers.delete(audio);
+        }
         if (prepared?.objectUrl) URL.revokeObjectURL(prepared.objectUrl);
     }
+    async function preloadRemoteChunk(prepared) {
+        if (!prepared?.objectUrl || prepared.audio) return prepared;
+        const audio = await reserveVoiceAudioPlayer();
+        prepared.audio = audio; audio.preload = "auto"; audio.volume = 0; audio.src = prepared.objectUrl;
+        await new Promise(resolve => {
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true; clearTimeout(timer);
+                audio.removeEventListener("canplay", finish); audio.removeEventListener("error", finish);
+                resolve();
+            };
+            const timer = setTimeout(finish, 1800);
+            audio.addEventListener("canplay", finish, { once: true });
+            audio.addEventListener("error", finish, { once: true });
+            try { audio.load(); } catch (_) {}
+            if (audio.readyState >= 2) finish();
+        });
+        audio.volume = 1;
+        return prepared;
+    }
 
+    function playMobileRemoteChunk(prepared, text, transcriptRange = {}) {
+        return new Promise(resolve => {
+            const Context = window.AudioContext || window.webkitAudioContext;
+            if (!Context || !prepared?.blob) { resolve(null); return; }
+            if (!voicePlaybackContext) {
+                try { voicePlaybackContext = new Context(); } catch (_) { resolve(null); return; }
+            }
+            const context = voicePlaybackContext;
+            let settled = false;
+            let progressTimer = null;
+            let watchdog = null;
+            let source = null;
+            const finish = value => {
+                if (settled) return;
+                settled = true;
+                clearInterval(progressTimer); clearTimeout(watchdog);
+                if (voicePlaybackSource === source) voicePlaybackSource = null;
+                if (source) { source.onended = null; try { source.disconnect(); } catch (_) {} }
+                releaseRemoteChunk(prepared);
+                if (cancelRemotePlayback === cancel) cancelRemotePlayback = null;
+                resolve(value);
+            };
+            const cancel = () => { try { source?.stop(); } catch (_) {} finish(false); };
+            cancelRemotePlayback = cancel;
+            (async () => {
+                try {
+                    if (context.state === "suspended") await context.resume();
+                    const encoded = await prepared.blob.arrayBuffer();
+                    const buffer = await context.decodeAudioData(encoded);
+                    if (settled || speechInterruptedByUser) { finish(false); return; }
+                    source = context.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(context.destination);
+                    voicePlaybackSource = source;
+                    source.onended = () => {
+                        const lastChar = Math.max(0, Number(transcriptRange.end) - 1);
+                        showOrbTranscriptForChar(lastChar);
+                        window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex: lastChar } }));
+                        finish(true);
+                    };
+                    const start = Number(transcriptRange.start) || 0;
+                    const end = Math.max(start + 1, Number(transcriptRange.end) || start + String(text).length);
+                    const startedAt = context.currentTime;
+                    const update = () => {
+                        const elapsed = Math.max(0, context.currentTime - startedAt);
+                        const progress = Math.min(1, elapsed / Math.max(buffer.duration, 0.001));
+                        const charIndex = Math.min(end - 1, Math.floor(start + (end - start) * progress));
+                        showOrbTranscriptForChar(charIndex);
+                        window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex } }));
+                    };
+                    progressTimer = setInterval(update, 120);
+                    watchdog = setTimeout(() => finish(false), Math.max(15000, buffer.duration * 1000 + 10000));
+                    source.start();
+                } catch (_) { finish(false); }
+            })();
+        });
+    }
     function playRemoteChunk(prepared, text, transcriptRange = {}) {
+        if (isMobileDevice()) {
+            const result = playMobileRemoteChunk(prepared, text, transcriptRange);
+            return result.then(value => value === null ? playRemoteChunk(prepared, text, transcriptRange) : value);
+        }
         return new Promise(resolve => {
             if (!prepared?.objectUrl) { resolve(false); return; }
-            const audio = voiceAudio;
+            const audio = prepared.audio || voiceAudio;
             let settled = false;
             const finish = value => {
                 if (settled) return;
@@ -1282,15 +1386,20 @@
                 audio.onerror = null;
                 audio.ontimeupdate = null;
                 releaseRemoteChunk(prepared);
+                if (cancelRemotePlayback === cancel) cancelRemotePlayback = null;
                 resolve(value);
             };
-            const timeout = setTimeout(() => finish(false), Math.max(12000, Math.min(30000, String(text).length * 180)));
+            const cancel = () => finish(false);
+            cancelRemotePlayback = cancel;
+            const timeout = setTimeout(() => finish(false), Math.max(30000, Math.min(1200000, String(text).length * 500)));
             (async () => {
                 try {
-                    audio.pause();
-                    audio.currentTime = 0;
-                    audio.src = prepared.objectUrl;
-                    audio.preload = "auto";
+                    if (!prepared.audio) {
+                        audio.pause();
+                        audio.currentTime = 0;
+                        audio.src = prepared.objectUrl;
+                        audio.preload = "auto";
+                    }
                     audio.volume = 1;
                     // Pitch and tone are transformed server-side; keep playback
                     // brisk here without changing the new male register.
@@ -1317,10 +1426,6 @@
         });
     }
 
-    async function speakRemoteChunk(text, lang, transcriptRange) {
-        return playRemoteChunk(await requestRemoteChunk(text, lang), text, transcriptRange);
-    }
-
     function voiceSafeText(text) {
         const value = String(text || "").replace(/^\s*เสียงตอบกลับ\s*[:：-]?\s*/u, "").replace(/\s*(?:ครับ|ค่ะ|คะ)(?=\s|[,.!?;:…。、]|$)/g, "").trim();
         if (/ข้อความเท่านั้น|ไม่มีเสียงพูด|ไม่สามารถพูด|ไม่มีระบบเสียง/i.test(value)) {
@@ -1329,49 +1434,13 @@
         return value;
     }
 
-    function speakNativeChunk(chunk, voice, speechRun) {
-        return new Promise(resolve => {
-            if (!window.speechSynthesis || speechRun !== activeSpeechRun) { resolve(false); return; }
-            const u = new SpeechSynthesisUtterance(chunk.text);
-            let settled = false;
-            let started = false;
-            const finish = value => {
-                if (settled) return;
-                settled = true;
-                clearTimeout(startWatchdog);
-                resolve(value);
-            };
-            u.lang = voice?.lang || chunk.lang;
-            u.voice = voice || null;
-            // Sentinel voice: low, calm and deliberate, similar to a cinematic AI.
-            u.pitch = 0.9;
-            u.rate = 1.02;
-            u.onstart = () => { started = true; };
-            u.onboundary = event => {
-                aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.34);
-                const charIndex = (Number(chunk.transcriptStartChar) || 0) + event.charIndex;
-                window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex } }));
-                showOrbTranscriptForChar(charIndex);
-            };
-            u.onend = () => finish(true);
-            u.onerror = () => finish(false);
-            // Desktop Chromium can accept an utterance without ever starting it.
-            // Detect that silent failure so the remote audio fallback can take over.
-            const startWatchdog = setTimeout(() => {
-                if (!started) {
-                    try { window.speechSynthesis.cancel(); } catch (_) {}
-                    finish(false);
-                }
-            }, 1800);
-            try {
-                window.speechSynthesis.resume();
-                window.speechSynthesis.speak(u);
-            } catch (_) { finish(false); }
-        });
-    }
-
-    async function speak(text) {
+    async function speak(text, { firstPrepared = null, firstPreparedAttempted = false } = {}) {
+        if (speechInterruptedByUser) {
+            releaseRemoteChunk(firstPrepared);
+            return false;
+        }
         text = voiceSafeText(text);
+        currentSpeechText = text;
         setOrbTranscript(text, 0);
         const speechRun = ++activeSpeechRun;
         const rawChunks = splitSpeechByLanguage(text);
@@ -1384,60 +1453,49 @@
             return { ...chunk, transcriptStartChar, transcriptEndChar };
         });
         if (!chunks.length) return false;
-        let voices = [];
-        if (window.speechSynthesis) {
-            voices = await loadSpeechVoices();
-            window.speechSynthesis.cancel();
-        }
         voiceAudio.pause();
-        await new Promise(resolve => setTimeout(resolve, 80));
         if (speechRun !== activeSpeechRun) return false;
         aiSpeechActive = true;
         aiSpeechPulse = 1;
         window.PanthoriumOrb?.setAISpeaking(true);
         window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text } }));
         let spokeAny = false;
-        let previousChunkLanguage = "";
-        const usesMaleNeural = chunk => chunk?.lang === "th-TH" || chunk?.lang === "en-US";
-        // Start every neural request together. Fetching only one chunk ahead
-        // still left a long silence when a short word finished before the next
-        // network response arrived.
-        const preparedRemotePromises = chunks.map(chunk => usesMaleNeural(chunk) ? requestRemoteChunk(chunk.text, chunk.lang) : Promise.resolve(null));
+        // Use the same authenticated system voice for every chunk and prefetch
+        // the next two audio pieces while the current one is playing.
+        const preparedRemotePromises = chunks.map(() => Promise.resolve(null));
+        if (firstPreparedAttempted && chunks.length) preparedRemotePromises[0] = Promise.resolve(firstPrepared);
+        let nextRemoteChunk = firstPreparedAttempted ? 1 : 0;
+        const prefetchRemote = currentIndex => {
+            const through = Math.min(chunks.length - 1, currentIndex + 2);
+            while (nextRemoteChunk <= through) {
+                const index = nextRemoteChunk++;
+                preparedRemotePromises[index] = requestRemoteChunk(chunks[index].text, "th-TH");
+            }
+        };
         const releasePendingRemote = startIndex => preparedRemotePromises.slice(startIndex).forEach(promise => promise.then(releaseRemoteChunk));
+        prefetchRemote(-1);
         for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
             const chunk = chunks[chunkIndex];
             const preparedRemote = await preparedRemotePromises[chunkIndex];
+            prefetchRemote(chunkIndex);
             if (speechRun !== activeSpeechRun) {
                 releaseRemoteChunk(preparedRemote);
                 releasePendingRemote(chunkIndex + 1);
                 break;
             }
-            // Give the listener a short, consistent boundary when a sentence
-            // switches scripts. Andrew remains the same speaker on both sides.
-            if (previousChunkLanguage && previousChunkLanguage !== chunk.lang) {
-                await new Promise(resolve => setTimeout(resolve, 15));
-                if (speechRun !== activeSpeechRun) {
-                    releaseRemoteChunk(preparedRemote);
-                    releasePendingRemote(chunkIndex + 1);
-                    break;
-                }
+            if (!preparedRemotePromises[chunkIndex].__voicePlayerPromise) {
+                preparedRemotePromises[chunkIndex].__voicePlayerPromise = preloadRemoteChunk(preparedRemote);
             }
-            const voice = voiceForLanguage(chunk.lang, voices);
-            const forceMaleNeural = usesMaleNeural(chunk);
-            let spoken = false;
+            const currentReady = await preparedRemotePromises[chunkIndex].__voicePlayerPromise;
+            if (chunkIndex + 1 < chunks.length && !preparedRemotePromises[chunkIndex + 1].__voicePlayerPromise) {
+                preparedRemotePromises[chunkIndex + 1].__voicePlayerPromise = preparedRemotePromises[chunkIndex + 1].then(preloadRemoteChunk).catch(() => null);
+            }
             const transcriptRange = { start: chunk.transcriptStartChar, end: chunk.transcriptEndChar };
-            if (forceMaleNeural) {
-                spoken = await playRemoteChunk(preparedRemote, chunk.text, transcriptRange);
-                if (!spoken && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange);
-            }
-            // Native speech is a best-effort fallback, never proof of playback.
-            // Preserve the approved male voice requirement for Thai/English.
-            if (!spoken && (voice || !forceMaleNeural) && speechRun === activeSpeechRun) spoken = await speakNativeChunk(chunk, voice, speechRun);
-            if (!spoken && !forceMaleNeural && speechRun === activeSpeechRun) spoken = await speakRemoteChunk(chunk.text, chunk.lang, transcriptRange);
+            const spoken = speechRun === activeSpeechRun && await playRemoteChunk(currentReady, chunk.text, transcriptRange);
             spokeAny = spokeAny || spoken;
-            previousChunkLanguage = chunk.lang;
         }
         if (speechRun === activeSpeechRun) {
+            currentSpeechText = "";
             aiSpeechActive = false;
             aiSpeechPulse = 0;
             window.PanthoriumOrb?.setAISpeaking(false);
@@ -1446,28 +1504,243 @@
         return spokeAny;
     }
 
+    function transcribeWithBrowserSpeechRecognition(SpeechRecognitionCtor, { timeoutMs = 12000, onListening = null } = {}) {
+        if (typeof SpeechRecognitionCtor !== "function") {
+            return Promise.reject(new Error("transcription_provider_unavailable"));
+        }
+        return new Promise((resolve, reject) => {
+            let recognition;
+            let settled = false;
+            const finish = (error, text = "") => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                if (recognition) {
+                    recognition.onresult = null;
+                    recognition.onerror = null;
+                    recognition.onend = null;
+                    try { recognition.stop(); } catch (_) {}
+                }
+                if (error) reject(error);
+                else resolve(text);
+            };
+            const timer = setTimeout(() => finish(new Error("transcription_timeout")), timeoutMs);
+            try {
+                recognition = new SpeechRecognitionCtor();
+                recognition.lang = "th-TH";
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.maxAlternatives = 1;
+                recognition.onresult = event => {
+                    for (let index = event.resultIndex || 0; index < event.results.length; index += 1) {
+                        const result = event.results[index];
+                        if (!result?.isFinal) continue;
+                        const text = String(result?.[0]?.transcript || "").trim();
+                        const confidence = Number(result?.[0]?.confidence);
+                        if (!text || !Number.isFinite(confidence) || confidence < 0.55) {
+                            finish(new Error("transcription_uncertain"));
+                            return;
+                        }
+                        finish(null, text);
+                        return;
+                    }
+                };
+                recognition.onerror = event => {
+                    const error = ["not-allowed", "service-not-allowed", "audio-capture"].includes(event?.error)
+                        ? "microphone_permission_denied"
+                        : "transcription_fallback_unavailable";
+                    finish(new Error(error));
+                };
+                recognition.onend = () => finish(new Error("transcription_uncertain"));
+                onListening?.();
+                recognition.start();
+            } catch (error) {
+                finish(error?.name === "NotAllowedError" ? new Error("microphone_permission_denied") : new Error("transcription_fallback_unavailable"));
+            }
+        });
+    }
+
+    function createAdaptiveVoiceDetector() {
+        let noiseFloor = 0.008;
+        let samples = 0;
+        let voicedFrames = 0;
+        return {
+            observe(level, elapsedMs) {
+                const value = Number.isFinite(level) ? level : 0;
+                // Do not learn a loud first syllable as "background noise".
+                // Mobile users often begin speaking as soon as the mic opens.
+                if (elapsedMs < 450 && value < 0.025) {
+                    samples += 1;
+                    noiseFloor += (value - noiseFloor) / samples;
+                }
+                const threshold = Math.min(0.035, Math.max(0.005, noiseFloor * 1.35));
+                if (value >= threshold) voicedFrames += 1;
+                else voicedFrames = Math.max(0, voicedFrames - 1);
+                return voicedFrames >= 2;
+            }
+        };
+    }
+
     // Browsers may keep speech synthesis paused until the first user gesture.
     window.addEventListener("pointerdown", () => {
         unlockVoiceAudio();
-        try { window.speechSynthesis?.resume(); } catch (_) {}
     }, { once: false, passive: true });
 
-    // Stream-safe speech: callers can send deltas without cutting a word or changing voices mid-sentence.
+    // Stream-safe speech: speak stable phrases while a voice answer is still
+    // arriving. Serialize the queue so later fragments never interrupt earlier ones.
     let streamingSpeechBuffer = "";
     let streamingSpeechTimer = null;
+    let streamingSpeechQueue = Promise.resolve();
+    let streamingSpeechGeneration = 0;
+    let streamingSpeechActive = false;
+    let streamingSpeechSucceeded = false;
+    let streamingSpeechInterrupted = false;
+    let streamingSpeechTtsInFlight = 0;
+    const streamingSpeechTtsPending = [];
+    function prepareStreamingSpeech(chunk, generation) {
+        return new Promise(resolve => {
+            streamingSpeechTtsPending.push({ chunk, generation, resolve });
+            pumpStreamingSpeechTts();
+        });
+    }
+    function pumpStreamingSpeechTts() {
+        while (streamingSpeechTtsInFlight < 2 && streamingSpeechTtsPending.length) {
+            const job = streamingSpeechTtsPending.shift();
+            if (job.generation !== streamingSpeechGeneration) { job.resolve(null); continue; }
+            streamingSpeechTtsInFlight += 1;
+            requestRemoteChunk(job.chunk, "th-TH").then(prepared => {
+                if (job.generation !== streamingSpeechGeneration) {
+                    releaseRemoteChunk(prepared);
+                    job.resolve(null);
+                } else job.resolve(prepared);
+            }).catch(() => job.resolve(null)).finally(() => {
+                streamingSpeechTtsInFlight = Math.max(0, streamingSpeechTtsInFlight - 1);
+                pumpStreamingSpeechTts();
+            });
+        }
+    }
+    function findSpeechChunkCut(text, maxLength, minimumLength = 18) {
+        const value = String(text || "");
+        const limit = Math.min(value.length, maxLength);
+        let cut = 0;
+        const boundaryPattern = /[,;:!?…。！？，；：\s]/gu;
+        let match;
+        while ((match = boundaryPattern.exec(value)) && match.index < limit) {
+            const end = match.index + match[0].length;
+            if (end <= limit && end >= minimumLength) cut = end;
+        }
+        if (cut >= minimumLength) return cut;
+        try {
+            if (typeof Intl.Segmenter === "function") {
+                for (const part of new Intl.Segmenter("th", { granularity: "word" }).segment(value)) {
+                    const end = part.index + part.segment.length;
+                    if (end > limit) break;
+                    if (part.isWordLike && end >= minimumLength) cut = end;
+                }
+            }
+        } catch (_) {}
+        if (cut >= minimumLength) return cut;
+        try {
+            if (typeof Intl.Segmenter === "function") {
+                for (const part of new Intl.Segmenter("th", { granularity: "grapheme" }).segment(value)) {
+                    const end = part.index + part.segment.length;
+                    if (end > limit) break;
+                    if (end >= minimumLength) cut = end;
+                }
+            }
+        } catch (_) {}
+        return cut >= minimumLength ? cut : 0;
+    }
+    function queueStreamingSpeech(text) {
+        const chunk = String(text || "").trim();
+        if (!chunk || speechInterruptedByUser) return;
+        if (!streamingSpeechActive) streamingSpeechInterrupted = false;
+        streamingSpeechActive = true;
+        const generation = streamingSpeechGeneration;
+        // Prepare every phrase before it reaches the playback head. The TTS
+        // pump bounds concurrent provider calls to two, while playback stays serial.
+        const preparedPromise = prepareStreamingSpeech(chunk, generation);
+        streamingSpeechQueue = streamingSpeechQueue.then(async () => {
+            const prepared = await preparedPromise;
+            if (generation !== streamingSpeechGeneration) { releaseRemoteChunk(prepared); return false; }
+            const succeeded = await speak(chunk, { firstPrepared: prepared, firstPreparedAttempted: true });
+            streamingSpeechSucceeded = streamingSpeechSucceeded || succeeded;
+            return succeeded;
+        }).catch(error => { console.warn("[Sentinel stream speech]", error?.message || error); return false; });
+    }
+    function drainStreamingSpeech(force = false, flushPartial = false) {
+        streamingSpeechBuffer = streamingSpeechBuffer.trimStart();
+        while (streamingSpeechBuffer) {
+            const sentence = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…\n])(?:\s|$)/u);
+            const sentenceLength = sentence ? sentence[1].trim().length : 0;
+            const minimumSentenceLength = streamingSpeechActive ? 120 : 30;
+            if (sentence && sentenceLength >= minimumSentenceLength) {
+                queueStreamingSpeech(sentence[1]);
+                streamingSpeechBuffer = streamingSpeechBuffer.slice(sentence[1].length).trimStart();
+                continue;
+            }
+            const firstChunk = !streamingSpeechActive;
+            // Keep later phrases small enough to synthesize while the
+            // current clip is still playing; large buffers create audible gaps
+            // on mobile networks and slower TTS responses.
+            const minimumChunkLength = firstChunk ? 32 : 120;
+            const maximumChunkLength = firstChunk ? 80 : 160;
+            if (streamingSpeechBuffer.length >= minimumChunkLength) {
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength, firstChunk ? 24 : 120);
+                if (cut) {
+                    queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
+                    streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
+                    continue;
+                }
+            }
+            if (flushPartial && streamingSpeechBuffer.length >= (streamingSpeechActive ? 120 : 24)) {
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, streamingSpeechBuffer.length, streamingSpeechActive ? 120 : 24);
+                if (cut) {
+                    queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
+                    streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
+                    continue;
+                }
+            }
+            if (force) {
+                queueStreamingSpeech(streamingSpeechBuffer);
+                streamingSpeechBuffer = "";
+            }
+            break;
+        }
+    }
+    async function finishStreamingSpeech() {
+        clearTimeout(streamingSpeechTimer);
+        drainStreamingSpeech(true);
+        await streamingSpeechQueue;
+        streamingSpeechActive = false;
+        window.dispatchEvent(new CustomEvent("panthorium:voice-stream-finished"));
+        const succeeded = streamingSpeechSucceeded || streamingSpeechInterrupted;
+        streamingSpeechSucceeded = false;
+        streamingSpeechInterrupted = false;
+        return succeeded;
+    }
+    function cancelStreamingSpeech() {
+        clearTimeout(streamingSpeechTimer);
+        streamingSpeechGeneration += 1;
+        streamingSpeechBuffer = "";
+        streamingSpeechActive = false;
+        streamingSpeechSucceeded = false;
+        streamingSpeechInterrupted = true;
+        for (const job of streamingSpeechTtsPending.splice(0)) job.resolve(null);
+    }
     window.addEventListener("panthorium:ai-stream-delta", event => {
+        if (speechInterruptedByUser) return;
         streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
         clearTimeout(streamingSpeechTimer);
-        streamingSpeechTimer = setTimeout(() => {
-            const match = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…])(?:\s|$)/);
-            if (match) { speak(match[1]); streamingSpeechBuffer = streamingSpeechBuffer.slice(match[1].length).trimStart(); }
-        }, 180);
+        // Queue speech while text is still arriving so the first audio does
+        // not wait for the complete answer to be synthesized on mobile.
+        drainStreamingSpeech(false);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 120 : 24)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 400 : 220);
     });
-    window.addEventListener("panthorium:ai-stream-end", () => {
-        clearTimeout(streamingSpeechTimer);
-        if (streamingSpeechBuffer.trim()) speak(streamingSpeechBuffer);
-        streamingSpeechBuffer = "";
-    });
+    // The SSE caller owns stream completion and awaits this method directly.
+    // Do not finish here as well; racing two finish calls can consume success state.
+    window.PanthoriumVoiceStream = { finish: finishStreamingSpeech };
+    window.PanthoriumVoiceCommands = { isStop: isVoiceStopCommand, isContinue: isVoiceContinueCommand };
 
     // Global voice path: accepts commands without opening Sentinel chat.
     function initGlobalVoice() {
@@ -1478,6 +1751,10 @@
         const electronVoice = Boolean(window.panthoriumDesktop?.isElectron);
         const recorderSupported = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
         let recognition = null;
+        let interruptionRecognition = null;
+        let interruptionMonitorEnabled = false;
+        let interruptionRestartTimer = null;
+        let interruptionStartRetries = 0;
         let autoResume = true;
         let recognitionBlocked = false;
         let voiceState = "idle";
@@ -1496,6 +1773,14 @@
             if (row) { row.classList.add("active"); row.textContent = label; }
             if (announce) toast(label, kind === "processing" || kind === "unresponsive" ? 10000 : 2500);
         };
+        window.addEventListener("panthorium:voice-start", () => {
+            if (voiceState === "processing") status("processing", "กำลังพูดคำตอบ", false);
+        });
+        if (!recorderSupported && document.body?.dataset.voiceIdentityRequired === "true") {
+            status("unsupported", "เบราว์เซอร์นี้ไม่รองรับการตรวจเสียงผู้พูด");
+            button.onclick = () => status("unsupported", "เบราว์เซอร์นี้ไม่รองรับการตรวจเสียงผู้พูด");
+            return;
+        }
         if (!SR && !recorderSupported) {
             status("unsupported", "ไม่รองรับคำสั่ง");
             button.onclick = () => status("unsupported", "ไม่รองรับคำสั่ง");
@@ -1504,6 +1789,82 @@
 
         // Assigned by the active voice path so processTranscript can resume listening.
         let resumeAfterTranscript = () => {};
+        const startInterruptionRecognition = () => {
+            if (!interruptionMonitorEnabled || !sentinelSpeechIsActive() || interruptionRecognition || !SR) return;
+            let monitor;
+            try { monitor = new SR(); } catch (_) { interruptionMonitorEnabled = false; return; }
+            interruptionRecognition = monitor;
+            monitor.lang = "th-TH";
+            monitor.continuous = true;
+            monitor.interimResults = true;
+            monitor.maxAlternatives = 1;
+            monitor.onresult = event => {
+                if (!sentinelSpeechIsActive() || !interruptionMonitorEnabled) return;
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const result = event.results[i];
+                    if (!result?.isFinal) continue;
+                    const text = String(result?.[0]?.transcript || "").trim();
+                    const confidence = Number(result?.[0]?.confidence);
+                    if (!text || (Number.isFinite(confidence) && confidence < 0.55)) continue;
+                    const normalized = normalizeVoiceStopText(text);
+                    const assistantText = normalizeVoiceStopText(currentSpeechText);
+                    if (assistantText.includes(normalized) || !isVoiceStopCommand(text)) continue;
+                    interruptionMonitorEnabled = false;
+                    try { if (typeof monitor.abort === "function") monitor.abort(); else monitor.stop(); } catch (_) {}
+                    stopSentinelSpeech();
+                    status("ready", "หยุดเสียงแล้ว", false);
+                    return;
+                }
+            };
+            monitor.onerror = event => {
+                if (interruptionRecognition !== monitor) return;
+                if (["not-allowed", "service-not-allowed", "audio-capture"].includes(event?.error)) {
+                    interruptionMonitorEnabled = false;
+                }
+            };
+            monitor.onend = () => {
+                if (interruptionRecognition === monitor) interruptionRecognition = null;
+                if (interruptionMonitorEnabled && sentinelSpeechIsActive()) {
+                    clearTimeout(interruptionRestartTimer);
+                    interruptionRestartTimer = setTimeout(startInterruptionRecognition, 250);
+                }
+            };
+            try {
+                monitor.start();
+                interruptionStartRetries = 0;
+            } catch (_) {
+                interruptionRecognition = null;
+                interruptionStartRetries += 1;
+                if (interruptionStartRetries >= 3) interruptionMonitorEnabled = false;
+                else {
+                    clearTimeout(interruptionRestartTimer);
+                    interruptionRestartTimer = setTimeout(startInterruptionRecognition, 350);
+                }
+            }
+        };
+        const startSpeechInterruptionMonitor = () => {
+            if (!sentinelSpeechIsActive()) return;
+            interruptionMonitorEnabled = true;
+            interruptionStartRetries = 0;
+            startInterruptionRecognition();
+        };
+        const stopSpeechInterruptionMonitor = () => {
+            if (streamingSpeechActive && !speechInterruptedByUser) return;
+            interruptionMonitorEnabled = false;
+            clearTimeout(interruptionRestartTimer);
+            interruptionRestartTimer = null;
+            const monitor = interruptionRecognition;
+            interruptionRecognition = null;
+            if (monitor) {
+                monitor.onend = null;
+                monitor.onerror = null;
+                try { if (typeof monitor.abort === "function") monitor.abort(); else monitor.stop(); } catch (_) {}
+            }
+        };
+        window.addEventListener("panthorium:voice-start", startSpeechInterruptionMonitor);
+        window.addEventListener("panthorium:voice-end", stopSpeechInterruptionMonitor);
+        window.addEventListener("panthorium:voice-stream-finished", stopSpeechInterruptionMonitor);
+
         // Shared transcript handler (Web Speech + MediaRecorder)
         const processTranscript = async text => {
             const value = String(text || "").trim();
@@ -1513,9 +1874,21 @@
                 resumeAfterTranscript();
                 return;
             }
+            setOrbTranscript(value, 0);
             voiceState = "processing";
             status("processing", "กำลังประมวลผล");
             try {
+                if (interruptedSpeechText && isVoiceContinueCommand(value)) {
+                    const continuation = interruptedSpeechText;
+                    interruptedSpeechText = "";
+                    speechInterruptedByUser = false;
+                    voiceState = "speaking";
+                    status("processing", "พูดต่อ", false);
+                    await speakVoiceResponse(continuation);
+                    status("ready", "พูดต่อจบแล้ว", false);
+                    return;
+                }
+                speechInterruptedByUser = false;
                 const { intent, response: res } = await requestVoiceInput(value);
                 if (!res || !res.ok || !res.text) {
                     const reason = res?.text || "ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง";
@@ -1524,8 +1897,16 @@
                 }
                 if (voiceResponseNeedsSpeech(intent, res)) {
                     voiceState = "speaking";
-                    status("processing", res.confirmationRequired ? res.text : "กำลังเตรียมเสียงตอบ");
-                    if (!(await speakVoiceResponse(res.text))) {
+                    status("processing", res.confirmationRequired ? res.text : res.streamSpoken ? "กำลังพูดคำตอบ" : "กำลังเตรียมเสียงตอบ", false);
+                    if (speechInterruptedByUser) {
+                        status("ready", "หยุดเสียงแล้ว", false);
+                        return;
+                    }
+                    if (res.streamSpoken && res.streamSpeechOk === false) {
+                        status("unresponsive", voicePlaybackFailure);
+                        return;
+                    }
+                    if (!res.streamSpoken && !(await speakVoiceResponse(res.text))) {
                         status("unresponsive", voicePlaybackFailure);
                         return;
                     }
@@ -1548,11 +1929,62 @@
             let recorderChunks = [];
             let recorderMime = "audio/webm";
             let recorderContext = null;
+            let recorderSource = null;
             let recorderAnalyser = null;
             let recorderData = null;
             let recorderMonitor = null;
             let recorderStartedAt = 0;
             let recorderLastVoiceAt = 0;
+            let recorderVoiceDetector = createAdaptiveVoiceDetector();
+            let endpointRecognition = null;
+            let endpointRestartTimer = null;
+            let endpointDisabled = false;
+            let endpointLastSpeechAt = 0;
+            const stopSpeechEndpoint = () => {
+                clearTimeout(endpointRestartTimer);
+                endpointRestartTimer = null;
+                const current = endpointRecognition;
+                endpointRecognition = null;
+                if (!current) return;
+                current.onresult = null;
+                current.onerror = null;
+                current.onend = null;
+                try { current.abort?.(); } catch (_) { try { current.stop?.(); } catch (_) {} }
+            };
+            const startSpeechEndpoint = () => {
+                const EndpointRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!isMobileDevice() || !EndpointRecognition || endpointDisabled || endpointRecognition || voiceState !== "listening" || !autoResume) return;
+                let endpoint;
+                try { endpoint = new EndpointRecognition(); } catch (_) { endpointDisabled = true; return; }
+                endpointRecognition = endpoint;
+                endpoint.lang = "th-TH";
+                endpoint.continuous = true;
+                endpoint.interimResults = true;
+                endpoint.maxAlternatives = 1;
+                endpoint.onresult = event => {
+                    if (voiceState !== "listening") return;
+                    for (let i = event.resultIndex || 0; i < (event.results || []).length; i++) {
+                        const transcript = String(event.results[i]?.[0]?.transcript || "").trim();
+                        if (!transcript) continue;
+                        // This recognizer only detects speech end on Android; the
+                        // server STT remains authoritative for the final transcript.
+                        endpointLastSpeechAt = performance.now();
+                        recorderLastVoiceAt = endpointLastSpeechAt;
+                    }
+                };
+                endpoint.onerror = event => {
+                    if (["not-allowed", "service-not-allowed", "audio-capture", "network"].includes(event?.error)) endpointDisabled = true;
+                };
+                endpoint.onend = () => {
+                    if (endpointRecognition !== endpoint) return;
+                    endpointRecognition = null;
+                    if (voiceState === "listening" && autoResume && !endpointDisabled) {
+                        endpointRestartTimer = setTimeout(startSpeechEndpoint, endpointLastSpeechAt ? 220 : 900);
+                    }
+                };
+                try { endpoint.start(); }
+                catch (_) { endpointRecognition = null; endpointDisabled = true; }
+            };
 
             const restartListening = () => {
                 if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
@@ -1563,13 +1995,29 @@
             };
             resumeAfterTranscript = restartListening;
 
+            const primeRecorderAudioContext = () => {
+                const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+                if (!recorderContext && AudioContextCtor) {
+                    try { recorderContext = new AudioContextCtor(); } catch (_) {}
+                }
+                if (recorderContext && recorderContext.state !== "running") {
+                    try { recorderContext.resume?.().catch?.(() => {}); } catch (_) {}
+                }
+            };
+            window.addEventListener("beforeunload", () => {
+                try { recorderContext?.close?.(); } catch (_) {}
+            }, { once: true });
+
             const cleanupRecorder = () => {
                 clearTimeout(recorderMonitor);
+                stopSpeechEndpoint();
                 recorderMonitor = null;
+                try { recorderSource?.disconnect?.(); } catch (_) {}
+                recorderSource = null;
                 recorderAnalyser = null;
                 recorderData = null;
-                if (recorderContext) { try { recorderContext.close(); } catch (_) {} }
-                recorderContext = null;
+                // Keep the context alive between utterances. Mobile browsers
+                // suspend contexts created outside a fresh touch gesture.
                 recorderStream?.getTracks?.().forEach(track => track.stop());
                 recorderStream = null;
             };
@@ -1583,13 +2031,16 @@
             };
             const transcribeRecorderBlob = async blob => {
                 const audio = await toDataUrl(blob);
+                if (!window.PanthoriumVoiceIdentity?.authorizeAudio) throw new Error("voice_verification_unavailable");
+                const authorization = await window.PanthoriumVoiceIdentity.authorizeAudio(audio);
+                if (authorization?.required && !authorization.matched) throw new Error(authorization.error || "voice_not_authorized");
                 const transcribeDirect = async () => {
                     const base = OS.config.backendUrl.replace(/\/$/, "");
                     const response = await authorizedFetch(base + "/api/speech/transcribe", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ audio, language: "th-TH" }),
-                        signal: AbortSignal.timeout(35000),
+                        signal: AbortSignal.timeout(22000),
                         cache: "no-store"
                     });
                     return {
@@ -1597,6 +2048,7 @@
                         statusCode: response.status
                     };
                 };
+                const transcribeWithFallback = () => transcribeDirect();
 
                 let data;
                 let statusCode;
@@ -1641,10 +2093,10 @@
                             "[Sentinel transcription bridge fallback]",
                             bridgeError?.message || bridgeError
                         );
-                        ({ data, statusCode } = await transcribeDirect());
+                        ({ data, statusCode } = await transcribeWithFallback());
                     }
                 } else {
-                    ({ data, statusCode } = await transcribeDirect());
+                    ({ data, statusCode } = await transcribeWithFallback());
                 }
 
                 if (
@@ -1660,6 +2112,7 @@
             const finishRecorder = ({ discard = false } = {}) => {
                 if (!recorder || recorder.state !== "recording") return;
                 clearTimeout(recorderMonitor);
+                stopSpeechEndpoint();
                 discardOnEnd = discard;
                 voiceState = "stopping";
                 if (!discard) status("processing", "ฟังจบแล้ว กำลังเตรียมประมวลผล");
@@ -1668,20 +2121,29 @@
             const monitorRecorder = () => {
                 if (!recorder || recorder.state !== "recording") return;
                 const now = performance.now();
-                if (recorderAnalyser && recorderData) {
+                const meterRunning = recorderContext?.state === "running" && recorderAnalyser && recorderData;
+                if (meterRunning) {
                     recorderAnalyser.getByteTimeDomainData(recorderData);
                     let sum = 0;
                     for (const value of recorderData) { const centered = (value - 128) / 128; sum += centered * centered; }
-                    if (Math.sqrt(sum / recorderData.length) > 0.025) recorderLastVoiceAt = now;
+                    const level = Math.sqrt(sum / recorderData.length);
+                    if (recorderVoiceDetector.observe(level, now - recorderStartedAt)) recorderLastVoiceAt = now;
                 }
-                const quietLongEnough = recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 1400 && now - recorderStartedAt > 700;
-                if (quietLongEnough || now - recorderStartedAt > 15000) { finishRecorder({ discard: false }); return; }
+                const meteredSilence = meterRunning && recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 850;
+                const endpointSilence = endpointLastSpeechAt > 0 && now - endpointLastSpeechAt > 1000;
+                if ((meteredSilence || endpointSilence) && now - recorderStartedAt > 700 || now - recorderStartedAt > 30000) { finishRecorder({ discard: false }); return; }
                 recorderMonitor = setTimeout(monitorRecorder, 100);
             };
             const startRecorder = async () => {
                 if (!autoResume || voiceState !== "idle" || recorder) return;
                 try {
+                    // Resume/create the meter synchronously from the microphone
+                    // gesture before awaiting permission or network work.
+                    primeRecorderAudioContext();
                     recorderStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+                    if (recorderContext && recorderContext.state !== "running") {
+                        try { await recorderContext.resume(); } catch (_) {}
+                    }
                     const supportedMime = typeof MediaRecorder.isTypeSupported === "function"
                         ? ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find(type => MediaRecorder.isTypeSupported(type))
                         : "";
@@ -1700,7 +2162,10 @@
                         userSpeechActive = false;
                         window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
                         if (discard) { discardOnEnd = false; voiceState = "idle"; restartListening(); return; }
-                        if (!chunks.length || !recorderLastVoiceAt) { voiceState = "idle"; status("unresponsive", "ยังไม่ได้ยินเสียง ตรวจสอบไมโครโฟนแล้วลองพูดอีกครั้ง"); restartListening(); return; }
+                        // Submit recorded audio even when a mobile browser has
+                        // suspended its analyser; ASR can validate silence and
+                        // quiet speech more reliably than the local VAD gate.
+                        if (!chunks.length) { voiceState = "idle"; status("unresponsive", "ยังไม่ได้ยินเสียง ตรวจสอบไมโครโฟนแล้วลองพูดอีกครั้ง"); restartListening(); return; }
                         voiceState = "processing";
                         status("processing", "กำลังถอดเสียง");
                         try {
@@ -1711,7 +2176,10 @@
                             console.warn("[Sentinel transcription]", error);
                             voiceState = "idle";
                             const message = ({
-                                transcription_provider_unavailable: "บริการถอดเสียงยังไม่ได้เชื่อมต่อผู้ให้บริการ AI",
+                                transcription_provider_unavailable: "บริการถอดเสียงหลักขัดข้อง กรุณาพูดซ้ำอีกครั้ง",
+                                transcription_fallback_unavailable: "ระบบถอดเสียงสำรองใช้ไม่ได้ กรุณาลองใหม่อีกครั้ง",
+                                microphone_permission_denied: "กรุณาอนุญาตสิทธิ์ไมโครโฟนแล้วลองใหม่",
+                                transcription_uncertain: "โปรดพูดอีกครั้ง",
                                 transcription_unavailable: "บริการถอดเสียงตอบกลับผิดพลาด กรุณาลองอีกครั้ง",
                                 invalid_audio: "รูปแบบหรือขนาดเสียงไม่ถูกต้อง ลองพูดให้สั้นลง",
                                 audio_too_large: "เสียงยาวเกินไป ลองพูดให้สั้นลง",
@@ -1721,29 +2189,44 @@
                                 electron_upload_failed: "Panthorium Browser ส่งเสียงไม่สำเร็จ กรุณาลองอีกครั้ง",
                                 browser_update_required: "Panthorium Browser รุ่นนี้เก่าเกินไป กรุณาอัปเดตเป็นรุ่นล่าสุด",
                                 transcription_timeout: "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง",
-                                untrusted_origin: "Panthorium Browser ไม่อนุญาตต้นทางนี้"
+                                untrusted_origin: "Panthorium Browser ไม่อนุญาตต้นทางนี้",
+                                voice_not_authorized: "ตรวจพบเสียงที่ไม่ได้รับอนุญาต จึงไม่นำไปประมวลผล",
+                                speaker_verification_not_configured: "ระบบยืนยันตัวตนด้วยเสียงยังตั้งค่าไม่ครบ"
                             })[String(error?.message || "").split(":")[0]] || (error?.name === "TimeoutError" || error?.name === "AbortError"
                                 ? "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง"
                                 : "ส่งเสียงไปยังบริการถอดเสียงไม่สำเร็จ กรุณาตรวจการเชื่อมต่อ");
                             status("unresponsive", message);
+                            if (String(error?.message || "").startsWith("transcription_uncertain")) {
+                                await speakVoiceResponse("โปรดพูดอีกครั้ง");
+                            }
                             restartListening();
                         }
                     };
                     recorder.start(250);
                     recorderStartedAt = performance.now();
                     recorderLastVoiceAt = 0;
+                    endpointLastSpeechAt = 0;
+                    endpointDisabled = false;
+                    recorderVoiceDetector = createAdaptiveVoiceDetector();
                     voiceState = "listening";
                     discardOnEnd = false;
                     userSpeechActive = true;
                     window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
                     status("listening", "กำลังฟัง...", false);
-                    recorderContext = new AudioContext();
-                    const source = recorderContext.createMediaStreamSource(recorderStream);
-                    recorderAnalyser = recorderContext.createAnalyser();
-                    recorderAnalyser.fftSize = 512;
-                    recorderData = new Uint8Array(recorderAnalyser.fftSize);
-                    source.connect(recorderAnalyser);
+                    if (recorderContext?.state === "running") {
+                        recorderSource = recorderContext.createMediaStreamSource(recorderStream);
+                        recorderAnalyser = recorderContext.createAnalyser();
+                        recorderAnalyser.fftSize = 512;
+                        recorderData = new Uint8Array(recorderAnalyser.fftSize);
+                        recorderSource.connect(recorderAnalyser);
+                    } else {
+                        // Keep recording with manual stop/30s safety limit if
+                        // WebAudio metering is unavailable on this device.
+                        recorderAnalyser = null;
+                        recorderData = null;
+                    }
                     recorderMonitor = setTimeout(monitorRecorder, 100);
+                    if (recorderContext?.state !== "running") startSpeechEndpoint();
                 } catch (error) {
                     cleanupRecorder();
                     autoResume = false;
@@ -1762,14 +2245,31 @@
             };
             button.onclick = async () => {
                 unlockVoiceAudio();
-                if (voiceState === "processing" || voiceState === "speaking" || voiceState === "stopping") { status("processing", "กำลังประมวลผล"); return; }
+                primeRecorderAudioContext();
+                if (aiSpeechActive || voiceState === "speaking") {
+                    autoResume = false;
+                    stopSentinelSpeech();
+                    voiceState = "idle";
+                    status("ready", "หยุดเสียงแล้ว กดไมค์เมื่อต้องการพูด", false);
+                    return;
+                }
+                if (voiceState === "speaking") {
+                    stopSentinelSpeech();
+                    voiceState = "idle";
+                }
+                if (voiceState === "processing" || voiceState === "stopping") { status("processing", "กำลังประมวลผล"); return; }
                 if (voiceState === "listening") { autoResume = false; stopRecorder(); return; }
                 recognitionBlocked = false;
                 autoResume = true;
                 await startRecorder();
             };
-            autoResume = true;
-            setTimeout(() => { if (autoResume && !recognitionBlocked) startRecorder(); }, 400);
+            const mobileRecorder = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+            // On phones, opening AudioContext after an automatic page-load
+            // start leaves Android's WebAudio meter suspended. Start from the
+            // mic tap so VAD is live and the utterance is not held for 30s.
+            autoResume = !mobileRecorder;
+            if (mobileRecorder) status("ready", "แตะไมโครโฟนเพื่อพูด", false);
+            else setTimeout(() => { if (autoResume && !recognitionBlocked) startRecorder(); }, 400);
             return;
         }
 
@@ -1846,7 +2346,7 @@
             if (voiceState === "listening") {
                 clearTimeout(silenceTimer);
                 // Wait for a real pause instead of treating the first final phrase as the whole command.
-                silenceTimer = setTimeout(finishListening, 1400);
+                silenceTimer = setTimeout(finishListening, 850);
             }
         };
         const recognitionFailure = event => {
@@ -1902,10 +2402,18 @@
         button.onclick = async () => {
             unlockVoiceAudio();
             try { window.speechSynthesis?.resume(); } catch (_) {}
-            if (voiceState === "processing" || voiceState === "speaking" || voiceState === "stopping") {
-                status("processing", voiceState === "speaking" ? "Sentinel กำลังพูด..." : "กำลังประมวลผล");
+            if (aiSpeechActive || voiceState === "speaking") {
+                autoResume = false;
+                stopSentinelSpeech();
+                voiceState = "idle";
+                status("ready", "หยุดเสียงแล้ว กดไมค์เมื่อต้องการพูด", false);
                 return;
             }
+            if (voiceState === "speaking") {
+                stopSentinelSpeech();
+                voiceState = "idle";
+            }
+            if (voiceState === "processing" || voiceState === "stopping") { status("processing", "กำลังประมวลผล"); return; }
             if (voiceState === "listening") {
                 autoResume = false;
                 // A tap on the stop button means "finish this command". The
@@ -2012,7 +2520,14 @@
     const voicePlaybackFailure = "ได้รับคำตอบแล้ว แต่เล่นเสียงไม่สำเร็จ ตรวจสอบเสียงเว็บไซต์หรือบริการเสียง แล้วแตะไมโครโฟนเพื่อลองใหม่";
     async function speakVoiceResponse(text) {
         // The answer remains readable under the Orb even if playback is blocked.
-        try { return await speak(text); } catch (_) { return false; }
+        try {
+            const spoken = await speak(text);
+            if (!spoken && speechInterruptedByUser) {
+                speechInterruptedByUser = false;
+                return true;
+            }
+            return spoken;
+        } catch (_) { return false; }
     }
 
     // ---------- AI: Sentinel (Backend) ----------
@@ -2219,8 +2734,9 @@
     // ---------- Apps Definition ----------
     const BROWSER_RELEASE_URL = "/browser-download.html";
     function browserDownloadUrl() {
+        const roles = typeof OS !== "undefined" && Array.isArray(OS.state?.user?.roles) ? OS.state.user.roles : [];
         const isAdmin = window.PanthoriumAuth?.isAdministrator?.() === true
-            || (typeof OS !== "undefined" && Array.isArray(OS.state?.user?.roles) && OS.state.user.roles.includes("admin"));
+            || (roles.includes("admin") && !roles.includes("guest"));
         return BROWSER_RELEASE_URL + (isAdmin ? "?edition=admin" : "?edition=user");
     }
     const isAdminShell = /^\/admin(?:\/|$)/i.test(window.location.pathname);
@@ -2265,7 +2781,7 @@
 
     const APP_LIST = [
         { id: "sentinel", name: "Sentinel AI", icon: "🤖", open: openSentinel },
-        { id: "settings", name: "ตั้งค่า", icon: "⚙️", open: openSettings }
+        { id: "voice-identity", name: "Voice Identity", icon: "🎙️", open: () => window.PanthoriumVoiceIdentity?.open?.() }
     ];
 
     function visibleApps() {
@@ -2359,6 +2875,7 @@
         async function send({ resumeGlobalVoice = false } = {}) {
             const text = input.value.trim();
             if (!text || sendBusy) return;
+            speechInterruptedByUser = false;
             sendBusy = true;
             window.PanthoriumVoice?.pause();
             unlockVoiceAudio();
@@ -2376,7 +2893,7 @@
                 const reply = (res && res.text && String(res.text).trim()) || "ยังไม่ได้รับคำตอบจาก AI";
                 appendMsg(reply, "ai", false, res?.provider);
                 if (!res?.ok) toast(reply, 10000);
-                else if (voiceResponseNeedsSpeech(intent, res) && !(await speakVoiceResponse(res.text))) toast(voicePlaybackFailure, 10000);
+                else if (voiceResponseNeedsSpeech(intent, res) && ((res.streamSpoken && res.streamSpeechOk === false) || (!res.streamSpoken && !(await speakVoiceResponse(res.text))))) toast(voicePlaybackFailure, 10000);
             } catch (err) {
                 messages.querySelector('.msg.loading, .msg[data-streaming="1"]')?.remove();
                 const reason = err && err.message === "authentication_required"
@@ -2416,6 +2933,7 @@
         let chatRecorderMonitor = null;
         let chatRecorderStartedAt = 0;
         let chatRecorderLastVoiceAt = 0;
+        let chatVoiceDetector = createAdaptiveVoiceDetector();
         let chatRecorderContext = null;
         let chatRecorderAnalyser = null;
         let chatRecorderData = null;
@@ -2441,6 +2959,9 @@
             for (let offset = 0; offset < bytes.length; offset += step) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + step, bytes.length)));
             const mimeType = String(blob.type || chatRecorderMime).split(";")[0] || "audio/webm";
             const audio = "data:" + mimeType + ";base64," + btoa(binary);
+            if (!window.PanthoriumVoiceIdentity?.authorizeAudio) throw new Error("voice_verification_unavailable");
+            const authorization = await window.PanthoriumVoiceIdentity.authorizeAudio(audio);
+            if (authorization?.required && !authorization.matched) throw new Error(authorization.error || "voice_not_authorized");
             const base = OS.config.backendUrl.replace(/\/$/, "");
             const post = async () => {
                 const response = await authorizedFetch(base + "/api/speech/transcribe", {
@@ -2505,13 +3026,15 @@
                     await send({ resumeGlobalVoice: true });
                 } catch (error) {
                     console.warn("[Sentinel chat transcription]", error);
-                    toast("ถอดเสียงไม่สำเร็จ กรุณาลองใหม่หรือพิมพ์ข้อความ");
+                    toast(error?.message === "voice_not_authorized" ? "เสียงนี้ไม่ได้รับอนุญาต จึงไม่ส่งให้ Sentinel" : error?.message === "transcription_uncertain" ? "โปรดพูดอีกครั้ง" : "ถอดเสียงไม่สำเร็จ กรุณาลองใหม่หรือพิมพ์ข้อความ");
+                    if (error?.message === "transcription_uncertain") await speakVoiceResponse("โปรดพูดอีกครั้ง");
                     window.PanthoriumVoice?.resume();
                 }
             };
             chatRecorder.start(250);
             chatRecorderStartedAt = performance.now();
             chatRecorderLastVoiceAt = 0;
+            chatVoiceDetector = createAdaptiveVoiceDetector();
             userSpeechActive = true;
             window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
             micBtn.classList.add("listening");
@@ -2530,9 +3053,10 @@
                     chatRecorderAnalyser.getByteTimeDomainData(chatRecorderData);
                     let sum = 0;
                     for (const value of chatRecorderData) { const c = (value - 128) / 128; sum += c * c; }
-                    if (Math.sqrt(sum / chatRecorderData.length) > 0.025) chatRecorderLastVoiceAt = now;
+                    const level = Math.sqrt(sum / chatRecorderData.length);
+                    if (chatVoiceDetector.observe(level, now - chatRecorderStartedAt)) chatRecorderLastVoiceAt = now;
                 }
-                if ((chatRecorderLastVoiceAt > 0 && now - chatRecorderLastVoiceAt > 1400 && now - chatRecorderStartedAt > 700) || now - chatRecorderStartedAt > 15000) {
+                if ((chatRecorderLastVoiceAt > 0 && now - chatRecorderLastVoiceAt > 1800 && now - chatRecorderStartedAt > 700) || now - chatRecorderStartedAt > 30000) {
                     try { chatRecorder.stop(); } catch (_) {}
                     return;
                 }
@@ -2560,7 +3084,7 @@
                 clearTimeout(voiceSilenceTimer);
                 voiceSilenceTimer = setTimeout(() => {
                     try { recognition.stop(); } catch (_) {}
-                }, 1400);
+                }, 850);
             };
             recognition.onstart = () => {
                 voiceRecognitionFailed = false;
@@ -2610,8 +3134,9 @@
         }
 
         micBtn.onclick = async () => {
+            if (aiSpeechActive) stopSentinelSpeech();
             // Electron / recorder path
-            if (chatElectron && chatRecorderOk) {
+            if (chatRecorderOk) {
                 if (chatRecorder && chatRecorder.state === "recording") {
                     try { chatRecorder.stop(); } catch (_) {}
                     return;
@@ -2627,6 +3152,10 @@
                     toast(denied ? "กรุณาอนุญาตไมโครโฟนให้ Panthorium Browser" : "เปิดไมโครโฟนไม่สำเร็จ");
                     window.PanthoriumVoice?.resume();
                 }
+                return;
+            }
+            if (!chatRecorderOk && document.body?.dataset.voiceIdentityRequired === "true") {
+                toast("เบราว์เซอร์นี้ไม่รองรับการตรวจเสียงผู้พูด");
                 return;
             }
             if (!recognition) {
@@ -3066,7 +3595,7 @@
         camera.updateProjectionMatrix();
         if (orbGroup) orbGroup.position.y = compact ? .5 : .27;
         renderer.setSize(width, height);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         if (orbMaterial) orbMaterial.uniforms.uPixel.value = renderer.getPixelRatio();
     }
 
@@ -3089,7 +3618,7 @@
         orbGroup.position.y = .27;
         scene.add(orbGroup);
 
-        const particleCount = window.innerWidth < 700 ? 11880 : 23100;
+        const particleCount = window.innerWidth < 700 ? 12360 : 23100;
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(particleCount * 3);
         const seeds = new Float32Array(particleCount);
@@ -3244,7 +3773,7 @@
 
     // ---------- PWA ----------
     if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("./sw.js?v=orb-display-fix-v3-voice").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=logo-safe-inset-v1").catch(() => {});
     }
 
     async function checkRemoteRelease() {

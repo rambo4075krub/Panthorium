@@ -13,7 +13,7 @@
   ];
 
   function isStagingAdmin() {
-    return /^\/admin(?:\/|\.html)?$/.test(location.pathname) || !!currentUser()?.roles?.includes('administrator');
+    return !!currentUser()?.roles?.includes('administrator');
   }
 
   function currentUser() {
