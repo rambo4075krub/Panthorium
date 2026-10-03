@@ -85,7 +85,7 @@ const { JSDOM } = require('jsdom');
     for (const frame of frames) {
       let event = 'message';
       let data = null;
-      for (const line of frame.split(/\\r?\\n/)) {
+      for (const line of frame.replaceAll(String.fromCharCode(13), '').split(String.fromCharCode(10))) {
         if (line.startsWith('event:')) event = line.slice(6).trim();
         if (line.startsWith('data:')) { try { data = JSON.parse(line.slice(5).trim()); } catch (_) {} }
       }
@@ -101,7 +101,7 @@ const { JSDOM } = require('jsdom');
     const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    const frames = buffer.split(/\\r?\\n\\r?\\n/);
+    const frames = buffer.replaceAll(String.fromCharCode(13), '').split(String.fromCharCode(10, 10));
     buffer = frames.pop() || '';
     consumeFrames(frames);
   }
