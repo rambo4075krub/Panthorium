@@ -49,6 +49,16 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
   const objects = new Map();
   try {
     Object.assign(w, { Headers, AbortSignal, AbortController, Blob, TextDecoder, TextEncoder });
+    let mobileAudioSources = 0;
+    w.AudioContext = class {
+      constructor() { this.state = 'running'; this.currentTime = 0; this.destination = {}; }
+      resume() { this.state = 'running'; return Promise.resolve(); }
+      async decodeAudioData() { return { duration: 0.03 }; }
+      createBufferSource() {
+        const source = { connect() {}, disconnect() {}, start() { mobileAudioSources++; setTimeout(() => source.onended?.(), 30); }, stop() { source.onended?.(); } };
+        return source;
+      }
+    };
     w.URL.createObjectURL = blob => { const url = `blob:https://staging.example.test/${objects.size}`; objects.set(url, blob); return url; };
     w.URL.revokeObjectURL = url => revoked.push(url);
     w.Audio = class {
@@ -363,6 +373,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     assert.equal(mobileSpeechRequests.length, 1, 'a complete mobile answer over 900 characters uses one continuous TTS request');
     assert.equal(mobileSpeechRequests[0].body.text, mobileResult.text, 'the sole mobile TTS request receives the complete answer');
     assert.equal(mobileResult.streamSpeechOk, true);
+    assert.equal(mobileAudioSources, 1, 'mobile TTS must play as a single Web Audio buffer on the audio render thread');
     Object.defineProperty(w.navigator, 'userAgent', { configurable: true, value: originalUserAgent });
     let interrupted = false;
     w.addEventListener('panthorium:voice-end', event => { if (event.detail?.interrupted) interrupted = true; }, { once: true });

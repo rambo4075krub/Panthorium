@@ -50,25 +50,38 @@ async function synthesizeSentinelMaleVoice(text, lang) {
   try {
     const source = applySentinelPronunciations(text.trim());
     const segments = splitSentinelSpeechText(source);
-    const audioParts = [];
-    for (let index = 0; index < segments.length; index += 1) {
-      const audioPath = path.join(workDir, `speech-${index}.mp3`);
-      const speech = new EdgeTTS({
-        voice,
-        // A single Thai system voice is intentional for every language.
-        lang: "th-TH",
-        outputFormat: "audio-24khz-48kbitrate-mono-mp3",
-        rate: "+12%",
-        pitch: "default",
-        volume: "default",
-        timeout: 40000,
-        proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY
-      });
-      await speech.ttsPromise(segments[index], audioPath);
-      const audio = await fs.readFile(audioPath);
-      if (!audio.length || audio.length > 5 * 1024 * 1024) throw new Error("invalid_speech_audio");
-      audioParts.push(audio);
-    }
+    const audioParts = new Array(segments.length);
+    let nextSegment = 0;
+    let firstError = null;
+    const synthesizeNext = async () => {
+      while (!firstError) {
+        const index = nextSegment++;
+        if (index >= segments.length) return;
+        try {
+          const audioPath = path.join(workDir, `speech-${index}.mp3`);
+          const speech = new EdgeTTS({
+            voice,
+            // A single Thai system voice is intentional for every language.
+            lang: "th-TH",
+            outputFormat: "audio-24khz-48kbitrate-mono-mp3",
+            rate: "+12%",
+            pitch: "default",
+            volume: "default",
+            timeout: 40000,
+            proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY
+          });
+          await speech.ttsPromise(segments[index], audioPath);
+          const audio = await fs.readFile(audioPath);
+          if (!audio.length || audio.length > 5 * 1024 * 1024) throw new Error("invalid_speech_audio");
+          audioParts[index] = audio;
+        } catch (error) {
+          firstError ||= error;
+        }
+      }
+    };
+    // Limit parallel provider sessions but avoid serial waits for long answers.
+    await Promise.all(Array.from({ length: Math.min(3, segments.length) }, () => synthesizeNext()));
+    if (firstError) throw firstError;
     const audio = Buffer.concat(audioParts);
     if (!audio.length || audio.length > 12 * 1024 * 1024) throw new Error("invalid_speech_audio");
     return { audio, voice };

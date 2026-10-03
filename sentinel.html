@@ -1161,6 +1161,8 @@
     }
 
     const voiceAudio = new Audio();
+    let voicePlaybackContext = null;
+    let voicePlaybackSource = null;
     const voiceAudioPlayers = [voiceAudio, new Audio()];
     const reservedVoiceAudioPlayers = new Set();
     const voiceAudioPlayerWaiters = [];
@@ -1198,12 +1200,19 @@
         cancelRemotePlayback = null;
         for (const audio of voiceAudioPlayers) { try { audio.pause(); audio.currentTime = 0; } catch (_) {} }
         try { voiceAudio.pause(); voiceAudio.currentTime = 0; } catch (_) {}
+        try { voicePlaybackSource?.stop(); } catch (_) {}
+        voicePlaybackSource = null;
         aiSpeechActive = false;
         aiSpeechPulse = 0;
         window.PanthoriumOrb?.setAISpeaking(false);
         window.dispatchEvent(new CustomEvent("panthorium:voice-end", { detail: { interrupted: true } }));
     }
     function unlockVoiceAudio() {
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        if (!voicePlaybackContext && AudioContextCtor) {
+            try { voicePlaybackContext = new AudioContextCtor(); } catch (_) {}
+        }
+        if (voicePlaybackContext?.state === "suspended") voicePlaybackContext.resume().catch(() => {});
         if (voiceAudioUnlocked || voiceAudioUnlocking || aiSpeechActive) return;
         if (!URL.createObjectURL) return;
         // Warm every reusable player from the user's tap; Android Chrome can
@@ -1255,7 +1264,7 @@
             if (expectedMaleProfile && receivedProfile !== expectedMaleProfile) return null;
             const blob = await response.blob();
             if (!blob.size) return null;
-            return { objectUrl: URL.createObjectURL(blob) };
+            return { objectUrl: URL.createObjectURL(blob), blob };
         } catch (_) {
             return null;
         } finally {
@@ -1302,7 +1311,68 @@
         return prepared;
     }
 
+    function playMobileRemoteChunk(prepared, text, transcriptRange = {}) {
+        return new Promise(resolve => {
+            const Context = window.AudioContext || window.webkitAudioContext;
+            if (!Context || !prepared?.blob) { resolve(null); return; }
+            if (!voicePlaybackContext) {
+                try { voicePlaybackContext = new Context(); } catch (_) { resolve(null); return; }
+            }
+            const context = voicePlaybackContext;
+            let settled = false;
+            let progressTimer = null;
+            let watchdog = null;
+            let source = null;
+            const finish = value => {
+                if (settled) return;
+                settled = true;
+                clearInterval(progressTimer); clearTimeout(watchdog);
+                if (voicePlaybackSource === source) voicePlaybackSource = null;
+                if (source) { source.onended = null; try { source.disconnect(); } catch (_) {} }
+                releaseRemoteChunk(prepared);
+                if (cancelRemotePlayback === cancel) cancelRemotePlayback = null;
+                resolve(value);
+            };
+            const cancel = () => { try { source?.stop(); } catch (_) {} finish(false); };
+            cancelRemotePlayback = cancel;
+            (async () => {
+                try {
+                    if (context.state === "suspended") await context.resume();
+                    const encoded = await prepared.blob.arrayBuffer();
+                    const buffer = await context.decodeAudioData(encoded);
+                    if (settled || speechInterruptedByUser) { finish(false); return; }
+                    source = context.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(context.destination);
+                    voicePlaybackSource = source;
+                    source.onended = () => {
+                        const lastChar = Math.max(0, Number(transcriptRange.end) - 1);
+                        showOrbTranscriptForChar(lastChar);
+                        window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex: lastChar } }));
+                        finish(true);
+                    };
+                    const start = Number(transcriptRange.start) || 0;
+                    const end = Math.max(start + 1, Number(transcriptRange.end) || start + String(text).length);
+                    const startedAt = context.currentTime;
+                    const update = () => {
+                        const elapsed = Math.max(0, context.currentTime - startedAt);
+                        const progress = Math.min(1, elapsed / Math.max(buffer.duration, 0.001));
+                        const charIndex = Math.min(end - 1, Math.floor(start + (end - start) * progress));
+                        showOrbTranscriptForChar(charIndex);
+                        window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex } }));
+                    };
+                    progressTimer = setInterval(update, 120);
+                    watchdog = setTimeout(() => finish(false), Math.max(15000, buffer.duration * 1000 + 10000));
+                    source.start();
+                } catch (_) { finish(false); }
+            })();
+        });
+    }
     function playRemoteChunk(prepared, text, transcriptRange = {}) {
+        if (isMobileDevice()) {
+            const result = playMobileRemoteChunk(prepared, text, transcriptRange);
+            return result.then(value => value === null ? playRemoteChunk(prepared, text, transcriptRange) : value);
+        }
         return new Promise(resolve => {
             if (!prepared?.objectUrl) { resolve(false); return; }
             const audio = prepared.audio || voiceAudio;
@@ -3423,7 +3493,6 @@
     let scene, camera, renderer, orbGroup, orb, orbMaterial, orbCore, orbHalo;
     let orbPulse = 0;
     let orbLastFrame = performance.now();
-    let orbLastRenderAt = 0;
     let orbAIActive = false;
     let orbAIEnergy = 0;
     let orbVoiceEnergy = 0;
@@ -3534,7 +3603,7 @@
         camera.updateProjectionMatrix();
         if (orbGroup) orbGroup.position.y = compact ? .5 : .27;
         renderer.setSize(width, height);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.innerWidth < 700 ? 1.25 : 2));
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         if (orbMaterial) orbMaterial.uniforms.uPixel.value = renderer.getPixelRatio();
     }
 
@@ -3546,8 +3615,8 @@
         camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, .1, 100);
         camera.position.set(0, 0, 4.65);
 
-        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: window.innerWidth < 700 ? "low-power" : "high-performance" });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.innerWidth < 700 ? 1.25 : 2));
+        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setClearColor(0x01030a, 1);
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -3557,7 +3626,7 @@
         orbGroup.position.y = .27;
         scene.add(orbGroup);
 
-        const particleCount = window.innerWidth < 700 ? 5400 : 23100;
+        const particleCount = window.innerWidth < 700 ? 11880 : 23100;
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(particleCount * 3);
         const seeds = new Float32Array(particleCount);
@@ -3672,11 +3741,6 @@
     function animateBg(now = performance.now()) {
         requestAnimationFrame(animateBg);
         if (orbContextLost || document.hidden) return;
-        const mobileFrameInterval = window.innerWidth < 700
-            ? (orbAIActive || aiSpeechActive || userSpeechActive ? 1000 / 24 : 1000 / 30)
-            : 0;
-        if (mobileFrameInterval && now - orbLastRenderAt < mobileFrameInterval) return;
-        orbLastRenderAt = now;
         const delta = Math.min((now - orbLastFrame) / 1000, .05);
         orbLastFrame = now;
         const time = now * .001;
