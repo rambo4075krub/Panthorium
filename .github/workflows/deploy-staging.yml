@@ -92,7 +92,7 @@ jobs:
           unset TOKEN
           TUNING_STATE="$(jq -r '.state // "UNKNOWN"' <<<"$TUNING_JOB_JSON")"
           TUNED_ENDPOINT="$(jq -r '.tunedModel.endpoint // empty' <<<"$TUNING_JOB_JSON")"
-          if [[ "$TUNING_STATE" != "SUCCEEDED" || -z "$TUNED_ENDPOINT" ]]; then
+          if [[ "$TUNING_STATE" != "JOB_STATE_SUCCEEDED" || -z "$TUNED_ENDPOINT" ]]; then
             echo "::error::Sentinel V4 tuning job is not SUCCEEDED or has no tunedModel.endpoint (state=$TUNING_STATE)"
             exit 1
           fi
