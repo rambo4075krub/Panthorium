@@ -54,7 +54,7 @@ class ProviderManager {
   }
   vertexConfigured() { return Boolean(this.vertex.project && this.vertex.location && this.vertex.endpointId); }
   available() { return this.priority.filter((p) => p === "vertex" ? this.vertexConfigured() : Boolean(this.keys[p])); }
-  catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: provider === "vertex" ? this.vertexConfigured() : Boolean(this.keys[provider]), priority, streaming: provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
+  catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: provider === "vertex" ? this.vertexConfigured() : Boolean(this.keys[provider]), priority, streaming: provider === "vertex" || provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
   resolveModel(provider, requestedModel) {
     const configured = this.models[provider];
     if (!configured) return null;
@@ -254,14 +254,76 @@ class ProviderManager {
       usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null
     };
   }
+  async streamVertexTuned(systemPrompt, history, onDelta = () => {}) {
+    const { project, location, endpointId, maxOutputTokens } = this.vertex;
+    const host = process.env.VERTEX_HOST
+      ? (process.env.VERTEX_HOST.startsWith("http") ? process.env.VERTEX_HOST : `https://${process.env.VERTEX_HOST}`)
+      : (location === "eu" || location === "us"
+        ? `https://aiplatform.${location}.rep.googleapis.com`
+        : `https://${location}-aiplatform.googleapis.com`);
+    const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: String(m.content || "") }] }));
+    const url = `${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(location)}/endpoints/${encodeURIComponent(endpointId)}:streamGenerateContent?alt=sse`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${await this.vertexAccessToken()}`,
+        "X-Goog-User-Project": String(project)
+      },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: systemPrompt }] }, contents, generationConfig: { temperature: 0.65, maxOutputTokens } }),
+      signal: AbortSignal.timeout(60000)
+    });
+    if (!response.ok) throw await providerError(response);
+    if (!response.body) throw new Error("vertex_stream_unavailable");
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let text = "";
+    let usage = null;
+    let truncated = false;
+    const model = this.models.vertex;
+    const consumeFrame = (frame) => {
+      const payloads = frame.split(/\\r?\\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).filter(Boolean);
+      for (const payload of payloads) {
+        if (payload === "[DONE]") continue;
+        let data;
+        try { data = JSON.parse(payload); } catch (_) { continue; }
+        const candidate = data.candidates?.[0];
+        if (candidate?.finishReason === "MAX_TOKENS") truncated = true;
+        const metadata = data.usageMetadata;
+        if (metadata) usage = {
+          inputTokens: metadata.promptTokenCount || 0,
+          outputTokens: (metadata.candidatesTokenCount || 0) + (metadata.thoughtsTokenCount || 0),
+          totalTokens: metadata.totalTokenCount || 0
+        };
+        for (const part of candidate?.content?.parts || []) {
+          if (typeof part.text !== "string" || !part.text || part.thought) continue;
+          text += part.text;
+          onDelta(part.text);
+        }
+      }
+    };
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split(/\\r?\\n\\r?\\n/);
+      buffer = frames.pop() || "";
+      for (const frame of frames) consumeFrame(frame);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) consumeFrame(buffer);
+    if (!text.trim()) throw new Error("vertex_stream_empty");
+    return { text: text.trim(), model, usage, streaming: "native", truncated };
+  }
   async streamDetailed(provider, systemPrompt, history, options = {}, onDelta = () => {}) {
     if (provider === "vertex") {
       if (!this.vertexConfigured()) return null;
       const model = this.resolveModel(provider, options.model);
       if (!model) throw new Error("model_not_allowed");
-      const result = await this.callDetailed(provider, systemPrompt, history, { model });
-      if (result?.text) onDelta(result.text);
-      return { ...result, streaming: "buffered" };
+      return this.streamVertexTuned(systemPrompt, history, onDelta);
     }
     const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
     if (provider === "groq") return this.streamOpenAICompatible(GROQ_CHAT_URL, key, model, systemPrompt, history, onDelta, false);

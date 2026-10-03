@@ -28,6 +28,17 @@ const assert = require('assert');
     if (String(url).startsWith('http://metadata.google.internal/')) {
       return new Response(JSON.stringify({ access_token: 'short-lived-test-token', expires_in: 3600 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
+    if (String(url).includes(':streamGenerateContent?alt=sse')) {
+      const chunk = (text, extra = {}) => JSON.stringify({
+        candidates: [{ content: { parts: [{ text }] } }],
+        ...extra
+      });
+      const frames = [
+        chunk('Sentinel '),
+        chunk('streamed response', { usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 7, totalTokenCount: 18 } })
+      ].map((data) => `data: ${data}\\n\\n`).join('');
+      return new Response(frames, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }
     return new Response(JSON.stringify({
       candidates: [{ content: { parts: [{ text: 'Sentinel direct response' }] } }],
       usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 7, totalTokenCount: 18 }
@@ -48,15 +59,21 @@ const assert = require('assert');
     const payload = JSON.parse(requests[1].options.body);
     assert.equal(payload.systemInstruction.parts[0].text, 'System instruction');
     assert.equal(payload.contents[0].parts[0].text, 'Hello');
-    // Test streamDetailed with Vertex
+    // Test native streaming from the tuned Vertex endpoint.
     let streamedText = '';
+    const deltas = [];
     const streamResult = await manager.streamDetailed('vertex', 'System instruction', [{ role: 'user', content: 'Stream test' }], {}, (delta) => {
+      deltas.push(delta);
       streamedText += delta;
     });
-    assert.equal(streamResult.text, 'Sentinel direct response');
-    assert.equal(streamResult.streaming, 'buffered');
-    assert.equal(streamedText, 'Sentinel direct response');
-
+    assert.equal(streamResult.text, 'Sentinel streamed response');
+    assert.equal(streamResult.streaming, 'native');
+    assert.equal(streamedText, 'Sentinel streamed response');
+    assert.deepEqual(deltas, ['Sentinel ', 'streamed response'], 'Vertex chunks must be delivered as they arrive');
+    assert(requests[3].url.includes(':streamGenerateContent?alt=sse'));
+    assert.equal(requests[3].options.headers.Accept, 'text/event-stream');
+    assert.equal(streamResult.usage.totalTokens, 18);
+    
     // Test direct VERTEX_ACCESS_TOKEN override
     process.env.VERTEX_ACCESS_TOKEN = 'manual-direct-token';
     const overrideManager = new ProviderManager();
