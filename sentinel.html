@@ -1673,7 +1673,7 @@
         while (streamingSpeechBuffer) {
             const sentence = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…\n])(?:\s|$)/u);
             const sentenceLength = sentence ? sentence[1].trim().length : 0;
-            const minimumSentenceLength = streamingSpeechActive ? 120 : 60;
+            const minimumSentenceLength = streamingSpeechActive ? 90 : 30;
             if (sentence && sentenceLength >= minimumSentenceLength) {
                 queueStreamingSpeech(sentence[1]);
                 streamingSpeechBuffer = streamingSpeechBuffer.slice(sentence[1].length).trimStart();
@@ -1683,18 +1683,18 @@
             // Keep later phrases small enough to synthesize while the
             // current clip is still playing; large buffers create audible gaps
             // on mobile networks and slower TTS responses.
-            const minimumChunkLength = firstChunk ? 60 : 120;
-            const maximumChunkLength = firstChunk ? 100 : 160;
+            const minimumChunkLength = firstChunk ? 32 : 90;
+            const maximumChunkLength = firstChunk ? 80 : 140;
             if (streamingSpeechBuffer.length >= minimumChunkLength) {
-                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength, firstChunk ? 45 : 120);
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength, firstChunk ? 24 : 80);
                 if (cut) {
                     queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
                     streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
                     continue;
                 }
             }
-            if (flushPartial && streamingSpeechBuffer.length >= (streamingSpeechActive ? 120 : 60)) {
-                const cut = findSpeechChunkCut(streamingSpeechBuffer, streamingSpeechBuffer.length, streamingSpeechActive ? 120 : 60);
+            if (flushPartial && streamingSpeechBuffer.length >= (streamingSpeechActive ? 90 : 24)) {
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, streamingSpeechBuffer.length, streamingSpeechActive ? 80 : 24);
                 if (cut) {
                     queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
                     streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
@@ -1735,7 +1735,7 @@
         // Queue speech while text is still arriving so the first audio does
         // not wait for the complete answer to be synthesized on mobile.
         drainStreamingSpeech(false);
-        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 120 : 45)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 400 : 350);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 90 : 24)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 300 : 220);
     });
     // The SSE caller owns stream completion and awaits this method directly.
     // Do not finish here as well; racing two finish calls can consume success state.
@@ -2129,8 +2129,8 @@
                     const level = Math.sqrt(sum / recorderData.length);
                     if (recorderVoiceDetector.observe(level, now - recorderStartedAt)) recorderLastVoiceAt = now;
                 }
-                const meteredSilence = meterRunning && recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 1400;
-                const endpointSilence = endpointLastSpeechAt > 0 && now - endpointLastSpeechAt > 1600;
+                const meteredSilence = meterRunning && recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 850;
+                const endpointSilence = endpointLastSpeechAt > 0 && now - endpointLastSpeechAt > 1000;
                 if ((meteredSilence || endpointSilence) && now - recorderStartedAt > 700 || now - recorderStartedAt > 30000) { finishRecorder({ discard: false }); return; }
                 recorderMonitor = setTimeout(monitorRecorder, 100);
             };
@@ -2346,7 +2346,7 @@
             if (voiceState === "listening") {
                 clearTimeout(silenceTimer);
                 // Wait for a real pause instead of treating the first final phrase as the whole command.
-                silenceTimer = setTimeout(finishListening, 1800);
+                silenceTimer = setTimeout(finishListening, 850);
             }
         };
         const recognitionFailure = event => {
@@ -3084,7 +3084,7 @@
                 clearTimeout(voiceSilenceTimer);
                 voiceSilenceTimer = setTimeout(() => {
                     try { recognition.stop(); } catch (_) {}
-                }, 1800);
+                }, 850);
             };
             recognition.onstart = () => {
                 voiceRecognitionFailed = false;
