@@ -72,7 +72,7 @@ class ProviderManager {
         const prefix = `projects/${project}/locations/`;
         if (!endpoint.startsWith(prefix)) throw new Error("vertex_tuned_endpoint_project_mismatch");
         const remainder = endpoint.slice(prefix.length).split("/");
-        if (remainder.length !== 3 || remainder[1] !== "endpoints" || !/^\\d+$/.test(remainder[2])) throw new Error("vertex_tuned_endpoint_resource_invalid");
+        if (remainder.length !== 3 || remainder[1] !== "endpoints" || !/^\d+$/.test(remainder[2])) throw new Error("vertex_tuned_endpoint_resource_invalid");
         this.vertex.location = remainder[0];
         this.vertex.endpointId = remainder[2];
       })().catch((error) => {
