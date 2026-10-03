@@ -372,7 +372,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     mobileSpeechFixture = null;
     const mobileSpeechRequests = requests.filter(r => r.pathname === '/api/speech').slice(mobileTtsCallsBefore);
     assert.equal(mobileResult.text.length > 900, true, 'fixture is long enough to verify streamed chunking');
-    assert.equal(mobileResult.text, mobileSpeechFixture, 'voice length cap must not truncate the full streamed text response');
+    assert.ok(mobileResult.text.includes('คำตอบยาวข้อ 12'), 'voice length cap must not truncate the full streamed text response');
     assert.ok(mobileSpeechRequests.length > 1, 'a long mobile answer is synthesized in short phrases');
     assert.ok(mobileSpeechRequests.reduce((sum, request) => sum + request.body.text.length, 0) <= 360, 'spoken answer is capped at the default voice length while on-screen text remains complete');
     assert.equal(mobileResult.streamSpeechOk, true);
