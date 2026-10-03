@@ -19,10 +19,6 @@ jobs:
       WIF_PROVIDER: ${{ vars.STAGING_WIF_PROVIDER }}
       RUNTIME_SA: ${{ vars.STAGING_RUNTIME_SA }}
       SQL_INSTANCE: ${{ vars.STAGING_SQL_INSTANCE }}
-      GROQ_SECRET: ${{ vars.STAGING_GROQ_SECRET || 'panthorium-staging-groq-api-key' }}
-      OPENAI_SECRET: ${{ vars.STAGING_OPENAI_SECRET || 'panthorium-staging-openai-api-key' }}
-      GEMINI_SECRET: ${{ vars.STAGING_GEMINI_SECRET || 'panthorium-staging-gemini-api-key' }}
-      ANTHROPIC_SECRET: ${{ vars.STAGING_ANTHROPIC_SECRET || 'panthorium-staging-anthropic-api-key' }}
       RESEND_SECRET: ${{ vars.STAGING_RESEND_SECRET || '' }}
       EMAIL_FROM_ADDRESS: ${{ vars.STAGING_EMAIL_FROM || '' }}
       VERTEX_PROJECT: project-0f6aa7d0-6055-420f-842
@@ -38,7 +34,7 @@ jobs:
           PRODUCTION_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
         run: |
           set -euo pipefail
-          for name in PROJECT RUNTIME_SA SQL_INSTANCE DEPLOY_SA WIF_PROVIDER GROQ_SECRET OPENAI_SECRET GEMINI_SECRET ANTHROPIC_SECRET; do
+          for name in PROJECT RUNTIME_SA SQL_INSTANCE DEPLOY_SA WIF_PROVIDER; do
             if [ -z "${!name}" ]; then
               echo "::error::Missing staging configuration: $name. See docs/STAGING.md"
               exit 1
@@ -74,13 +70,9 @@ jobs:
           service_account: ${{ env.DEPLOY_SA }}
           project_id: ${{ env.PROJECT }}
       - uses: google-github-actions/setup-gcloud@v2
-      - name: Verify staging provider secrets
+      - name: Verify optional staging email secret
         run: |
           set -euo pipefail
-          for secret in "$GROQ_SECRET" "$OPENAI_SECRET" "$GEMINI_SECRET" "$ANTHROPIC_SECRET"; do
-            [[ "$secret" =~ ^[A-Za-z0-9_-]+$ ]]
-            gcloud secrets describe "$secret" --project="$PROJECT" >/dev/null
-          done
           if [ -n "$RESEND_SECRET" ] || [ -n "$EMAIL_FROM_ADDRESS" ]; then
             test -n "$RESEND_SECRET" && test -n "$EMAIL_FROM_ADDRESS"
             [[ "$RESEND_SECRET" =~ ^[A-Za-z0-9_-]+$ ]]
@@ -95,8 +87,9 @@ jobs:
             --image="$IMAGE" --service-account="$RUNTIME_SA" --allow-unauthenticated \
             --port=8787 --max-instances=1 --min-instances=0 --cpu-throttling \
             --set-cloudsql-instances="$SQL_INSTANCE" \
-            --update-env-vars="^@^NODE_ENV=production@HOST=0.0.0.0@TRUST_PROXY=1@DATABASE_SSL_MODE=disable@ALLOW_ELECTRON_ORIGIN=1@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_RELEASE_GATE_AUTO_GATE=0@SENTINEL_RELEASE_GATE_AUTO_BENCHMARK=0@SENTINEL_RELEASE_GATE_AUTO_IMPROVE=0@PANTHORIUM_GOVERNANCE_MODE=off@PANTHORIUM_SENTINEL_CONTROL_MODE=off@SENTINEL_ACTIVE_LEARNING_NEVER=1@AI_PRIORITY=vertex,groq,openai,gemini@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@GROQ_MODEL=openai/gpt-oss-20b@OPENAI_MODEL=gpt-4o-mini@GEMINI_MODEL=gemini-3.5-flash-lite@ANTHROPIC_MODEL=claude-haiku-4-5-20251001@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=openai,gemini@SENTINEL_MIN_EVALUATORS=2@SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=1" \
-            --update-secrets="DATABASE_URL=panthorium-staging-database-url:latest,JWT_SECRET=panthorium-staging-jwt:latest,ADMIN_PASSWORD=panthorium-staging-admin-password:latest,GROQ_API_KEY=$GROQ_SECRET:latest,OPENAI_API_KEY=$OPENAI_SECRET:latest,GEMINI_API_KEY=$GEMINI_SECRET:latest,ANTHROPIC_API_KEY=$ANTHROPIC_SECRET:latest" --quiet
+            --update-env-vars="^@^NODE_ENV=production@HOST=0.0.0.0@TRUST_PROXY=1@DATABASE_SSL_MODE=disable@ALLOW_ELECTRON_ORIGIN=1@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_RELEASE_GATE_AUTO_GATE=0@SENTINEL_RELEASE_GATE_AUTO_BENCHMARK=0@SENTINEL_RELEASE_GATE_AUTO_IMPROVE=0@PANTHORIUM_GOVERNANCE_MODE=off@PANTHORIUM_SENTINEL_CONTROL_MODE=off@SENTINEL_ACTIVE_LEARNING_NEVER=1@AI_PRIORITY=vertex@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex@SENTINEL_MIN_EVALUATORS=1@SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=1" \
+            --update-secrets="DATABASE_URL=panthorium-staging-database-url:latest,JWT_SECRET=panthorium-staging-jwt:latest,ADMIN_PASSWORD=panthorium-staging-admin-password:latest" \
+            --remove-secrets=GROQ_API_KEY,OPENAI_API_KEY,GEMINI_API_KEY,ANTHROPIC_API_KEY --quiet
           if [ -n "$RESEND_SECRET" ]; then
             gcloud run services update "$SERVICE" --project="$PROJECT" --region="$REGION" \
               --update-secrets="RESEND_API_KEY=$RESEND_SECRET:latest" \
