@@ -25,10 +25,10 @@ jobs:
       ANTHROPIC_SECRET: ${{ vars.STAGING_ANTHROPIC_SECRET || 'panthorium-staging-anthropic-api-key' }}
       RESEND_SECRET: ${{ vars.STAGING_RESEND_SECRET || '' }}
       EMAIL_FROM_ADDRESS: ${{ vars.STAGING_EMAIL_FROM || '' }}
-      VERTEX_PROJECT: ${{ vars.STAGING_VERTEX_PROJECT_ID || 'project-0f6aa7d0-6055-420f-842' }}
-      VERTEX_LOCATION: ${{ vars.STAGING_VERTEX_LOCATION || 'eu' }}
-      VERTEX_ENDPOINT_ID: ${{ vars.STAGING_VERTEX_ENDPOINT_ID || '8246935342645510144' }}
-      VERTEX_MODEL: ${{ vars.STAGING_VERTEX_MODEL || 'sentinel-v4' }}
+      VERTEX_PROJECT: project-0f6aa7d0-6055-420f-842
+      VERTEX_LOCATION: eu
+      VERTEX_ENDPOINT_ID: '8246935342645510144'
+      VERTEX_MODEL: sentinel-v4
       REGION: asia-southeast1
       SERVICE: panthorium-backend-staging
     steps:
