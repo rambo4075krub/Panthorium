@@ -90,4 +90,5 @@ jobs:
             --min-instances=0 \
             --cpu-throttling \
             --update-env-vars="$ENV_VARS" \
+            --remove-secrets=GROQ_API_KEY,OPENAI_API_KEY,GEMINI_API_KEY,ANTHROPIC_API_KEY \
             --quiet
