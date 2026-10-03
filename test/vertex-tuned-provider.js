@@ -36,7 +36,7 @@ const assert = require('assert');
       const frames = [
         chunk('Sentinel '),
         chunk('streamed response', { usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 7, totalTokenCount: 18 } })
-      ].map((data) => `data: ${data}\\n\\n`).join('');
+      ].map((data) => 'data: ' + data + String.fromCharCode(10, 10)).join('');
       return new Response(frames, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     }
     return new Response(JSON.stringify({

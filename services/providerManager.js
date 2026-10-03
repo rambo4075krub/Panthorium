@@ -285,7 +285,7 @@ class ProviderManager {
     let truncated = false;
     const model = this.models.vertex;
     const consumeFrame = (frame) => {
-      const payloads = frame.split(/\\r?\\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).filter(Boolean);
+      const payloads = frame.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).filter(Boolean);
       for (const payload of payloads) {
         if (payload === "[DONE]") continue;
         let data;
@@ -309,7 +309,7 @@ class ProviderManager {
       const { value, done } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      const frames = buffer.split(/\\r?\\n\\r?\\n/);
+      const frames = buffer.split(/\r?\n\r?\n/);
       buffer = frames.pop() || "";
       for (const frame of frames) consumeFrame(frame);
     }
