@@ -74,7 +74,10 @@ class ProviderManager {
     }
     const { project, location } = this.vertex;
     const model = String(process.env.SENTINEL_VERTEX_AUDIO_MODEL || "gemini-2.5-flash-lite").trim();
-    const configuredHost = process.env.SENTINEL_VERTEX_AUDIO_HOST || process.env.VERTEX_HOST || `${location}-aiplatform.googleapis.com`;
+    const defaultAudioHost = location === "eu" || location === "us"
+      ? `aiplatform.${location}.rep.googleapis.com`
+      : `${location}-aiplatform.googleapis.com`;
+    const configuredHost = process.env.SENTINEL_VERTEX_AUDIO_HOST || process.env.VERTEX_HOST || defaultAudioHost;
     const host = configuredHost.startsWith("http") ? configuredHost : `https://${configuredHost}`;
     const url = `${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
     const languageName = String(language).toLowerCase().startsWith("th") ? "Thai" : String(language).toLowerCase().startsWith("en") ? "English" : "the spoken language";
