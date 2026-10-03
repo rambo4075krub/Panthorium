@@ -7,11 +7,14 @@ const source = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8')
 const svg = source('panthorium-logo.svg');
 const mark = source('panthorium-logo-mark.svg');
 const shell = source('sentinel.html');
-const bootMarkup = shell.match(/<div id="boot-screen">([\\s\\S]*?)<!-- LOGIN/);
-assert(bootMarkup && bootMarkup[1].includes('panthorium-logo-mark.svg'), 'restart uses the plain logo mark');
-assert(!bootMarkup[1].includes('data-panthorium-logo'), 'restart does not receive the ringed logo');
+const bootStart = shell.indexOf('<div id="boot-screen">');
+const bootEnd = shell.indexOf('<!-- LOGIN', bootStart);
+const bootMarkup = bootStart >= 0 && bootEnd > bootStart ? shell.slice(bootStart, bootEnd) : '';
+
+assert(bootMarkup.includes('panthorium-logo-mark.svg'), 'restart uses the plain logo mark');
+assert(!bootMarkup.includes('data-panthorium-logo'), 'restart does not receive the ringed logo');
 assert(mark.includes('viewBox="0 0 256 256"') && !mark.includes('<circle'), 'restart mark has no surrounding circle');
-assert(bootMarkup[1].includes('boot-title') && bootMarkup[1].includes('boot-progress') && bootMarkup[1].includes('boot-status'), 'restart screen retains its existing text and progress');
+assert(bootMarkup.includes('boot-title') && bootMarkup.includes('boot-progress') && bootMarkup.includes('boot-status'), 'restart screen retains its existing text and progress');
 assert(!source('branding.js').includes('.boot-logo, .login-avatar'), 'branding does not replace the plain restart mark with the ringed logo');
 
 const group = svg.match(/<g transform="([^"]+)">([\s\S]*?)<\/g>/);
