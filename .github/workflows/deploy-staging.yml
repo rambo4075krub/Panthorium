@@ -50,11 +50,11 @@ jobs:
           [[ "$RUNTIME_SA" == *"@$PROJECT.iam.gserviceaccount.com" ]]
           [[ "$SQL_INSTANCE" == "$PROJECT:$REGION:"* ]]
           configured=0
-          for name in VERTEX_PROJECT VERTEX_LOCATION VERTEX_ENDPOINT_ID; do
+          for name in VERTEX_PROJECT VERTEX_TUNING_JOB_LOCATION VERTEX_TUNING_JOB_ID; do
             if [ -n "${!name}" ]; then configured=$((configured + 1)); fi
           done
           if [ "$configured" -ne 0 ] && [ "$configured" -ne 3 ]; then
-            echo "::error::Configure all three optional staging Vertex variables or leave all three empty"
+            echo "::error::Configure the Vertex project and tuning job resource"
             exit 1
           fi
       - uses: actions/setup-node@v4
