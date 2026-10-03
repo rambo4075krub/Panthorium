@@ -5,6 +5,7 @@ const assert = require('assert');
     SENTINEL_VERTEX_PROJECT_ID: process.env.SENTINEL_VERTEX_PROJECT_ID,
     SENTINEL_VERTEX_LOCATION: process.env.SENTINEL_VERTEX_LOCATION,
     SENTINEL_VERTEX_ENDPOINT_ID: process.env.SENTINEL_VERTEX_ENDPOINT_ID,
+    SENTINEL_VERTEX_MODEL: process.env.SENTINEL_VERTEX_MODEL,
     AI_PRIORITY: process.env.AI_PRIORITY,
     VERTEX_PROJECT: process.env.VERTEX_PROJECT,
     VERTEX_LOCATION: process.env.VERTEX_LOCATION,
@@ -15,6 +16,7 @@ const assert = require('assert');
     SENTINEL_VERTEX_PROJECT_ID: 'test-project',
     SENTINEL_VERTEX_LOCATION: 'europe-west4',
     SENTINEL_VERTEX_ENDPOINT_ID: 'endpoint-123',
+    SENTINEL_VERTEX_MODEL: 'sentinel-v4',
     AI_PRIORITY: 'vertex'
   });
   const { ProviderManager } = require('../services/providerManager');
@@ -36,7 +38,7 @@ const assert = require('assert');
     const result = await manager.callDetailed('vertex', 'System instruction', [{ role: 'user', content: 'Hello' }]);
     const second = await manager.callDetailed('vertex', 'System instruction', [{ role: 'user', content: 'Again' }]);
     assert.equal(result.text, 'Sentinel direct response');
-    assert.equal(result.model, 'sentinel-v3');
+    assert.equal(result.model, 'sentinel-v4');
     assert.deepEqual(result.usage, { inputTokens: 11, outputTokens: 7, totalTokens: 18 });
     assert.equal(requests.length, 3);
     assert.equal(second.text, 'Sentinel direct response');
