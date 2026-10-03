@@ -68,6 +68,7 @@ const assert = require('assert');
     delete process.env.SENTINEL_VERTEX_PROJECT_ID;
     delete process.env.SENTINEL_VERTEX_LOCATION;
     delete process.env.SENTINEL_VERTEX_ENDPOINT_ID;
+    delete process.env.SENTINEL_VERTEX_MODEL;
     process.env.VERTEX_PROJECT = 'legacy-project';
     process.env.VERTEX_LOCATION = 'eu';
     process.env.VERTEX_ENDPOINT_ID = 'legacy-endpoint';
