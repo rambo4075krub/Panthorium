@@ -205,7 +205,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert.equal(w.document.getElementById('voice-identity-launcher'), null, 'guest must not see a Voice Identity start-menu launcher');
     for (const app of catalog.apps) {
       const result = await command(`เปิด ${app.aliases[0]}`);
-      assert.equal(result.ok, catalog.allowed(app, guest), `${app.label}: guest permission`);
+      assert.equal(result.ok, catalog.allowed(app, guest), `${app.label}: guest permission: ${JSON.stringify(result)}`);
       assert.equal(isVisible(app), catalog.allowed(app, guest), `${app.label}: guest DOM`);
       if (app.id === 'voice-identity' && result.ok) assert.equal(w.document.querySelector(app.selector + ' [data-type] option[value="administrator"]'), null, 'guest sees only user/family enrollment types');
       if (result.ok) await command(`ปิด ${app.aliases[0]}`);
