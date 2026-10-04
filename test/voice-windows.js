@@ -96,7 +96,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     load('phase2-auth.js'); await tick();
     await w.PanthoriumAuth.login('admin', 'fixture');
     w.document.getElementById('desktop').classList.add('active');
-    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumStagingAdminDesktop.render();
     assert(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), 'administrator desktop must show Voice Identity icon');
     w.PanthoriumAIStream.install();
