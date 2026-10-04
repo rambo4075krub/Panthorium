@@ -115,6 +115,7 @@
         }
         const remove = document.createElement('button');
         remove.type = 'button';
+        remove.dataset.delete = entry.memoryId;
         remove.textContent = 'ลบ';
         remove.setAttribute('aria-label', 'ลบนัดหมาย ' + entry.title);
         remove.style.cssText = 'border:1px solid rgba(255,120,140,.3);background:rgba(255,80,110,.08);color:var(--text);border-radius:8px;padding:6px 9px;cursor:pointer;';
