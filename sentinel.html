@@ -773,11 +773,11 @@
     // Panthorium OS - Sentinel Runtime
     // =========================================================
     function defaultBackendOrigin() {
-        // Use the origin serving the shell; saved overrides can point at old
-        // staging deployments and lose the same-site refresh cookie.
+        // Resolve the cloud API from the served origin; native builds may inject a public endpoint.
+        const configured = String(window.PANTHORIUM_BACKEND_URL || "").trim();
+        if (configured && /^https?:\/\//i.test(configured)) return new URL(configured).origin;
         if (/^https?:$/.test(window.location.protocol)) return window.location.origin;
-        const stored = localStorage.getItem("pt_backend_url");
-        return stored || (/^https?:$/.test(window.location.protocol) ? window.location.origin : "http://localhost:8787");
+        return "https://panthorium-backend-staging-124818950958.asia-southeast1.run.app";
     }
     const OS = {
         // Web OS shell build (shown in About). Browser app version is releaseVersion.
@@ -792,15 +792,11 @@
         config: {
             // Backend / Sentinel
             backendUrl: defaultBackendOrigin(),
-            useBackend: localStorage.getItem("pt_use_backend") !== "0",
-            sessionId: localStorage.getItem("pt_session_id") || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
+            useBackend: true,
+            // Conversations use one account-scoped server session across devices.
+            sessionId: "account-default",
             // Access token stays in memory only; provider secrets remain server-side.
             accessToken: ""
-        },
-        biometrics: {
-            faceDescriptor: null,
-            voiceprint: null,
-            enrolled: false
         },
         conversationHistory: [],
         windows: new Map(),
@@ -809,8 +805,13 @@
         sentinelOnline: false
     };
 
-    // เก็บ session ถาวร
-    localStorage.setItem("pt_session_id", OS.config.sessionId);
+    // Retire device-only connection settings and sensitive local biometric descriptors.
+    (function clearLegacyDeviceStorage() {
+        try {
+            ["pt_backend_url", "pt_use_backend", "pt_session_id", "pt_face", "pt_voice", "pt_enrolled"]
+                .forEach(key => localStorage.removeItem(key));
+        } catch (error) { console.warn("Legacy device settings could not be cleared:", error); }
+    })();
 
     // ---------- Utilities ----------
     function toast(msg, duration = 2500) {
@@ -961,89 +962,6 @@
         for (let i = 0; i < 48; i++) sum += data[i];
         return sum / 48;
     }
-
-    async function enrollBiometrics() {
-        toast("กำลังโหลดโมเดล AI...");
-        await loadFaceModels();
-        toast("กำลังเปิดกล้องและไมโครโฟน...");
-        const ok = await startCamera();
-        if (!ok) {
-            return false;
-        }
-
-        toast("กรุณามองกล้องสักครู่...");
-        await new Promise(r => setTimeout(r, 2200));
-
-        const video = $("faceVideo");
-        try {
-            const det = await faceapi
-                .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
-                .withFaceLandmarks()
-                .withFaceDescriptor();
-            if (det) {
-                OS.biometrics.faceDescriptor = Array.from(det.descriptor);
-                localStorage.setItem("pt_face", JSON.stringify(OS.biometrics.faceDescriptor));
-            }
-        } catch (e) {}
-
-        // Capture simple voiceprint
-        const vp = extractVoiceFeatures();
-        if (vp > 0) {
-            OS.biometrics.voiceprint = vp;
-            localStorage.setItem("pt_voice", vp);
-        }
-
-        OS.biometrics.enrolled = true;
-        localStorage.setItem("pt_enrolled", "1");
-        return true;
-    }
-
-    async function verifyBiometrics() {
-        if (!OS.biometrics.enrolled) return true; // first time
-        const video = $("faceVideo");
-        let faceOK = true;
-        let voiceOK = true;
-
-        if (OS.biometrics.faceDescriptor && faceModelsLoaded) {
-            try {
-                const det = await faceapi
-                    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
-                    .withFaceLandmarks()
-                    .withFaceDescriptor();
-                if (det) {
-                    const dist = faceapi.euclideanDistance(
-                        new Float32Array(OS.biometrics.faceDescriptor),
-                        det.descriptor
-                    );
-                    faceOK = dist < 0.52;
-                } else faceOK = false;
-            } catch (e) { faceOK = false; }
-        }
-
-        if (OS.biometrics.voiceprint) {
-            const cur = extractVoiceFeatures();
-            voiceOK = Math.abs(OS.biometrics.voiceprint - cur) < 18;
-        }
-
-        return faceOK; // prioritize face; voice is secondary
-    }
-
-    // Load saved biometrics
-    (function loadSavedBio() {
-        if (localStorage.getItem("pt_enrolled") === "1") {
-            OS.biometrics.enrolled = true;
-            try {
-                const f = localStorage.getItem("pt_face");
-                if (f) OS.biometrics.faceDescriptor = JSON.parse(f);
-                const v = localStorage.getItem("pt_voice");
-                if (v) OS.biometrics.voiceprint = parseFloat(v);
-            } catch (e) {}
-        }
-    })();
-
-    // ---------- Login (disabled - free access) ----------
-    // ระบบเปิดใช้ฟรีทันทีหลัง boot ไม่ต้อง login
-    // Biometric จะถูกใช้เฉพาะเมื่อผู้ใช้เลือกเปิดฟังก์ชันขั้นสูงเอง
 
     // ---------- Speech ----------
     let aiSpeechActive = false;
@@ -3227,90 +3145,48 @@
         const html = `
             <div class="app-content">
                 <div class="settings-section">
-                    <h3>🧠 Sentinel (Backend)</h3>
+                    <h3>🧠 Sentinel · Cloud</h3>
                     <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px;">
                         สถานะ: <strong id="sentinel-status-text">${sentinelStatus}</strong><br>
-                        <span style="font-size:12px;">AI หลักอยู่บนเซิร์ฟเวอร์ — API Key ไม่โผล่ฝั่งผู้ใช้</span>
+                        <span style="font-size:12px;">AI ประมวลผลผ่านเซิร์ฟเวอร์ ข้อมูลบัญชีถูกแยกตามผู้ใช้ และ API Key ไม่ถูกเก็บบนอุปกรณ์</span>
                     </p>
                     <div class="setting-row">
-                        <label>Backend URL</label>
-                        <input type="text" id="backend-url" placeholder="http://localhost:8787" value="${OS.config.backendUrl}">
+                        <label>เซิร์ฟเวอร์: <strong id="backend-url-display"></strong></label>
                     </div>
-                    <div class="setting-row">
-                        <label>
-                            <input type="checkbox" id="use-backend" ${OS.config.useBackend ? "checked" : ""} style="width:auto;margin-right:8px;">
-                            ใช้ Sentinel เป็นหลัก
-                        </label>
-                    </div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                        <button class="btn-primary" id="save-backend">บันทึก Backend</button>
-                        <button class="btn-primary" id="test-sentinel" style="background:rgba(0,255,204,0.2);color:var(--accent);">ทดสอบการเชื่อมต่อ</button>
-                    </div>
+                    <button class="btn-primary" id="test-sentinel" style="background:rgba(0,255,204,0.2);color:var(--accent);">ตรวจสอบการเชื่อมต่อเซิร์ฟเวอร์</button>
                 </div>
                 <div class="settings-section">
-                    <h3>🛡️ Biometric (ไม่บังคับ)</h3>
+                    <h3>🔐 Voice Identity · บัญชีบนเซิร์ฟเวอร์</h3>
                     <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px;">
-                        สถานะ: ${OS.biometrics.enrolled ? "ลงทะเบียนแล้ว" : "ยังไม่ได้ลงทะเบียน"}
+                        การลงทะเบียนชีวมิติแบบเก็บข้อมูลบนอุปกรณ์ถูกปิดแล้ว ใช้ Voice Identity เพื่อจัดการตัวตนผ่านบัญชีและเซิร์ฟเวอร์
                     </p>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                        <button class="btn-primary" id="enroll-bio">ลงทะเบียน Biometric</button>
-                        <button class="btn-danger" id="reset-bio">ล้างข้อมูล</button>
-                    </div>
+                    <button class="btn-primary" id="open-cloud-identity">เปิด Voice Identity</button>
                 </div>
                 <div class="settings-section">
                     <h3>ℹ️ ระบบ</h3>
                     <p style="font-size:13px;color:var(--text-dim);line-height:1.6;">
                         Panthorium OS v${OS.version}<br>
-                        สถาปัตยกรรม: Frontend + Sentinel Backend<br>
-                        รองรับ: คอมพิวเตอร์ · แท็บเล็ต · สมาร์ทโฟน<br>
-                        <strong style="color:var(--accent);">ใช้งานฟรีทันที ไม่ต้อง login</strong>
+                        สถาปัตยกรรม: Panthorium Client + Sentinel Cloud API<br>
+                        โน้ตและความทรงจำซิงก์ตามบัญชีที่เข้าสู่ระบบ
                     </p>
                 </div>
             </div>
         `;
-        createWindow("settings", "ตั้งค่า", html, { width: 420, height: 620 });
-
-        $("save-backend").onclick = () => {
-            const url = $("backend-url").value.trim().replace(/\/$/, "") || "http://localhost:8787";
-            const use = $("use-backend").checked;
-            OS.config.backendUrl = url;
-            OS.config.useBackend = use;
-            localStorage.setItem("pt_backend_url", url);
-            localStorage.setItem("pt_use_backend", use ? "1" : "0");
-            toast("บันทึกการตั้งค่า Backend แล้ว");
-            checkSentinelStatus();
-        };
+        createWindow("settings", "ตั้งค่า", html, { width: 420, height: 560 });
+        $("backend-url-display").textContent = OS.config.backendUrl;
 
         $("test-sentinel").onclick = async () => {
-            toast("กำลังทดสอบ Sentinel...");
+            toast("กำลังตรวจสอบเซิร์ฟเวอร์...");
             const ok = await checkSentinelStatus();
             const el = $("sentinel-status-text");
             if (el) el.textContent = ok ? "🟢 Online" : "🔴 Offline";
-            toast(ok ? "เชื่อมต่อ Sentinel สำเร็จ" : "เชื่อมต่อไม่ได้ — ตรวจ URL หรือเปิด Backend");
+            toast(ok ? "เชื่อมต่อ Sentinel สำเร็จ" : "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้");
         };
 
-        $("enroll-bio").onclick = async () => {
-            toast("กำลังเริ่มลงทะเบียน Biometric...");
-            const ok = await enrollBiometrics();
-            if (ok) {
-                toast("ลงทะเบียน Biometric สำเร็จ");
-                closeWindow("settings");
-                openSettings();
-            } else {
-                toast("ไม่สามารถลงทะเบียนได้ (ต้องอนุญาตกล้อง/ไมค์)");
-            }
-        };
-
-        $("reset-bio").onclick = () => {
-            if (confirm("ล้างข้อมูลใบหน้าและเสียง?")) {
-                localStorage.removeItem("pt_face");
-                localStorage.removeItem("pt_voice");
-                localStorage.removeItem("pt_enrolled");
-                OS.biometrics = { faceDescriptor: null, voiceprint: null, enrolled: false };
-                toast("ล้างข้อมูล Biometric แล้ว");
-                closeWindow("settings");
-                openSettings();
-            }
+        $("open-cloud-identity").onclick = () => {
+            const identity = window.PanthoriumVoiceIdentity;
+            if (typeof identity?.open === "function") identity.open();
+            else toast("Voice Identity ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่");
         };
     }
 
@@ -3567,38 +3443,9 @@
 
     // ---------- App: Files (simple) ----------
     function openFiles() {
-        let files = JSON.parse(localStorage.getItem("pt_files") || "[]");
-        function render() {
-            const list = files.map((f, i) => `
-                <div class="file-item" data-i="${i}">
-                    <div class="fico">📄</div>
-                    <div class="fname">${f.name}</div>
-                    <div class="fsize">${f.size}</div>
-                </div>
-            `).join("") || `<p style="color:var(--text-dim);font-size:13px;padding:12px;">ยังไม่มีไฟล์ — ใช้แอปบันทึกเพื่อสร้าง</p>`;
-
-            return `
-                <div class="app-content">
-                    <div style="display:flex;gap:8px;margin-bottom:14px;">
-                        <button class="btn-primary" id="new-file">+ สร้างไฟล์ใหม่</button>
-                    </div>
-                    <div class="file-list" id="file-list">${list}</div>
-                </div>
-            `;
-        }
-
-        createWindow("files", "ตัวจัดการไฟล์", render(), { width: 400, height: 380 });
-
-        const win = OS.windows.get("files").el;
-        win.querySelector("#new-file").onclick = () => {
-            const name = prompt("ชื่อไฟล์:");
-            if (!name) return;
-            files.push({ name, size: "0 B", content: "", created: Date.now() });
-            localStorage.setItem("pt_files", JSON.stringify(files));
-            closeWindow("files");
-            openFiles();
-        };
+        toast("ตัวจัดการไฟล์ถูกปิดชั่วคราวจนกว่าจะมีพื้นที่เก็บไฟล์บนคลาวด์ ขณะนี้จะไม่อ่านหรือบันทึกไฟล์ไว้บนอุปกรณ์");
     }
+
 
     // ---------- App: Terminal ----------
     function openTerminal() {
