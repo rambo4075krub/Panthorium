@@ -3321,20 +3321,21 @@
         const instance = openNotes.instance;
         if (openNotes.authChangedHandler) window.removeEventListener("panthorium:auth-changed", openNotes.authChangedHandler);
 
-        const html = `
-            <div style="height:100%;display:flex;flex-direction:column;">
-                <div style="padding:8px 12px;min-height:42px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                    <span id="notes-sync-status" role="status" aria-live="polite">กำลังโหลดบัญชี…</span>
-                    <button id="notes-import-legacy" type="button" hidden style="border:1px solid rgba(0,255,204,.3);background:rgba(0,255,204,.08);color:var(--text);border-radius:8px;padding:7px 10px;">นำเข้าบันทึกเดิมจากอุปกรณ์นี้</button>
-                    <button id="notes-save-retry" type="button" hidden style="border:1px solid rgba(0,255,204,.3);background:rgba(0,255,204,.08);color:var(--text);border-radius:8px;padding:7px 10px;">ลองอีกครั้ง</button>
-                </div>
-                <textarea class="notes-area" id="notes-area" maxlength="12000" disabled placeholder="เขียนบันทึกที่นี่..."></textarea>
-            </div>
-        `;
+        const html =
+            '<div style="height:100%;display:flex;flex-direction:column;">' +
+                '<div style="padding:8px 12px;min-height:42px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+                    '<span id="notes-sync-status" role="status" aria-live="polite">กำลังโหลดบัญชี…</span>' +
+                    '<button id="notes-account-login" type="button" hidden style="border:1px solid rgba(0,255,204,.3);background:rgba(0,255,204,.08);color:var(--text);border-radius:8px;padding:7px 10px;">เข้าสู่ระบบ / สมัครบัญชี</button>' +
+                    '<button id="notes-import-legacy" type="button" hidden style="border:1px solid rgba(0,255,204,.3);background:rgba(0,255,204,.08);color:var(--text);border-radius:8px;padding:7px 10px;">นำเข้าบันทึกเดิมจากอุปกรณ์นี้</button>' +
+                    '<button id="notes-save-retry" type="button" hidden style="border:1px solid rgba(0,255,204,.3);background:rgba(0,255,204,.08);color:var(--text);border-radius:8px;padding:7px 10px;">ลองอีกครั้ง</button>' +
+                '</div>' +
+                '<textarea class="notes-area" id="notes-area" maxlength="12000" disabled placeholder="เขียนบันทึกที่นี่..."></textarea>' +
+            '</div>';
         createWindow("notes", "บันทึก", html, { width: 420, height: 400 });
 
         const area = $("notes-area");
         const status = $("notes-sync-status");
+        const loginButton = $("notes-account-login");
         const importButton = $("notes-import-legacy");
         const retryButton = $("notes-save-retry");
         area.style.height = "auto";
@@ -3359,69 +3360,68 @@
             const id = currentUserId();
             return Boolean(id) && !id.startsWith("guest:") && !user.roles?.includes("guest");
         };
-        const localKey = (id) => "pt_notes:v2:" + encodeURIComponent(id || "device");
         const legacyNote = () => { try { return localStorage.getItem("pt_notes") || ""; } catch (_) { return ""; } };
         const setStatus = (value) => { status.textContent = value; };
         const showLegacyImport = () => { importButton.hidden = !legacyNote(); };
 
         async function loadNotes() {
             ready = false;
+            remoteSync = false;
             area.disabled = true;
             retryButton.hidden = true;
-            setStatus("กำลังโหลดบันทึก…");
+            importButton.hidden = true;
+            loginButton.hidden = true;
+            setStatus("กำลังโหลดบันทึกบนคลาวด์…");
             try {
                 if (window.PanthoriumAuth?.ensureSession) await window.PanthoriumAuth.ensureSession();
                 else await ensureAuth();
                 if (!isCurrent()) return;
+
                 activeOwner = currentUserId();
                 if (!activeOwner) throw new Error("account_unavailable");
-
-                if (isRegisteredUser()) {
-                    remoteSync = true;
-                    const response = await authorizedFetch(OS.config.backendUrl.replace(/\/$/, "") + "/api/agent/memory?kind=note&limit=100", { signal: AbortSignal.timeout(10000) });
-                    const data = await response.json().catch(() => ({}));
-                    if (!response.ok || !data.ok) throw new Error(data.error || "notes_load_failed");
-                    const savedNote = (data.memories || []).find(item => item.title === noteTitle);
-                    if (savedNote) {
-                        noteMemoryId = savedNote.memoryId;
-                        area.value = savedNote.content || "";
-                        setStatus("ซิงก์บันทึกกับบัญชีนี้แล้ว");
-                        importButton.hidden = true;
-                    } else {
-                        area.value = "";
-                        setStatus("บันทึกนี้จะซิงก์กับบัญชีของคุณ");
-                        showLegacyImport();
-                    }
-                } else {
-                    remoteSync = false;
-                    area.value = localStorage.getItem(localKey(activeOwner)) || "";
-                    setStatus("เก็บบันทึกไว้ในอุปกรณ์นี้ • เข้าสู่ระบบเพื่อซิงก์ข้ามอุปกรณ์");
-                    if (area.value) importButton.hidden = true;
-                    else showLegacyImport();
+                if (!isRegisteredUser()) {
+                    area.value = "";
+                    loginButton.hidden = false;
+                    setStatus("เข้าสู่ระบบหรือสมัครบัญชีเพื่อบันทึกและซิงก์โน้ตบนคลาวด์");
+                    return;
                 }
-                if (!isCurrent()) return;
+
+                const owner = activeOwner;
+                const response = await authorizedFetch(OS.config.backendUrl.replace(/\/$/, "") + "/api/agent/memory?kind=note&limit=100", { signal: AbortSignal.timeout(10000) });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) throw new Error(data.error || "notes_load_failed");
+                if (!isCurrent() || owner !== currentUserId()) return;
+
+                remoteSync = true;
+                const savedNote = (data.memories || []).find(item => item.title === noteTitle);
+                if (savedNote) {
+                    noteMemoryId = savedNote.memoryId;
+                    area.value = savedNote.content || "";
+                    setStatus("บันทึกและซิงก์กับบัญชีของคุณบนคลาวด์แล้ว");
+                    importButton.hidden = true;
+                } else {
+                    noteMemoryId = "";
+                    area.value = "";
+                    setStatus("โน้ตใหม่จะบันทึกบนเซิร์ฟเวอร์และใช้ได้บนอุปกรณ์อื่นเมื่อเข้าสู่บัญชีนี้");
+                    showLegacyImport();
+                }
                 ready = true;
                 area.disabled = false;
             } catch (error) {
                 if (!isCurrent()) return;
                 ready = false;
-                setStatus("โหลดบันทึกไม่สำเร็จ • แตะลองอีกครั้ง");
+                remoteSync = false;
+                area.disabled = true;
+                setStatus("เชื่อมต่อคลาวด์เพื่อโหลดโน้ตไม่ได้ • แตะลองอีกครั้ง");
                 retryButton.hidden = false;
             }
         }
 
         async function saveSnapshot(content, owner, version) {
-            if (!ready || !isCurrent() || owner !== activeOwner || owner !== currentUserId() || version !== revision) return;
-            if (!remoteSync) {
-                localStorage.setItem(localKey(owner), content);
-                setStatus("บันทึกไว้ในอุปกรณ์นี้ • ไม่ซิงก์ข้ามอุปกรณ์");
-                if (pendingLegacyImport && legacyNote() === content) { localStorage.removeItem("pt_notes"); pendingLegacyImport = false; }
-                return;
-            }
-
+            if (!ready || !remoteSync || !isCurrent() || owner !== activeOwner || owner !== currentUserId() || version !== revision || !isRegisteredUser()) return;
             let response;
             if (!content.trim()) {
-                if (!noteMemoryId) { setStatus("บันทึกแล้ว"); return; }
+                if (!noteMemoryId) { setStatus("บันทึกแล้วบนคลาวด์"); return; }
                 response = await authorizedFetch(OS.config.backendUrl.replace(/\/$/, "") + "/api/agent/memory/" + encodeURIComponent(noteMemoryId), {
                     method: "DELETE",
                     signal: AbortSignal.timeout(10000)
@@ -3446,23 +3446,26 @@
             if (owner !== currentUserId()) return;
             if (content.trim()) noteMemoryId = data.memory?.memoryId || noteMemoryId;
             else noteMemoryId = "";
-            setStatus("บันทึกแล้ว • ซิงก์กับบัญชีนี้");
+            setStatus("บันทึกแล้ว • ซิงก์กับบัญชีบนคลาวด์");
             retryButton.hidden = true;
-            if (pendingLegacyImport && legacyNote() === content) { localStorage.removeItem("pt_notes"); pendingLegacyImport = false; }
+            if (pendingLegacyImport && legacyNote() === content) {
+                try { localStorage.removeItem("pt_notes"); } catch (_) {}
+                pendingLegacyImport = false;
+            }
         }
 
         function scheduleSave(immediate = false) {
-            if (!ready || !activeOwner) return;
+            if (!ready || !remoteSync || !isRegisteredUser() || !activeOwner) return;
             clearTimeout(saveTimer);
             const owner = activeOwner;
             const content = area.value;
             const version = ++revision;
             retryButton.hidden = true;
-            setStatus(remoteSync ? "กำลังบันทึกและซิงก์…" : "กำลังบันทึกในอุปกรณ์นี้…");
+            setStatus("กำลังบันทึกและซิงก์บนคลาวด์…");
             const enqueue = () => {
                 saveQueue = saveQueue.catch(() => {}).then(() => saveSnapshot(content, owner, version)).catch(() => {
                     if (!isCurrent() || version !== revision) return;
-                    setStatus("บันทึกไม่สำเร็จ • ข้อความยังอยู่ในช่อง");
+                    setStatus("บันทึกบนเซิร์ฟเวอร์ไม่สำเร็จ • ข้อความยังอยู่ในช่องนี้");
                     retryButton.hidden = false;
                 });
             };
@@ -3470,7 +3473,14 @@
             else saveTimer = setTimeout(enqueue, 600);
         }
 
+        loginButton.addEventListener("click", () => {
+            const identity = window.PanthoriumVoiceIdentity;
+            if (typeof identity?.openLogin === "function") identity.openLogin();
+            else if (typeof identity?.open === "function") identity.open();
+            else if (typeof toast === "function") toast("เปิดเมนู Voice Identity เพื่อเข้าสู่ระบบหรือสมัครบัญชี");
+        });
         importButton.addEventListener("click", () => {
+            if (!ready || !remoteSync || !isRegisteredUser()) return;
             const oldValue = legacyNote();
             if (!oldValue) return;
             area.value = oldValue.slice(0, 12000);
@@ -3478,7 +3488,10 @@
             importButton.hidden = true;
             scheduleSave(true);
         });
-        retryButton.addEventListener("click", () => scheduleSave(true));
+        retryButton.addEventListener("click", () => {
+            if (ready) scheduleSave(true);
+            else loadNotes();
+        });
         area.addEventListener("input", () => {
             if (!pendingLegacyImport) importButton.hidden = true;
             scheduleSave();
