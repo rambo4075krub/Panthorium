@@ -40,6 +40,8 @@ const { ProviderManager } = require('../services/providerManager');
     assert.equal(payload.contents[0].parts[1].inlineData.data, Buffer.from('fixture audio').toString('base64'));
     assert.match(payload.contents[0].parts[0].text, /Transcribe the attached audio exactly in Thai/);
     assert.match(payload.contents[0].parts[0].text, /TRANSCRIPTION_UNCERTAIN/);
+    assert.match(payload.contents[0].parts[0].text, /Do not infer missing words/);
+    assert.doesNotMatch(payload.contents[0].parts[0].text, /including names Panthorium, Sentinel, Niwat, AI, API, and ProviderManager/);
     assert(!calls.some(item => /api\.(groq|openai)\.com/.test(item.url)), 'transcription must not call revoked provider APIs');
     await assert.rejects(
       manager.transcribeAudio(Buffer.from('silence'), 'audio/webm', 'th'),
