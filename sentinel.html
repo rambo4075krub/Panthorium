@@ -2825,9 +2825,6 @@
             return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
         } }
     ];
-        { id: "sentinel", name: "Sentinel AI", icon: "🤖", open: openSentinel },
-        { id: "voice-identity", name: "Voice Identity", icon: "🎙️", open: () => window.PanthoriumVoiceIdentity?.open?.() }
-    ];
 
     function visibleApps() {
         return APP_LIST.filter(app => !app.visible || app.visible());
