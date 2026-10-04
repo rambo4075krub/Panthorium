@@ -21,12 +21,6 @@
         object-fit: contain !important;
         flex: 0 0 auto !important;
       }
-      .sm-avatar > img[data-panthorium-logo] {
-        width: 130% !important;
-        height: 130% !important;
-        max-width: none !important;
-        max-height: none !important;
-      }
     `;
     document.head.appendChild(style);
   }
@@ -46,7 +40,7 @@
 
   function applyBranding() {
     installLogoStyles();
-    // The SVG owns its circular border, interior color and transparent outer area.
+    // Preserve the shell's circular frame, fill and accent border around the original inset mark.
     document.querySelectorAll('.login-avatar, .sm-avatar, .about-logo, [data-panthorium-logo-frame]')
       .forEach(ensureLogo);
   }
