@@ -2433,7 +2433,16 @@
                 stopSentinelSpeech();
                 voiceState = "idle";
             }
-            if (voiceState === "processing" || voiceState === "stopping") { status("processing", "กำลังประมวลผล"); return; }
+            if (voiceState === "processing" || voiceState === "stopping") {
+                autoResume = false;
+                voiceTurnId += 1;
+                activeVoiceRequestController?.abort();
+                activeVoiceRequestController = null;
+                stopSentinelSpeech();
+                voiceState = "idle";
+                status("ready", "ยกเลิกรอบเสียงแล้ว", false);
+                return;
+            }
             if (voiceState === "listening") {
                 autoResume = false;
                 // A tap on the stop button means "finish this command". The
