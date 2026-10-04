@@ -76,11 +76,12 @@ const catalog = require('../voice-window-catalog');
     }
     assert.equal(serviceCalls, restrictedPaths.length);
     for (const entry of catalog.apps) {
-      assert.equal(catalog.allowed(entry, guest), !excluded.includes(entry.id), entry.id);
+      const guestAllowed = !entry.accountRequired && !excluded.includes(entry.id);
+      assert.equal(catalog.allowed(entry, guest), guestAllowed, entry.id);
       assert.equal(catalog.allowed(entry, admin), true, entry.id);
       assert.equal(catalog.allowed(entry, user), !excluded.includes(entry.id), 'standard user access: ' + entry.id);
       const res = await call('/api/sentinel/command', guest, { command: 'เปิด ' + entry.aliases[0] });
-      assert.equal(res.status, excluded.includes(entry.id) ? 403 : 200, entry.id);
+      assert.equal(res.status, excluded.includes(entry.id) || entry.accountRequired ? 403 : 200, entry.id);
     }
     assert.equal(catalog.allowed(catalog.apps.find(entry => entry.id === 'voice-identity'), guest), true, 'guest can open voice enrollment');
     assert.equal((await call('/api/biometrics/status', guest)).status, 200, 'guest can read non-sensitive enrollment status');
