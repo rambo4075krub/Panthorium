@@ -26,6 +26,16 @@ const { AgentMemoryService } = require('../services/agentMemoryService');
   assert.equal(found.ok, true);
   assert.equal(found.memories.length, 1);
 
+  const updated = await memory.update({ user, memoryId: created.memory.memoryId, content: 'Respond in Thai and English', importance: 95 });
+  assert.equal(updated.ok, true);
+  assert.equal(updated.memory.content, 'Respond in Thai and English');
+  assert.equal(updated.memory.importance, 95);
+
+  const hiddenFromOtherUser = await memory.update({ user: { sub: 'u2', permissions: ['chat'] }, memoryId: created.memory.memoryId, content: 'Private data' });
+  assert.equal(hiddenFromOtherUser.error, 'memory_not_found', 'an account cannot update another account memory');
+  const deniedGuestUpdate = await memory.update({ user: guest, memoryId: created.memory.memoryId, content: 'Private data' });
+  assert.equal(deniedGuestUpdate.error, 'memory_requires_account', 'guest memory updates are rejected');
+
   const context = await memory.context({ user, query: 'language' });
   assert.equal(context.ok, true);
   assert.equal(context.context[0].title, 'Language');
