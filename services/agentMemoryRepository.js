@@ -106,6 +106,15 @@ class AgentMemoryRepository {
     return r.rows.map((row) => this.mapRow(row));
   }
 
+  async update(userId, memoryId, patch = {}) {
+    const current = await this.get(userId, memoryId);
+    if (!current) return null;
+    const item = this.normalize({ ...current, ...patch, memoryId: current.memoryId, userId: current.userId, updatedAt: new Date().toISOString() });
+    if (!this.pool) { this.memory.set(item.memoryId, item); return item; }
+    const r = await this.pool.query(`UPDATE panthorium_agent_memories SET title=$3,content=$4,tags=$5::jsonb,importance=$6,updated_at=NOW() WHERE memory_id=$1 AND user_id=$2 RETURNING memory_id AS "memoryId",user_id AS "userId",kind,title,content,tags,source,importance,created_at AS "createdAt",updated_at AS "updatedAt"`, [memoryId,userId,item.title,item.content,JSON.stringify(item.tags),item.importance]);
+    return this.mapRow(r.rows[0]);
+  }
+
   async delete(userId, memoryId) {
     if (!this.pool) { const item = this.memory.get(memoryId); if (!item || item.userId !== userId) return false; this.memory.delete(memoryId); return true; }
     const r = await this.pool.query('DELETE FROM panthorium_agent_memories WHERE memory_id=$1 AND user_id=$2', [memoryId,userId]);
