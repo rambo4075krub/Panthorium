@@ -24,6 +24,38 @@ class AgentMemoryService {
     return { ok: true, memories: await this.repository.list(user.sub, limit, safeKind) };
   }
 
+  async update({ user, memoryId, title, content, tags, importance, requestId } = {}) {
+    if (!this.allowed(user)) return { ok: false, error: 'memory_requires_account' };
+    const id = String(memoryId || '');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return { ok: false, error: 'invalid_memory_id' };
+    const current = await this.repository.get(user.sub, id);
+    if (!current) return { ok: false, error: 'memory_not_found' };
+    const changes = {};
+    if (title !== undefined) {
+      if (typeof title !== 'string' || !title.trim() || title.length > 240) return { ok: false, error: 'invalid_memory_title' };
+      changes.title = title.trim();
+    }
+    if (content !== undefined) {
+      if (typeof content !== 'string' || !content.trim() || content.length > 12000) return { ok: false, error: 'invalid_memory_content' };
+      changes.content = content.trim();
+    }
+    if (tags !== undefined) {
+      const safeTags = this.validateTags(tags);
+      if (!safeTags) return { ok: false, error: 'invalid_memory_tags' };
+      changes.tags = safeTags;
+    }
+    if (importance !== undefined) {
+      const score = Number(importance);
+      if (!Number.isInteger(score) || score < 1 || score > 100) return { ok: false, error: 'invalid_memory_importance' };
+      changes.importance = score;
+    }
+    if (!Object.keys(changes).length) return { ok: false, error: 'empty_memory_update' };
+    const memory = await this.repository.update(user.sub, id, changes);
+    if (!memory) return { ok: false, error: 'memory_not_found' };
+    this.audit?.record('agent.memory_updated', { userId: user.sub, requestId, memoryId: id, kind: memory.kind });
+    return { ok: true, memory };
+  }
+
   async search({ user, query, limit, requestId } = {}) {
     if (!this.allowed(user)) return { ok: false, error: 'memory_requires_account' };
     const text = String(query || '').trim(); if (!text || text.length > 500) return { ok: false, error: 'invalid_memory_query' };
