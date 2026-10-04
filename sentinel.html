@@ -2059,7 +2059,9 @@
                 }
                 const meteredSilence = meterRunning && recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 850;
                 const endpointSilence = endpointLastSpeechAt > 0 && now - endpointLastSpeechAt > 1000;
-                if ((meteredSilence || endpointSilence) && now - recorderStartedAt > 700 || now - recorderStartedAt > 30000) { finishRecorder({ discard: false }); return; }
+                // If both local VAD and the browser speech endpoint are silent or unavailable, submit a short capture instead of holding the mic for the 30-second ceiling.
+                const noDetectedSpeechTimeout = !recorderLastVoiceAt && !endpointLastSpeechAt && now - recorderStartedAt > 8000;
+                if (((meteredSilence || endpointSilence) && now - recorderStartedAt > 700) || noDetectedSpeechTimeout || now - recorderStartedAt > 30000) { finishRecorder({ discard: false }); return; }
                 recorderMonitor = setTimeout(monitorRecorder, 100);
             };
             const startRecorder = async () => {
