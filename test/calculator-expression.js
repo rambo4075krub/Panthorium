@@ -13,6 +13,6 @@ const cases = [
 for (const [input, expected] of cases) assert.equal(evaluate(input), expected, input);
 
 for (const input of ['', '1/0', '2(3+4)', '1+foo', '1/0', '1e999']) {
-  assert.throws(() => evaluate(input), undefined, input || 'empty expression');
+  assert.throws(() => evaluate(input), Error, input || 'empty expression');
 }
 console.log('Calculator expression tests passed: precedence, parentheses, signs, decimals, Unicode operators, and invalid input');
