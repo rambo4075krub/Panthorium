@@ -3800,7 +3800,7 @@
         orbCore.material.uniforms.uTime.value = time;
         orbCore.material.uniforms.uPulse.value = smoothPulse;
         const breathe = 1 + Math.sin(time * 1.35) * .022 + smoothPulse * .16 + orbAIEnergy * (.15 + Math.sin(time * 9) * .01) + orbVoiceEnergy * .018;
-        orbGroup.scale.setScalar(breathe);
+        orbGroup.scale.setScalar(.98 * breathe);
         orbHalo.material.opacity = Math.max(.08, .2 + Math.sin(time * 1.6) * .035 - smoothPulse * .08 + orbAIEnergy * .035 + orbVoiceEnergy * .012);
         renderer.render(scene, camera);
     }
