@@ -68,7 +68,12 @@
     const target = aliases.find(item => text.includes(item.alias));
     if (!target) return null;
     if (/อย่า|ห้าม|ไม่ต้อง|ไม่อยาก|ไม่ให้|dont|donot|never/.test(text)) return { error: 'voice_command_negated' };
-    let rest = text.replace(target.alias, '');
+    // Mobile STT can repeat one short command or vary the final vowel on the retry.
+    // Remove aliases only for the selected app; a second app name remains unparsed.
+    let rest = text;
+    for (const item of aliases) {
+      if (item.app.id === target.app.id) rest = rest.split(item.alias).join('');
+    }
     // Ignore polite framing, but not arbitrary text such as delete/train/change.
     rest = rest.replace(/ช่วย|กรุณา|ขอ|หน้าต่าง|หน้าจอ|ฟังก์ชั่น|ฟังก์ชัน|ฟังชั่น|ฟังชัน|ฟังชั่น|โปรแกรม|ของ|ให้หน่อย|ให้ด้วย|ให้ฉัน|ให้ผม|ให้|หน่อยสิ|หน่อย|ด้วย|ได้ไหม|ได้มั้ย|ได้หรือไม่|นะ|ครับ|ค่ะ|คะ|ที|please|can you|canyou|the|window|app/g, '');
     // Thai "เปิด" contains "ปิด". Tokenize longest verbs first instead of
