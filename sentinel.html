@@ -2733,9 +2733,97 @@
         window.open(browserDownloadUrl(), "_blank", "noopener,noreferrer");
     }
 
+    function openCalculator() {
+        if (OS.windows.has("calculator")) { focusWindow("calculator"); return; }
+        const math = window.PanthoriumCalculatorMath;
+        if (!math || typeof math.evaluate !== "function") {
+            toast("เครื่องคิดเลขยังโหลดไม่สำเร็จ กรุณาโหลดหน้าใหม่");
+            return;
+        }
+
+        const keys = [
+            { label: "C", action: "clear" }, { label: "⌫", action: "backspace" }, { label: "(", value: "(" }, { label: "÷", value: "÷" },
+            { label: "7", value: "7" }, { label: "8", value: "8" }, { label: "9", value: "9" }, { label: "×", value: "×" },
+            { label: "4", value: "4" }, { label: "5", value: "5" }, { label: "6", value: "6" }, { label: "−", value: "-" },
+            { label: "1", value: "1" }, { label: "2", value: "2" }, { label: "3", value: "3" }, { label: "+", value: "+" },
+            { label: "±", action: "sign" }, { label: "0", value: "0" }, { label: ".", value: "." }, { label: "=", action: "equals" }
+        ];
+        const keyHtml = keys.map(key => {
+            const action = key.action || "insert";
+            const value = key.value == null ? "" : key.value;
+            const accent = ["÷", "×", "−", "+", "="].includes(key.label);
+            return `<button type="button" data-calculator-action="${action}" data-calculator-value="${value}" aria-label="${key.label}" style="min-height:48px;border:1px solid ${accent ? "rgba(0,255,204,.28)" : "rgba(148,163,184,.2)"};border-radius:12px;background:${key.label === "=" ? "linear-gradient(135deg,#00d8b5,#168cff)" : accent ? "rgba(0,255,204,.08)" : "rgba(30,41,59,.82)"};color:${key.label === "=" ? "#03101a" : "var(--text)"};font-size:20px;font-weight:650;cursor:pointer;touch-action:manipulation;">${key.label}</button>`;
+        }).join("");
+        const html = `
+            <div style="height:100%;display:flex;flex-direction:column;gap:12px;padding:14px;background:linear-gradient(145deg,rgba(16,34,52,.97),rgba(5,10,21,.99));box-sizing:border-box;">
+                <input id="calculator-display" type="text" aria-label="ผลคำนวณ" value="0" readonly style="width:100%;min-height:66px;box-sizing:border-box;border:1px solid rgba(0,255,204,.2);border-radius:12px;background:rgba(3,9,18,.72);color:var(--text);padding:12px;font-size:30px;text-align:right;font-variant-numeric:tabular-nums;outline:none;">
+                <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;flex:1;">${keyHtml}</div>
+                <div style="font-size:11px;color:var(--text-dim);text-align:center;">การคำนวณไม่ส่งหรือบันทึกข้อมูล</div>
+            </div>`;
+        const calculator = createWindow("calculator", "เครื่องคิดเลข", html, {
+            width: Math.min(320, Math.max(240, window.innerWidth - 48)),
+            height: Math.min(460, window.innerHeight - 80)
+        });
+        const display = calculator.el.querySelector("#calculator-display");
+        let expression = "";
+        let justEvaluated = false;
+        const render = () => { display.value = expression || "0"; };
+        const insert = value => {
+            if (justEvaluated && (/[0-9.]/.test(value) || value === "(")) expression = "";
+            justEvaluated = false;
+            expression += value;
+            render();
+        };
+        const calculate = () => {
+            if (!expression) return;
+            try {
+                expression = String(math.evaluate(expression));
+                justEvaluated = true;
+                render();
+            } catch (_) {
+                expression = "";
+                justEvaluated = true;
+                display.value = "Error";
+            }
+        };
+        calculator.el.querySelectorAll("[data-calculator-action]").forEach(button => {
+            button.addEventListener("click", () => {
+                const action = button.dataset.calculatorAction;
+                if (action === "clear") { expression = ""; justEvaluated = false; render(); }
+                else if (action === "backspace") {
+                    if (justEvaluated) expression = "";
+                    else expression = expression.slice(0, -1);
+                    justEvaluated = false;
+                    render();
+                } else if (action === "sign") {
+                    if (!expression) expression = "-";
+                    else expression = "-(" + expression + ")";
+                    justEvaluated = false;
+                    render();
+                } else if (action === "equals") calculate();
+                else insert(button.dataset.calculatorValue || "");
+            });
+        });
+        calculator.el.addEventListener("keydown", event => {
+            if (/^[0-9.+\-*/()]$/.test(event.key)) { event.preventDefault(); insert(event.key); }
+            else if (event.key === "Enter" || event.key === "=") { event.preventDefault(); calculate(); }
+            else if (event.key === "Backspace") {
+                event.preventDefault();
+                expression = justEvaluated ? "" : expression.slice(0, -1);
+                justEvaluated = false;
+                render();
+            } else if (event.key === "Escape") { expression = ""; justEvaluated = false; render(); }
+        });
+    }
+
     const APP_LIST = [
         { id: "sentinel", name: "Sentinel AI", icon: "🤖", open: openSentinel },
-        { id: "voice-identity", name: "Voice Identity", icon: "🎙️", open: () => window.PanthoriumVoiceIdentity?.open?.() }
+        { id: "voice-identity", name: "Voice Identity", icon: "🎙️", open: () => window.PanthoriumVoiceIdentity?.open?.() },
+        { id: "calculator", name: "เครื่องคิดเลข", icon: "🧮", open: openCalculator },
+        { id: "notes", name: "บันทึก", icon: "📝", open: openNotes, visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } }
     ];
 
     function visibleApps() {

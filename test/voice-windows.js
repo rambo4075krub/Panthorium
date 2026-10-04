@@ -54,6 +54,14 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
   const registeredNotes = await registeredNotesResponse.json();
   assert.equal(registeredNotesResponse.status, 200, JSON.stringify(registeredNotes));
   assert.equal(registeredNotes.results?.[0]?.output?.uiAction, 'open_notes', 'a registered chat account can open Notes without Sentinel Agent permission');
+  const calculatorResponse = await fetch(`${base}/api/sentinel/command`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${registeredToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'เปิดเครื่องคิดเลข' })
+  });
+  const calculatorCommand = await calculatorResponse.json();
+  assert.equal(calculatorResponse.status, 200, JSON.stringify(calculatorCommand));
+  assert.equal(calculatorCommand.results?.[0]?.output?.uiAction, 'open_calculator', 'a registered chat account can open the calculator by voice');
   const dom = new JSDOM(source('sentinel.html'), { url: 'https://panthorium-backend-staging.example.run.app/admin', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
   const w = dom.window;
   const context = dom.getInternalVMContext();
@@ -88,7 +96,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     load('phase2-auth.js'); await tick();
     await w.PanthoriumAuth.login('admin', 'fixture');
     w.document.getElementById('desktop').classList.add('active');
-    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumStagingAdminDesktop.render();
     assert(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), 'administrator desktop must show Voice Identity icon');
     w.PanthoriumAIStream.install();
@@ -196,8 +204,9 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert.equal(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), null, 'guest desktop must not show Voice Identity');
     assert.equal(w.document.getElementById('voice-identity-launcher'), null, 'guest must not see a Voice Identity start-menu launcher');
     for (const app of catalog.apps) {
+      client++; // each app check is a separate simulated guest client; keep the per-IP limiter enabled
       const result = await command(`เปิด ${app.aliases[0]}`);
-      assert.equal(result.ok, catalog.allowed(app, guest), `${app.label}: guest permission`);
+      assert.equal(result.ok, catalog.allowed(app, guest), `${app.label}: guest permission: ${JSON.stringify(result)}`);
       assert.equal(isVisible(app), catalog.allowed(app, guest), `${app.label}: guest DOM`);
       if (app.id === 'voice-identity' && result.ok) assert.equal(w.document.querySelector(app.selector + ' [data-type] option[value="administrator"]'), null, 'guest sees only user/family enrollment types');
       if (result.ok) await command(`ปิด ${app.aliases[0]}`);
