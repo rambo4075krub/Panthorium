@@ -3303,9 +3303,15 @@
                     message = "เซสชันบัญชีหมดอายุ • เข้าสู่ระบบใหม่แล้วลองอีกครั้ง";
                 } else if (httpStatus === 403 && code === "permission_denied") {
                     message = "บัญชีที่เข้าสู่ระบบไม่มีสิทธิ์ Chat สำหรับเรียกข้อมูล • ออกจากระบบแล้วเข้าบัญชีที่ได้รับสิทธิ์";
-                } else if (httpStatus === 403 && (code === "user_feature_restricted" || code === "memory_requires_account")) {
-                    message = "เซสชันปัจจุบันเป็น Guest • เข้าสู่ระบบด้วยบัญชีผู้ใช้แล้วลองอีกครั้ง";
-                    loginButton.hidden = false;
+                } else if (httpStatus === 403 && code === "user_feature_restricted") {
+                    message = "เซิร์ฟเวอร์จำกัดสิทธิ์ Notes ของบัญชีนี้ผิดพลาด • ไม่ต้องเข้าสู่ระบบซ้ำ";
+                } else if (httpStatus === 403 && code === "memory_requires_account") {
+                    if (isRegisteredUser()) {
+                        message = "เซิร์ฟเวอร์ยังไม่ยืนยันสิทธิ์ Notes ของบัญชีนี้ • แตะลองอีกครั้งเพื่อซิงก์";
+                    } else {
+                        message = "เซสชันปัจจุบันเป็น Guest • เข้าสู่ระบบด้วยบัญชีผู้ใช้แล้วลองอีกครั้ง";
+                        loginButton.hidden = false;
+                    }
                 } else if (httpStatus === 403) {
                     message = "เซิร์ฟเวอร์ปฏิเสธสิทธิ์บัญชี • ตรวจสอบบัญชีที่เข้าสู่ระบบ";
                 } else if (httpStatus === 429) {
