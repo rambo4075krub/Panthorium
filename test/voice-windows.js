@@ -93,8 +93,8 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
         cloudEvents.set(memoryId, memory);
         return Response.json({ ok: true, memory }, { status: 201 });
       }
-      const memoryDelete = /^\\/api\\/agent\\/memory\\/([0-9a-f-]+)$/i.exec(pathname);
-      if (memoryDelete && httpMethod === 'DELETE') { cloudEvents.delete(memoryDelete[1]); return Response.json({ ok: true }); }
+      const memoryDeleteId = pathname.startsWith('/api/agent/memory/') ? pathname.slice('/api/agent/memory/'.length) : '';
+      if (memoryDeleteId && /^[0-9a-f-]+$/i.test(memoryDeleteId) && httpMethod === 'DELETE') { cloudEvents.delete(memoryDeleteId); return Response.json({ ok: true }); }
       if (pathname === '/api/auth/logout') return Response.json({ ok: true });
       if (pathname === '/api/auth/login') return Response.json({ ok: true, user: admin, accessToken: auth.signAccessToken(admin) });
       if (pathname === '/api/sentinel/command' || pathname.startsWith('/api/agent/workflow/')) {
