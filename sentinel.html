@@ -1752,6 +1752,8 @@
         let autoResume = true;
         let recognitionBlocked = false;
         let voiceState = "idle";
+        let voiceTurnId = 0;
+        let activeVoiceRequestController = null;
         let silenceTimer = null;
         let transcriptParts = new Map();
         let latestInterim = "";
@@ -1860,7 +1862,9 @@
         window.addEventListener("panthorium:voice-stream-finished", stopSpeechInterruptionMonitor);
 
         // Shared transcript handler (Web Speech + MediaRecorder)
-        const processTranscript = async text => {
+        const processTranscript = async (text, expectedTurnId = null) => {
+            const turnId = expectedTurnId == null ? ++voiceTurnId : expectedTurnId;
+            if (turnId !== voiceTurnId) return;
             const value = String(text || "").trim();
             if (!value) {
                 voiceState = "idle";
@@ -1871,6 +1875,8 @@
             setOrbTranscript(value, 0);
             voiceState = "processing";
             status("processing", "กำลังประมวลผล");
+            const controller = new AbortController();
+            activeVoiceRequestController = controller;
             try {
                 if (interruptedSpeechText && isVoiceContinueCommand(value)) {
                     const continuation = interruptedSpeechText;
@@ -1879,11 +1885,12 @@
                     voiceState = "speaking";
                     status("processing", "พูดต่อ", false);
                     await speakVoiceResponse(continuation);
-                    status("ready", "พูดต่อจบแล้ว", false);
+                    if (turnId === voiceTurnId) status("ready", "พูดต่อจบแล้ว", false);
                     return;
                 }
                 speechInterruptedByUser = false;
-                const { intent, response: res } = await requestVoiceInput(value);
+                const { intent, response: res } = await requestVoiceInput(value, controller.signal);
+                if (turnId !== voiceTurnId || controller.signal.aborted) return;
                 if (!res || !res.ok || !res.text) {
                     const reason = res?.text || "ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง";
                     status("unresponsive", reason);
@@ -1892,7 +1899,7 @@
                 if (voiceResponseNeedsSpeech(intent, res)) {
                     voiceState = "speaking";
                     status("processing", res.confirmationRequired ? res.text : res.streamSpoken ? "กำลังพูดคำตอบ" : "กำลังเตรียมเสียงตอบ", false);
-                    if (speechInterruptedByUser) {
+                    if (turnId !== voiceTurnId || speechInterruptedByUser) {
                         status("ready", "หยุดเสียงแล้ว", false);
                         return;
                     }
@@ -1905,13 +1912,17 @@
                         return;
                     }
                 }
-                status("ready", "พร้อมใช้งาน", intent === "conversation");
+                if (turnId === voiceTurnId) status("ready", "พร้อมใช้งาน", intent === "conversation");
             } catch (error) {
+                if (turnId !== voiceTurnId || controller.signal.aborted) return;
                 console.warn("Global voice command failed", error);
                 status("unresponsive", "ไม่ตอบสนอง");
             } finally {
-                voiceState = "idle";
-                resumeAfterTranscript();
+                if (turnId === voiceTurnId) {
+                    if (activeVoiceRequestController === controller) activeVoiceRequestController = null;
+                    voiceState = "idle";
+                    resumeAfterTranscript();
+                }
             }
         };
 
@@ -2130,6 +2141,9 @@
             };
             const startRecorder = async () => {
                 if (!autoResume || voiceState !== "idle" || recorder) return;
+                activeVoiceRequestController?.abort();
+                activeVoiceRequestController = null;
+                const captureTurnId = ++voiceTurnId;
                 try {
                     // Resume/create the meter synchronously from the microphone
                     // gesture before awaiting permission or network work.
@@ -2155,6 +2169,7 @@
                         cleanupRecorder();
                         userSpeechActive = false;
                         window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
+                        if (captureTurnId !== voiceTurnId) { discardOnEnd = false; voiceState = "idle"; return; }
                         if (discard) { discardOnEnd = false; voiceState = "idle"; restartListening(); return; }
                         // Submit recorded audio even when a mobile browser has
                         // suspended its analyser; ASR can validate silence and
@@ -2164,9 +2179,11 @@
                         status("processing", "กำลังถอดเสียง");
                         try {
                             const text = await transcribeRecorderBlob(new Blob(chunks, { type: recorderMime }));
+                            if (captureTurnId !== voiceTurnId) return;
                             window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
-                            await processTranscript(text);
+                            await processTranscript(text, captureTurnId);
                         } catch (error) {
+                            if (captureTurnId !== voiceTurnId) return;
                             console.warn("[Sentinel transcription]", error);
                             voiceState = "idle";
                             const message = ({
@@ -2251,7 +2268,16 @@
                     stopSentinelSpeech();
                     voiceState = "idle";
                 }
-                if (voiceState === "processing" || voiceState === "stopping") { status("processing", "กำลังประมวลผล"); return; }
+                if (voiceState === "processing" || voiceState === "stopping") {
+                    autoResume = false;
+                    voiceTurnId += 1;
+                    activeVoiceRequestController?.abort();
+                    activeVoiceRequestController = null;
+                    stopSentinelSpeech();
+                    voiceState = "idle";
+                    status("ready", "ยกเลิกรอบเสียงแล้ว", false);
+                    return;
+                }
                 if (voiceState === "listening") { autoResume = false; stopRecorder(); return; }
                 recognitionBlocked = false;
                 autoResume = true;
@@ -2499,11 +2525,11 @@
         return res;
     }
 
-    async function requestVoiceInput(text) {
+    async function requestVoiceInput(text, signal) {
         const classify = window.PanthoriumWindowCatalog?.classifyVoiceInput;
         if (!classify) return { intent: "command", response: { ok: false, text: "โมดูลคำสั่งเสียงยังโหลดไม่สำเร็จ กรุณาโหลดหน้าใหม่" } };
         const { kind, text: input } = classify(text);
-        const response = await callAI(input, { voiceMode: kind === "command", conversationalVoice: kind === "conversation" });
+        const response = await callAI(input, { voiceMode: kind === "command", conversationalVoice: kind === "conversation", signal });
         return { intent: kind, response };
     }
 
