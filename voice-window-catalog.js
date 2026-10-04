@@ -8,6 +8,7 @@
   // function name or selector supplied by an AI response or a transcript.
   const apps = [
     { id: 'sentinel', key: 'sentinel', label: 'Sentinel AI', permission: 'chat', aliases: ['Sentinel AI', 'เซนทิเนลเอไอ', 'แชต', 'แชท'], selector: '.window[data-id="sentinel"]', opener: 'openSentinel', windowId: 'sentinel' },
+    { id: 'notes', key: 'notes', label: 'Notes', permission: 'chat', aliases: ['Notes', 'Note', 'โน้ต', 'โน๊ต', 'บันทึก', 'แอปบันทึก'], selector: '.window[data-id="notes"]', opener: 'openNotes', windowId: 'notes' },
     { id: 'settings', key: 'settings', label: 'Settings', permission: 'settings', aliases: ['Settings', 'Setting', 'การตั้งค่า', 'ตั้งค่า'], selector: '.window[data-id="settings"]', opener: 'openSettings', windowId: 'settings' },
     { id: 'voice-identity', key: 'voice_identity', label: 'Voice Identity', permission: 'chat', aliases: ['Voice Identity', 'จดจำเสียง', 'ลงทะเบียนเสียง', 'เสียงที่อนุญาต'], selector: '#panthorium-voice-identity', opener: 'PanthoriumVoiceIdentity.open', closeButton: '[data-close]', refresher: 'PanthoriumVoiceIdentity.refresh' },
     { id: 'security', key: 'security_dashboard', label: 'Security', permission: 'settings', role: 'administrator', aliases: ['Security Dashboard', 'Security', 'ซีเคียวริตี้', 'แดชบอร์ดความปลอดภัย', 'ความปลอดภัย'], selector: '.window[data-id="security-dashboard"]', opener: 'PanthoriumSecurityDashboard.open', windowId: 'security-dashboard', refreshButton: '[data-p3-refresh]' },
