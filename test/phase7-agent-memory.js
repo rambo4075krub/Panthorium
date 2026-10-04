@@ -3,6 +3,7 @@ const { AgentMemoryRepository } = require('../services/agentMemoryRepository');
 const { AgentMemoryService } = require('../services/agentMemoryService');
 
 (async () => {
+  assert.throws(() => new AgentMemoryRepository({ requireDatabase: true }), /DATABASE_URL is required/, "production must not silently fall back to process memory");
   const repository = new AgentMemoryRepository();
   const events = [];
   const memory = new AgentMemoryService({ repository, audit: { record: (event, data) => events.push({ event, data }) } });
@@ -21,6 +22,7 @@ const { AgentMemoryService } = require('../services/agentMemoryService');
 
   const listed = await memory.list({ user });
   assert.equal(listed.memories.length, 1);
+  assert.equal((await memory.list({ user: { sub: 'u2', permissions: ['chat'] } })).memories.length, 0, 'another account cannot read this memory');
 
   const found = await memory.search({ user, query: 'Thai' });
   assert.equal(found.ok, true);
