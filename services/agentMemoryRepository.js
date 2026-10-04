@@ -2,7 +2,8 @@ const { getDatabasePool } = require('./databasePool');
 const { randomUUID } = require('crypto');
 
 class AgentMemoryRepository {
-  constructor({ databaseUrl = '', databaseSslMode = 'disable' } = {}) {
+  constructor({ databaseUrl = '', databaseSslMode = 'disable', requireDatabase = false } = {}) {
+    if (requireDatabase && !databaseUrl) throw new Error('DATABASE_URL is required for durable agent memory');
     this.pool = databaseUrl ? getDatabasePool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } }) : null;
     this.memory = new Map();
   }
