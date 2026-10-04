@@ -20,6 +20,8 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
   const synthesized = [], conversations = [], streamConversations = [], requests = [], playback = [], revoked = [], recognizers = [];
   let failProvider = false, failSpeech = false, blockPlayback = false, rejectOnce = '', rejectAlways = '', refreshOK = true, playing = false, holdPlayback = false, chatFailure = null, ttsInFlight = 0, maxTtsInFlight = 0, fakeTts = false, speechAttempts = 0, pendingDeltaAt = 0, firstSpeechLatencyMs = null;
   let mobileSpeechFixture = null;
+  let holdNextVoiceReply = false;
+  let releaseHeldVoiceReply = null;
   // No network access to an AI or speech provider in CI.
   require('../services/sentinelSpeechAudio').synthesizeSentinelMaleVoice = async (text, lang) => {
     speechAttempts += 1;
@@ -33,7 +35,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
   const sentinel = {
     status: () => ({ name: 'Sentinel', providers: ['fixture'] }),
     chat: async input => { conversations.push(input); return failProvider ? { ok: false, error: 'no_provider_available' } : { ok: true, text: answer, provider: 'fixture' }; },
-    streamChat: async input => { streamConversations.push(input); if (failProvider) return { ok: false, error: 'no_provider_available', text: 'no_provider_available' }; const text = mobileSpeechFixture || answer; if (mobileSpeechFixture) { for (let i = 0; i < text.length; i += 12) { input.onDelta(text.slice(i, i + 12)); await tick(); } } else input.onDelta(text); return { ok: true, text, provider: 'fixture', streaming: 'native' }; }
+    streamChat: async input => { streamConversations.push(input); if (failProvider) return { ok: false, error: 'no_provider_available', text: 'no_provider_available' }; const text = mobileSpeechFixture || answer; if (holdNextVoiceReply) { holdNextVoiceReply = false; await new Promise(resolve => { releaseHeldVoiceReply = resolve; }); } if (mobileSpeechFixture) { for (let i = 0; i < text.length; i += 12) { input.onDelta(text.slice(i, i + 12)); await tick(); } } else input.onDelta(text); return { ok: true, text, provider: 'fixture', streaming: 'native' }; }
   };
   const tools = new ToolRegistry({ sentinel });
   const agent = new AgentService({ tools, audit });
@@ -263,6 +265,19 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       assert.equal(playback.length, playbackBeforeInvalidResponses, 'invalid/forbidden responses must not produce speech');
     }
     chatFailure = null;
+
+    // Cancelling during a pending voice answer must abort the stream and never
+    // allow its delayed response to speak into the next interaction.
+    holdNextVoiceReply = true;
+    const playbackBeforeCancelledTurn = playback.length;
+    globalMic.start(); transcript(globalMic, 'การเรียนรู้คืออะไร'); globalMic.stop();
+    for (let i = 0; i < 200 && !releaseHeldVoiceReply; i++) await tick();
+    assert.equal(typeof releaseHeldVoiceReply, 'function', 'the voice reply is pending before cancellation');
+    await w.document.getElementById('global-voice').onclick();
+    assert.equal(w.PanthoriumVoice.state(), 'idle', 'tapping while processing cancels the pending turn');
+    releaseHeldVoiceReply(); releaseHeldVoiceReply = null;
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.equal(playback.length, playbackBeforeCancelledTurn, 'a cancelled stale voice answer must not play');
 
     // Unsupported commands stay commands: never convert a failure to AI prose.
     const chats = streamConversations.length, audioCount = synthesized.length;
