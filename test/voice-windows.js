@@ -54,6 +54,14 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
   const registeredNotes = await registeredNotesResponse.json();
   assert.equal(registeredNotesResponse.status, 200, JSON.stringify(registeredNotes));
   assert.equal(registeredNotes.results?.[0]?.output?.uiAction, 'open_notes', 'a registered chat account can open Notes without Sentinel Agent permission');
+  const calculatorResponse = await fetch(`${base}/api/sentinel/command`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${registeredToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'เปิดเครื่องคิดเลข' })
+  });
+  const calculatorCommand = await calculatorResponse.json();
+  assert.equal(calculatorResponse.status, 200, JSON.stringify(calculatorCommand));
+  assert.equal(calculatorCommand.results?.[0]?.output?.uiAction, 'open_calculator', 'a registered chat account can open the calculator by voice');
   const dom = new JSDOM(source('sentinel.html'), { url: 'https://panthorium-backend-staging.example.run.app/admin', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
   const w = dom.window;
   const context = dom.getInternalVMContext();
