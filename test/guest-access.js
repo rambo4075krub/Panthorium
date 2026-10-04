@@ -6,6 +6,8 @@ const { installGuestAccess, restrictedPaths } = require('../middleware/guestAcce
 const { createApiRouter } = require('../routes/api');
 const { createBiometricsRouter } = require('../routes/biometrics');
 const { createAuthRouter } = require('../routes/auth');
+const { createMemoryRouter } = require('../routes/memory');
+const { AgentMemoryService } = require('../services/agentMemoryService');
 const { ToolRegistry } = require('../services/toolRegistry');
 const { AgentService } = require('../services/agentService');
 const catalog = require('../voice-window-catalog');
@@ -40,6 +42,9 @@ const catalog = require('../voice-window-catalog');
   const app = express(); app.use(express.json()); installGuestAccess(app, auth);
   app.use('/api/auth', createAuthRouter(auth, { isProduction: false, refreshTokenDays: 30 }, null, deviceRepository));
   app.use('/api/biometrics', createBiometricsRouter(auth, biometrics));
+  const memoryOwners = [];
+  const memory = new AgentMemoryService({ repository: { list: async userId => { memoryOwners.push(userId); return []; } }, audit });
+  app.use('/api/agent/memory', createMemoryRouter(auth, memory));
   app.use('/api', createApiRouter(sentinel, auth, audit, {}, agent, {}, {}, {}, {}));
   // Verify every namespace is denied before any service side effect.
   let serviceCalls = 0;
@@ -54,6 +59,13 @@ const catalog = require('../voice-window-catalog');
     const recognized = await (await call('/api/auth/guest', null, { guestSessionId: crypto.randomUUID(), deviceKey })).json();
     assert.equal(recognized.user.id, protectedGuestId, 'remembered device restores guest voice owner');
     assert.equal(recognized.deviceRecognized, true);
+    const userNotes = await call('/api/agent/memory?limit=30', user);
+    assert.equal(userNotes.status, 200, 'signed-in standard user can load personal cloud notes');
+    assert.deepEqual((await userNotes.json()).memories, []);
+    assert.deepEqual(memoryOwners, [user.id], 'notes remain scoped to the authenticated user id');
+    const guestNotes = await call('/api/agent/memory?limit=30', guest);
+    assert.equal(guestNotes.status, 403, 'guest cannot read personal cloud notes');
+    assert.deepEqual(memoryOwners, [user.id], 'guest denial occurs before any memory data access');
     for (const route of restrictedPaths) {
       const url = route + '/access-check';
       assert.equal((await call(url, null)).status, 401);
