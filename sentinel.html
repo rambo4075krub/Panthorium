@@ -3301,8 +3301,12 @@
                 let message = "โหลดโน้ตจากคลาวด์ไม่สำเร็จ";
                 if (httpStatus === 401 || code === "authentication_required") {
                     message = "เซสชันบัญชีหมดอายุ • เข้าสู่ระบบใหม่แล้วลองอีกครั้ง";
-                } else if (httpStatus === 403 || code === "memory_requires_account") {
-                    message = "บัญชีนี้ยังไม่มีสิทธิ์ใช้โน้ตบนคลาวด์ • ตรวจสอบบัญชีที่เข้าสู่ระบบ";
+                } else if (httpStatus === 403 && code === "permission_denied") {
+                    message = "บัญชีที่เข้าสู่ระบบไม่มีสิทธิ์ Chat สำหรับเรียกข้อมูล • ออกจากระบบแล้วเข้าบัญชีที่ได้รับสิทธิ์";
+                } else if (httpStatus === 403 && code === "memory_requires_account") {
+                    message = "เซสชันปัจจุบันยังเป็น Guest • เข้าสู่บัญชีผู้ใช้แล้วลองอีกครั้ง";
+                } else if (httpStatus === 403) {
+                    message = "เซิร์ฟเวอร์ปฏิเสธสิทธิ์บัญชี • ตรวจสอบบัญชีที่เข้าสู่ระบบ";
                 } else if (httpStatus === 429) {
                     message = "มีคำขอมากเกินไป • รอสักครู่แล้วลองอีกครั้ง";
                 } else if (httpStatus >= 500) {
