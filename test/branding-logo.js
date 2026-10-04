@@ -11,23 +11,29 @@ const branding = source('branding.js');
 const bootStart = shell.indexOf('<div id="boot-screen">');
 const bootEnd = shell.indexOf('<!-- LOGIN', bootStart);
 const bootMarkup = bootStart >= 0 && bootEnd > bootStart ? shell.slice(bootStart, bootEnd) : '';
+const cssBlock = selector => {
+  const start = shell.indexOf(selector + ' {');
+  const end = shell.indexOf('}', start);
+  return start >= 0 && end > start ? shell.slice(start, end) : '';
+};
 
 assert(bootMarkup.includes('panthorium-logo-mark.svg'), 'restart retains the plain logo mark');
 assert(!bootMarkup.includes('data-panthorium-logo'), 'restart remains outside shared avatar branding');
 assert(mark.includes('viewBox="0 0 256 256"') && !mark.includes('<circle'), 'restart mark remains plain');
 assert(bootMarkup.includes('boot-title') && bootMarkup.includes('boot-progress') && bootMarkup.includes('boot-status'), 'restart keeps its existing text and progress');
 
-const group = svg.match(/<g transform="([^"]+)">([\\s\\S]*?)<\\/g>/);
+const groupStart = svg.indexOf('<g transform="matrix(0.68 0 0 0.68 40.96 40.96)">');
+const groupEnd = svg.indexOf('</g>', groupStart);
+const group = groupStart >= 0 && groupEnd > groupStart ? svg.slice(groupStart, groupEnd + 4) : '';
 assert(group, 'logo artwork is contained by its original safe-inset group');
-assert.equal(group[1], 'matrix(0.68 0 0 0.68 40.96 40.96)', 'restore the original logo scale');
 assert(svg.includes('<rect width="256" height="256" fill="none"/>'), 'logo outside the mark stays transparent');
 assert(!svg.includes('<circle'), 'the shared SVG does not add a second circle to the shell frame');
-assert.equal((group[2].match(/<path /g) || []).length, 4, 'all original logo facets remain');
+assert.equal((group.match(/<path /g) || []).length, 4, 'all original logo facets remain');
 assert(!branding.includes('.sm-avatar > img[data-panthorium-logo]'), 'avatar art is never enlarged beyond its frame');
 assert(branding.includes('overflow: hidden !important;'), 'logo frames clip their contents');
-assert(/\\.sm-avatar \\{[^}]*background: rgba\\(0,255,204,0.15\\);[^}]*border: 1px solid var\\(--accent\\);/s.test(shell), 'restore the original guest avatar fill and border');
-assert(/\\.login-avatar \\{[^}]*border: 2px solid var\\(--accent\\);[^}]*background: rgba\\(0,255,204,0.08\\);/s.test(shell), 'restore the original login avatar frame');
-assert(/\\.about-logo \\{[^}]*border: 2px solid var\\(--accent\\);/s.test(shell), 'restore the original about logo frame');
+assert(cssBlock('.sm-avatar').includes('background: rgba(0,255,204,0.15);') && cssBlock('.sm-avatar').includes('border: 1px solid var(--accent);'), 'restore the original guest avatar fill and border');
+assert(cssBlock('.login-avatar').includes('border: 2px solid var(--accent);') && cssBlock('.login-avatar').includes('background: rgba(0,255,204,0.08);'), 'restore the original login avatar frame');
+assert(cssBlock('.about-logo').includes('border: 2px solid var(--accent);'), 'restore the original about logo frame');
 
 const dom = new JSDOM(`<!doctype html><html><head></head><body>
   <div class="boot-logo" style="width:120px;height:120px;border-radius:50%"><img src="/panthorium-logo-mark.svg" alt="Panthorium"></div>
