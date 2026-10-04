@@ -22,6 +22,10 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert.equal(catalog.parse(`${alias} เปิดขึ้น`)?.action, `open_${app.key}`, `target-first ${alias}`);
   }
   assert.equal(catalog.parse('ช่วยเปิดหน้าต่าง Learning Lab ให้หน่อยครับ')?.action, 'open_learning_lab');
+  assert.equal(catalog.parse('เปิดโน้ต เปิดโน้ต')?.action, 'open_notes', 'collapse a duplicated Notes transcript');
+  assert.equal(catalog.parse('เปิดโน้ต เปิดโน๊ต')?.action, 'open_notes', 'accept a duplicated transcript with alias variation');
+  assert.equal(catalog.parse('เปิดโน้ต แล้วเปิด Settings'), null, 'do not discard a second app command');
+  assert.equal(catalog.parse('เปิดโน้ต แล้วปิดโน้ต')?.error, 'ambiguous_voice_command', 'do not discard a conflicting repeated command');
   assert.equal(catalog.parse('อย่าเปิด Learning Lab')?.error, 'voice_command_negated');
   assert.equal(catalog.parse('เปิด Learning Lab แล้วลบข้อมูล'), null, 'must not silently drop a destructive second instruction');
   assert.equal(catalog.parse('กลับไปดู Learning Lab'), null, 'กลับ must not close a window');
@@ -41,6 +45,15 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
   const server = serverApp.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
+  const registeredToken = auth.signAccessToken(guest);
+  const registeredNotesResponse = await fetch(`${base}/api/sentinel/command`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${registeredToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'เปิดโน้ต เปิดโน๊ต' })
+  });
+  const registeredNotes = await registeredNotesResponse.json();
+  assert.equal(registeredNotesResponse.status, 200, JSON.stringify(registeredNotes));
+  assert.equal(registeredNotes.results?.[0]?.output?.uiAction, 'open_notes', 'a registered chat account can open Notes without Sentinel Agent permission');
   const dom = new JSDOM(source('sentinel.html'), { url: 'https://panthorium-backend-staging.example.run.app/admin', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
   const w = dom.window;
   const context = dom.getInternalVMContext();
