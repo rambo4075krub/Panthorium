@@ -10,6 +10,7 @@
     { id: 'sentinel', key: 'sentinel', label: 'Sentinel AI', permission: 'chat', aliases: ['Sentinel AI', 'เซนทิเนลเอไอ', 'แชต', 'แชท'], selector: '.window[data-id="sentinel"]', opener: 'openSentinel', windowId: 'sentinel' },
     { id: 'notes', key: 'notes', label: 'Notes', permission: 'chat', aliases: ['Notes', 'Note', 'โน้ต', 'โน๊ต', 'บันทึก', 'แอปบันทึก'], selector: '.window[data-id="notes"]', opener: 'openNotes', windowId: 'notes' },
     { id: 'calculator', key: 'calculator', label: 'Calculator', permission: 'chat', aliases: ['Calculator', 'เครื่องคิดเลข', 'คิดเลข'], selector: '.window[data-id="calculator"]', opener: 'openCalculator', windowId: 'calculator' },
+    { id: 'calendar', key: 'calendar', label: 'Calendar', permission: 'chat', accountRequired: true, aliases: ['Calendar', 'ปฏิทิน', 'นัดหมาย', 'ตารางนัด'], selector: '.window[data-id="calendar"]', opener: 'PanthoriumCalendar.open', windowId: 'calendar', refresher: 'PanthoriumCalendar.refresh' },
     { id: 'settings', key: 'settings', label: 'Settings', permission: 'settings', aliases: ['Settings', 'Setting', 'การตั้งค่า', 'ตั้งค่า'], selector: '.window[data-id="settings"]', opener: 'openSettings', windowId: 'settings' },
     { id: 'voice-identity', key: 'voice_identity', label: 'Voice Identity', permission: 'chat', aliases: ['Voice Identity', 'จดจำเสียง', 'ลงทะเบียนเสียง', 'เสียงที่อนุญาต'], selector: '#panthorium-voice-identity', opener: 'PanthoriumVoiceIdentity.open', closeButton: '[data-close]', refresher: 'PanthoriumVoiceIdentity.refresh' },
     { id: 'security', key: 'security_dashboard', label: 'Security', permission: 'settings', role: 'administrator', aliases: ['Security Dashboard', 'Security', 'ซีเคียวริตี้', 'แดชบอร์ดความปลอดภัย', 'ความปลอดภัย'], selector: '.window[data-id="security-dashboard"]', opener: 'PanthoriumSecurityDashboard.open', windowId: 'security-dashboard', refreshButton: '[data-p3-refresh]' },
@@ -32,7 +33,10 @@
   ];
   const userRestrictedIds = new Set(['settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control']);
   function allowed(app, user) {
-    return !!app && !(!(user?.roles || []).some(role => ['administrator', 'operator'].includes(role)) && userRestrictedIds.has(app.id)) && (user?.permissions || []).includes(app.permission) && (!app.role || (user?.roles || []).includes(app.role));
+    const roles = user?.roles || [];
+    const id = String(user?.sub || user?.id || '');
+    const hasAccount = !!id && !id.startsWith('guest:') && !roles.includes('guest');
+    return !!app && (!app.accountRequired || hasAccount) && !(!roles.some(role => ['administrator', 'operator'].includes(role)) && userRestrictedIds.has(app.id)) && (user?.permissions || []).includes(app.permission) && (!app.role || roles.includes(app.role));
   }
   const normalize = text => String(text || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
   const aliases = apps.flatMap(app => app.aliases.map(alias => ({ app, alias: normalize(alias) }))).sort((a, b) => b.alias.length - a.alias.length);

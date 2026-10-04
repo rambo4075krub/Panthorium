@@ -25,6 +25,11 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
   assert.equal(catalog.parse('เปิดโน้ต เปิดโน้ต')?.action, 'open_notes', 'collapse a duplicated Notes transcript');
   assert.equal(catalog.parse('เปิดโน้ต เปิดโน๊ต')?.action, 'open_notes', 'accept a duplicated transcript with alias variation');
   assert.equal(catalog.parse('เปิดโน้ต แล้วเปิด Settings'), null, 'do not discard a second app command');
+  const calendarApp = catalog.apps.find(app => app.id === 'calendar');
+  const registeredUser = { id: 'calendar-user', sub: 'calendar-user', permissions: ['chat'], roles: ['user'] };
+  assert.equal(catalog.parse('เปิดปฏิทิน')?.action, 'open_calendar');
+  assert.equal(catalog.allowed(calendarApp, registeredUser), true, 'registered users may use the cloud calendar');
+  assert.equal(catalog.allowed(calendarApp, guest), false, 'Guest cannot use account-scoped cloud calendar');
   assert.equal(catalog.parse('เปิดโน้ต แล้วปิดโน้ต')?.error, 'ambiguous_voice_command', 'do not discard a conflicting repeated command');
   assert.equal(catalog.parse('อย่าเปิด Learning Lab')?.error, 'voice_command_negated');
   assert.equal(catalog.parse('เปิด Learning Lab แล้วลบข้อมูล'), null, 'must not silently drop a destructive second instruction');
@@ -66,6 +71,8 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
   const w = dom.window;
   const context = dom.getInternalVMContext();
   const externalPopups = new Map();
+  const cloudEvents = new Map();
+  w.confirm = () => true;
   Object.defineProperty(w, 'open', { configurable: true, writable: true, value: (url, name, features) => { const popup = { url, name, features, closed: false, focus() {}, close() { this.closed = true; } }; externalPopups.set(name, popup); return popup; } });
   const evaluate = code => vm.runInContext(code, context);
   const load = name => evaluate(source(name));
@@ -77,6 +84,17 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     w.fetch = async (url, options = {}) => {
       const pathname = new URL(url, base).pathname;
       requests.push({ pathname, method: options.method || 'GET' });
+      const httpMethod = String(options.method || 'GET').toUpperCase();
+      if (pathname === '/api/agent/memory' && httpMethod === 'GET') return Response.json({ ok: true, memories: [...cloudEvents.values()] });
+      if (pathname === '/api/agent/memory' && httpMethod === 'POST') {
+        const body = JSON.parse(options.body || '{}');
+        const memoryId = '00000000-0000-4000-8000-' + String(cloudEvents.size + 1).padStart(12, '0');
+        const memory = { memoryId, ...body };
+        cloudEvents.set(memoryId, memory);
+        return Response.json({ ok: true, memory }, { status: 201 });
+      }
+      const memoryDeleteId = pathname.startsWith('/api/agent/memory/') ? pathname.slice('/api/agent/memory/'.length) : '';
+      if (memoryDeleteId && /^[0-9a-f-]+$/i.test(memoryDeleteId) && httpMethod === 'DELETE') { cloudEvents.delete(memoryDeleteId); return Response.json({ ok: true }); }
       if (pathname === '/api/auth/logout') return Response.json({ ok: true });
       if (pathname === '/api/auth/login') return Response.json({ ok: true, user: admin, accessToken: auth.signAccessToken(admin) });
       if (pathname === '/api/sentinel/command' || pathname.startsWith('/api/agent/workflow/')) {
@@ -96,7 +114,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     load('phase2-auth.js'); await tick();
     await w.PanthoriumAuth.login('admin', 'fixture');
     w.document.getElementById('desktop').classList.add('active');
-    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'calendar-ui.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumStagingAdminDesktop.render();
     assert(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), 'administrator desktop must show Voice Identity icon');
     w.PanthoriumAIStream.install();
@@ -138,6 +156,30 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       assert(!root.isConnected || w.getComputedStyle(root).display === 'none');
     }
     console.log(`PASS: actual ${catalog.apps.length} registered windows open, focus without duplicates, close, close twice, reopen; supported refresh and minimized restore`);
+    await w.PanthoriumCalendar.open();
+    const calendarForm = w.document.querySelector('.window[data-id="calendar"] [data-calendar-form]');
+    const calendarTitle = w.document.querySelector('.window[data-id="calendar"] [data-calendar-title]');
+    const calendarDate = w.document.querySelector('.window[data-id="calendar"] [data-calendar-date]');
+    const calendarTime = w.document.querySelector('.window[data-id="calendar"] [data-calendar-time]');
+    const calendarDescription = w.document.querySelector('.window[data-id="calendar"] [data-calendar-description]');
+    calendarTitle.value = '<img src=x onerror=alert(1)> นัดหมาย';
+    calendarDate.value = '2030-01-02';
+    calendarTime.value = '09:30';
+    calendarDescription.value = 'รายละเอียดนัด';
+    calendarForm.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    for (let i = 0; i < 80 && cloudEvents.size !== 1; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(cloudEvents.size, 1, 'calendar event is written through the cloud API');
+    const savedCalendarEvent = [...cloudEvents.values()][0];
+    assert.equal(savedCalendarEvent.kind, 'calendar-event');
+    assert.equal(savedCalendarEvent.title, '<img src=x onerror=alert(1)> นัดหมาย');
+    assert.equal(JSON.parse(savedCalendarEvent.content).timeZone.length > 0, true);
+    const calendarList = w.document.querySelector('.window[data-id="calendar"] [data-calendar-events]');
+    assert.equal(calendarList.querySelector('img'), null, 'remote event titles render as text, never HTML');
+    assert.match(calendarList.textContent, /นัดหมาย/);
+    calendarList.querySelector('[data-delete]').click();
+    for (let i = 0; i < 80 && cloudEvents.size !== 0; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(cloudEvents.size, 0, 'calendar event is removed from the cloud API');
+    console.log('PASS: cloud calendar saves, reloads and deletes account-scoped events safely');
 
     // Every registered module function must be callable through the same
     // authenticated command path. Mutating/costly controls stop at approval.
