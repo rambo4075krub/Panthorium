@@ -3318,7 +3318,7 @@
                 } else if (httpStatus) {
                     message = "เซิร์ฟเวอร์ปฏิเสธคำขอ (HTTP " + httpStatus + ") • ลองเข้าสู่ระบบใหม่";
                 }
-                if (error?.requestId) message += " • รหัส " + String(error.requestId).slice(0, 32);
+                if (error?.requestId) message += " • รหัส " + String(error.requestId).slice(0, 36);
                 setStatus(message);
                 retryButton.hidden = false;
             }
