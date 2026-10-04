@@ -3,6 +3,7 @@ const { AgentMemoryRepository } = require('../services/agentMemoryRepository');
 const { AgentMemoryService } = require('../services/agentMemoryService');
 
 (async () => {
+  assert.throws(() => new AgentMemoryRepository({ requireDatabase: true }), /DATABASE_URL is required/, "production must not silently fall back to process memory");
   const repository = new AgentMemoryRepository();
   const events = [];
   const memory = new AgentMemoryService({ repository, audit: { record: (event, data) => events.push({ event, data }) } });
@@ -21,10 +22,21 @@ const { AgentMemoryService } = require('../services/agentMemoryService');
 
   const listed = await memory.list({ user });
   assert.equal(listed.memories.length, 1);
+  assert.equal((await memory.list({ user: { sub: 'u2', permissions: ['chat'] } })).memories.length, 0, 'another account cannot read this memory');
 
   const found = await memory.search({ user, query: 'Thai' });
   assert.equal(found.ok, true);
   assert.equal(found.memories.length, 1);
+
+  const updated = await memory.update({ user, memoryId: created.memory.memoryId, content: 'Respond in Thai and English', importance: 95 });
+  assert.equal(updated.ok, true);
+  assert.equal(updated.memory.content, 'Respond in Thai and English');
+  assert.equal(updated.memory.importance, 95);
+
+  const hiddenFromOtherUser = await memory.update({ user: { sub: 'u2', permissions: ['chat'] }, memoryId: created.memory.memoryId, content: 'Private data' });
+  assert.equal(hiddenFromOtherUser.error, 'memory_not_found', 'an account cannot update another account memory');
+  const deniedGuestUpdate = await memory.update({ user: guest, memoryId: created.memory.memoryId, content: 'Private data' });
+  assert.equal(deniedGuestUpdate.error, 'memory_requires_account', 'guest memory updates are rejected');
 
   const context = await memory.context({ user, query: 'language' });
   assert.equal(context.ok, true);

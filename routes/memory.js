@@ -39,6 +39,15 @@ function createMemoryRouter(authService, memory) {
     } catch (error) { next(error); }
   });
 
+  router.patch('/:memoryId', auth, requirePermission('chat'), limiter, async (req, res, next) => {
+    try {
+      const { title, content, tags, importance } = req.body || {};
+      const out = await memory.update({ user: req.user, memoryId: req.params.memoryId, title, content, tags, importance, requestId: req.requestId });
+      const status = out.ok ? 200 : out.error === 'memory_not_found' ? 404 : out.error === 'memory_requires_account' ? 403 : 400;
+      res.status(status).json(out);
+    } catch (error) { next(error); }
+  });
+
   router.delete('/:memoryId', auth, requirePermission('chat'), limiter, async (req, res, next) => {
     try {
       const out = await memory.remove({ user: req.user, memoryId: req.params.memoryId, requestId: req.requestId });
