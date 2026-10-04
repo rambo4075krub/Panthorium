@@ -204,6 +204,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert.equal(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), null, 'guest desktop must not show Voice Identity');
     assert.equal(w.document.getElementById('voice-identity-launcher'), null, 'guest must not see a Voice Identity start-menu launcher');
     for (const app of catalog.apps) {
+      client++; // each app check is a separate simulated guest client; keep the per-IP limiter enabled
       const result = await command(`เปิด ${app.aliases[0]}`);
       assert.equal(result.ok, catalog.allowed(app, guest), `${app.label}: guest permission: ${JSON.stringify(result)}`);
       assert.equal(isVisible(app), catalog.allowed(app, guest), `${app.label}: guest DOM`);
