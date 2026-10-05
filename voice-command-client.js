@@ -147,6 +147,7 @@
       const action = result.output?.uiAction;
       const outcome = action?.startsWith('function_') ? await functionAction(action) : await windowAction(action);
       outcomes.push(outcome);
+      if (outcome.ok && action === 'open_voice_identity' && /เข้าสู่ระบบ|login/i.test(catalog.normalize(command || '')) && window.PanthoriumAuth?.isGuest?.()) await window.PanthoriumVoiceIdentity?.openLogin?.();
       if (outcome.ok) seen.add(index);
       else break;
     }
