@@ -3828,7 +3828,10 @@
             if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
             return (bytes / (1024 * 1024)).toFixed(1) + " MB";
         };
-        const ownerId = () => typeof currentUserId === "function" ? String(currentUserId() || "") : "";
+        const ownerId = () => {
+            const user = OS.state.user || {};
+            return String(user.sub || user.id || "");
+        };
         const isRegistered = () => {
             const user = OS.state.user || {};
             const id = ownerId();
