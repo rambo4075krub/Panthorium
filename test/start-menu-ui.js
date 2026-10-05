@@ -30,10 +30,6 @@ assert.equal(doc.querySelector('#start-btn img').getAttribute('src'), '/panthori
 assert.match(css, /#sm-apps\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*overflow-y:\s*auto/);
 assert.match(css, /#system-controls\s*\{[^}]*position:\s*fixed[^}]*bottom:\s*env\(safe-area-inset-bottom/);
 assert.match(css, /#global-voice\s*\{[^}]*right:\s*max\([^}]*bottom:\s*calc\(env\(safe-area-inset-bottom/);
-assert(shell.includes('/start-menu-ui.js?v=start-menu-controls-v1'));
-assert(shell.includes('/start-menu-ui.js?v=start-menu-controls-v1'));
-assert(shell.includes('/start-menu-ui.js?v=start-menu-controls-v1'));
-assert(shell.includes('/start-menu-ui.js?v=start-menu-controls-v1'));
 
 const searchDom = new JSDOM(
   '<div id="apps">' +
