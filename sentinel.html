@@ -2834,24 +2834,27 @@
         return APP_LIST.filter(app => !app.visible || app.visible());
     }
 
-    function initDesktop() {
-        // Desktop icons
+    function renderAppLaunchers() {
+        const apps = visibleApps();
         const desk = $("desktop-icons");
+        const sm = $("sm-apps");
+        if (!desk || !sm) return;
+
         desk.innerHTML = "";
-        visibleApps().forEach(app => {
+        apps.forEach(app => {
             const el = document.createElement("div");
             el.className = "desk-icon";
+            el.dataset.appId = app.id;
             el.innerHTML = `<div class="icon-img">${app.icon}</div><span>${app.name}</span>`;
             el.onclick = () => app.open();
             desk.appendChild(el);
         });
 
-        // Start menu apps
-        const sm = $("sm-apps");
         sm.innerHTML = "";
-        visibleApps().forEach(app => {
+        apps.forEach(app => {
             const el = document.createElement("div");
             el.className = "sm-app";
+            el.dataset.appId = app.id;
             el.innerHTML = `<div class="ico">${app.icon}</div><span>${app.name}</span>`;
             el.onclick = () => {
                 app.open();
@@ -2859,6 +2862,10 @@
             };
             sm.appendChild(el);
         });
+    }
+
+    function initDesktop() {
+        renderAppLaunchers();
 
         try {
             initBackground();
@@ -2871,8 +2878,14 @@
         });
     }
 
+    window.addEventListener("panthorium:auth-changed", () => {
+        try { renderAppLaunchers(); }
+        catch (error) { console.error("Launcher refresh failed", error); }
+    });
+
     // Start menu toggle
     $("start-btn").onclick = () => {
+        renderAppLaunchers();
         $("start-menu").classList.toggle("open");
     };
     document.addEventListener("click", (e) => {
@@ -3406,6 +3419,16 @@
                     }
                 } else if (httpStatus === 403) {
                     message = "เซิร์ฟเวอร์ปฏิเสธสิทธิ์บัญชี • ตรวจสอบบัญชีที่เข้าสู่ระบบ";
+                } else if (code === "notes_storage_unconfigured") {
+                    message = "ยังไม่ได้ตั้งค่าพื้นที่ bucket สำหรับ Notes • ข้อมูลเดิมยังไม่ถูกลบ";
+                } else if (code === "notes_storage_permission_denied") {
+                    message = "บริการ bucket ไม่มีสิทธิ์เข้าถึง Notes • เซสชันบัญชียังอยู่ ลองอีกครั้งภายหลัง";
+                } else if (code === "notes_migration_conflict" || code === "note_conflict") {
+                    message = "ตรวจพบข้อมูล Notes ที่ไม่ตรงกัน • ระบบคงข้อมูลเดิมไว้เพื่อป้องกันข้อมูลสูญหาย";
+                } else if (code === "notes_storage_corrupt") {
+                    message = "ไฟล์ Notes บน bucket อ่านไม่ได้ • ข้อมูล SQL เดิมจะไม่ถูกลบก่อนตรวจสอบ";
+                } else if (code === "note_too_large" || code === "notes_count_limit") {
+                    message = "Notes เกินขีดจำกัดพื้นที่หรือจำนวนที่รองรับ";
                 } else if (httpStatus === 429) {
                     message = "มีคำขอมากเกินไป • รอสักครู่แล้วลองอีกครั้ง";
                 } else if (httpStatus >= 500) {
