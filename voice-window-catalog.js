@@ -9,6 +9,7 @@
   const apps = [
     { id: 'sentinel', key: 'sentinel', label: 'Sentinel AI', permission: 'chat', aliases: ['Sentinel AI', 'เซนทิเนลเอไอ', 'แชต', 'แชท'], selector: '.window[data-id="sentinel"]', opener: 'openSentinel', windowId: 'sentinel' },
     { id: 'notes', key: 'notes', label: 'Notes', permission: 'chat', aliases: ['Notes', 'Note', 'โน้ต', 'โน๊ต', 'บันทึก', 'แอปบันทึก'], selector: '.window[data-id="notes"]', opener: 'openNotes', windowId: 'notes' },
+    { id: 'files', key: 'files', label: 'Files', permission: 'chat', accountRequired: true, aliases: ['Files', 'File', 'ไฟล์', 'จัดการไฟล์', 'ไฟล์ของฉัน'], selector: '.window[data-id="files"]', opener: 'openFiles', windowId: 'files' },
     { id: 'calculator', key: 'calculator', label: 'Calculator', permission: 'chat', aliases: ['Calculator', 'เครื่องคิดเลข', 'คิดเลข'], selector: '.window[data-id="calculator"]', opener: 'openCalculator', windowId: 'calculator' },
     { id: 'calendar', key: 'calendar', label: 'Calendar', permission: 'chat', accountRequired: true, aliases: ['Calendar', 'ปฏิทิน', 'นัดหมาย', 'ตารางนัด'], selector: '.window[data-id="calendar"]', opener: 'PanthoriumCalendar.open', windowId: 'calendar', refresher: 'PanthoriumCalendar.refresh' },
     { id: 'reminders', key: 'reminders', label: 'Reminders', permission: 'chat', accountRequired: true, aliases: ['Reminders', 'เตือนความจำ', 'เตือนยา', 'เตือนนัด', 'การเตือน'], selector: '.window[data-id="reminders"]', opener: 'PanthoriumReminders.open', windowId: 'reminders', refresher: 'PanthoriumReminders.refresh' },
