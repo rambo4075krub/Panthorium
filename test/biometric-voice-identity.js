@@ -20,12 +20,17 @@ const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed 
 
 (async () => {
   const originalFetch = global.fetch;
-  let nextVector = vector(2);
-  global.fetch = async () => ({ ok: true, json: async () => ({ signalPresent: true, embedding: nextVector }) });
+  let nextVector = vector(2), embeddingCalls = 0;
+  global.fetch = async () => { embeddingCalls += 1; return { ok: true, json: async () => ({ signalPresent: true, embedding: nextVector }) }; };
   try {
     const repository = new Repository();
     const service = new BiometricIdentityService({ repository, providerUrl: 'https://speaker.test', providerToken: 'test-only-token', encryptionKey: 'test-only-key', matchThreshold: 0.82, enrollmentThreshold: 0.76 });
     await service.init();
+    const beforeEmptyOwner = embeddingCalls;
+    const emptyOwner = await service.verify({ ownerUserId: 'no-profile-owner', audio: audio(0) });
+    assert.equal(emptyOwner.matched, false);
+    assert.equal(emptyOwner.acceptCommands, false);
+    assert.equal(embeddingCalls, beforeEmptyOwner, 'empty owner never calls speaker model');
     await assert.rejects(() => service.enroll({ ownerUserId: 'u1', actorRoles: ['user'], displayName: 'Fake admin', subjectType: 'administrator', consent: true, samples: [audio(1), audio(2), audio(3)] }), /administrator_role_required/);
     const user = await service.enroll({ ownerUserId: 'u1', actorRoles: ['user'], displayName: 'Owner', subjectType: 'user', consent: true, samples: [audio(1), audio(2), audio(3)] });
     assert.equal(user.encryptedTemplate, undefined);
