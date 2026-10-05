@@ -1,0 +1,64 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { JSDOM } = require('jsdom');
+
+async function main() {
+  const dom = new JSDOM('<!doctype html><body><div id="sm-apps"></div></body>', {
+    url: 'https://panthorium.test/',
+    runScripts: 'outside-only',
+    pretendToBeVisual: true
+  });
+  const window = dom.window;
+  const windows = new Map();
+  const manager = {
+    preferences: { fullscreenOnOpen: true, minimizeToStartMenu: true, preserveStateUntilClose: true, landscapeEdgeToEdge: true },
+    registerExternalWindow(id, title, root, options) {
+      root.classList.add('panthorium-managed-window', 'panthorium-window-fullscreen');
+      const record = { id, title, el: root, menuAppId: options.menuAppId, external: true, fullscreen: true, displayMode: 'flex' };
+      windows.set(id, record);
+      return record;
+    },
+    findByAppId(id) { return windows.get(id) || null; },
+    minimize(id) { const record = windows.get(id); record.el.style.display = 'none'; return true; },
+    restore(id) { const record = windows.get(id); if (!record) return false; record.el.style.display = record.displayMode; return true; },
+    close(id) { const record = windows.get(id); if (record) record.el.remove(); windows.delete(id); return Boolean(record); },
+    toggleFullscreen(id) { const record = windows.get(id); record.fullscreen = !record.fullscreen; record.el.classList.toggle('panthorium-window-fullscreen', record.fullscreen); return true; }
+  };
+  window.PanthoriumWindowManager = manager;
+  window.PanthoriumWindowCatalog = {
+    apps: [{ id: 'ai-platform', label: 'AI Platform', selector: '#ai-window', closeButton: '[data-close]' }]
+  };
+  window.eval(fs.readFileSync(require.resolve('../window-manager-ui.js'), 'utf8'));
+
+  const launcher = window.document.createElement('button');
+  launcher.className = 'sm-app';
+  launcher.dataset.appId = 'ai-platform';
+  window.document.getElementById('sm-apps').appendChild(launcher);
+  const root = window.document.createElement('section');
+  root.id = 'ai-window';
+  root.style.cssText = 'position:fixed;inset:6%;display:flex';
+  root.innerHTML = '<header><strong>AI Platform</strong><button type="button" data-close>✕</button></header><input value="unsaved work">';
+  window.document.body.appendChild(root);
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+
+  assert.equal(manager.findByAppId('ai-platform').el, root, 'new catalog windows register with the shared manager');
+  assert.ok(root.classList.contains('panthorium-window-fullscreen'), 'new function windows open in the shared fullscreen layout');
+  assert.ok(root.querySelector('[data-panthorium-window-action="minimize"]'), 'catalog windows receive a minimize control');
+  assert.ok(root.querySelector('[data-panthorium-window-action="fullscreen"]'), 'catalog windows receive a fullscreen control');
+
+  root.querySelector('[data-panthorium-window-action="minimize"]').click();
+  assert.equal(root.style.display, 'none', 'minimize hides the same live window');
+  manager.restore('ai-platform');
+  assert.equal(root.style.display, 'flex', 'the shared manager restores the same window');
+  assert.equal(root.querySelector('input').value, 'unsaved work', 'the existing session state remains in the window');
+
+  root.querySelector('[data-close]').click();
+  await new Promise(resolve => window.setTimeout(resolve, 5));
+  assert.equal(manager.findByAppId('ai-platform'), null, 'explicit close clears the managed session');
+  assert.equal(root.isConnected, false, 'explicit close removes the old window root');
+
+  window.close();
+  console.log('Window Manager UI: shared fullscreen, minimize/restore, and close lifecycle passed');
+}
+
+main().catch(error => { console.error(error); process.exitCode = 1; });
