@@ -58,7 +58,8 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
       assert.equal(icons.length, 14, 'every admin icon is on the desktop on production hosts too');
       assert.equal(new Set(icons.map(icon => icon.dataset.appId)).size, 14);
       assert.notEqual(w.getComputedStyle(w.document.getElementById('desktop-icons')).display, 'none');
-      assert.equal(w.getComputedStyle(w.document.getElementById('sm-apps')).display, 'none');
+      assert.notEqual(w.getComputedStyle(w.document.getElementById('sm-apps')).display, 'none', 'administrator Start Menu exposes searchable launchers');
+      assert(w.document.getElementById('start-search'));
       assert(w.document.getElementById('btn-restart'));
     }
     if (desktop) {
