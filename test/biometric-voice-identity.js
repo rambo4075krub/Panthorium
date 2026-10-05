@@ -91,6 +91,7 @@ const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed 
       repository, providerUrl: 'https://speaker.test', providerToken: 'test-only-token',
       encryptionKey: 'test-only-key', matchThreshold: 0.80, enrollmentThreshold: 0.76
     });
+    assert.equal(slightlyLoweredService.status().matchThreshold, 0.80, 'the configured staging threshold is exposed to the signed-in diagnostics UI');
     const base = vector(2);
     const baseNorm = Math.sqrt(base.reduce((sum, value) => sum + value * value, 0));
     const unitBase = base.map(value => value / baseNorm);
