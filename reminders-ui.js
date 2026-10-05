@@ -39,6 +39,7 @@
     const status = root.querySelector('[data-reminders-status]');
     const form = root.querySelector('[data-reminders-form]');
     const save = root.querySelector('[data-reminders-save]');
+    save.disabled = true;
     const dateField = root.querySelector('[data-reminders-time]');
     const list = root.querySelector('[data-reminders-list]');
     dateField.value = localInputValue(new Date(Date.now() + 60 * 60 * 1000));
