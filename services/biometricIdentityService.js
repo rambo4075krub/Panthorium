@@ -93,6 +93,39 @@ class BiometricIdentityService {
   }
   async list(ownerUserId) { return (await this.repository.list(ownerUserId)).map(publicProfile); }
   async remove(ownerUserId, profileId) { const removed = await this.repository.remove(profileId, ownerUserId); if (removed) this.audit?.record('biometric.voice_removed', { ownerUserId, profileId }); return removed; }
+  async addSamples({ ownerUserId, actorRoles = [], profileId, consent, samples }) {
+    if (consent !== true) throw new Error('biometric_consent_required');
+    if (!Array.isArray(samples) || samples.length < 3 || samples.length > 5 || samples.some(sample => !this.validateAudio(sample))) throw new Error('invalid_voice_samples');
+    const profile = await this.repository.get(profileId, ownerUserId);
+    if (!profile || profile.status && profile.status !== 'active') throw new Error('voice_profile_not_found');
+    if (profile.subjectType === 'administrator' && !actorRoles.includes('administrator')) throw new Error('administrator_role_required');
+
+    const vectors = [];
+    for (const sample of samples) vectors.push(await this.extract(sample));
+    if (!vectors.every(vector => vector.length === vectors[0].length)) throw new Error('inconsistent_voice_embeddings');
+    const candidate = mean(vectors);
+    const consistency = Math.min(...vectors.map(vector => cosine(candidate, vector)));
+    if (consistency < this.enrollmentThreshold) throw new Error('voice_samples_do_not_match');
+
+    const previous = this.decrypt(profile.encryptedTemplate);
+    if (previous.length !== candidate.length) throw new Error('inconsistent_voice_embeddings');
+    const profileConsistency = cosine(candidate, previous);
+    if (profileConsistency < this.enrollmentThreshold) throw new Error('voice_samples_do_not_match');
+
+    const oldCount = Math.max(1, Number(profile.sampleCount) || 1);
+    const sampleCount = oldCount + vectors.length;
+    const mergedTemplate = previous.map((value, index) =>
+      (Number(value) * oldCount + vectors.reduce((sum, vector) => sum + Number(vector[index]), 0)) / sampleCount
+    );
+    const updated = await this.repository.updateTemplate(profileId, ownerUserId, {
+      encryptedTemplate: this.encrypt(mergedTemplate),
+      sampleCount,
+      expectedRevision: Number(profile.templateRevision) || 1
+    });
+    if (!updated) throw new Error('voice_profile_samples_conflict');
+    this.audit?.record('biometric.voice_samples_added', { ownerUserId, profileId, addedSamples: vectors.length, sampleCount });
+    return publicProfile(updated);
+  }
   async verify({ ownerUserId, audio }) {
     if (!this.validateAudio(audio)) throw new Error('invalid_voice_sample');
     const profiles = await this.repository.list(ownerUserId);
