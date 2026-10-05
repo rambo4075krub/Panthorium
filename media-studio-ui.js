@@ -396,7 +396,6 @@
       if (!result.aiEditPlanning) root.querySelector('[data-ai-plan]').disabled = true;
     } catch (error) { setStatus(root, formatError(error.message), true); }
   }
-
   function minimize(root) {
     if (window.PanthoriumWindowManager?.minimize) window.PanthoriumWindowManager.minimize('media-studio');
     else root.style.display = 'none';
@@ -495,7 +494,6 @@
     window.PanthoriumWindowManager?.registerExternal?.('media-studio', 'Media Studio', root, { menuAppId: 'media-studio', controls: false });
     root.querySelector('[data-close]').onclick = () => close(root);
     root.querySelector('[data-minimize]').onclick = () => minimize(root);
-
     root.querySelector('[data-refresh]').onclick = async () => { try { await refreshFiles(root, root.querySelector('[data-media-file]').value); setStatus(root, 'โหลดรายการวิดีโอแล้ว'); } catch (error) { setStatus(root, formatError(error.message), true); } };
     root.querySelector('[data-media-file]').onchange = async () => {
       root.querySelectorAll('.ms-bin-item').forEach(entry => entry.classList.toggle('active', entry.dataset.fileId === root.querySelector('[data-media-file]').value));
