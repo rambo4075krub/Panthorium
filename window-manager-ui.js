@@ -51,21 +51,11 @@
     const closeButton = app.closeButton ? root.querySelector(app.closeButton) : null;
     const parent = closeButton?.parentElement || root.firstElementChild;
     if (!parent) return;
+    root.querySelectorAll('[data-fullscreen], [data-maximize], [data-panthorium-window-action="fullscreen"], .win-btn.max')
+      .forEach(button => button.remove());
     const alreadyHasMinimize = root.querySelector('[data-minimize], [data-panthorium-window-action="minimize"]');
-    const alreadyHasFullscreen = root.querySelector('[data-fullscreen], [data-panthorium-window-action="fullscreen"]');
     if (!alreadyHasMinimize) {
       const button = makeControl('minimize', 'ย่อไปไว้ใน Start Menu', '−', () => manager.minimize(app.id));
-      if (closeButton) parent.insertBefore(button, closeButton);
-      else parent.appendChild(button);
-    }
-    if (!alreadyHasFullscreen) {
-      const button = makeControl('fullscreen', 'คืนขนาดหน้าต่าง', '⛶', control => {
-        manager.toggleFullscreen(app.id);
-        const active = Boolean(manager.findByAppId(app.id)?.fullscreen);
-        control.textContent = active ? '⤢' : '⛶';
-        control.title = active ? 'คืนขนาดหน้าต่าง' : 'เต็มจอ';
-        control.setAttribute('aria-label', control.title);
-      });
       if (closeButton) parent.insertBefore(button, closeButton);
       else parent.appendChild(button);
     }
@@ -77,9 +67,10 @@
     if (current?.el !== root) {
       manager.registerExternalWindow(app.id, app.label || app.id, root, {
         menuAppId: app.id,
-        fullscreenOnOpen: manager.preferences?.fullscreenOnOpen
+        fullscreenOnOpen: true
       });
     }
+    manager.setFullscreen?.(app.id, true);
     root.dataset.panthoriumManagedWindow = app.id;
     bindControls(app, root);
     bindClose(app, root);
@@ -108,9 +99,10 @@
     };
     const record = manager.registerExternalWindow(id, title || app.label || id, root, {
       menuAppId: options.menuAppId || id,
-      fullscreenOnOpen: options.fullscreenOnOpen
+      fullscreenOnOpen: true
     });
     if (!record || options.controls === false) return record;
+    manager.setFullscreen?.(id, true);
     root.dataset.panthoriumManagedWindow = id;
     bindControls(app, root);
     bindClose(app, root);
