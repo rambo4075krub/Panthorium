@@ -3193,9 +3193,7 @@
             for (let offset = 0; offset < bytes.length; offset += step) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + step, bytes.length)));
             const mimeType = String(blob.type || chatRecorderMime).split(";")[0] || "audio/webm";
             const audio = "data:" + mimeType + ";base64," + btoa(binary);
-            if (!window.PanthoriumVoiceIdentity?.authorizeAudio) throw new Error("voice_verification_unavailable");
-            const authorization = await window.PanthoriumVoiceIdentity.authorizeAudio(audio);
-            if (authorization?.required && !authorization.matched) throw new Error(authorization.error || "voice_not_authorized");
+            // The backend verifies this exact audio once before sending it to STT.
             const base = OS.config.backendUrl.replace(/\/$/, "");
             const post = async () => {
                 const response = await authorizedFetch(base + "/api/speech/transcribe", {
@@ -3222,6 +3220,18 @@
                 }
             } else {
                 ({ data, statusCode } = await post());
+            }
+            if (statusCode === 403 && data?.error === "voice_enrollment_required") {
+                const response = await authorizedFetch(base + "/api/speech/identity-navigation", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ audio, language: "th-TH" }),
+                    signal: AbortSignal.timeout(22000),
+                    cache: "no-store"
+                });
+                const navigation = await response.json().catch(() => ({}));
+                if (response.ok && navigation.ok && ["register", "login"].includes(navigation.intent)) return { identityNavigation: navigation.intent };
+                throw new Error(navigation.error || "voice_navigation_unavailable");
             }
             if (statusCode < 200 || statusCode >= 300 || !data.ok || typeof data.text !== "string" || !data.text.trim()) {
                 throw new Error(data.error || "transcription_unavailable");
@@ -3254,7 +3264,16 @@
                 }
                 toast("กำลังถอดเสียง...", 4000);
                 try {
-                    const text = await transcribeChatBlob(new Blob(chunks, { type: chatRecorderMime }));
+                    const transcript = await transcribeChatBlob(new Blob(chunks, { type: chatRecorderMime }));
+                    if (transcript && typeof transcript === "object" && transcript.identityNavigation) {
+                        const identity = window.PanthoriumVoiceIdentity;
+                        if (transcript.identityNavigation === "login") identity?.openLogin?.();
+                        else identity?.open?.();
+                        toast("เปิดหน้าต่าง Voice Identity แล้ว");
+                        window.PanthoriumVoice?.resume();
+                        return;
+                    }
+                    const text = String(transcript || "").trim();
                     input.value = text;
                     window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
                     await send({ resumeGlobalVoice: true });
