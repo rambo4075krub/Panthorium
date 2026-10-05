@@ -10,6 +10,8 @@ class ReminderService {
     this.deliveryAvailable = Boolean(this.sender);
   }
 
+  async init() { await this.repository?.init?.(); }
+
   createSender() {
     if (!this.config.resendApiKey || !this.config.emailFrom) return null;
     return async ({ email, subject, text }) => {
