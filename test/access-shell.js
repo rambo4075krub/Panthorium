@@ -34,6 +34,12 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
     };
   }
   w.document.getElementById('sm-apps').innerHTML = '<div class="sm-app">Sentinel AI</div><div class="sm-app">ตั้งค่า</div><button id="phase4-ai-launcher">AI Platform</button><button id="phase5-agent-launcher">Sentinel Agent</button>';
+  if (role === 'user') {
+    const apps = w.document.getElementById('sm-apps');
+    for (const [id, label] of [['calculator', 'เครื่องคิดเลข'], ['notes', 'บันทึก'], ['files', 'ไฟล์']]) {
+      const item = w.document.createElement('button'); item.className = 'sm-app'; item.dataset.appId = id; item.textContent = label; apps.appendChild(item);
+    }
+  }
   try {
     for (const file of ['voice-window-catalog.js', 'access-shell-ui.js', 'staging-admin-desktop.js', 'ui-layout.js']) w.eval(source(file));
     w.PanthoriumStagingAdminDesktop.sync();
@@ -44,7 +50,8 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
       const lateLauncher = w.document.createElement('button'); lateLauncher.id = 'phase6-automation-launcher'; lateLauncher.textContent = 'Agent Automation';
       w.document.getElementById('sm-apps').appendChild(lateLauncher);
       await new Promise(resolve => w.setTimeout(resolve, 40));
-      assert.deepEqual([...w.document.querySelectorAll('#sm-apps > *')].map(el => el.querySelector('span')?.textContent.trim() || el.textContent.trim()), ['Sentinel AI', 'Voice Identity'], 'late module injection cannot expand a non-staff Start Menu');
+      const expectedMenu = role === 'user' ? ['Sentinel AI', 'Voice Identity', 'เครื่องคิดเลข', 'บันทึก', 'ไฟล์'] : ['Sentinel AI', 'Voice Identity'];
+      assert.deepEqual([...w.document.querySelectorAll('#sm-apps > *')].map(el => el.querySelector('span')?.textContent.trim() || el.textContent.trim()), expectedMenu, 'non-staff Start Menu keeps authorized apps and removes late privileged injection');
     }
     if (role === 'admin') {
       const icons = [...w.document.querySelectorAll('#desktop-icons [data-app-id]')];
