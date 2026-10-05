@@ -16,7 +16,7 @@ cd android
 ./gradlew assembleDebug
 ```
 
-The APK is created at `android/app/build/outputs/apk/debug/app-debug.apk`. Install it on a physical device and test sign-in, microphone permission, Thai/English recording, streamed text, spoken playback, stop/resume, and returning to the app after backgrounding it.
+The APK is created at `android/app/build/outputs/apk/debug/app-debug.apk`. Preparation enables immersive fullscreen on Android: status and navigation bars hide while using the app and can be revealed temporarily by swiping from a screen edge. Install it on a physical device and test sign-in, microphone permission, Thai/English recording, streamed text, spoken playback, stop/resume, immersive bar reveal, and returning to the app after backgrounding it.
 
 Set `PANTHORIUM_MOBILE_START_URL` to another HTTPS environment when needed. Do not put credentials or API keys in this value.
 
@@ -31,6 +31,7 @@ Google Play updates require a production Android App Bundle signed with the same
 - Android shell for staging smoke tests
 - Panthorium icon with its original red/orange mark inside a teal ring; everything outside the circle is transparent
 - User-initiated microphone permission declaration
+- Immersive fullscreen with transient system bars revealed by swipe
 - Existing Panthorium web UI, authentication, and API behavior
 
 Calendar, notifications, medication reminders, Play Billing, background audio, and production signing are not implemented by this wrapper yet. Keep production rollout blocked until those functions and privacy disclosures are implemented and tested.
