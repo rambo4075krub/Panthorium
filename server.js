@@ -60,7 +60,6 @@ const { createSecurityRouter } = require("./routes/security");
 const { createAutomationRouter } = require("./routes/automation");
 const { createMemoryRouter } = require("./routes/memory");
 const { createFilesRouter } = require("./routes/files");
-const { createFilesRouter } = require("./routes/files");
 const { createReminderRouter } = require("./routes/reminders");
 const { createKnowledgeRouter } = require("./routes/knowledge");
 const { createOrchestrationRouter } = require("./routes/orchestration");
