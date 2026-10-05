@@ -21,11 +21,11 @@ async function main() {
     restore(id) { const win = managedWindows.get(id); if (win) win.el.style.display = win.displayMode; return Boolean(win); },
     minimize(id) { const win = managedWindows.get(id); if (win) win.el.style.display = 'none'; return Boolean(win); },
     close(id) { const win = managedWindows.get(id); if (win) win.el.remove(); managedWindows.delete(id); return Boolean(win); },
-    toggleFullscreen(id) {
+    setFullscreen(id) {
       const win = managedWindows.get(id);
       if (!win) return false;
-      win.fullscreen = !win.fullscreen;
-      win.el.classList.toggle('panthorium-window-fullscreen', win.fullscreen);
+      win.fullscreen = true;
+      win.el.classList.add('panthorium-window-fullscreen');
       return true;
     }
   };
@@ -49,8 +49,9 @@ async function main() {
 
   assert.ok(root.querySelector('[data-ai-instruction]'), 'Sentinel edit prompt is visible in the Inspector');
   assert.ok(root.querySelector('[data-generation-command]'), 'video generation has its own prompt field');
-  assert.ok(root.querySelector('[data-fullscreen]'), 'editor provides a fullscreen control');
+  assert.equal(root.querySelector('[data-fullscreen]'), null, 'editor does not expose a restore-size control');
   assert.ok(root.querySelector('[data-minimize]'), 'editor provides a minimize control');
+  assert.ok(root.querySelector('[data-close]'), 'editor provides a close control');
   assert.ok(root.querySelector('[data-media-bin]'));
   assert.ok(root.querySelector('[data-media-preview]'));
   assert.ok(root.querySelector('[data-range-track]'));
@@ -59,7 +60,8 @@ async function main() {
   assert.match(css, /orientation:portrait/);
   assert.match(css, /orientation:landscape/);
   assert.match(css, /safe-area-inset/);
-  assert.match(css, /max\(env\(safe-area-inset-top,0px\),32px\)/, 'portrait layout leaves room for the phone status bar');
+  assert.doesNotMatch(css, /max\(env\(safe-area-inset-top,0px\),32px\)/, 'portrait layout does not hard-code a 32px top gap');
+  assert.match(css, /data-panthorium-immersive="true"/, 'immersive mode uses the whole device screen');
   assert.match(css, /\.panthorium-window-fullscreen/);
   assert.match(css, /100dvh/);
   assert.ok(root.classList.contains('panthorium-window-fullscreen'), 'Media Studio uses the common fullscreen window preference');
