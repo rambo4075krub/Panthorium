@@ -22,7 +22,7 @@ async function main() {
     minimize(id) { const record = windows.get(id); record.el.style.display = 'none'; return true; },
     restore(id) { const record = windows.get(id); if (!record) return false; record.el.style.display = record.displayMode; return true; },
     close(id) { const record = windows.get(id); if (record) record.el.remove(); windows.delete(id); return Boolean(record); },
-    toggleFullscreen(id) { const record = windows.get(id); record.fullscreen = !record.fullscreen; record.el.classList.toggle('panthorium-window-fullscreen', record.fullscreen); return true; }
+    setFullscreen(id) { const record = windows.get(id); if (!record) return false; record.fullscreen = true; record.el.classList.add('panthorium-window-fullscreen'); return true; }
   };
   window.PanthoriumWindowManager = manager;
   window.PanthoriumWindowCatalog = {
@@ -37,14 +37,15 @@ async function main() {
   const root = window.document.createElement('section');
   root.id = 'ai-window';
   root.style.cssText = 'position:fixed;inset:6%;display:flex';
-  root.innerHTML = '<header><strong>AI Platform</strong><button type="button" data-close>✕</button></header><input value="unsaved work">';
+  root.innerHTML = '<header><strong>AI Platform</strong><button type="button" data-fullscreen>⛶</button><button type="button" data-close>✕</button></header><input value="unsaved work">';
   window.document.body.appendChild(root);
   await new Promise(resolve => window.setTimeout(resolve, 0));
 
   assert.equal(manager.findByAppId('ai-platform').el, root, 'new catalog windows register with the shared manager');
   assert.ok(root.classList.contains('panthorium-window-fullscreen'), 'new function windows open in the shared fullscreen layout');
   assert.ok(root.querySelector('[data-panthorium-window-action="minimize"]'), 'catalog windows receive a minimize control');
-  assert.ok(root.querySelector('[data-panthorium-window-action="fullscreen"]'), 'catalog windows receive a fullscreen control');
+  assert.equal(root.querySelector('[data-fullscreen], [data-panthorium-window-action="fullscreen"]'), null, 'catalog windows do not expose a size-restore control');
+  assert.ok(root.querySelector('[data-close]'), 'catalog windows keep a close control');
 
   root.querySelector('[data-panthorium-window-action="minimize"]').click();
   assert.equal(root.style.display, 'none', 'minimize hides the same live window');
@@ -58,7 +59,7 @@ async function main() {
   assert.equal(root.isConnected, false, 'explicit close removes the old window root');
 
   window.close();
-  console.log('Window Manager UI: shared fullscreen, minimize/restore, and close lifecycle passed');
+  console.log('Window Manager UI: fullscreen-only layout, minimize/restore, close-only titlebar controls passed');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });
