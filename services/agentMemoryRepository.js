@@ -155,12 +155,12 @@ class AgentMemoryRepository {
   }
 
   async get(userId, memoryId) {
-    if (this.notesRepository) {
-      await this.ensureNotesMigrated(userId);
-      const note = await this.notesRepository.get(userId, memoryId);
-      if (note) return note;
-    }
-    return this.getSql(userId, memoryId);
+    if (!this.notesRepository) return this.getSql(userId, memoryId);
+    const legacy = await this.getSql(userId, memoryId);
+    if (legacy && legacy.kind !== 'note') return legacy;
+    await this.ensureNotesMigrated(userId);
+    const note = await this.notesRepository.get(userId, memoryId);
+    return note || null;
   }
 
   async listSql(userId, limit = 30, kind = null, excludeNotes = false) {
