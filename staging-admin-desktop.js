@@ -38,6 +38,9 @@ async function openApp(app){
   const entry=window.PanthoriumWindowCatalog?.apps.find(item=>item.id===app.id);
   const commands=window.PanthoriumVoiceCommands;
   if(!entry||!commands){notify(`${app.label} ยังโหลดไม่เสร็จ`);return false;}
+  if(!window.PanthoriumWindowCatalog.allowed(entry,typeof OS!=='undefined'?OS.state.user:null)){notify(`${app.label} ไม่มีสิทธิ์ใช้งานในบัญชีนี้`);return false;}
+  const existingWindow=window.PanthoriumWindowManager?.findByAppId?.(app.id);
+  if(existingWindow){window.PanthoriumWindowManager.restore(existingWindow.id);return true;}
   const result=await commands.windowAction(`open_${entry.key}`);
   if(!result.ok)notify(result.text);
   return result.ok;
