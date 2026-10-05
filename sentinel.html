@@ -3567,9 +3567,184 @@
         });
     }
 
-    // ---------- App: Files (simple) ----------
+    // ---------- App: Files ----------
     function openFiles() {
-        toast("ตัวจัดการไฟล์ถูกปิดชั่วคราวจนกว่าจะมีพื้นที่เก็บไฟล์บนคลาวด์ ขณะนี้จะไม่อ่านหรือบันทึกไฟล์ไว้บนอุปกรณ์");
+        if (OS.windows.has("files")) { focusWindow("files"); return; }
+        const html = '<div style="height:100%;display:flex;flex-direction:column;gap:10px;padding:12px;">' +
+            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+                '<span id="files-sync-status" role="status" aria-live="polite" style="flex:1;">กำลังตรวจสอบบัญชี…</span>' +
+                '<button id="files-refresh" type="button">รีเฟรช</button>' +
+                '<button id="files-upload" type="button">อัปโหลดไฟล์</button>' +
+                '<input id="files-input" type="file" hidden>' +
+                '<button id="files-login" type="button" hidden>เข้าสู่ระบบ / สมัครบัญชี</button>' +
+            '</div>' +
+            '<div style="font-size:12px;opacity:.72;">ไฟล์อยู่ใน Cloud Storage ส่วนตัวของบัญชีนี้ • จำกัด 20 MB ต่อไฟล์ และ 100 MB ต่อบัญชีในรุ่นทดสอบ</div>' +
+            '<div id="files-list" style="overflow:auto;flex:1;display:flex;flex-direction:column;gap:7px;"></div>' +
+        '</div>';
+        createWindow("files", "ไฟล์บนคลาวด์", html, { width: 620, height: 460 });
+
+        const status = document.getElementById("files-sync-status");
+        const list = document.getElementById("files-list");
+        const refreshButton = document.getElementById("files-refresh");
+        const uploadButton = document.getElementById("files-upload");
+        const input = document.getElementById("files-input");
+        const loginButton = document.getElementById("files-login");
+        let busy = false;
+        const isCurrent = () => OS.windows.has("files");
+        const apiBase = () => String(OS.config.backendUrl || "").replace(/\/$/, "");
+        const escapeHtml = value => String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+        const formatBytes = value => {
+            const bytes = Math.max(0, Number(value) || 0);
+            if (bytes < 1024) return bytes + " B";
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+            return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+        };
+        const ownerId = () => typeof currentUserId === "function" ? String(currentUserId() || "") : "";
+        const isRegistered = () => {
+            const user = OS.state.user || {};
+            const id = ownerId();
+            return Boolean(id && !id.startsWith("guest:") && !(user.roles || []).includes("guest"));
+        };
+        const messageFor = error => {
+            const code = String(error && error.message || "");
+            if (code === "account_required") return "เข้าสู่ระบบด้วยบัญชีผู้ใช้ก่อน จึงจะเปิดไฟล์บนคลาวด์ได้";
+            if (code === "files_storage_unconfigured") return "Staging ยังไม่ได้กำหนด bucket สำหรับ Files";
+            if (code === "files_storage_permission_denied") return "Cloud Run ยังไม่มีสิทธิ์เข้าถึง bucket";
+            if (code === "files_quota_exceeded") return "พื้นที่บัญชีถึงขีดจำกัด 100 MB";
+            if (code === "files_count_limit") return "บัญชีมีไฟล์ถึงขีดจำกัดรุ่นทดสอบ";
+            if (code === "file_too_large") return "ไฟล์ใหญ่เกิน 20 MB";
+            if (error && error.status === 401) return "เซสชันหมดอายุ • เข้าสู่ระบบแล้วลองอีกครั้ง";
+            return "เชื่อมต่อ Cloud Storage ไม่สำเร็จ • ลองอีกครั้ง";
+        };
+        async function ensureAccount() {
+            if (window.PanthoriumAuth && typeof window.PanthoriumAuth.ensureSession === "function") {
+                await window.PanthoriumAuth.ensureSession();
+            }
+            if (!isCurrent()) return "";
+            if (!isRegistered()) {
+                loginButton.hidden = false;
+                uploadButton.disabled = true;
+                status.textContent = "เข้าสู่ระบบหรือสมัครบัญชีเพื่อใช้ไฟล์บนคลาวด์";
+                return "";
+            }
+            loginButton.hidden = true;
+            uploadButton.disabled = false;
+            return ownerId();
+        }
+        async function loadFiles() {
+            if (!isCurrent() || busy) return;
+            busy = true;
+            status.textContent = "กำลังโหลดรายการจาก bucket ส่วนตัว…";
+            try {
+                const owner = await ensureAccount();
+                if (!owner) return;
+                const response = await authorizedFetch(apiBase() + "/api/files", { signal: AbortSignal.timeout(15000) });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) throw Object.assign(new Error(data.error || "files_load_failed"), { status: response.status });
+                if (!isCurrent() || owner !== ownerId()) return;
+                const files = Array.isArray(data.files) ? data.files : [];
+                list.innerHTML = files.length ? files.map(file =>
+                    '<div style="display:flex;gap:8px;align-items:center;padding:10px;border:1px solid rgba(0,255,204,.18);border-radius:10px;background:rgba(12,24,44,.65);">' +
+                        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(file.name) + '">' + escapeHtml(file.name) + '</span>' +
+                        '<span style="font-size:12px;opacity:.7;">' + formatBytes(file.size) + '</span>' +
+                        '<button type="button" data-files-action="download" data-file-id="' + escapeHtml(file.id) + '" data-file-name="' + escapeHtml(file.name) + '">ดาวน์โหลด</button>' +
+                        '<button type="button" data-files-action="delete" data-file-id="' + escapeHtml(file.id) + '">ลบ</button>' +
+                    '</div>'
+                ).join("") : '<div style="padding:18px;text-align:center;opacity:.7;">ยังไม่มีไฟล์ในบัญชีนี้</div>';
+                status.textContent = "ซิงก์แล้ว • " + files.length + " ไฟล์ • ใช้ " + formatBytes(data.usedBytes) + " จาก " + formatBytes(data.maxBytes);
+            } catch (error) {
+                if (isCurrent()) status.textContent = messageFor(error);
+                list.innerHTML = "";
+            } finally {
+                busy = false;
+            }
+        }
+        refreshButton.addEventListener("click", () => { loadFiles(); });
+        uploadButton.addEventListener("click", () => input.click());
+        loginButton.addEventListener("click", () => {
+            const identity = window.PanthoriumVoiceIdentity;
+            if (typeof identity?.openLogin === "function") identity.openLogin();
+            else if (typeof identity?.open === "function") identity.open();
+            else if (typeof toast === "function") toast("เปิด Voice Identity เพื่อเข้าสู่ระบบหรือสมัครบัญชี");
+        });
+        input.addEventListener("change", async () => {
+            const file = input.files && input.files[0];
+            input.value = "";
+            if (!file || busy) return;
+            if (file.size > 20 * 1024 * 1024) { status.textContent = "ไฟล์ใหญ่เกิน 20 MB"; return; }
+            busy = true;
+            uploadButton.disabled = true;
+            status.textContent = "กำลังอัปโหลดไฟล์ไปยัง Cloud Storage…";
+            try {
+                const owner = await ensureAccount();
+                if (!owner) return;
+                const response = await authorizedFetch(apiBase() + "/api/files", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/octet-stream",
+                        "X-File-Name": encodeURIComponent(file.name),
+                        "X-File-Content-Type": file.type || "application/octet-stream"
+                    },
+                    body: file,
+                    signal: AbortSignal.timeout(120000)
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) throw Object.assign(new Error(data.error || "files_upload_failed"), { status: response.status });
+                status.textContent = "อัปโหลดและบันทึกในบัญชีคลาวด์แล้ว";
+                busy = false;
+                await loadFiles();
+            } catch (error) {
+                status.textContent = messageFor(error);
+            } finally {
+                busy = false;
+                uploadButton.disabled = !isRegistered();
+            }
+        });
+        list.addEventListener("click", async event => {
+            const button = event.target.closest("[data-files-action]");
+            if (!button || busy) return;
+            const id = button.getAttribute("data-file-id") || "";
+            const action = button.getAttribute("data-files-action");
+            busy = true;
+            try {
+                if (action === "download") {
+                    status.textContent = "กำลังดาวน์โหลดจาก Cloud Storage…";
+                    const response = await authorizedFetch(apiBase() + "/api/files/" + encodeURIComponent(id), { signal: AbortSignal.timeout(120000) });
+                    if (!response.ok) {
+                        const data = await response.json().catch(() => ({}));
+                        throw Object.assign(new Error(data.error || "files_download_failed"), { status: response.status });
+                    }
+                    const blob = await response.blob();
+                    const link = document.createElement("a");
+                    const href = URL.createObjectURL(blob);
+                    link.href = href;
+                    link.download = button.getAttribute("data-file-name") || "file";
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    setTimeout(() => URL.revokeObjectURL(href), 1000);
+                    status.textContent = "ดาวน์โหลดไฟล์แล้ว";
+                } else if (action === "delete" && window.confirm("ลบไฟล์นี้ออกจากบัญชีคลาวด์หรือไม่?")) {
+                    const response = await authorizedFetch(apiBase() + "/api/files/" + encodeURIComponent(id), { method: "DELETE" });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok || !data.ok) throw Object.assign(new Error(data.error || "files_delete_failed"), { status: response.status });
+                    status.textContent = "ลบไฟล์แล้ว";
+                    busy = false;
+                    await loadFiles();
+                    return;
+                }
+            } catch (error) {
+                status.textContent = messageFor(error);
+            } finally {
+                busy = false;
+            }
+        });
+        openFiles.authChangedHandler = openFiles.authChangedHandler || (() => {
+            if (OS.windows.has("files")) loadFiles();
+        });
+        window.removeEventListener("panthorium:auth-changed", openFiles.authChangedHandler);
+        window.addEventListener("panthorium:auth-changed", openFiles.authChangedHandler);
+        loadFiles();
     }
 
 
