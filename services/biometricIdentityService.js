@@ -18,7 +18,7 @@ class BiometricIdentityService {
     this.matchThreshold = Number(matchThreshold); this.enrollmentThreshold = Number(enrollmentThreshold);
   }
   async init() { await this.repository.init(); }
-  status() { return { configured: Boolean(this.providerUrl && this.key), gateEnabled: this.gateEnabled, providerConfigured: Boolean(this.providerUrl), encryptionConfigured: Boolean(this.key), minEnrollmentSamples: 3, maxEnrollmentSamples: 5, allowedSubjects: [...TYPES] }; }
+  status() { return { configured: Boolean(this.providerUrl && this.key), gateEnabled: this.gateEnabled, providerConfigured: Boolean(this.providerUrl), encryptionConfigured: Boolean(this.key), matchThreshold: this.matchThreshold, minEnrollmentSamples: 3, maxEnrollmentSamples: 5, allowedSubjects: [...TYPES] }; }
   validateAudio(audio) {
     if (typeof audio !== 'string' || audio.length < 4000 || audio.length > 1400000) return false;
     const comma = audio.indexOf(',');
