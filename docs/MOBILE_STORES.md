@@ -24,7 +24,7 @@
 | Google Play | Google Play Console | ~$25 ครั้งเดียว | `.aab` (Android App Bundle) |
 | Apple App Store | Apple Developer Program | ~$99 / ปี | `.ipa` ผ่าน Xcode / Transporter |
 
-บัญชี, การเซ็นชื่อ (signing), privacy policy, และรีวิวสโตร์ **ทำแทนใน GitHub Actions อย่างเดียวไม่ได้** ต้องมีเจ้าของบัญชียืนยันตัวตน
+บัญชี, การเซ็นชื่อ (signing), การตรวจ Privacy/Policy และรีวิวสโตร์ **ทำแทนใน GitHub Actions อย่างเดียวไม่ได้** ต้องมีเจ้าของบัญชียืนยันตัวตน Privacy/Policy มีศูนย์รวมฉบับ staging ใน Start Menu แล้ว แต่ก่อนส่งขึ้นสโตร์เจ้าของบริการต้องยืนยันตัวตนผู้ควบคุมข้อมูล/ช่องทางติดต่อ ระยะเก็บข้อมูลและผู้ประมวลผล พร้อมตรวจเนื้อหาตามกฎหมายที่ใช้บังคับ
 
 ## เส้นทางที่แนะนำ
 
@@ -43,7 +43,7 @@ npx cap sync
 ```
 
 จากนั้น:
-- Android: เปิดใน Android Studio → Build → Generate Signed Bundle → อัปโหลด Play Console
+- Android: เปิดใน Android Studio → Build → Generate Signed Bundle → อัปโหลด Play Console ตัว preview ใช้ immersive fullscreen และแสดงแถบระบบชั่วคราวเมื่อผู้ใช้ปัดจากขอบจอ
 - iOS: เปิดใน Xcode (ต้องใช้ Mac) → Archive → Distribute → App Store Connect
 
 ### ชื่อไฟล์เมื่อมีแพ็กเกจมือถือ
