@@ -147,7 +147,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="files"]'), 'Files appears in Start menu after account authentication');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="goals"]'), 'Goals appears in Start menu for signed-in chat accounts');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="assistant-preferences"]'), 'Sentinel Preferences appears in Start menu for signed-in chat accounts');
-    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'window-manager-ui.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumStagingAdminDesktop.render();
     await new Promise(resolve => setTimeout(resolve, 40));
     for (const appId of ['media-studio', 'browser']) {
@@ -180,7 +180,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       assert.equal(w.document.querySelectorAll(app.selector).length, 1, `${app.label}: duplicate window`);
       if (app.refresher || app.refreshButton) assert.equal((await command(`รีเฟรช ${app.aliases[0]}`)).ok, true, `${app.label} refresh`);
       const closed = await command(`ปิด ${app.aliases[0]}`);
-      assert.equal(closed.ok, true);
+      assert.equal(closed.ok, true, `${app.id} close: ${JSON.stringify(closed)}`);
       assert.equal(closed.text, `ปิด ${app.label}`);
       assert.equal(isVisible(app), false, `${app.label} stayed open`);
       if (app.external) assert.equal(externalPopups.get(`panthorium-external-${app.id}`)?.closed, true, `${app.label}: browser window stayed open`);
