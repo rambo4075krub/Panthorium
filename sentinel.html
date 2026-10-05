@@ -2823,6 +2823,10 @@
         { id: "notes", name: "บันทึก", icon: "📝", open: openNotes, visible: () => {
             const user = OS.state.user;
             return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
+        { id: "files", name: "ไฟล์", icon: "📁", open: openFiles, visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
         } }
     ];
 
