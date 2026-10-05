@@ -45,13 +45,15 @@ service and is not persisted. Enrollment requires explicit consent and 3–5 sam
 12-second sample, for 36–60 seconds of total speech. The prompt is not
 transcribed or compared with the words spoken; it is sampling guidance, not a
 challenge-response liveness check. `/api/speech/transcribe` verifies a
-signed-in owner's enrolled voice before calling paid transcription. The UI
-also checks before STT **when `BIOMETRIC_GATE_ENABLED=1`**. The flag defaults
-to 0 so a failed model build or uncalibrated threshold cannot interrupt the
-existing staging microphone. Enroll and evaluate consented voices first; then
-enable the flag in a separate staging revision. With the gate enabled, a guest
-or unenrolled account has no voice access;
-text access remains available. A registered voice never grants an account
+signed-in owner's enrolled voice before calling paid transcription. The server
+performs one speaker check per recording; the client does not repeat that model
+call. The app gate defaults to 0, while the staging deploy workflow explicitly
+sets `BIOMETRIC_GATE_ENABLED=1`. A signed-in owner with no profiles may use a
+separate, rate-limited identity-navigation endpoint that accepts only exact
+registration or login phrases and discards every other transcript. It never
+routes that audio to Sentinel. Once a profile exists, this narrow route closes.
+Unknown speakers cannot use general STT. Chat text remains available, subject
+to account permissions. A registered voice never grants an account
 role or administrator permission.
 
 The staging deploy workflow builds the model image, grants the backend runtime
