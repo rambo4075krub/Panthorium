@@ -1,13 +1,13 @@
 const { randomUUID } = require('crypto');
 
 class AgentSchedulerService {
-  constructor({ jobs, workflow, runs, audit, authService, automation, pollMs = 5000, workerId } = {}) {
-    this.jobs = jobs; this.workflow = workflow; this.runs = runs; this.audit = audit; this.authService = authService || null; this.automation = automation || null;
+  constructor({ jobs, workflow, runs, audit, authService, automation, reminders, pollMs = 5000, workerId } = {}) {
+    this.jobs = jobs; this.workflow = workflow; this.runs = runs; this.audit = audit; this.authService = authService || null; this.automation = automation || null; this.reminders = reminders || null;
     this.pollMs = Math.max(1000, Number(pollMs) || 5000); this.workerId = workerId || `scheduler:${randomUUID()}`;
     this.timer = null; this.running = false;
   }
 
-  async init() { await this.jobs?.init?.(); await this.automation?.init?.(); await this.jobs?.recoverStale?.(); }
+  async init() { await this.jobs?.init?.(); await this.automation?.init?.(); await this.reminders?.init?.(); await this.jobs?.recoverStale?.(); }
   start() { if (this.timer) return; this.timer = setInterval(() => this.tick().catch((error) => console.error('[AGENT SCHEDULER]', error)), this.pollMs); this.timer.unref?.(); }
   stop() { if (this.timer) clearInterval(this.timer); this.timer = null; }
 
@@ -43,6 +43,6 @@ class AgentSchedulerService {
     } catch (error) { const next = await this.jobs.finish(job.jobId, { status: 'failed', error: String(error?.message || 'scheduler_error').slice(0,500), completedAt: new Date().toISOString() }); this.audit?.record('agent.job_failed', { userId: job.userId, jobId: job.jobId, error: String(error?.message || 'scheduler_error').slice(0,500) }); return next; }
   }
 
-  async tick() { if (this.running) return { ok: true, skipped: true }; this.running = true; try { await this.syncWaiting(); const recurring = await this.automation?.materializeDue?.(10) || []; const jobs = await this.jobs.claimDue(this.workerId, 5); for (const job of jobs) await this.executeJob(job); return { ok: true, materialized: recurring.length, claimed: jobs.length }; } finally { this.running = false; } }
+  async tick() { if (this.running) return { ok: true, skipped: true }; this.running = true; try { await this.syncWaiting(); let remindersSent = 0; try { const delivered = await this.reminders?.deliverDue?.(10); remindersSent = Number(delivered?.sent) || 0; } catch (error) { this.audit?.record('reminder.scheduler_failed', { error: String(error?.message || 'reminder_scheduler_failed').slice(0,120) }); } const recurring = await this.automation?.materializeDue?.(10) || []; const jobs = await this.jobs.claimDue(this.workerId, 5); for (const job of jobs) await this.executeJob(job); return { ok: true, materialized: recurring.length, claimed: jobs.length, remindersSent }; } finally { this.running = false; } }
 }
 module.exports = { AgentSchedulerService };
