@@ -9,6 +9,26 @@ async function main() {
     pretendToBeVisual: true
   });
   const window = dom.window;
+  const managedWindows = new Map();
+  window.PanthoriumWindowManager = {
+    registerExternal(id, title, root, options) {
+      root.classList.add('panthorium-managed-window', 'panthorium-window-fullscreen');
+      const record = { id, title, el: root, menuAppId: options.menuAppId, fullscreen: true, displayMode: 'flex' };
+      managedWindows.set(id, record);
+      return record;
+    },
+    findByAppId(id) { return managedWindows.get(id) || null; },
+    restore(id) { const win = managedWindows.get(id); if (win) win.el.style.display = win.displayMode; return Boolean(win); },
+    minimize(id) { const win = managedWindows.get(id); if (win) win.el.style.display = 'none'; return Boolean(win); },
+    close(id) { const win = managedWindows.get(id); if (win) win.el.remove(); managedWindows.delete(id); return Boolean(win); },
+    toggleFullscreen(id) {
+      const win = managedWindows.get(id);
+      if (!win) return false;
+      win.fullscreen = !win.fullscreen;
+      win.el.classList.toggle('panthorium-window-fullscreen', win.fullscreen);
+      return true;
+    }
+  };
   window.OS = {
     config: { accessToken: 'session-test' },
     state: { user: { id: '11111111-1111-4111-8111-111111111111', roles: [], permissions: ['chat'] } }
@@ -40,18 +60,22 @@ async function main() {
   assert.match(css, /orientation:landscape/);
   assert.match(css, /safe-area-inset/);
   assert.match(css, /max\(env\(safe-area-inset-top,0px\),32px\)/, 'portrait layout leaves room for the phone status bar');
-  assert.match(css, /:fullscreen/);
+  assert.match(css, /\.panthorium-window-fullscreen/);
   assert.match(css, /100dvh/);
+  assert.ok(root.classList.contains('panthorium-window-fullscreen'), 'Media Studio uses the common fullscreen window preference');
 
+  const prompt = root.querySelector('[data-ai-instruction]');
+  prompt.value = 'keep this edit brief';
   root.querySelector('[data-minimize]').click();
   assert.equal(root.style.display, 'none', 'minimize hides the editor window');
-  const restore = window.document.querySelector('#media-studio-restore');
-  assert.ok(restore, 'minimized editor leaves a restore button');
-  restore.click();
+  assert.equal(window.document.querySelector('#media-studio-restore'), null, 'the editor does not create a floating restore control');
+  const restored = window.PanthoriumMediaStudio.open();
+  assert.equal(restored, root, 'opening from its Start Menu launcher restores the same editor root');
   assert.equal(root.style.display, 'flex', 'restore brings the editor back');
-  assert.equal(window.document.querySelector('#media-studio-restore'), null);
+  assert.equal(root.querySelector('[data-ai-instruction]').value, 'keep this edit brief', 'the editor state remains until the user closes it');
 
   window.PanthoriumMediaStudio.close();
+  assert.equal(managedWindows.has('media-studio'), false, 'closing the editor clears its managed session');
   window.close();
   console.log('Media Studio UI: Sentinel prompts, V1/A1 timeline and responsive portrait/landscape rules passed');
 }
