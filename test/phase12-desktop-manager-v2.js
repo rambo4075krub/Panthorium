@@ -12,6 +12,8 @@ const layout = read('ui-layout.js');
 const server = read('server.js');
 const shell = read('sentinel.html');
 const windowManager = read('window-manager-ui.js');
+const privacyPolicy = read('privacy-policy-ui.js');
+const manifest = JSON.parse(read('manifest.json'));
 
 assert.match(desktop, /const APPS=\[/, 'Desktop Manager V2 must use a static App Registry');
 assert.match(desktop, /data-desktop-v2/, 'Desktop icons must come from a single managed renderer');
@@ -35,10 +37,18 @@ assert.match(shell, /panthorium\.window\.preferences\.v1/, 'window preferences a
 assert.match(shell, /fullscreenOnOpen:\s*true/, 'all managed app windows open fullscreen by default');
 assert.match(shell, /minimizeToStartMenu:\s*true/, 'the shared preference keeps minimized windows in Start Menu');
 assert.match(shell, /preserveStateUntilClose:\s*true/, 'window state persists until explicit close');
+assert.match(shell, /data-panthorium-immersive/, 'the shell removes safe-area padding after immersive fullscreen succeeds');
+assert.match(shell, /requestFullscreen\(\{ navigationUI: "hide" \}\)/, 'launcher taps request system/browser immersive mode');
+assert.doesNotMatch(shell, /class="win-btn max"/, 'native windows no longer expose a restore-size control');
+assert.match(shell, /pinLast\?\.\("privacy-policy", sm\)/, 'the Start Menu pins Privacy/Policy after each app render');
 assert.match(shell, /function registerExternalWindow\(/, 'custom function windows use the shared desktop window manager');
 assert.match(shell, /data-managed-minimized-window/, 'minimized windows reuse their original Start Menu launcher');
 assert.match(windowManager, /PanthoriumWindowCatalog\?\.apps/, 'catalog scanning registers all function windows');
 assert.match(server, /window-manager-ui\.js/, 'the shared window manager is loaded before function windows');
+assert.match(server, /privacy-policy-ui\.js/, 'the centralized policy window is served by the Panthorium shell');
+assert.match(privacyPolicy, /PanthoriumPrivacyPolicy\.register/, 'future policy entries use the central registry');
+assert.equal(manifest.display, 'fullscreen', 'installed PWA requests immersive display mode');
+assert.equal(manifest.display_override[0], 'fullscreen', 'fullscreen is the highest-priority PWA display mode');
 assert.match(desktop, /PanthoriumWindowManager\?\.findByAppId/, 'reopening from an admin desktop icon restores the existing managed window');
 
 console.log('Phase 12 Desktop Manager V2 tests passed');
