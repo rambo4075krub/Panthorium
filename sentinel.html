@@ -3691,6 +3691,7 @@
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok || !data.ok) throw Object.assign(new Error(data.error || "files_upload_failed"), { status: response.status });
                 status.textContent = "อัปโหลดและบันทึกในบัญชีคลาวด์แล้ว";
+                busy = false;
                 await loadFiles();
             } catch (error) {
                 status.textContent = messageFor(error);
@@ -3721,7 +3722,7 @@
                     document.body.appendChild(link);
                     link.click();
                     link.remove();
-                    URL.revokeObjectURL(href);
+                    setTimeout(() => URL.revokeObjectURL(href), 1000);
                     status.textContent = "ดาวน์โหลดไฟล์แล้ว";
                 } else if (action === "delete" && window.confirm("ลบไฟล์นี้ออกจากบัญชีคลาวด์หรือไม่?")) {
                     const response = await authorizedFetch(apiBase() + "/api/files/" + encodeURIComponent(id), { method: "DELETE" });
