@@ -27,7 +27,8 @@ jobs:
       VERTEX_MODEL: sentinel-v4
       REGION: asia-southeast1
       SERVICE: panthorium-backend-staging
-      PANTHORIUM_FILES_BUCKET: my-gemini-dataset-2026
+      PANTHORIUM_FILES_BUCKET: ${{ vars.PANTHORIUM_STAGING_FILES_BUCKET || '' }}
+      PANTHORIUM_PRODUCTION_FILES_BUCKET: ${{ vars.PANTHORIUM_PRODUCTION_FILES_BUCKET || '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Check isolated staging configuration
@@ -35,7 +36,7 @@ jobs:
           PRODUCTION_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
         run: |
           set -euo pipefail
-          for name in PROJECT RUNTIME_SA SQL_INSTANCE DEPLOY_SA WIF_PROVIDER PANTHORIUM_FILES_BUCKET; do
+          for name in PROJECT RUNTIME_SA SQL_INSTANCE DEPLOY_SA WIF_PROVIDER PANTHORIUM_FILES_BUCKET PANTHORIUM_PRODUCTION_FILES_BUCKET; do
             if [ -z "${!name}" ]; then
               echo "::error::Missing staging configuration: $name. See docs/STAGING.md"
               exit 1
@@ -50,6 +51,15 @@ jobs:
           [[ "$WIF_PROVIDER" == "projects/124818950958/locations/global/workloadIdentityPools/github-staging/providers/github" ]]
           [[ "$RUNTIME_SA" == *"@$PROJECT.iam.gserviceaccount.com" ]]
           [[ "$SQL_INSTANCE" == "$PROJECT:$REGION:"* ]]
+          bucket_pattern='^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$'
+          if ! [[ "$PANTHORIUM_FILES_BUCKET" =~ $bucket_pattern ]] || ! [[ "$PANTHORIUM_PRODUCTION_FILES_BUCKET" =~ $bucket_pattern ]]; then
+            echo "::error::Set valid Cloud Storage bucket names in the repository variables."
+            exit 1
+          fi
+          if [ "$PANTHORIUM_FILES_BUCKET" = "$PANTHORIUM_PRODUCTION_FILES_BUCKET" ]; then
+            echo "::error::Staging and production must use different Cloud Storage buckets."
+            exit 1
+          fi
           configured=0
           for name in VERTEX_PROJECT VERTEX_TUNING_JOB_LOCATION VERTEX_TUNING_JOB_ID; do
             if [ -n "${!name}" ]; then configured=$((configured + 1)); fi

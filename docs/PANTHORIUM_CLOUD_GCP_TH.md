@@ -12,16 +12,17 @@ Google Cloud กับ Google Play Billing เป็นคนละบริก�
 ## สถานะโค้ดปัจจุบัน
 
 - staging ใช้ Google Cloud Run, Cloud SQL และ Artifact Registry ตาม `.github/workflows/deploy-staging.yml`; API ใช้ PostgreSQL ผ่าน `DATABASE_URL`
-- Notes เรียก API ที่ผูกข้อมูลกับบัญชีและตั้งให้ production ต้องมีฐานข้อมูล แต่ staging ที่ใช้อยู่ยังอยู่บน Google Cloud ตามที่ต้องการ
+- Notes ผูกกับบัญชีจาก session ที่ตรวจสอบแล้ว; โค้ด PR นี้ย้าย Notes จาก Cloud SQL ไปเก็บเป็น object ใน Cloud Storage แยก prefix ตาม account ID และย้ายโน้ตเก่าแบบคัดลอก/ตรวจสอบก่อนลบข้อมูลต้นทาง
 - ค่า AI ของ staging เลือก Vertex; การใช้ Vertex เป็นการเรียกบริการ AI เพิ่มเติมจาก API/ฐานข้อมูล และมีต้นทุน/การประมวลผลข้อมูลของตัวเอง
-- Files ถูกซ่อนชั่วคราวเพราะยังไม่มี API และการเชื่อมต่อ Cloud Storage สำหรับอัปโหลด/ดาวน์โหลดแบบตรวจเจ้าของบัญชี นี่เป็นข้อจำกัดระหว่างพัฒนา ไม่ใช่ข้อสรุปว่าจะไม่มีพื้นที่ไฟล์
-- ปฏิทิน เตือนยา เตือนนัด และซิงก์ไฟล์/รูป/วิดีโอ ยังต้องพัฒนาบริการและหน้าจอเพิ่มก่อนเปิดใช้จริง
+- Files มี API สำหรับรายการ อัปโหลด ดาวน์โหลด และลบ โดย backend ใช้ account ID จาก session; ขีดจำกัดในโค้ดปัจจุบันคือ 20 MiB ต่อไฟล์, 100 MiB และ 1,000 ไฟล์ต่อบัญชี
+- Notes และ Files ใช้ bucket ที่ระบุผ่าน `PANTHORIUM_FILES_BUCKET`; staging/production ต้องใช้ bucket คนละใบและให้ Cloud Run runtime service account มี `roles/storage.objectUser` บน bucket ของสภาพแวดล้อมนั้นเท่านั้น
+- ปฏิทินและการเตือนมีโค้ด UI/API บางส่วนแล้ว แต่การซิงก์ครบทุกอุปกรณ์และการแจ้งเตือนขณะอุปกรณ์ออฟไลน์ยังต้องทดสอบและพัฒนาต่อ; การเก็บไฟล์สื่อขนาดใหญ่ยังต้องทดสอบกับ bucket จริง
 
 ## โครงสร้างเป้าหมาย
 
 1. **Panthorium Browser และแอป** เชื่อมโดเมน API ของ Panthorium ด้วย HTTPS
 2. **Cloud Run** รัน API ของ Panthorium ใน Google Cloud project ที่คุณควบคุม
-3. **Cloud SQL for PostgreSQL** เก็บบัญชี โน้ต ปฏิทิน งาน นัด เตือนยา การตั้งค่า และ metadata โดยแต่ละระเบียนมี `user_id` ที่ API มาจาก session ที่ตรวจสอบแล้ว ห้ามเชื่อ `user_id` ที่แอปส่งมาเอง
+3. **Cloud SQL for PostgreSQL** เก็บบัญชี ปฏิทิน งาน นัด เตือนยา การตั้งค่า และ metadata ที่เป็นข้อมูลเชิงโครงสร้าง โดย API ใช้ account ID จาก session ที่ตรวจสอบแล้ว ห้ามเชื่อ `user_id` ที่แอปส่งมาเอง เนื้อหา Notes เก็บใน Cloud Storage ตามการย้ายใน PR นี้
 4. **Cloud Storage bucket ส่วนตัวของ Panthorium** เก็บไฟล์ รูป วิดีโอ และสื่อ ตั้ง Public Access Prevention ห้ามเปิด bucket เป็นสาธารณะ ให้ backend ตรวจเจ้าของ/โควตาก่อนออกสิทธิ์อัปโหลดหรือดาวน์โหลด และกำหนดอายุ URL ชั่วคราวให้สั้น
 5. **ระบบสมาชิก** บันทึกโควตาของแต่ละบัญชีในฐานข้อมูล หลัง backend ตรวจสอบสถานะการซื้อจาก Google Play แล้วเท่านั้น
 6. **การแจ้งเตือน** เก็บตารางนัดและเวลาเตือนในคลาวด์เป็นข้อมูลหลัก แต่โทรศัพท์ยังใช้ระบบแจ้งเตือนของ Android เพื่อส่งเสียง/แสดงเตือนขณะไม่ได้เปิดแอป
@@ -31,13 +32,14 @@ Google Cloud กับ Google Play Billing เป็นคนละบริก�
 ## ลำดับดำเนินงาน
 
 1. แยก Google Cloud project สำหรับ staging และ production พร้อมกำหนดเจ้าของ Billing Account, IAM และ service account ที่มีสิทธิ์เท่าที่จำเป็น
-2. เตรียม Cloud Storage bucket ส่วนตัวสำหรับ staging; แยก bucket production เมื่อถึงขั้นเปิดจริง ห้ามเก็บข้อมูลทดสอบปะปนกับข้อมูลจริง
-3. เพิ่มตาราง metadata/โควตาและ API สำหรับเริ่มอัปโหลด ตรวจยืนยันไฟล์ แสดงรายการ ดาวน์โหลด และลบ โดยทุกคำขอผ่าน account authorization
-4. ตั้ง CORS ให้เฉพาะโดเมน Panthorium ที่ใช้งานจริง และกำหนดขนาด/ชนิดไฟล์/พื้นที่รวมต่อบัญชี; ตรวจสถานะไฟล์ก่อนแสดงให้ผู้ใช้
-5. เชื่อม Files UI กับ API/Cloud Storage หลัง backend ผ่านการทดสอบการแยกบัญชีและการอัปโหลดขนาดใหญ่แล้ว
-6. ทำ API และฐานข้อมูลสำหรับปฏิทิน งาน เตือนยา และเตือนนัด แล้วซิงก์บัญชีเดียวกันระหว่างโทรศัพท์ แท็บเล็ต และ Browser
-7. เพิ่ม Play Billing: แอปส่ง purchase token ให้ backend, backend ตรวจสอบกับ Google Play ก่อนเปิดแพ็กเกจ/เพิ่มโควตา และปรับสิทธิ์เมื่อการสมัครต่ออายุ ยกเลิก หรือหมดอายุ
-8. ทดสอบบัญชีแยกกันบนเว็บทั่วไปและ Panthorium Browser ทั้ง Admin/Guest รวมทั้งบัญชีเดียวกันบนโทรศัพท์และแท็บเล็ต ก่อนค่อยพิจารณา merge `main`
+2. เตรียม bucket ส่วนตัวแยกสำหรับ staging และ production; ตั้ง Public Access Prevention และห้ามปะปนข้อมูลทดสอบกับข้อมูลจริง
+3. ให้ `roles/storage.objectUser` แก่ Cloud Run runtime service account เฉพาะ bucket ของสภาพแวดล้อมนั้น และกำหนด GitHub repository variables `PANTHORIUM_STAGING_FILES_BUCKET` กับ `PANTHORIUM_PRODUCTION_FILES_BUCKET`
+4. ตรวจทดสอบ Notes migration และ Files API ด้วย bucket จริง แยกบัญชี และยืนยันสิทธิ์ของ runtime service account ก่อนเปิดใช้
+5. ตั้ง CORS ให้เฉพาะโดเมน Panthorium ที่ใช้งานจริง และคำนวณโควตากับต้นทุน Cloud Storage/เครือข่ายก่อนเปิดแพ็กเกจพื้นที่
+6. ทดสอบระบบ Notes/Files บน Browser โทรศัพท์และแท็บเล็ต ด้วยบัญชีเดียวกันและบัญชีที่แยกจากกัน
+7. ทำ API และฐานข้อมูลสำหรับปฏิทิน งาน เตือนยา และเตือนนัด แล้วทดสอบการซิงก์บัญชีเดียวกันระหว่างอุปกรณ์
+8. เพิ่ม Play Billing: แอปส่ง purchase token ให้ backend, backend ตรวจสอบกับ Google Play ก่อนเปิดแพ็กเกจ/เพิ่มโควตา และปรับสิทธิ์เมื่อการสมัครต่ออายุ ยกเลิก หรือหมดอายุ
+9. ทดสอบบัญชีแยกกันบนเว็บทั่วไปและ Panthorium Browser ทั้ง Admin/Guest รวมทั้งบัญชีเดียวกันบนโทรศัพท์และแท็บเล็ต ก่อนค่อยพิจารณา merge `main`
 
 ## ค่าใช้จ่ายและแพ็กเกจพื้นที่
 
@@ -49,4 +51,4 @@ Cloud Storage มีต้นทุนหลายส่วน เช่น ป�
 
 ## ขอบเขตของ PR นี้
 
-PR นี้ทำการแยกข้อมูล Notes ตามบัญชีและบังคับให้ backend ใช้ฐานข้อมูลใน production พร้อมบันทึกแนวทาง Panthorium Cloud บน Google Cloud เท่านั้น ยังไม่ได้สร้าง bucket, เชื่อม API Files, เปิด Play Billing หรือทำ migration ไป production
+PR นี้เพิ่มการย้าย Notes จาก Cloud SQL ไป Cloud Storage, API Cloud Files, การแยกข้อมูลตามบัญชี และเปิดการตรวจ Voice Identity ใน deployment ตามค่าที่กำหนด แต่ยังไม่สร้าง bucket/กำหนด IAM ให้อัตโนมัติ การทดสอบ Cloud Storage ใน CI ใช้ mock จึงต้องตรวจ bucket จริงและทำ staging acceptance ก่อน merge ส่วน Play Billing และการรองรับผู้ใช้ 10 ล้านคนยังไม่อยู่ในขอบเขตนี้
