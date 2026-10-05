@@ -24,6 +24,17 @@ class Repository {
 
 const audio = suffix => `data:audio/webm;codecs=opus;base64,${'A'.repeat(4100)}${suffix}`;
 const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed ? 1 : 0.01));
+const vectorAtSimilarity = (reference, score) => {
+  const norm = Math.sqrt(reference.reduce((sum, value) => sum + value * value, 0));
+  const unit = reference.map(value => value / norm);
+  const axis = Array.from({ length: reference.length }, (_, index) => index === 1 ? 1 : 0);
+  const projection = axis.reduce((sum, value, index) => sum + value * unit[index], 0);
+  const orthogonal = axis.map((value, index) => value - projection * unit[index]);
+  const orthogonalNorm = Math.sqrt(orthogonal.reduce((sum, value) => sum + value * value, 0));
+  return unit.map((value, index) =>
+    value * score + (orthogonal[index] / orthogonalNorm) * Math.sqrt(1 - score * score)
+  );
+};
 
 (async () => {
   const originalFetch = global.fetch;
@@ -89,25 +100,20 @@ const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed 
     assert.equal(accepted.matched, true);
     const slightlyLoweredService = new BiometricIdentityService({
       repository, providerUrl: 'https://speaker.test', providerToken: 'test-only-token',
-      encryptionKey: 'test-only-key', matchThreshold: 0.80, enrollmentThreshold: 0.76
+      encryptionKey: 'test-only-key', matchThreshold: 0.75, enrollmentThreshold: 0.76
     });
-    assert.equal(slightlyLoweredService.status().matchThreshold, 0.80, 'the configured staging threshold is exposed to the signed-in diagnostics UI');
+    assert.equal(slightlyLoweredService.status().matchThreshold, 0.75, 'the configured staging threshold is exposed to the signed-in diagnostics UI');
     const base = vector(2);
-    const baseNorm = Math.sqrt(base.reduce((sum, value) => sum + value * value, 0));
-    const unitBase = base.map(value => value / baseNorm);
-    const axis = Array.from({ length: base.length }, (_, index) => index === 1 ? 1 : 0);
-    const projection = axis.reduce((sum, value, index) => sum + value * unitBase[index], 0);
-    const orthogonal = axis.map((value, index) => value - projection * unitBase[index]);
-    const orthogonalNorm = Math.sqrt(orthogonal.reduce((sum, value) => sum + value * value, 0));
-    const targetScore = 0.81;
-    nextVector = unitBase.map((value, index) =>
-      value * targetScore + (orthogonal[index] / orthogonalNorm) * Math.sqrt(1 - targetScore * targetScore)
-    );
+    const targetScore = 0.76;
+    nextVector = vectorAtSimilarity(base, targetScore);
     const oldThresholdResult = await service.verify({ ownerUserId: 'u1', audio: audio(40) });
-    assert.equal(oldThresholdResult.matched, false, 'a 0.81 match remains below the previous 0.82 threshold');
+    assert.equal(oldThresholdResult.matched, false, 'a 0.76 match remains below the previous 0.82 threshold');
     const loweredThresholdResult = await slightlyLoweredService.verify({ ownerUserId: 'u1', audio: audio(41) });
-    assert.equal(loweredThresholdResult.matched, true, 'a 0.81 match passes the small 0.80 staging adjustment');
+    assert.equal(loweredThresholdResult.matched, true, 'a 0.76 match passes the staging 0.75 threshold trial');
     assert.ok(Math.abs(loweredThresholdResult.score - targetScore) < 0.001, 'test probe exercises the intended threshold boundary');
+    nextVector = vectorAtSimilarity(base, 0.74);
+    const belowThresholdResult = await slightlyLoweredService.verify({ ownerUserId: 'u1', audio: audio(42) });
+    assert.equal(belowThresholdResult.matched, false, 'a 0.74 match remains rejected at the staging 0.75 threshold');
     nextVector = vector(20);
     const rejected = await service.verify({ ownerUserId: 'u1', audio: audio(5) });
     assert.equal(rejected.matched, false);
