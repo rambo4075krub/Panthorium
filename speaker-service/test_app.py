@@ -14,7 +14,7 @@ from app import decode_audio, handler_class
 
 def sample_audio(frequency=220, amplitude=0.2, seconds=2, leading_silence=0, trailing_silence=0):
     import struct
-    pcm = b"".join(struct.pack("<h", int(32767 * amplitude * math.sin(2 * math.pi * frequency * i / 16000))) for i in range(16000 * seconds))
+    pcm = b"".join(struct.pack("<h", int(32767 * amplitude * math.sin(2 * math.pi * frequency * i / 16000))) for i in range(int(16000 * seconds)))
     output = io.BytesIO()
     with wave.open(output, "wb") as wav:
         wav.setnchannels(1)
