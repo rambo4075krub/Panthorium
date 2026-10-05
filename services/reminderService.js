@@ -75,6 +75,7 @@ class ReminderService {
   async deliverDue(limit = 10) {
     if (!this.deliveryAvailable) return { ok: false, error: 'reminder_email_unavailable', sent: 0 };
     const due = await this.repository.claimDue(limit);
+    let sent = 0;
     for (const reminder of due) {
       try {
         const account = await this.authService?.repository?.findUserById?.(reminder.userId);
@@ -84,6 +85,7 @@ class ReminderService {
         const text = [type, reminder.title, when, reminder.details, 'ส่งโดย Panthorium ตามการตั้งเตือนในบัญชีของคุณ'].filter(Boolean).join('\\n');
         await this.sender({ email: account.email, subject: 'Panthorium: ' + type, text });
         await this.repository.finish(reminder.reminderId, { status: 'sent' });
+        sent++;
         this.audit?.record('reminder.delivered', { userId: reminder.userId, reminderId: reminder.reminderId, kind: reminder.kind });
       } catch (error) {
         const retryAt = reminder.attempts < 3 ? new Date(Date.now() + 60000).toISOString() : null;
@@ -93,7 +95,7 @@ class ReminderService {
         this.audit?.record('reminder.delivery_failed', { userId: reminder.userId, reminderId: reminder.reminderId, attempt: reminder.attempts, error: code });
       }
     }
-    return { ok: true, sent: due.length };
+    return { ok: true, sent, attempted: due.length };
   }
 }
 
