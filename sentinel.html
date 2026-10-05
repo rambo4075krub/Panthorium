@@ -3317,7 +3317,9 @@
                     const level = Math.sqrt(sum / chatRecorderData.length);
                     if (chatVoiceDetector.observe(level, now - chatRecorderStartedAt)) chatRecorderLastVoiceAt = now;
                 }
-                if ((chatRecorderLastVoiceAt > 0 && now - chatRecorderLastVoiceAt > 1800 && now - chatRecorderStartedAt > 700) || now - chatRecorderStartedAt > 30000) {
+                const chatSpeechEnded = chatRecorderLastVoiceAt > 0 && now - chatRecorderLastVoiceAt > 1800 && now - chatRecorderStartedAt > 700;
+                const noChatSpeechTimeout = !chatRecorderLastVoiceAt && now - chatRecorderStartedAt > 8000;
+                if (chatSpeechEnded || noChatSpeechTimeout || now - chatRecorderStartedAt > 30000) {
                     try { chatRecorder.stop(); } catch (_) {}
                     return;
                 }
