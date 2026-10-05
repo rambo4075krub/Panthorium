@@ -1,6 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { requireAuth, requirePermission } = require('../middleware/auth');
+const { CloudNotesError } = require('../services/cloudNotesRepository');
 
 function createMemoryRouter(authService, memory) {
   const router = express.Router();
@@ -54,6 +55,13 @@ function createMemoryRouter(authService, memory) {
       const status = out.ok ? 200 : out.error === 'memory_not_found' ? 404 : out.error === 'memory_requires_account' ? 403 : 400;
       res.status(status).json(out);
     } catch (error) { next(error); }
+  });
+
+  router.use((error, req, res, next) => {
+    if (error instanceof CloudNotesError) {
+      return res.status(error.status).json({ ok: false, error: error.code, requestId: req.requestId || null });
+    }
+    return next(error);
   });
 
   return router;
