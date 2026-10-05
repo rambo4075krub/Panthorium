@@ -10,6 +10,8 @@ const desktop = read('staging-admin-desktop.js');
 const access = read('access-shell-ui.js');
 const layout = read('ui-layout.js');
 const server = read('server.js');
+const shell = read('sentinel.html');
+const windowManager = read('window-manager-ui.js');
 
 assert.match(desktop, /const APPS=\[/, 'Desktop Manager V2 must use a static App Registry');
 assert.match(desktop, /data-desktop-v2/, 'Desktop icons must come from a single managed renderer');
@@ -29,5 +31,14 @@ assert.match(voiceUi, /!root\.querySelector\('\[data-consent\]'\)\.checked/, 'En
 assert.doesNotMatch(access, /setInterval\(/, 'Access shell must be event-driven, not polling');
 assert.doesNotMatch(layout, /setInterval\(/, 'UI layout must not poll sync loops');
 assert.match(server, /staging-admin-desktop\.js/, 'Server shell must load Desktop Manager V2 directly');
+assert.match(shell, /panthorium\.window\.preferences\.v1/, 'window preferences are persisted in shared storage');
+assert.match(shell, /fullscreenOnOpen:\s*true/, 'all managed app windows open fullscreen by default');
+assert.match(shell, /minimizeToStartMenu:\s*true/, 'the shared preference keeps minimized windows in Start Menu');
+assert.match(shell, /preserveStateUntilClose:\s*true/, 'window state persists until explicit close');
+assert.match(shell, /function registerExternalWindow\(/, 'custom function windows use the shared desktop window manager');
+assert.match(shell, /data-managed-minimized-window/, 'minimized windows reuse their original Start Menu launcher');
+assert.match(windowManager, /PanthoriumWindowCatalog\?\.apps/, 'catalog scanning registers all function windows');
+assert.match(server, /window-manager-ui\.js/, 'the shared window manager is loaded before function windows');
+assert.match(desktop, /PanthoriumWindowManager\?\.findByAppId/, 'reopening from an admin desktop icon restores the existing managed window');
 
 console.log('Phase 12 Desktop Manager V2 tests passed');
