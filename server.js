@@ -33,6 +33,8 @@ const { AgentRunRepository } = require("./services/agentRunRepository");
 const { AgentPendingRepository } = require("./services/agentPendingRepository");
 const { AgentJobRepository } = require("./services/agentJobRepository");
 const { AgentSchedulerService } = require("./services/agentSchedulerService");
+const { ReminderRepository } = require("./services/reminderRepository");
+const { ReminderService } = require("./services/reminderService");
 const { AgentAutomationRepository } = require("./services/agentAutomationRepository");
 const { AgentAutomationService } = require("./services/agentAutomationService");
 const { AgentAutomationPolicyService } = require("./services/agentAutomationPolicyService");
@@ -56,6 +58,7 @@ const { createAuthRouter } = require("./routes/auth");
 const { createSecurityRouter } = require("./routes/security");
 const { createAutomationRouter } = require("./routes/automation");
 const { createMemoryRouter } = require("./routes/memory");
+const { createReminderRouter } = require("./routes/reminders");
 const { createKnowledgeRouter } = require("./routes/knowledge");
 const { createOrchestrationRouter } = require("./routes/orchestration");
 const { createIntegrationsRouter } = require("./routes/integrations");
@@ -82,6 +85,8 @@ const securityResponse = new SecurityResponseService({ audit, databaseUrl: confi
 const authService = new AuthService({ repository: authRepository, config, audit });
 const biometrics = new BiometricIdentityService({ repository: biometricIdentityRepository, audit, providerUrl: config.biometricSpeakerUrl, providerToken: config.biometricSpeakerToken, encryptionKey: config.biometricTemplateKey, gateEnabled: config.biometricGateEnabled, matchThreshold: config.biometricVoiceThreshold, enrollmentThreshold: config.biometricEnrollmentThreshold });
 const emailOtp = new EmailOtpService({ repository: emailOtpRepository, authService, config });
+const reminderRepository = new ReminderRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, requireDatabase: config.isProduction });
+const reminders = new ReminderService({ repository: reminderRepository, authService, config, audit });
 const conversations = new ConversationRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const aiOperations = new AiOperationsService({ audit, conversations });
 const agentRuns = new AgentRunRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
@@ -112,7 +117,7 @@ const agentPlanner = new AgentPlannerService({ agentService, gateway: sentinel.g
 const agentWorkflow = new AgentWorkflowService({ agentService, gateway: sentinel.gateway, audit, runs: agentRuns, pendingStore: agentPending, memory: agentMemory });
 const agentAutomationPolicy = new AgentAutomationPolicyService();
 const agentAutomation = new AgentAutomationService({ repository: agentAutomationRepository, jobs: agentJobs, audit, policy: agentAutomationPolicy });
-const agentScheduler = new AgentSchedulerService({ jobs: agentJobs, workflow: agentWorkflow, runs: agentRuns, audit, authService, automation: agentAutomation });
+const agentScheduler = new AgentSchedulerService({ jobs: agentJobs, workflow: agentWorkflow, runs: agentRuns, audit, authService, automation: agentAutomation, reminders });
 const multiAgentPlanner = new MultiAgentPlannerService({ gateway: sentinel.gateway, audit });
 const multiAgent = new MultiAgentOrchestrator({ workflow: agentWorkflow, audit, runs: multiAgentRuns, planner: multiAgentPlanner });
 
@@ -173,6 +178,7 @@ app.use("/api/biometrics", createBiometricsRouter(authService, biometrics));
 app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
 app.use("/api/agent/automation", createAutomationRouter(authService, agentAutomation));
 app.use("/api/agent/memory", createMemoryRouter(authService, agentMemory));
+app.use("/api/reminders", createReminderRouter(authService, reminders));
 app.use("/api/agent/knowledge", createKnowledgeRouter(authService, agentKnowledge));
 app.use("/api/agent/orchestration", createOrchestrationRouter(authService, multiAgent));
 app.use("/api/integrations", createIntegrationsRouter(authService, integrations));
@@ -199,7 +205,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "calculator-expression.js", "calendar-ui.js", "external-apps-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "external-apps-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js"];
 for (const script of shellScripts) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -351,6 +357,7 @@ async function start() {
   await authService.init();
   await biometrics.init();
   await emailOtp.init();
+  await reminders.init();
   await conversations.init();
   await agentRuns.init();
   await agentPending.init();
@@ -423,4 +430,4 @@ if (require.main === module) {
   }).catch((error) => { console.error("[BOOT]", error); process.exit(1); });
 }
 
-module.exports = { app, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
+module.exports = { app, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
