@@ -11,6 +11,7 @@ const { AgentWorkflowService } = require('../services/agentWorkflowService');
 const { createApiRouter } = require('../routes/api');
 const catalog = require('../voice-window-catalog');
 const source = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
+assert.equal((source('sentinel.html').match(/authorizeAudio\(audio\)/g) || []).length, 0, 'both voice input paths rely on the single server-side speaker check');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const admin = { id: 'voice-admin', username: 'admin', permissions: ['chat', 'system:read', 'settings', 'sentinel:command'], roles: ['administrator'] };
 const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'system:read'], roles: ['guest'] };
