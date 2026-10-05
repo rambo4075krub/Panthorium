@@ -107,7 +107,6 @@ const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed 
     const loweredThresholdResult = await slightlyLoweredService.verify({ ownerUserId: 'u1', audio: audio(41) });
     assert.equal(loweredThresholdResult.matched, true, 'a 0.81 match passes the small 0.80 staging adjustment');
     assert.ok(Math.abs(loweredThresholdResult.score - targetScore) < 0.001, 'test probe exercises the intended threshold boundary');
-    nextVector = vector(2);
     nextVector = vector(20);
     const rejected = await service.verify({ ownerUserId: 'u1', audio: audio(5) });
     assert.equal(rejected.matched, false);
