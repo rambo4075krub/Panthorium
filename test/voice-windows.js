@@ -44,6 +44,9 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
   assert.equal(catalog.parse('เปิดความชอบ Sentinel')?.action, 'open_sentinel_preferences');
   assert.equal(catalog.allowed(preferencesApp, registeredUser), true, 'registered users may use account-scoped Sentinel preferences');
   assert.equal(catalog.allowed(preferencesApp, guest), false, 'Guest cannot use private Sentinel preferences');
+  const policyApp = catalog.apps.find(app => app.id === 'privacy-policy');
+  assert.equal(catalog.parse('เปิด Privacy Policy')?.action, 'open_privacy_policy');
+  assert.equal(catalog.allowed(policyApp, guest), true, 'Guests can read public Privacy/Policy articles');
   assert.equal(catalog.parse('เปิดโน้ต แล้วปิดโน้ต')?.error, 'ambiguous_voice_command', 'do not discard a conflicting repeated command');
   assert.equal(catalog.parse('อย่าเปิด Learning Lab')?.error, 'voice_command_negated');
   assert.equal(catalog.parse('เปิด Learning Lab แล้วลบข้อมูล'), null, 'must not silently drop a destructive second instruction');
@@ -147,7 +150,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="files"]'), 'Files appears in Start menu after account authentication');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="goals"]'), 'Goals appears in Start menu for signed-in chat accounts');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="assistant-preferences"]'), 'Sentinel Preferences appears in Start menu for signed-in chat accounts');
-    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'window-manager-ui.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'window-manager-ui.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'privacy-policy-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumStagingAdminDesktop.render();
     await new Promise(resolve => setTimeout(resolve, 40));
     for (const appId of ['media-studio', 'browser']) {
