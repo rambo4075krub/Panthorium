@@ -396,10 +396,49 @@
       if (!result.aiEditPlanning) root.querySelector('[data-ai-plan]').disabled = true;
     } catch (error) { setStatus(root, formatError(error.message), true); }
   }
+  function syncFullscreenButton(root) {
+    const button = root.querySelector('[data-fullscreen]');
+    if (!button) return;
+    const active = document.fullscreenElement === root;
+    button.textContent = active ? '⤢' : '⛶';
+    button.setAttribute('aria-label', active ? 'ออกจากเต็มจอ' : 'เต็มจอ');
+    button.title = active ? 'ออกจากเต็มจอ' : 'เต็มจอ';
+  }
+  async function toggleFullscreen(root) {
+    try {
+      if (document.fullscreenElement === root) {
+        if (document.exitFullscreen) await document.exitFullscreen();
+      } else if (typeof root.requestFullscreen === 'function') {
+        try { await root.requestFullscreen({ navigationUI: 'hide' }); }
+        catch (_) { await root.requestFullscreen(); }
+      } else {
+        setStatus(root, 'เบราว์เซอร์นี้ไม่รองรับโหมดเต็มจอ', true);
+      }
+    } catch (_) { setStatus(root, 'เข้าโหมดเต็มจอไม่ได้ในขณะนี้', true); }
+    syncFullscreenButton(root);
+  }
+  async function minimize(root) {
+    try {
+      if (document.fullscreenElement === root && document.exitFullscreen) await document.exitFullscreen();
+    } catch (_) {}
+    document.getElementById('media-studio-restore')?.remove();
+    const restore = document.createElement('button');
+    restore.id = 'media-studio-restore';
+    restore.type = 'button';
+    restore.setAttribute('aria-label', 'คืนค่า Media Studio');
+    restore.textContent = '🎬  Media Studio';
+    restore.style.cssText = 'position:fixed;right:max(14px,env(safe-area-inset-right,0px));bottom:max(14px,env(safe-area-inset-bottom,0px));z-index:10031;min-height:44px;padding:8px 14px;background:#173b3a;color:#d9fff8;border:1px solid #53cbb9;border-radius:22px;box-shadow:0 6px 24px #0009;font:600 14px system-ui;cursor:pointer';
+    restore.onclick = () => { restore.remove(); root.style.display = 'flex'; root.focus(); };
+    document.body.appendChild(restore);
+    root.style.display = 'none';
+  }
   function close(root) {
     if (currentUrl) URL.revokeObjectURL(currentUrl);
     currentUrl = '';
     if (root._mediaResize) window.removeEventListener('resize', root._mediaResize);
+    if (root._mediaFullscreen) document.removeEventListener('fullscreenchange', root._mediaFullscreen);
+    document.getElementById('media-studio-restore')?.remove();
+    if (document.fullscreenElement === root && document.exitFullscreen) document.exitFullscreen().catch(() => {});
     root.remove();
   }
   function accountUser() {
@@ -437,7 +476,12 @@
       return;
     }
     const existing = document.getElementById('media-studio-dashboard');
-    if (existing) return existing.focus();
+    if (existing) {
+      document.getElementById('media-studio-restore')?.remove();
+      existing.style.display = 'flex';
+      existing.focus();
+      return existing;
+    }
     const root = document.createElement('section');
     root.id = 'media-studio-dashboard';
     root.tabIndex = -1;
@@ -453,10 +497,17 @@
         @media(min-width:951px) and (max-width:1100px) and (orientation:landscape) and (max-height:600px){#media-studio-dashboard header{padding:4px 9px}#media-studio-dashboard .ms-projectbar{min-height:28px;padding:3px 8px}#media-studio-dashboard .ms-editor{grid-template-rows:minmax(0,1fr) 135px}#media-studio-dashboard .ms-panels{grid-template-columns:145px minmax(0,1fr) 220px}#media-studio-dashboard .ms-monitor-stage{min-height:0}#media-studio-dashboard .ms-timeline-head{height:23px}#media-studio-dashboard .ms-ruler{height:17px}#media-studio-dashboard .ms-track-row{height:32px}#media-studio-dashboard .ms-timeline-note{display:none}}
         @media(pointer:coarse){#media-studio-dashboard .ms-trim-handle{width:16px}#media-studio-dashboard [data-trim-start]{left:-8px}#media-studio-dashboard [data-trim-end]{right:-8px}}
         @media(max-width:760px){#media-studio-dashboard{height:100vh}}@supports(height:100dvh){@media(max-width:760px){#media-studio-dashboard{height:100dvh}}}
+        #media-studio-dashboard:fullscreen{inset:0!important;width:100vw;height:100vh;height:100dvh;border:0;border-radius:0;padding:max(env(safe-area-inset-top,0px),16px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)!important}
+        #media-studio-dashboard [data-window-action]{min-width:38px;min-height:38px;display:inline-flex;align-items:center;justify-content:center;padding:4px!important}
+        @media(max-width:760px){#media-studio-dashboard header{gap:6px!important;align-items:center}#media-studio-dashboard header>div:first-child{min-width:0;flex:1}#media-studio-dashboard .ms-window-tools{gap:4px!important;flex:none}#media-studio-dashboard .ms-window-tools .ms-cloud-label{display:none}#media-studio-dashboard .ms-window-tools [data-window-action]{min-width:36px;min-height:36px}}
+        @media(max-width:760px) and (orientation:portrait){#media-studio-dashboard{padding:max(env(safe-area-inset-top,0px),32px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)!important}}
+        @media(max-width:760px) and (orientation:landscape){#media-studio-dashboard{padding:max(env(safe-area-inset-top,0px),16px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)!important}}
+        @media(min-width:761px) and (max-width:1100px) and (orientation:portrait){#media-studio-dashboard{padding-top:max(env(safe-area-inset-top,0px),24px)}}
+        @media(min-width:761px) and (max-width:1100px) and (orientation:landscape) and (max-height:600px){#media-studio-dashboard{padding-top:max(env(safe-area-inset-top,0px),12px)}}
       </style>
       <header style="display:flex;justify-content:space-between;align-items:center;gap:12px">
         <div style="display:flex;align-items:center;gap:10px"><span style="font-size:21px">🎬</span><div><div style="font-size:13px;font-weight:700">Panthorium Media Studio</div><div data-media-status style="font-size:10px;color:#9ca9ae">Project · Untitled Sequence</div></div></div>
-        <div style="display:flex;align-items:center;gap:7px"><span style="font-size:9px;color:#7f8d93">CLOUD PROJECT</span><button type="button" data-close aria-label="ปิด">✕</button></div>
+        <div class="ms-window-tools" style="display:flex;align-items:center;gap:6px"><span class="ms-cloud-label" style="font-size:9px;color:#7f8d93">CLOUD PROJECT</span><button type="button" data-window-action data-minimize aria-label="ย่อ Media Studio" title="ย่อ">−</button><button type="button" data-window-action data-fullscreen aria-label="เต็มจอ" title="เต็มจอ">⛶</button><button type="button" data-window-action data-close aria-label="ปิด">✕</button></div>
       </header>
       <div class="ms-projectbar"><span style="color:#71d8c8;font-weight:700">EDIT WORKSPACE</span><span>SEQUENCE 01</span><span>V1 · A1</span><span style="flex:1"></span><button type="button" data-refresh>Refresh media</button><label style="padding:4px 8px;border:1px solid #454f55;border-radius:4px;cursor:pointer">Import<input data-upload type="file" accept="video/*" style="display:none"></label><select data-media-file style="display:none"></select></div>
       <div class="ms-editor">
@@ -474,6 +525,10 @@
       </div>`;
     document.body.appendChild(root);
     root.querySelector('[data-close]').onclick = () => close(root);
+    root.querySelector('[data-minimize]').onclick = () => minimize(root);
+    root.querySelector('[data-fullscreen]').onclick = () => toggleFullscreen(root);
+    root._mediaFullscreen = () => syncFullscreenButton(root);
+    document.addEventListener('fullscreenchange', root._mediaFullscreen);
     root.querySelector('[data-refresh]').onclick = async () => { try { await refreshFiles(root, root.querySelector('[data-media-file]').value); setStatus(root, 'โหลดรายการวิดีโอแล้ว'); } catch (error) { setStatus(root, formatError(error.message), true); } };
     root.querySelector('[data-media-file]').onchange = async () => {
       root.querySelectorAll('.ms-bin-item').forEach(entry => entry.classList.toggle('active', entry.dataset.fileId === root.querySelector('[data-media-file]').value));
