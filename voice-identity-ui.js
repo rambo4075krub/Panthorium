@@ -130,7 +130,8 @@
         } else {
           const verdict = result.matched === true ? 'ผ่าน' : 'ไม่ผ่าน';
           const thresholdText = Number.isFinite(threshold) ? threshold.toFixed(3) : 'ไม่ทราบ';
-          voiceTestResult.textContent = `${verdict} · คะแนนจับคู่ ${score.toFixed(3)} / เกณฑ์ ${thresholdText}`;
+          const matchedProfile = result.profile?.displayName ? ` · โปรไฟล์ ${result.profile.displayName}` : '';
+          voiceTestResult.textContent = `${verdict}${matchedProfile} · คะแนนจับคู่ ${score.toFixed(3)} / เกณฑ์ ${thresholdText}`;
           voiceTestResult.style.color = result.matched === true ? '#6ee7b7' : '#fbbf24';
         }
       } catch (error) {
