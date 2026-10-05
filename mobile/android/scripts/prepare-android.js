@@ -80,8 +80,15 @@ if (!activity.includes(immersiveMarker)) {
   if (/\bonResume\s*\(|onWindowFocusChanged\s*\(/.test(activity)) {
     throw new Error('MainActivity already overrides a fullscreen lifecycle method; merge immersive mode manually to avoid replacing app behavior.');
   }
-  if (!activity.includes('import android.os.Bundle;')) activity = activity.replace(/^(package [^;]+;)/m, '$1\n\nimport android.os.Bundle;');
-  if (!activity.includes('import android.view.View;')) activity = activity.replace(/^(package [^;]+;)/m, '$1\n\nimport android.view.View;');
+  const requiredImports = [
+    'import android.os.Bundle;',
+    'import android.view.View;',
+    'import androidx.core.graphics.Insets;',
+    'import androidx.core.view.ViewCompat;',
+    'import androidx.core.view.WindowInsetsCompat;'
+  ];
+  const missingImports = requiredImports.filter(importLine => !activity.includes(importLine));
+  if (missingImports.length) activity = activity.replace(/^(package [^;]+;)/m, '$1\n\n' + missingImports.join('\n'));
   const methods = `
     // ${immersiveMarker}: status and navigation bars reappear temporarily on a swipe.
     @Override
@@ -96,7 +103,30 @@ if (!activity.includes(immersiveMarker)) {
         if (hasFocus) panthoriumHideSystemBars();
     }
 
+    private boolean panthoriumWindowInsetsInstalled;
+
+    private void panthoriumInstallWindowInsets() {
+        if (panthoriumWindowInsetsInstalled || getBridge() == null || getBridge().getWebView() == null) return;
+        android.view.View webView = getBridge().getWebView();
+        android.view.ViewParent parent = webView.getParent();
+        android.view.View root = parent instanceof android.view.View ? (android.view.View) parent : webView;
+        final int baseLeft = root.getPaddingLeft();
+        final int baseTop = root.getPaddingTop();
+        final int baseRight = root.getPaddingRight();
+        final int baseBottom = root.getPaddingBottom();
+        final int types = WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout();
+        ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
+            Insets safe = insets.getInsets(types);
+            view.setPadding(baseLeft + safe.left, baseTop + safe.top,
+                baseRight + safe.right, baseBottom + safe.bottom);
+            return new WindowInsetsCompat.Builder(insets).setInsets(types, Insets.NONE).build();
+        });
+        ViewCompat.requestApplyInsets(root);
+        panthoriumWindowInsetsInstalled = true;
+    }
+
     private void panthoriumHideSystemBars() {
+        panthoriumInstallWindowInsets();
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             android.view.WindowInsetsController controller = getWindow().getInsetsController();
             if (controller != null) {
