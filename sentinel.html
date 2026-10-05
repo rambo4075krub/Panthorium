@@ -459,10 +459,52 @@
             backdrop-filter: blur(20px);
         }
         .window.maximized {
-            top: 0 !important; left: 0 !important;
-            width: 100% !important;
-            height: 100% !important;
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            height: 100dvh !important;
+            min-width: 0 !important;
+            min-height: 0 !important;
             border-radius: 0;
+        }
+        .window.maximized .window-resize { display: none; }
+        .panthorium-managed-window.panthorium-window-fullscreen {
+            position: fixed !important; inset: 0 !important;
+            width: 100vw !important; height: 100vh !important; height: 100dvh !important;
+            min-width: 0 !important; min-height: 0 !important;
+            max-width: none !important; max-height: none !important;
+            margin: 0 !important; border-radius: 0 !important; box-sizing: border-box !important;
+            padding: max(env(safe-area-inset-top, 0px), 16px) max(env(safe-area-inset-right, 0px), 0px)
+                max(env(safe-area-inset-bottom, 0px), 0px) max(env(safe-area-inset-left, 0px), 0px) !important;
+            overflow: hidden !important;
+        }
+        .panthorium-window-control {
+            min-width: 38px; min-height: 38px; margin-left: 5px; padding: 5px 10px;
+            border: 1px solid rgba(255,255,255,.24); border-radius: 8px;
+            background: rgba(20,28,38,.92); color: #e8f0ff; font: 600 15px/1 system-ui,sans-serif;
+            cursor: pointer; touch-action: manipulation;
+        }
+        .panthorium-window-control:hover,.panthorium-window-control:focus-visible { border-color: #00d9b7; outline: none; }
+        @media (max-width: 760px) and (orientation: portrait) {
+            .window.maximized { padding: max(env(safe-area-inset-top, 0px), 32px) max(env(safe-area-inset-right, 0px), 0px)
+                max(env(safe-area-inset-bottom, 0px), 0px) max(env(safe-area-inset-left, 0px), 0px) !important; }
+            .panthorium-managed-window.panthorium-window-fullscreen {
+                padding-top: max(env(safe-area-inset-top, 0px), 32px) !important;
+            }
+        }
+        @media (orientation: landscape) {
+            .window.maximized { padding: max(env(safe-area-inset-top, 0px), 8px) max(env(safe-area-inset-right, 0px), 8px)
+                max(env(safe-area-inset-bottom, 0px), 0px) max(env(safe-area-inset-left, 0px), 8px) !important; }
+            .panthorium-managed-window.panthorium-window-fullscreen {
+                padding: max(env(safe-area-inset-top, 0px), 8px) max(env(safe-area-inset-right, 0px), 8px)
+                    max(env(safe-area-inset-bottom, 0px), 0px) max(env(safe-area-inset-left, 0px), 8px) !important;
+            }
+            html[data-window-landscape-edge-to-edge="false"] .window.maximized,
+            html[data-window-landscape-edge-to-edge="false"] .panthorium-managed-window.panthorium-window-fullscreen {
+                padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+                    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px) !important;
+            }
         }
         .window-titlebar {
             height: 38px;
@@ -893,6 +935,32 @@
         apps: {},
         sentinelOnline: false
     };
+
+    const WINDOW_PREFERENCES_KEY = "panthorium.window.preferences.v1";
+    const DEFAULT_WINDOW_PREFERENCES = Object.freeze({
+        fullscreenOnOpen: true,
+        minimizeToStartMenu: true,
+        preserveStateUntilClose: true,
+        landscapeEdgeToEdge: true
+    });
+    function loadWindowPreferences() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(WINDOW_PREFERENCES_KEY) || "{}");
+            return Object.fromEntries(Object.keys(DEFAULT_WINDOW_PREFERENCES).map(key => [
+                key, typeof saved[key] === "boolean" ? saved[key] : DEFAULT_WINDOW_PREFERENCES[key]
+            ]));
+        } catch (_) { return { ...DEFAULT_WINDOW_PREFERENCES }; }
+    }
+    let windowPreferences = loadWindowPreferences();
+    document.documentElement.dataset.windowLandscapeEdgeToEdge = String(windowPreferences.landscapeEdgeToEdge);
+    function saveWindowPreferences(next = {}) {
+        windowPreferences = Object.fromEntries(Object.keys(DEFAULT_WINDOW_PREFERENCES).map(key => [
+            key, typeof next[key] === "boolean" ? next[key] : windowPreferences[key]
+        ]));
+        document.documentElement.dataset.windowLandscapeEdgeToEdge = String(windowPreferences.landscapeEdgeToEdge);
+        try { localStorage.setItem(WINDOW_PREFERENCES_KEY, JSON.stringify(windowPreferences)); } catch (_) {}
+        return { ...windowPreferences };
+    }
 
     // Retire device-only connection settings and sensitive local biometric descriptors.
     (function clearLegacyDeviceStorage() {
@@ -2695,6 +2763,8 @@
         const w = document.createElement("div");
         w.className = "window";
         w.dataset.id = id;
+        const fullscreenOnOpen = typeof opts.fullscreenOnOpen === "boolean" ? opts.fullscreenOnOpen : windowPreferences.fullscreenOnOpen;
+        if (fullscreenOnOpen) w.classList.add("maximized");
         const width = opts.width || Math.min(520, window.innerWidth - 40);
         const height = opts.height || Math.min(420, window.innerHeight - 80);
         const left = opts.left ?? Math.max(20, (window.innerWidth - width) / 2 + (OS.windows.size * 24) % 80);
@@ -2759,17 +2829,18 @@
         resizeHandle.addEventListener("pointerup", () => { resizing = false; });
 
         w.querySelector(".close").onclick = () => closeWindow(id);
-        w.querySelector(".min").onclick = () => {
-            w.style.display = "none";
-            updateTaskbar();
-        };
+        w.querySelector(".min").onclick = () => minimizeWindow(id);
         w.querySelector(".max").onclick = () => {
-            w.classList.toggle("maximized");
+            const active = !w.classList.contains("maximized");
+            setWindowFullscreen(id, active);
+            const button = w.querySelector(".max");
+            button.title = active ? "คืนขนาดหน้าต่าง" : "เต็มจอ";
+            button.setAttribute("aria-label", button.title);
         };
 
         w.addEventListener("pointerdown", () => focusWindow(id));
 
-        OS.windows.set(id, { el: w, title, minimized: false });
+        OS.windows.set(id, { el: w, title, menuAppId: opts.menuAppId || id, minimized: false, external: false, fullscreen: fullscreenOnOpen });
         updateTaskbar();
         return OS.windows.get(id);
     }
@@ -2777,30 +2848,114 @@
     function focusWindow(id) {
         const win = OS.windows.get(id);
         if (!win) return;
-        win.el.style.display = "flex";
+        win.el.style.display = win.displayMode || "flex";
         win.el.style.zIndex = ++OS.zCounter;
         win.minimized = false;
         updateTaskbar();
     }
 
+    function minimizeWindow(id) {
+        const win = OS.windows.get(id);
+        if (!win) return false;
+        win.minimized = true;
+        win.el.style.display = "none";
+        updateTaskbar();
+        return true;
+    }
+
     function closeWindow(id) {
         const win = OS.windows.get(id);
         if (!win) return;
+        if (document.fullscreenElement === win.el && document.exitFullscreen) document.exitFullscreen().catch(() => {});
         win.el.remove();
         OS.windows.delete(id);
         updateTaskbar();
+    }
+
+    function findWindowByAppId(appId) {
+        for (const [id, win] of OS.windows) if (win.menuAppId === appId || id === appId) return { id, ...win };
+        const catalogApp = window.PanthoriumWindowCatalog?.apps?.find(app => app.id === appId && app.windowId);
+        if (catalogApp) {
+            const win = OS.windows.get(catalogApp.windowId);
+            if (win) { win.menuAppId = appId; return { id: catalogApp.windowId, ...win }; }
+        }
+        return null;
+    }
+
+    function setWindowFullscreen(id, active) {
+        const win = OS.windows.get(id);
+        if (!win) return false;
+        if (win.external) {
+            if (active) win.el.classList.add("panthorium-window-fullscreen");
+            else win.el.classList.remove("panthorium-window-fullscreen");
+            win.fullscreen = Boolean(active);
+        } else {
+            win.el.classList.toggle("maximized", Boolean(active));
+            win.fullscreen = Boolean(active);
+        }
+        return true;
+    }
+
+    function registerExternalWindow(id, title, element, opts = {}) {
+        if (!element) return null;
+        const current = OS.windows.get(id);
+        if (current?.el === element) return current;
+        if (current) closeWindow(id);
+        const fullscreen = typeof opts.fullscreenOnOpen === "boolean" ? opts.fullscreenOnOpen : windowPreferences.fullscreenOnOpen;
+        if (!element.dataset.panthoriumWindowedStyle) element.dataset.panthoriumWindowedStyle = element.getAttribute("style") || "";
+        element.classList.add("panthorium-managed-window");
+        if (fullscreen) element.classList.add("panthorium-window-fullscreen");
+        const displayMode = getComputedStyle(element).display === "none" ? (opts.displayMode || "flex") : getComputedStyle(element).display;
+        OS.zCounter = Math.max(OS.zCounter, 10030) + 1;
+        element.style.zIndex = String(OS.zCounter);
+        const record = {
+            el: element, title, menuAppId: opts.menuAppId || id,
+            minimized: element.style.display === "none", external: true,
+            fullscreen, displayMode
+        };
+        OS.windows.set(id, record);
+        if (element.dataset.panthoriumFocusBound !== "true") {
+            element.dataset.panthoriumFocusBound = "true";
+            element.addEventListener("pointerdown", () => focusWindow(id));
+        }
+        updateTaskbar();
+        return record;
     }
 
     function updateTaskbar() {
         const container = $("sm-apps");
         if (!container || !OS?.windows?.forEach) return;
         container.querySelectorAll("[data-minimized-window]").forEach(item => item.remove());
+        container.querySelectorAll(".sm-app[data-managed-minimized-window]").forEach(item => {
+            const label = item.querySelector("span:not(.ico)");
+            if (label && item.dataset.baseLabel) label.textContent = item.dataset.baseLabel;
+            delete item.dataset.managedMinimizedWindow;
+            item.classList.remove("sm-window-app");
+        });
         OS.windows.forEach((win, id) => {
             if (win.el.style.display !== "none") return;
+            const catalogApp = window.PanthoriumWindowCatalog?.apps?.find(app => app.windowId === id);
+            const appId = catalogApp?.id || win.menuAppId || id;
+            win.menuAppId = appId;
+            const accessApp = window.PanthoriumWindowCatalog?.apps?.find(app => app.id === appId);
+            if (accessApp && !window.PanthoriumWindowCatalog.allowed(accessApp, OS.state?.user)) return;
+            const launcher = Array.from(container.querySelectorAll(".sm-app[data-app-id]"))
+                .find(item => item.dataset.appId === appId);
+            if (launcher) {
+                const label = launcher.querySelector("span:not(.ico)");
+                if (label) {
+                    if (!launcher.dataset.baseLabel) launcher.dataset.baseLabel = label.textContent || win.title;
+                    label.textContent = `ย่อไว้ · ${win.title}`;
+                }
+                launcher.dataset.managedMinimizedWindow = id;
+                launcher.classList.add("sm-window-app");
+                return;
+            }
             const button = document.createElement("button");
             button.type = "button";
             button.className = "sm-app sm-window-app";
             button.dataset.minimizedWindow = id;
+            button.dataset.appId = win.menuAppId || id;
             button.dataset.searchText = `${id} ${win.title}`;
             const icon = document.createElement("span");
             icon.className = "ico";
@@ -2817,6 +2972,25 @@
         });
         applyStartMenuSearch();
     }
+
+    window.PanthoriumWindowManager = {
+        get preferences() { return { ...windowPreferences }; },
+        setPreferences: saveWindowPreferences,
+        focus: focusWindow,
+        restore: focusWindow,
+        minimize: minimizeWindow,
+        close: closeWindow,
+        findByAppId: findWindowByAppId,
+        registerExternalWindow,
+        setFullscreen: setWindowFullscreen,
+        toggleFullscreen(id) {
+            const win = OS.windows.get(id);
+            if (!win) return false;
+            return setWindowFullscreen(id, !Boolean(win.fullscreen ?? (win.external
+                ? win.el.classList.contains("panthorium-window-fullscreen")
+                : win.el.classList.contains("maximized"))));
+        }
+    };
     // ---------- Apps Definition ----------
     const BROWSER_RELEASE_URL = "/browser-download.html";
     function browserDownloadUrl() {
@@ -3008,7 +3182,11 @@
             el.className = "desk-icon";
             el.dataset.appId = app.id;
             el.innerHTML = `<div class="icon-img">${app.icon}</div><span>${app.name}</span>`;
-            el.onclick = () => app.open();
+            el.onclick = () => {
+                const existingWindow = findWindowByAppId(app.id);
+                if (existingWindow) focusWindow(existingWindow.id);
+                else app.open();
+            };
             desk.appendChild(el);
         });
 
@@ -3018,11 +3196,12 @@
             el.type = "button";
             el.className = "sm-app";
             el.dataset.appId = app.id;
+            el.dataset.baseLabel = app.name;
             el.dataset.searchText = `${app.id} ${app.name}`;
             el.innerHTML = `<div class="ico" aria-hidden="true">${app.icon}</div><span>${app.name}</span>`;
             el.onclick = () => {
-                const existingWindow = OS.windows.get(app.id);
-                if (existingWindow) focusWindow(app.id);
+                const existingWindow = findWindowByAppId(app.id);
+                if (existingWindow) focusWindow(existingWindow.id);
                 else app.open();
                 closeStartMenu();
             };
