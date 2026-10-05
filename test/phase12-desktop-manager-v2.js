@@ -17,7 +17,8 @@ assert.match(desktop, /replaceChildren\(\.\.\.visibleApps\.map\(createIcon\)\)/,
 assert.doesNotMatch(desktop, /cloneNode\(/, 'Desktop Manager V2 must not clone Start Menu nodes');
 assert.doesNotMatch(desktop, /setInterval\(/, 'Desktop Manager V2 must not poll the DOM');
 assert.doesNotMatch(desktop, /new MutationObserver/, 'Desktop Manager V2 must not repair the DOM through observers');
-assert.match(desktop, /#start-menu #sm-apps\{display:none!important;\}/, 'Staging Admin Start Menu must hide app grid');
+assert.doesNotMatch(desktop, /#start-menu #sm-apps\{display:none!important;\}/, 'Staging Admin Start Menu keeps its searchable app list visible');
+assert.match(desktop, /menuApps:enabledApps/, 'Administrator launcher registry is available to the Start Menu');
 assert.match(desktop, /รีสตาร์ท/, 'Staging Admin Start Menu must keep restart action');
 assert.match(desktop, /id:'voice-identity',icon:'🎙️',label:'Voice Identity',role:'administrator'/, 'Admin desktop must expose Voice Identity registration only to administrators');
 const voiceUi = read('voice-identity-ui.js');
