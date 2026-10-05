@@ -78,7 +78,7 @@
             transition: width 0.3s ease;
         }
         .boot-status { margin-top: 16px; font-size: 12px; color: var(--text-dim); }
-        #global-voice { position: fixed; right: 18px; bottom: 68px; z-index: 10020; width: 48px; height: 48px; border: 1px solid var(--accent); border-radius: 50%; background: rgba(5,18,24,.9); color: var(--accent); font-size: 22px; cursor: pointer; box-shadow: 0 0 18px rgba(0,255,204,.25); }
+        #global-voice { position: fixed; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(env(safe-area-inset-bottom, 0px) + max(2px, calc((var(--taskbar-h) - 48px) / 2))); z-index: 10020; width: 48px; height: 48px; border: 1px solid var(--accent); border-radius: 50%; background: rgba(5,18,24,.9); color: var(--accent); font-size: 22px; cursor: pointer; box-shadow: 0 0 18px rgba(0,255,204,.25); }
         #global-voice.listening { background: var(--danger); border-color: #ff9aaa; color: #fff; animation: pulse-mic 1s infinite; }
         #global-voice.processing { border-color: #ffd166; color: #ffd166; }
         #voice-status-box { display: grid; gap: 4px; padding: 8px 12px 0; pointer-events: none; }
@@ -230,73 +230,64 @@
             line-height: 1.25;
         }
 
-        /* ========== TASKBAR ========== */
-        #taskbar {
+        /* ========== BOTTOM SYSTEM CONTROLS ========== */
+        #system-controls {
             position: fixed;
-            bottom: 0; left: 0; right: 0;
+            left: 0; right: 0;
+            bottom: env(safe-area-inset-bottom, 0px);
             height: var(--taskbar-h);
-            background: rgba(10, 14, 22, 0.88);
-            backdrop-filter: blur(24px);
-            border-top: 1px solid rgba(255,255,255,0.06);
-            display: flex; align-items: center;
-            padding: 0 10px;
+            display: flex;
+            align-items: center;
+            padding-left: max(12px, env(safe-area-inset-left, 0px));
+            padding-right: max(12px, env(safe-area-inset-right, 0px));
             z-index: 8000;
-            gap: 6px;
+            pointer-events: none;
         }
-        .tb-btn {
-            height: 36px; min-width: 36px;
-            border-radius: 8px;
-            border: none;
-            background: transparent;
-            color: var(--text);
-            font-size: 18px;
+        #system-controls-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            pointer-events: auto;
+        }
+        #start-btn {
+            width: 44px; height: 44px;
+            padding: 0;
+            border: 0;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(10, 18, 32, .54);
             cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
-            padding: 0 10px;
-            transition: background 0.15s;
+            transition: background .16s ease, transform .16s ease;
+            pointer-events: auto;
         }
-        .tb-btn:hover { background: rgba(255,255,255,0.08); }
-        .tb-btn.active { background: rgba(0,255,204,0.15); color: var(--accent); }
-        .tb-apps {
-            flex: 1;
-            display: flex; align-items: center; gap: 4px;
-            overflow-x: auto;
-            scrollbar-width: none;
-        }
-        .tb-apps::-webkit-scrollbar { display: none; }
-        .tb-app {
-            height: 34px;
-            padding: 0 12px;
-            border-radius: 8px;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid transparent;
-            color: var(--text);
-            font-size: 13px;
-            cursor: pointer;
-            display: flex; align-items: center; gap: 6px;
-            white-space: nowrap;
-            transition: all 0.15s;
-        }
-        .tb-app:hover { background: rgba(255,255,255,0.1); }
-        .tb-app.active {
-            background: rgba(0,255,204,0.12);
-            border-color: rgba(0,255,204,0.3);
-        }
-        .tb-right {
-            display: flex; align-items: center; gap: 8px;
-            margin-left: auto;
-        }
-        #clock {
-            font-size: 13px;
-            color: var(--text-dim);
-            padding: 0 8px;
-            font-variant-numeric: tabular-nums;
-        }
+        #start-btn:hover, #start-btn:focus-visible { background: rgba(22, 42, 64, .82); }
+        #start-btn:active { transform: scale(.96); }
+        #start-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        #start-btn img { width: 34px; height: 34px; display: block; object-fit: contain; }
         #status-dot {
-            width: 8px; height: 8px;
+            width: 9px; height: 9px;
+            flex: 0 0 9px;
             border-radius: 50%;
             background: var(--success);
-            box-shadow: 0 0 6px var(--success);
+            box-shadow: 0 0 8px var(--success);
+            pointer-events: auto;
+        }
+        #clock {
+            position: absolute;
+            left: 50%;
+            max-width: calc(100vw - 164px);
+            transform: translateX(-50%);
+            color: var(--text-dim);
+            font-size: 13px;
+            line-height: 1.25;
+            font-variant-numeric: tabular-nums;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            pointer-events: none;
         }
 
         /* Version number — top-right, plain digits matching orb cyan */
@@ -327,25 +318,26 @@
         /* ========== START MENU ========== */
         #start-menu {
             position: fixed;
-            bottom: calc(var(--taskbar-h) + 8px);
-            left: 10px;
-            width: 280px;
-            max-height: 70vh;
-            background: var(--surface-2);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 16px;
+            bottom: calc(var(--taskbar-h) + env(safe-area-inset-bottom, 0px) + 10px);
+            left: max(10px, calc(env(safe-area-inset-left, 0px) + 10px));
+            width: min(340px, calc(100vw - 20px));
+            max-height: min(78dvh, calc(100dvh - var(--taskbar-h) - env(safe-area-inset-bottom, 0px) - 20px)) !important;
+            background: rgba(13, 21, 36, .94);
+            border: 1px solid rgba(106, 210, 255, .18);
+            border-radius: 18px;
             backdrop-filter: blur(30px);
             display: none;
             flex-direction: column;
             overflow: hidden;
             z-index: 8500;
-            box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+            box-shadow: 0 18px 54px rgba(0,0,0,.56), inset 0 1px rgba(255,255,255,.035);
         }
         #start-menu.open { display: flex; }
         .sm-header {
-            padding: 16px 18px 12px;
-            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 14px 16px 12px;
+            border-bottom: 1px solid rgba(255,255,255,.07);
             display: flex; align-items: center; gap: 12px;
+            flex: 0 0 auto;
         }
         .sm-avatar {
             width: 40px; height: 40px;
@@ -357,41 +349,102 @@
         }
         .sm-user { font-size: 14px; font-weight: 500; }
         .sm-status { font-size: 11px; color: var(--text-dim); }
-        .sm-apps {
-            padding: 10px;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 6px;
-            overflow-y: auto;
+        .sm-search { padding: 12px 12px 8px; flex: 0 0 auto; }
+        .sr-only {
+            position: absolute; width: 1px; height: 1px;
+            padding: 0; margin: -1px; overflow: hidden;
+            clip: rect(0,0,0,0); white-space: nowrap; border: 0;
         }
-        .sm-app {
-            display: flex; flex-direction: column; align-items: center;
-            padding: 14px 8px;
+        #start-search {
+            width: 100%; height: 42px;
+            border: 1px solid rgba(107, 215, 255, .25);
             border-radius: 12px;
-            cursor: pointer;
-            transition: background 0.15s;
-            gap: 6px;
+            padding: 0 13px;
+            outline: none;
+            background: rgba(4, 12, 24, .72);
+            color: var(--text);
+            font-family: inherit;
+            font-size: 13px;
         }
-        .sm-app:hover { background: rgba(255,255,255,0.06); }
-        .sm-app .ico { font-size: 26px; }
-        .sm-app span { font-size: 12px; color: var(--text-dim); }
+        #start-search::placeholder { color: #8595ae; }
+        #start-search:focus { border-color: rgba(0,255,204,.7); box-shadow: 0 0 0 3px rgba(0,255,204,.1); }
+        .sm-apps {
+            padding: 4px 10px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-height: 0;
+            flex: 1 1 auto;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(100, 200, 255, .34) transparent;
+        }
+        .sm-apps::-webkit-scrollbar { width: 5px; }
+        .sm-apps::-webkit-scrollbar-thumb { border-radius: 6px; background: rgba(100,200,255,.34); }
+        .sm-app[hidden], #sm-apps > [data-search-hidden="true"] { display: none !important; }
+        .sm-app {
+            width: 100%;
+            min-height: 48px;
+            padding: 8px 11px;
+            border: 1px solid transparent;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 12px;
+            background: transparent;
+            color: var(--text);
+            text-align: left;
+            font: inherit;
+            cursor: pointer;
+            transition: background .15s ease, border-color .15s ease;
+        }
+        .sm-app:hover, .sm-app:focus-visible {
+            background: rgba(62, 139, 180, .14);
+            border-color: rgba(88, 209, 255, .18);
+            outline: none;
+        }
+        .sm-app:active { background: rgba(0,255,204,.12); }
+        .sm-app .ico {
+            width: 30px;
+            flex: 0 0 30px;
+            font-size: 22px;
+            text-align: center;
+        }
+        .sm-app span {
+            flex: 1;
+            min-width: 0;
+            color: var(--text);
+            font-size: 13px;
+            line-height: 1.3;
+        }
+        .sm-app.sm-window-app { border-color: rgba(0,255,204,.1); }
+        #sm-empty {
+            padding: 14px 12px 18px;
+            color: var(--text-dim);
+            font-size: 13px;
+            text-align: center;
+        }
+        #sm-empty[hidden] { display: none; }
         .sm-footer {
             padding: 10px;
-            border-top: 1px solid rgba(255,255,255,0.06);
+            border-top: 1px solid rgba(255,255,255,.07);
             display: flex; gap: 6px;
+            flex: 0 0 auto;
         }
         .sm-footer button {
             flex: 1;
             padding: 10px;
-            border: none;
+            border: 1px solid rgba(255,255,255,.05);
             border-radius: 10px;
-            background: rgba(255,255,255,0.05);
+            background: rgba(255,255,255,.05);
             color: var(--text);
             font-size: 13px;
             cursor: pointer;
         }
-        .sm-footer button:hover { background: rgba(255,255,255,0.1); }
-
+        .sm-footer button:hover { background: rgba(255,255,255,.1); }
         /* ========== WINDOWS ========== */
         .window {
             position: absolute;
@@ -408,7 +461,7 @@
         .window.maximized {
             top: 0 !important; left: 0 !important;
             width: 100% !important;
-            height: calc(100% - var(--taskbar-h)) !important;
+            height: 100% !important;
             border-radius: 0;
         }
         .window-titlebar {
@@ -736,7 +789,7 @@
         <div id="windows"></div>
 
         <!-- Start Menu -->
-        <div id="start-menu">
+        <div id="start-menu" role="region" aria-label="เมนูเริ่มต้น">
             <div class="sm-header">
                 <div class="sm-avatar"><img src="/panthorium-logo.svg" data-panthorium-logo alt="Panthorium" style="width:32px;height:32px;object-fit:contain;"></div>
                 <div>
@@ -744,21 +797,26 @@
                     <div class="sm-status" id="sm-status">Online · ฟรี</div>
                 </div>
             </div>
-            <div class="sm-apps" id="sm-apps"></div>
+            <div class="sm-search">
+                <label class="sr-only" for="start-search">ค้นหาแอปและเครื่องมือ</label>
+                <input id="start-search" type="search" placeholder="ค้นหาแอปหรือเครื่องมือ..." autocomplete="off" enterkeyhint="search">
+            </div>
+            <div class="sm-apps" id="sm-apps" aria-label="แอปและหน้าต่าง"></div>
+            <div id="sm-empty" hidden>ไม่พบแอปที่ตรงกับคำค้นหา</div>
             <div class="sm-footer">
                 <button id="btn-settings-quick">⚙️ ตั้งค่า</button>
                 <button id="btn-logout">🔄 รีสตาร์ท</button>
             </div>
         </div>
 
-        <!-- Taskbar -->
-        <div id="taskbar">
-            <button class="tb-btn" id="start-btn" title="Start">⊞</button>
-            <div class="tb-apps" id="tb-apps"></div>
-            <div class="tb-right">
-                <div id="status-dot" title="System Online"></div>
-                <div id="clock"></div>
+        <div id="system-controls" aria-label="ตัวควบคุมด้านล่าง">
+            <div id="system-controls-left">
+                <button id="start-btn" type="button" title="เมนูเริ่มต้น" aria-label="เปิดเมนูเริ่มต้น" aria-controls="start-menu" aria-expanded="false">
+                    <img src="/panthorium-logo.svg" data-panthorium-logo alt="" aria-hidden="true">
+                </button>
+                <span id="status-dot" role="status" aria-label="ออนไลน์" title="Online"></span>
             </div>
+            <time id="clock" lang="th" aria-label="วันที่และเวลา"></time>
         </div>
     </div>
 
@@ -767,6 +825,7 @@
     <!-- External libs -->
     <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
     <script src="/vendor/three.min.js?v=r128-local"></script>
+    <script src="/start-menu-ui.js?v=start-menu-controls-v1"></script>
 
     <script>
     // =========================================================
@@ -824,12 +883,17 @@
 
     function $(id) { return document.getElementById(id); }
 
-    // ---------- Clock ----------
+    // ---------- Gregorian calendar and local time ----------
     function updateClock() {
         const now = new Date();
-        const t = now.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
-        const d = now.toLocaleDateString("th-TH", { day: "numeric", month: "short" });
-        $("clock").textContent = `${d}  ${t}`;
+        const locale = "th-TH-u-ca-gregory-nu-latn";
+        const date = now.toLocaleDateString(locale, { day: "numeric", month: "short", year: "numeric" });
+        const time = now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+        const clock = $("clock");
+        if (clock) {
+            clock.textContent = `${date} · ${time}`;
+            clock.dateTime = now.toISOString();
+        }
     }
     setInterval(updateClock, 10000);
     updateClock();
@@ -855,16 +919,22 @@
     })();
 
     // ---------- Network Status ----------
-    window.addEventListener("online", () => {
-        OS.state.online = true;
-        $("status-dot").style.background = "var(--success)";
-        $("sm-status").textContent = "Online";
-    });
-    window.addEventListener("offline", () => {
-        OS.state.online = false;
-        $("status-dot").style.background = "var(--danger)";
-        $("sm-status").textContent = "Offline";
-    });
+    function setNetworkStatus(online) {
+        const isOnline = Boolean(online);
+        OS.state.online = isOnline;
+        const dot = $("status-dot");
+        if (dot) {
+            dot.style.background = isOnline ? "var(--success)" : "var(--danger)";
+            dot.style.boxShadow = isOnline ? "0 0 8px var(--success)" : "0 0 8px var(--danger)";
+            dot.title = isOnline ? "Online" : "Offline";
+            dot.setAttribute("aria-label", isOnline ? "ออนไลน์" : "ออฟไลน์");
+        }
+        const label = $("sm-status");
+        if (label) label.textContent = isOnline ? "Online" : "Offline";
+    }
+    window.addEventListener("online", () => setNetworkStatus(true));
+    window.addEventListener("offline", () => setNetworkStatus(false));
+    setNetworkStatus(navigator.onLine);
 
     // ---------- Boot Sequence ----------
     async function boot() {
@@ -2666,25 +2736,31 @@
     }
 
     function updateTaskbar() {
-        const container = $("tb-apps");
-        container.innerHTML = "";
+        const container = $("sm-apps");
+        if (!container || !OS?.windows?.forEach) return;
+        container.querySelectorAll("[data-minimized-window]").forEach(item => item.remove());
         OS.windows.forEach((win, id) => {
-            const btn = document.createElement("button");
-            btn.className = "tb-app" + (win.el.style.display !== "none" ? " active" : "");
-            btn.textContent = win.title;
-            btn.onclick = () => {
-                if (win.el.style.display === "none") {
-                    focusWindow(id);
-                } else {
-                    win.el.style.display = "none";
-                    win.minimized = true;
-                    updateTaskbar();
-                }
+            if (win.el.style.display !== "none") return;
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "sm-app sm-window-app";
+            button.dataset.minimizedWindow = id;
+            button.dataset.searchText = `${id} ${win.title}`;
+            const icon = document.createElement("span");
+            icon.className = "ico";
+            icon.setAttribute("aria-hidden", "true");
+            icon.textContent = "▱";
+            const label = document.createElement("span");
+            label.textContent = `ย่อไว้ · ${win.title}`;
+            button.append(icon, label);
+            button.onclick = () => {
+                focusWindow(id);
+                closeStartMenu();
             };
-            container.appendChild(btn);
+            container.appendChild(button);
         });
+        applyStartMenuSearch();
     }
-
     // ---------- Apps Definition ----------
     const BROWSER_RELEASE_URL = "/browser-download.html";
     function browserDownloadUrl() {
@@ -2834,8 +2910,30 @@
         return APP_LIST.filter(app => !app.visible || app.visible());
     }
 
+    function applyStartMenuSearch() {
+        const search = $("start-search");
+        const list = $("sm-apps");
+        if (!search || !list) return 0;
+        const emptyState = $("sm-empty");
+        return window.PanthoriumStartMenuUI?.filter(search.value, list, emptyState) ?? 0;
+    }
+
     function renderAppLaunchers() {
         const apps = visibleApps();
+        const adminManager = window.PanthoriumStagingAdminDesktop;
+        const baseAppIds = new Set(apps.map(app => app.id));
+        if (typeof adminManager?.menuApps === "function") {
+            adminManager.menuApps().forEach(app => {
+                if (baseAppIds.has(app.id)) return;
+                baseAppIds.add(app.id);
+                apps.push({
+                    id: app.id,
+                    name: app.label,
+                    icon: app.icon,
+                    open: () => adminManager.open(app.id)
+                });
+            });
+        }
         const desk = $("desktop-icons");
         const sm = $("sm-apps");
         if (!desk || !sm) return;
@@ -2852,17 +2950,24 @@
 
         sm.innerHTML = "";
         apps.forEach(app => {
-            const el = document.createElement("div");
+            const el = document.createElement("button");
+            el.type = "button";
             el.className = "sm-app";
             el.dataset.appId = app.id;
-            el.innerHTML = `<div class="ico">${app.icon}</div><span>${app.name}</span>`;
+            el.dataset.searchText = `${app.id} ${app.name}`;
+            el.innerHTML = `<div class="ico" aria-hidden="true">${app.icon}</div><span>${app.name}</span>`;
             el.onclick = () => {
-                app.open();
+                const existingWindow = OS.windows.get(app.id);
+                if (existingWindow) focusWindow(app.id);
+                else app.open();
                 closeStartMenu();
             };
             sm.appendChild(el);
         });
+        updateTaskbar();
+        applyStartMenuSearch();
     }
+
 
     function initDesktop() {
         renderAppLaunchers();
@@ -2883,18 +2988,36 @@
         catch (error) { console.error("Launcher refresh failed", error); }
     });
 
-    // Start menu toggle
+    // Start menu and searchable vertical launcher list.
     $("start-btn").onclick = () => {
         renderAppLaunchers();
-        $("start-menu").classList.toggle("open");
+        const menu = $("start-menu");
+        const opening = !menu.classList.contains("open");
+        menu.classList.toggle("open", opening);
+        $("start-btn").setAttribute("aria-expanded", String(opening));
     };
+    $("start-search").addEventListener("input", applyStartMenuSearch);
+    $("start-search").addEventListener("keydown", event => {
+        if (event.key === "Escape") {
+            closeStartMenu();
+            $("start-btn").focus();
+        } else if (event.key === "Enter" && event.currentTarget.value.trim()) {
+            const firstVisible = Array.from($("sm-apps").children).find(item => !item.hidden && item.dataset.searchHidden !== "true" && item.style.display !== "none");
+            firstVisible?.click();
+        }
+    });
+    if (window.MutationObserver && $("sm-apps")) {
+        const launcherObserver = new MutationObserver(() => applyStartMenuSearch());
+        launcherObserver.observe($("sm-apps"), { childList: true });
+    }
     document.addEventListener("click", (e) => {
-        if (!$("start-menu").contains(e.target) && e.target !== $("start-btn")) {
+        if (!$("start-menu").contains(e.target) && !$("start-btn").contains(e.target)) {
             closeStartMenu();
         }
     });
     function closeStartMenu() {
         $("start-menu").classList.remove("open");
+        $("start-btn").setAttribute("aria-expanded", "false");
     }
 
     $("btn-settings-quick").onclick = () => { openSettings(); closeStartMenu(); };
