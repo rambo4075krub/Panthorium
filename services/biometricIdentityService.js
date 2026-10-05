@@ -76,6 +76,7 @@ class BiometricIdentityService {
     if (!TYPES.has(subjectType)) throw new Error('invalid_subject_type');
     if (subjectType === 'administrator' && !actorRoles.includes('administrator')) throw new Error('administrator_role_required');
     if (consent !== true) throw new Error('biometric_consent_required');
+    if (subjectType === 'user' && (await this.repository.list(ownerUserId)).some(profile => profile.subjectType === 'user')) throw new Error('voice_profile_exists');
     const guest = actorRoles.includes('guest');
     const normalizedEmail = String(email || '').trim().toLowerCase();
     if (guest && (normalizedEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail))) throw new Error('valid_email_required');
