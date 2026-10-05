@@ -26,6 +26,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
   assert.equal(catalog.parse('เปิดโน้ต เปิดโน๊ต')?.action, 'open_notes', 'accept a duplicated transcript with alias variation');
   assert.equal(catalog.parse('เปิดโน้ต แล้วเปิด Settings'), null, 'do not discard a second app command');
   const calendarApp = catalog.apps.find(app => app.id === 'calendar');
+  const goalsApp = catalog.apps.find(app => app.id === 'goals');
   const registeredUser = { id: 'calendar-user', sub: 'calendar-user', permissions: ['chat'], roles: ['user'] };
   const filesApp = catalog.apps.find(app => app.id === 'files');
   assert.equal(catalog.allowed(filesApp, registeredUser), true, 'registered chat accounts may use cloud Files');
@@ -33,6 +34,13 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
   assert.equal(catalog.parse('เปิดปฏิทิน')?.action, 'open_calendar');
   assert.equal(catalog.allowed(calendarApp, registeredUser), true, 'registered users may use the cloud calendar');
   assert.equal(catalog.allowed(calendarApp, guest), false, 'Guest cannot use account-scoped cloud calendar');
+  assert.equal(catalog.parse('เปิดเป้าหมาย')?.action, 'open_goals');
+  assert.equal(catalog.allowed(goalsApp, registeredUser), true, 'registered users may use account-scoped goal tracking');
+  assert.equal(catalog.allowed(goalsApp, guest), false, 'Guest cannot use private cloud goals');
+  const preferencesApp = catalog.apps.find(app => app.id === 'assistant-preferences');
+  assert.equal(catalog.parse('เปิดความชอบ Sentinel')?.action, 'open_sentinel_preferences');
+  assert.equal(catalog.allowed(preferencesApp, registeredUser), true, 'registered users may use account-scoped Sentinel preferences');
+  assert.equal(catalog.allowed(preferencesApp, guest), false, 'Guest cannot use private Sentinel preferences');
   assert.equal(catalog.parse('เปิดโน้ต แล้วปิดโน้ต')?.error, 'ambiguous_voice_command', 'do not discard a conflicting repeated command');
   assert.equal(catalog.parse('อย่าเปิด Learning Lab')?.error, 'voice_command_negated');
   assert.equal(catalog.parse('เปิด Learning Lab แล้วลบข้อมูล'), null, 'must not silently drop a destructive second instruction');
@@ -104,6 +112,14 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
         cloudEvents.set(memoryId, memory);
         return Response.json({ ok: true, memory }, { status: 201 });
       }
+      const memoryUpdateId = pathname.startsWith('/api/agent/memory/') ? pathname.slice('/api/agent/memory/'.length) : '';
+      if (memoryUpdateId && httpMethod === 'PATCH') {
+        const current = cloudEvents.get(memoryUpdateId);
+        if (!current) return Response.json({ ok: false, error: 'memory_not_found' }, { status: 404 });
+        const updated = { ...current, ...JSON.parse(options.body || '{}') };
+        cloudEvents.set(memoryUpdateId, updated);
+        return Response.json({ ok: true, memory: updated });
+      }
       const memoryDeleteId = pathname.startsWith('/api/agent/memory/') ? pathname.slice('/api/agent/memory/'.length) : '';
       if (memoryDeleteId && /^[0-9a-f-]+$/i.test(memoryDeleteId) && httpMethod === 'DELETE') { cloudEvents.delete(memoryDeleteId); return Response.json({ ok: true }); }
       if (pathname === '/api/auth/logout') return Response.json({ ok: true });
@@ -126,7 +142,9 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     await w.PanthoriumAuth.login('admin', 'fixture');
     w.document.getElementById('desktop').classList.add('active');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="files"]'), 'Files appears in Start menu after account authentication');
-    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'calendar-ui.js', 'reminders-ui.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="goals"]'), 'Goals appears in Start menu for signed-in chat accounts');
+    assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="assistant-preferences"]'), 'Sentinel Preferences appears in Start menu for signed-in chat accounts');
+    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumStagingAdminDesktop.render();
     assert(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), 'administrator desktop must show Voice Identity icon');
     w.PanthoriumAIStream.install();
@@ -193,6 +211,60 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert.equal(cloudEvents.size, 0, 'calendar event is removed from the cloud API');
     console.log('PASS: cloud calendar saves, reloads and deletes account-scoped events safely');
 
+    await w.PanthoriumGoals.open();
+    const goalForm = w.document.querySelector('.window[data-id="goals"] [data-goals-form]');
+    const goalTitle = w.document.querySelector('.window[data-id="goals"] [data-goals-title]');
+    const goalDate = w.document.querySelector('.window[data-id="goals"] [data-goals-date]');
+    const goalDescription = w.document.querySelector('.window[data-id="goals"] [data-goals-description]');
+    goalTitle.value = '<img src=x onerror=alert(1)> เรียนภาษาอังกฤษ';
+    goalDate.value = '2030-06-01';
+    goalDescription.value = 'ฝึกสัปดาห์ละ 3 ครั้ง';
+    goalForm.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    for (let i = 0; i < 80 && cloudEvents.size !== 1; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(cloudEvents.size, 1, 'goal is written through the cloud memory API');
+    const savedGoal = [...cloudEvents.values()][0];
+    assert.equal(savedGoal.kind, 'goal');
+    assert.equal(savedGoal.title, '<img src=x onerror=alert(1)> เรียนภาษาอังกฤษ');
+    assert.equal(JSON.parse(savedGoal.content).status, 'active');
+    const goalList = w.document.querySelector('.window[data-id="goals"] [data-goals-list]');
+    assert.equal(goalList.querySelector('img'), null, 'goal title renders as text, never HTML');
+    const goalEdit = goalList.querySelector('article form');
+    goalEdit.querySelector('[data-progress]').value = '35';
+    goalEdit.querySelector('[data-note]').value = 'ทำได้ 7 จาก 20 ชั่วโมง';
+    goalEdit.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    for (let i = 0; i < 80 && JSON.parse(cloudEvents.values().next().value.content).progress !== 35; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    const updatedGoal = [...cloudEvents.values()][0];
+    assert.equal(JSON.parse(updatedGoal.content).progress, 35, 'goal progress persists through cloud PATCH');
+    assert.equal(JSON.parse(updatedGoal.content).progressNote, 'ทำได้ 7 จาก 20 ชั่วโมง');
+    assert.equal(goalList.querySelector('[role="progressbar"]').getAttribute('aria-valuenow'), '35', 'progress bar reflects the latest saved percentage accessibly');
+    const deleteGoal = goalList.querySelector('[data-delete]');
+    deleteGoal.click();
+    assert.equal(cloudEvents.size, 1, 'first delete click only opens inline confirmation');
+    goalList.querySelector('[data-cancel-delete]').click();
+    assert.equal(cloudEvents.size, 1, 'cancel keeps the cloud goal');
+    deleteGoal.click();
+    deleteGoal.click();
+    for (let i = 0; i < 80 && cloudEvents.size !== 0; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(cloudEvents.size, 0, 'confirmed delete removes the cloud goal');
+    console.log('PASS: cloud goals create, track progress, confirm/cancel deletion, and render safely');
+
+    await w.PanthoriumAssistantPreferences.open();
+    const preferenceWindow = w.document.querySelector('.window[data-id="assistant-preferences"]');
+    const preferenceForm = preferenceWindow.querySelector('[data-preferences-form]');
+    preferenceWindow.querySelector('[data-preferences-name]').value = 'คุณปานเทพ';
+    preferenceWindow.querySelector('[data-preferences-style]').value = 'concise';
+    preferenceWindow.querySelector('[data-preferences-language]').value = 'thai';
+    preferenceForm.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    for (let i = 0; i < 80 && cloudEvents.size !== 1; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(cloudEvents.size, 1, 'assistant preferences are written to cloud memory');
+    const savedPreferences = [...cloudEvents.values()][0];
+    assert.equal(savedPreferences.kind, 'assistant-preference');
+    assert.deepEqual(JSON.parse(savedPreferences.content), { version: 1, preferredName: 'คุณปานเทพ', style: 'concise', language: 'thai' });
+    preferenceWindow.querySelector('[data-preferences-reset]').click();
+    for (let i = 0; i < 80 && JSON.parse(cloudEvents.values().next().value.content).preferredName !== ''; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.deepEqual(JSON.parse([...cloudEvents.values()][0].content), { version: 1, preferredName: '', style: 'natural', language: 'automatic' }, 'reset overwrites the cloud preference with defaults');
+    console.log('PASS: Sentinel preferences save and reset as account-scoped cloud memory');
+
     // Every registered module function must be callable through the same
     // authenticated command path. Mutating/costly controls stop at approval.
     for (const functionCommand of catalog.functionCommands) {
@@ -258,6 +330,9 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert.equal(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), null, 'guest desktop must not show Voice Identity');
     assert.equal(w.document.getElementById('voice-identity-launcher'), null, 'guest must not see a Voice Identity start-menu launcher');
     assert.equal(w.document.querySelector('#sm-apps .sm-app[data-app-id="files"]'), null, 'Guest must not see private Files launcher');
+    assert.equal(w.document.querySelector('#sm-apps .sm-app[data-app-id="goals"]'), null, 'Guest must not see private Goals launcher');
+    assert.equal(w.document.querySelector('#sm-apps .sm-app[data-app-id="assistant-preferences"]'), null, 'Guest must not see private Sentinel Preferences launcher');
+    assert.equal(preferenceWindow.querySelector('[data-preferences-name]').value, '', 'account change clears the previous user name from the open preferences window');
     for (const app of catalog.apps) {
       client++; // each app check is a separate simulated guest client; keep the per-IP limiter enabled
       const result = await command(`เปิด ${app.aliases[0]}`);

@@ -2903,6 +2903,14 @@
         { id: "files", name: "ไฟล์", icon: "📁", open: openFiles, visible: () => {
             const user = OS.state.user;
             return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
+        { id: "goals", name: "เป้าหมาย", icon: "🎯", open: () => window.PanthoriumGoals?.open?.(), visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
+        { id: "assistant-preferences", name: "ความชอบ Sentinel", icon: "⚙️", open: () => window.PanthoriumAssistantPreferences?.open?.(), visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
         } }
     ];
 
