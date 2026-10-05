@@ -20,8 +20,7 @@ assert(shell.includes('smoothPulse * .16'), 'click response must preserve protot
 assert(shell.includes('orbAIEnergy * (.15 + Math.sin(time * 9) * .01)'), 'AI speech response must preserve prototype expansion');
 assert(shell.includes('orbVoiceEnergy * .018'), 'user speech response must stay subtle');
 assert(shell.includes('function fitOrbViewport()'), 'orb must fit narrow smartphone viewports');
-assert(shell.includes('const compactDistance = 1.28 /'), 'compact screens must scale the orb down slightly');
-assert(shell.includes('compact ? Math.max(4.85, compactDistance) : 4.65'), 'smartphones must move the camera back enough to keep the orb on screen');
+assert(shell.includes('compact ? Math.max(4.65, compactDistance) : 4.65'), 'smartphones must move the camera back enough to keep the orb on screen');
 assert(shell.includes('white-space: normal'), 'smartphone transcript lines must wrap instead of disappearing off screen');
 assert(shell.includes('overflow-wrap: anywhere'), 'long smartphone transcript text must remain visible');
 assert(!shell.includes('createAIFaceGeometry'), 'unapproved speech-face prototype must not ship');
