@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
+async function main() {
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const shell = read('sentinel.html');
 const server = read('server.js');
@@ -54,6 +55,29 @@ assert.equal(ui.filter('missing app', list, empty), 0);
 assert.equal(empty.hidden, false, 'an empty-state message appears when nothing matches');
 assert.equal(ui.filter('', list, empty), 2, 'clearing search restores all accessible apps');
 assert.equal(empty.hidden, true);
+
+const privacy = searchDom.window.document.createElement('button');
+privacy.className = 'sm-app';
+privacy.dataset.appId = 'privacy-policy';
+privacy.textContent = 'Privacy/Policy';
+list.appendChild(privacy);
+ui.pinLast('privacy-policy', list);
+const futureApp = searchDom.window.document.createElement('button');
+futureApp.className = 'sm-app';
+futureApp.dataset.appId = 'future-app';
+futureApp.textContent = 'A future app';
+list.appendChild(futureApp);
+await new Promise(resolve => searchDom.window.setTimeout(resolve, 0));
+assert.equal(list.lastElementChild.dataset.appId, 'privacy-policy', 'Privacy/Policy is restored to the bottom after future launchers are added');
+const minimizedApp = searchDom.window.document.createElement('button');
+minimizedApp.className = 'sm-app';
+minimizedApp.dataset.appId = 'future-minimized-window';
+list.appendChild(minimizedApp);
+await new Promise(resolve => searchDom.window.setTimeout(resolve, 0));
+assert.equal(list.lastElementChild.dataset.appId, 'privacy-policy', 'minimized-window launchers cannot move Privacy/Policy from the bottom');
 searchDom.window.close();
 dom.window.close();
-console.log('Start menu controls: responsive structure, Gregorian clock, logo launcher, one-column search, hidden-app access, and minimized-window recovery passed');
+console.log('Start menu controls: responsive structure, hidden-app access, search, minimized-window recovery, and permanent Privacy/Policy pin passed');
+}
+
+main().catch(error => { console.error(error); process.exitCode = 1; });
