@@ -95,8 +95,12 @@ class BiometricIdentityService {
   async remove(ownerUserId, profileId) { const removed = await this.repository.remove(profileId, ownerUserId); if (removed) this.audit?.record('biometric.voice_removed', { ownerUserId, profileId }); return removed; }
   async verify({ ownerUserId, audio }) {
     if (!this.validateAudio(audio)) throw new Error('invalid_voice_sample');
-    const probe = await this.extract(audio);
     const profiles = await this.repository.list(ownerUserId);
+    if (!profiles.length) {
+      this.audit?.record('biometric.voice_rejected', { ownerUserId, profileId: null, score: null, reason: 'no_enrolled_profiles' });
+      return { ok: true, matched: false, score: null, profile: null, acceptCommands: false };
+    }
+    const probe = await this.extract(audio);
     let best = null;
     for (const profile of profiles) { const score = cosine(probe, this.decrypt(profile.encryptedTemplate)); if (!best || score > best.score) best = { profile, score }; }
     const matched = Boolean(best && best.score >= this.matchThreshold);
