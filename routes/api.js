@@ -95,7 +95,17 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
         const profiles = await biometrics.list(req.user.sub);
         if (!profiles.length) return res.status(403).json({ ok: false, error: "voice_enrollment_required" });
         const verification = await biometrics.verify({ ownerUserId: req.user.sub, audio: value });
-        if (!verification.matched) return res.status(403).json({ ok: false, error: "voice_not_authorized" });
+        if (!verification.matched) {
+          const denied = { ok: false, error: "voice_not_authorized" };
+          if (process.env.BIOMETRIC_DIAGNOSTICS_ENABLED === "1" && Number.isFinite(Number(verification.score))) {
+            const configuredThreshold = Number(biometrics.status?.().matchThreshold);
+            denied.voiceDiagnostic = {
+              score: Number(Number(verification.score).toFixed(4)),
+              threshold: Number.isFinite(configuredThreshold) ? configuredThreshold : null
+            };
+          }
+          return res.status(403).json(denied);
+        }
       }
       const result = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language);
       res.json({ ok: true, text: result.text, provider: result.provider, model: result.model, confidence: result.confidence, crossCheckedBy: result.crossCheckedBy || null });
