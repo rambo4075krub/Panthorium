@@ -41,7 +41,6 @@ const { AgentAutomationPolicyService } = require("./services/agentAutomationPoli
 const { AgentMemoryRepository } = require("./services/agentMemoryRepository");
 const { AgentMemoryService } = require("./services/agentMemoryService");
 const { CloudFilesService } = require("./services/cloudFilesService");
-const { CloudFilesService } = require("./services/cloudFilesService");
 const { AgentKnowledgeRepository } = require("./services/agentKnowledgeRepository");
 const { AgentKnowledgeService } = require("./services/agentKnowledgeService");
 const { AgentPolicyService } = require("./services/agentPolicyService");
@@ -117,7 +116,6 @@ toolRegistry.register({
 });
 const agentMemory = new AgentMemoryService({ repository: agentMemoryRepository, audit, knowledge: agentKnowledge });
 const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET });
-const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET });
 sentinel.memory = agentMemory;
 const agentPlanner = new AgentPlannerService({ agentService, gateway: sentinel.gateway, audit, memory: agentMemory });
 const agentWorkflow = new AgentWorkflowService({ agentService, gateway: sentinel.gateway, audit, runs: agentRuns, pendingStore: agentPending, memory: agentMemory });
@@ -184,7 +182,6 @@ app.use("/api/biometrics", createBiometricsRouter(authService, biometrics));
 app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
 app.use("/api/agent/automation", createAutomationRouter(authService, agentAutomation));
 app.use("/api/agent/memory", createMemoryRouter(authService, agentMemory));
-app.use("/api/files", createFilesRouter(authService, cloudFiles));
 app.use("/api/files", createFilesRouter(authService, cloudFiles));
 app.use("/api/reminders", createReminderRouter(authService, reminders));
 app.use("/api/agent/knowledge", createKnowledgeRouter(authService, agentKnowledge));
