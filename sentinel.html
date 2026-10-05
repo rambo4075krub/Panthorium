@@ -1997,7 +1997,6 @@
                         // This recognizer only detects speech end on Android; the
                         // server STT remains authoritative for the final transcript.
                         endpointLastSpeechAt = performance.now();
-                        recorderLastVoiceAt = endpointLastSpeechAt;
                     }
                 };
                 endpoint.onerror = event => {
@@ -2169,11 +2168,16 @@
                     const level = Math.sqrt(sum / recorderData.length);
                     if (recorderVoiceDetector.observe(level, now - recorderStartedAt)) recorderLastVoiceAt = now;
                 }
-                const meteredSilence = meterRunning && recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 850;
-                const endpointSilence = endpointLastSpeechAt > 0 && now - endpointLastSpeechAt > 1000;
-                // If both local VAD and the browser speech endpoint are silent or unavailable, submit a short capture instead of holding the mic for the 30-second ceiling.
+                const meteredSilence = meterRunning && recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 1100;
+                const endpointSilence = endpointLastSpeechAt > 0 && now - endpointLastSpeechAt > 1700;
+                // Require both active signals to agree when the microphone meter is working. A stale browser recognition event must not cut speech that the microphone still hears.
+                const meterHasSpeech = meterRunning && recorderLastVoiceAt > 0;
+                const confirmedSilence = meterHasSpeech
+                    ? meteredSilence && (!endpointLastSpeechAt || endpointSilence)
+                    : endpointSilence;
+                // If neither detector can hear speech, stop the capture after a bounded wait.
                 const noDetectedSpeechTimeout = !recorderLastVoiceAt && !endpointLastSpeechAt && now - recorderStartedAt > 8000;
-                if (((meteredSilence || endpointSilence) && now - recorderStartedAt > 700) || noDetectedSpeechTimeout || now - recorderStartedAt > 30000) { finishRecorder({ discard: false }); return; }
+                if ((confirmedSilence && now - recorderStartedAt > 1000) || noDetectedSpeechTimeout || now - recorderStartedAt > 30000) { finishRecorder({ discard: false }); return; }
                 recorderMonitor = setTimeout(monitorRecorder, 100);
             };
             const startRecorder = async () => {
