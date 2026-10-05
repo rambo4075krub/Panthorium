@@ -2133,7 +2133,7 @@
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ audio, language: "th-TH" }),
-                        signal: AbortSignal.timeout(22000),
+                        signal: AbortSignal.timeout(40000),
                         cache: "no-store"
                     });
                     return {
@@ -2212,7 +2212,12 @@
                     !data.ok ||
                     typeof data.text !== "string" ||
                     !data.text.trim()
-                ) throw new Error(data.error || "transcription_unavailable");
+                ) {
+                    const error = new Error(data.error || "transcription_unavailable");
+                    error.statusCode = statusCode;
+                    if (data.voiceDiagnostic && typeof data.voiceDiagnostic === "object") error.voiceDiagnostic = data.voiceDiagnostic;
+                    throw error;
+                }
 
                 return data.text.trim();
             };
@@ -2305,7 +2310,8 @@
                             if (captureTurnId !== voiceTurnId) return;
                             console.warn("[Sentinel transcription]", error);
                             voiceState = "idle";
-                            const message = ({
+                            const errorCode = String(error?.message || "").split(":")[0];
+                            let message = ({
                                 transcription_provider_unavailable: "บริการถอดเสียงหลักขัดข้อง กรุณาพูดซ้ำอีกครั้ง",
                                 transcription_fallback_unavailable: "ระบบถอดเสียงสำรองใช้ไม่ได้ กรุณาลองใหม่อีกครั้ง",
                                 microphone_permission_denied: "กรุณาอนุญาตสิทธิ์ไมโครโฟนแล้วลองใหม่",
@@ -2314,17 +2320,24 @@
                                 invalid_audio: "รูปแบบหรือขนาดเสียงไม่ถูกต้อง ลองพูดให้สั้นลง",
                                 audio_too_large: "เสียงยาวเกินไป ลองพูดให้สั้นลง",
                                 authentication_required: "เซสชันยังไม่พร้อม กรุณาลองอีกครั้ง",
-                                invalid_or_expired_token: "เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง",
+                                invalid_or_expired_token: "เซสชันหมดอายุ กรุณาลองอีกครั้ง",
                                 voice_session_changed: "เริ่มเซสชันใหม่แล้ว กรุณาพูดอีกครั้ง",
                                 electron_upload_failed: "Panthorium Browser ส่งเสียงไม่สำเร็จ กรุณาลองอีกครั้ง",
                                 browser_update_required: "Panthorium Browser รุ่นนี้เก่าเกินไป กรุณาอัปเดตเป็นรุ่นล่าสุด",
                                 transcription_timeout: "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง",
                                 untrusted_origin: "Panthorium Browser ไม่อนุญาตต้นทางนี้",
-                                voice_not_authorized: "ตรวจพบเสียงที่ไม่ได้รับอนุญาต จึงไม่นำไปประมวลผล",
+                                voice_not_authorized: "เสียงที่รับมาไม่ตรงกับโปรไฟล์ที่ลงทะเบียน จึงยังไม่ส่งคำสั่งไปประมวลผล",
+                                voice_verification_unavailable: "บริการยืนยันเสียงบนคลาวด์ไม่พร้อม กรุณาลองอีกครั้ง",
                                 speaker_verification_not_configured: "ระบบยืนยันตัวตนด้วยเสียงยังตั้งค่าไม่ครบ"
-                            })[String(error?.message || "").split(":")[0]] || (error?.name === "TimeoutError" || error?.name === "AbortError"
+                            })[errorCode] || (error?.name === "TimeoutError" || error?.name === "AbortError"
                                 ? "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง"
                                 : "ส่งเสียงไปยังบริการถอดเสียงไม่สำเร็จ กรุณาตรวจการเชื่อมต่อ");
+                            const diagnostic = error?.voiceDiagnostic;
+                            if (errorCode === "voice_not_authorized" && diagnostic && Number.isFinite(Number(diagnostic.score))) {
+                                const score = Number(diagnostic.score).toFixed(2);
+                                const threshold = Number(diagnostic.threshold);
+                                message += Number.isFinite(threshold) ? ` (คะแนน ${score} / เกณฑ์ ${threshold.toFixed(2)})` : ` (คะแนน ${score})`;
+                            }
                             status("unresponsive", message);
                             if (String(error?.message || "").startsWith("transcription_uncertain")) {
                                 await speakVoiceResponse("โปรดพูดอีกครั้ง");
