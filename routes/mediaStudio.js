@@ -9,6 +9,9 @@ function createMediaStudioRouter(authService, mediaStudio) {
   const auth = requireAuth(authService);
   const transcribeLimiter = rateLimit({ windowMs: 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false });
   const renderLimiter = rateLimit({ windowMs: 60 * 1000, limit: 3, standardHeaders: true, legacyHeaders: false });
+  const aiPlanLimiter = rateLimit({ windowMs: 60 * 1000, limit: 8, standardHeaders: true, legacyHeaders: false });
+  const generateLimiter = rateLimit({ windowMs: 5 * 60 * 1000, limit: 2, standardHeaders: true, legacyHeaders: false });
+  const generationPollLimiter = rateLimit({ windowMs: 60 * 1000, limit: 12, standardHeaders: true, legacyHeaders: false });
 
   function account(req, res, next) {
     if (!isAccountUser(req.user)) {
@@ -16,6 +19,10 @@ function createMediaStudioRouter(authService, mediaStudio) {
     }
     return next();
   }
+
+  router.get('/capabilities', auth, account, (req, res) => {
+    res.set('Cache-Control', 'private, no-store').json({ ok: true, ...mediaStudio.capabilities() });
+  });
 
   router.get('/files', auth, account, async (req, res, next) => {
     try {
@@ -31,6 +38,40 @@ function createMediaStudioRouter(authService, mediaStudio) {
       if (language != null && !['th', 'en'].includes(language)) return res.status(400).json({ ok: false, error: 'invalid_language' });
       res.set('Cache-Control', 'private, no-store');
       res.json(await mediaStudio.transcribe({ user: req.user, fileId, language: language || 'th' }));
+    } catch (error) { next(error); }
+  });
+
+  router.post('/plan-edit', auth, account, aiPlanLimiter, async (req, res, next) => {
+    try {
+      const { fileId, instruction, transcript } = req.body || {};
+      if (typeof fileId !== 'string' || fileId.length > 80) return res.status(400).json({ ok: false, error: 'invalid_file_id' });
+      if (typeof instruction !== 'string' || instruction.length > 2400) return res.status(400).json({ ok: false, error: 'invalid_ai_instruction' });
+      if (transcript != null && (typeof transcript !== 'string' || transcript.length > 12000)) return res.status(413).json({ ok: false, error: 'ai_context_too_large' });
+      res.set('Cache-Control', 'private, no-store').json(await mediaStudio.planEdit({ user: req.user, fileId, instruction, transcript: transcript || '' }));
+    } catch (error) { next(error); }
+  });
+
+  router.post('/generate', auth, account, generateLimiter, async (req, res, next) => {
+    try {
+      const body = req.body || {};
+      if (typeof body.prompt !== 'string' || body.prompt.length > 1600) return res.status(400).json({ ok: false, error: 'invalid_generation_prompt' });
+      if (body.confirmed !== true) return res.status(409).json({ ok: false, error: 'generation_confirmation_required' });
+      const result = await mediaStudio.startGeneration({
+        user: req.user,
+        prompt: body.prompt,
+        durationSeconds: body.durationSeconds == null ? 8 : body.durationSeconds,
+        aspectRatio: body.aspectRatio || '16:9',
+        name: body.name || '',
+        confirmed: body.confirmed
+      });
+      res.set('Cache-Control', 'private, no-store').status(202).json(result);
+    } catch (error) { next(error); }
+  });
+
+  router.get('/generation/:jobToken', auth, account, generationPollLimiter, async (req, res, next) => {
+    try {
+      if (String(req.params.jobToken || '').length > 6000) return res.status(400).json({ ok: false, error: 'invalid_generation_job' });
+      res.set('Cache-Control', 'private, no-store').json(await mediaStudio.generationStatus({ user: req.user, jobToken: req.params.jobToken }));
     } catch (error) { next(error); }
   });
 
