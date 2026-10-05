@@ -10,7 +10,14 @@ const { JsonBiometricIdentityRepository } = require('../services/biometricIdenti
 class Repository {
   constructor() { this.rows = []; }
   async init() {}
-  async create(row) { const saved = { ...row, profileId: `p-${this.rows.length + 1}`, status: 'active' }; this.rows.push(saved); return saved; }
+  async create(row) { const saved = { ...row, profileId: `p-${this.rows.length + 1}`, templateRevision: 1, status: 'active' }; this.rows.push(saved); return saved; }
+  async get(id, owner) { return this.rows.find(row => row.profileId === id && row.ownerUserId === owner) || null; }
+  async updateTemplate(id, owner, { encryptedTemplate, sampleCount, expectedRevision }) {
+    const row = await this.get(id, owner);
+    if (!row || row.templateRevision !== expectedRevision) return null;
+    row.encryptedTemplate = encryptedTemplate; row.sampleCount = sampleCount; row.templateRevision += 1;
+    return row;
+  }
   async list(owner) { return this.rows.filter(row => row.ownerUserId === owner); }
   async remove(id, owner) { const before = this.rows.length; this.rows = this.rows.filter(row => row.profileId !== id || row.ownerUserId !== owner); return before !== this.rows.length; }
 }
@@ -34,6 +41,20 @@ const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed 
     await assert.rejects(() => service.enroll({ ownerUserId: 'u1', actorRoles: ['user'], displayName: 'Fake admin', subjectType: 'administrator', consent: true, samples: [audio(1), audio(2), audio(3)] }), /administrator_role_required/);
     const user = await service.enroll({ ownerUserId: 'u1', actorRoles: ['user'], displayName: 'Owner', subjectType: 'user', consent: true, samples: [audio(1), audio(2), audio(3)] });
     assert.equal(user.encryptedTemplate, undefined);
+    const callsBeforeDuplicate = embeddingCalls;
+    await assert.rejects(() => service.enroll({ ownerUserId: 'u1', actorRoles: ['user'], displayName: 'Owner again', subjectType: 'user', consent: true, samples: [audio(1), audio(2), audio(3)] }), /voice_profile_exists/);
+    assert.equal(embeddingCalls, callsBeforeDuplicate, 'duplicate account profile is rejected before embedding audio');
+    const profileCountBeforeAppend = (await repository.list('u1')).length;
+    const enriched = await service.addSamples({ ownerUserId: 'u1', actorRoles: ['user'], profileId: user.profileId, consent: true, samples: [audio(11), audio(12), audio(13)] });
+    assert.equal(enriched.profileId, user.profileId, 'new samples update the logged-in user profile');
+    assert.equal(enriched.sampleCount, 6);
+    assert.equal(enriched.templateRevision, 2);
+    assert.equal((await repository.list('u1')).length, profileCountBeforeAppend, 'adding samples does not create another profile');
+    await assert.rejects(() => service.addSamples({ ownerUserId: 'different-owner', actorRoles: ['user'], profileId: user.profileId, consent: true, samples: [audio(14), audio(15), audio(16)] }), /voice_profile_not_found/);
+    nextVector = vector(20);
+    await assert.rejects(() => service.addSamples({ ownerUserId: 'u1', actorRoles: ['user'], profileId: user.profileId, consent: true, samples: [audio(17), audio(18), audio(19)] }), /voice_samples_do_not_match/);
+    assert.equal((await repository.get(user.profileId, 'u1')).sampleCount, 6, 'rejected speaker samples leave the enrolled template unchanged');
+    nextVector = vector(2);
     const family = await service.enroll({ ownerUserId: 'u1', actorRoles: ['user'], displayName: 'Family', subjectType: 'family', relationship: 'parent', consent: true, samples: [audio(1), audio(2), audio(3)] });
     assert.equal(family.subjectType, 'family');
     const administrator = await service.enroll({ ownerUserId: 'admin-1', actorRoles: ['administrator'], displayName: 'Admin', subjectType: 'administrator', consent: true, samples: [audio(1), audio(2), audio(3)] });
@@ -53,6 +74,13 @@ const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed 
       const reopened = new JsonBiometricIdentityRepository(path.join(dir, 'data.json'));
       await reopened.init();
       assert.equal((await reopened.list('guest:tab-id')).length, 1, 'enrolled guest survives restart and 24 hours');
+      const persistentProfile = (await reopened.list('guest:tab-id'))[0];
+      const persistedUpdate = await reopened.updateTemplate(persistentProfile.profileId, 'guest:tab-id', { encryptedTemplate: 'updated-ciphertext', sampleCount: 6, expectedRevision: 1 });
+      assert.equal(persistedUpdate.sampleCount, 6);
+      assert.equal(persistedUpdate.templateRevision, 2, 'appending samples increments persistent template revision');
+      assert.equal(await reopened.updateTemplate(persistentProfile.profileId, 'other-owner', { encryptedTemplate: 'wrong-owner', sampleCount: 9, expectedRevision: 2 }), null, 'owner isolation prevents cross-account profile updates');
+      assert.equal(await reopened.updateTemplate(persistentProfile.profileId, 'guest:tab-id', { encryptedTemplate: 'stale-write', sampleCount: 9, expectedRevision: 1 }), null, 'stale template revisions cannot overwrite newer samples');
+      assert.equal((await reopened.get(persistentProfile.profileId, 'guest:tab-id')).sampleCount, 6, 'new samples persist across repository reopen');
       assert.equal(await reopened.findGuestOwnerByDeviceKeyHash(crypto.createHash('sha256').update(deviceKey).digest('hex')), 'guest:tab-id');
       assert.equal(await reopened.isDeviceBoundGuestOwner('guest:tab-id'), true);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
