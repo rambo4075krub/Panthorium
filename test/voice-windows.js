@@ -27,6 +27,9 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
   assert.equal(catalog.parse('เปิดโน้ต แล้วเปิด Settings'), null, 'do not discard a second app command');
   const calendarApp = catalog.apps.find(app => app.id === 'calendar');
   const registeredUser = { id: 'calendar-user', sub: 'calendar-user', permissions: ['chat'], roles: ['user'] };
+  const filesApp = catalog.apps.find(app => app.id === 'files');
+  assert.equal(catalog.allowed(filesApp, registeredUser), true, 'registered chat accounts may use cloud Files');
+  assert.equal(catalog.allowed(filesApp, guest), false, 'Guest cannot use account-scoped cloud Files');
   assert.equal(catalog.parse('เปิดปฏิทิน')?.action, 'open_calendar');
   assert.equal(catalog.allowed(calendarApp, registeredUser), true, 'registered users may use the cloud calendar');
   assert.equal(catalog.allowed(calendarApp, guest), false, 'Guest cannot use account-scoped cloud calendar');
@@ -67,6 +70,14 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
   const calculatorCommand = await calculatorResponse.json();
   assert.equal(calculatorResponse.status, 200, JSON.stringify(calculatorCommand));
   assert.equal(calculatorCommand.results?.[0]?.output?.uiAction, 'open_calculator', 'a registered chat account can open the calculator by voice');
+  const filesResponse = await fetch(`${base}/api/sentinel/command`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${auth.signAccessToken(registeredUser)}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'เปิดไฟล์' })
+  });
+  const filesCommand = await filesResponse.json();
+  assert.equal(filesResponse.status, 200, JSON.stringify(filesCommand));
+  assert.equal(filesCommand.results?.[0]?.output?.uiAction, 'open_files', 'a registered chat account can open Files by voice');
   const dom = new JSDOM(source('sentinel.html'), { url: 'https://panthorium-backend-staging.example.run.app/admin', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
   const w = dom.window;
   const context = dom.getInternalVMContext();
@@ -114,6 +125,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     load('phase2-auth.js'); await tick();
     await w.PanthoriumAuth.login('admin', 'fixture');
     w.document.getElementById('desktop').classList.add('active');
+    assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="files"]'), 'Files appears in Start menu after account authentication');
     for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'calendar-ui.js', 'reminders-ui.js', 'external-apps-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumStagingAdminDesktop.render();
     assert(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), 'administrator desktop must show Voice Identity icon');
@@ -245,6 +257,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     w.PanthoriumStagingAdminDesktop.render();
     assert.equal(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), null, 'guest desktop must not show Voice Identity');
     assert.equal(w.document.getElementById('voice-identity-launcher'), null, 'guest must not see a Voice Identity start-menu launcher');
+    assert.equal(w.document.querySelector('#sm-apps .sm-app[data-app-id="files"]'), null, 'Guest must not see private Files launcher');
     for (const app of catalog.apps) {
       client++; // each app check is a separate simulated guest client; keep the per-IP limiter enabled
       const result = await command(`เปิด ${app.aliases[0]}`);
@@ -271,6 +284,17 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     replaceUser(admin);
     w.PanthoriumStagingAdminDesktop.render();
     assert(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), 'administrator icon returns for administrator account');
+    replaceUser(registeredUser);
+    w.PanthoriumStagingAdminDesktop.render();
+    assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="files"]'), 'Start menu refreshes for a signed-in chat account');
+    client++;
+    const chatFilesOpened = await command('เปิด File');
+    assert.equal(chatFilesOpened.ok, true, 'signed-in chat user can open Files by voice');
+    assert(isVisible(filesApp), 'Files voice command opens its real app window');
+    await command('ปิดไฟล์');
+    assert.equal(isVisible(filesApp), false, 'Files voice command closes its real app window');
+    replaceUser(admin);
+    w.PanthoriumStagingAdminDesktop.render();
     console.log('PASS: guest and operator denied administrator windows by server AND client');
 
     client++;
