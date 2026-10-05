@@ -29,6 +29,8 @@ async function main() {
 
   assert.ok(root.querySelector('[data-ai-instruction]'), 'Sentinel edit prompt is visible in the Inspector');
   assert.ok(root.querySelector('[data-generation-command]'), 'video generation has its own prompt field');
+  assert.ok(root.querySelector('[data-fullscreen]'), 'editor provides a fullscreen control');
+  assert.ok(root.querySelector('[data-minimize]'), 'editor provides a minimize control');
   assert.ok(root.querySelector('[data-media-bin]'));
   assert.ok(root.querySelector('[data-media-preview]'));
   assert.ok(root.querySelector('[data-range-track]'));
@@ -37,7 +39,17 @@ async function main() {
   assert.match(css, /orientation:portrait/);
   assert.match(css, /orientation:landscape/);
   assert.match(css, /safe-area-inset/);
+  assert.match(css, /max\(env\(safe-area-inset-top,0px\),32px\)/, 'portrait layout leaves room for the phone status bar');
+  assert.match(css, /:fullscreen/);
   assert.match(css, /100dvh/);
+
+  root.querySelector('[data-minimize]').click();
+  assert.equal(root.style.display, 'none', 'minimize hides the editor window');
+  const restore = window.document.querySelector('#media-studio-restore');
+  assert.ok(restore, 'minimized editor leaves a restore button');
+  restore.click();
+  assert.equal(root.style.display, 'flex', 'restore brings the editor back');
+  assert.equal(window.document.querySelector('#media-studio-restore'), null);
 
   window.PanthoriumMediaStudio.close();
   window.close();
