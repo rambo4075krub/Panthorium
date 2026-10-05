@@ -61,4 +61,61 @@ block = block
   .replace(/versionName\s*(?:=\s*)?["'][^"']+["']/, "versionName '" + versionName + "'");
 gradle = gradle.replace(defaultConfig[0], block);
 fs.writeFileSync(gradlePath, gradle);
-console.log('Android microphone permissions, Panthorium launcher icons, and app version ' + versionName + ' (' + versionCode + ') are prepared.');
+
+const appNamespace = /namespace\s+["']([^"']+)["']/.exec(gradle)?.[1]
+  || /applicationId\s+["']([^"']+)["']/.exec(block)?.[1];
+if (!appNamespace || !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(appNamespace)) {
+  throw new Error('Could not determine the Android app namespace for MainActivity.');
+}
+const activityPath = path.join(androidRoot, 'app', 'src', 'main', 'java', ...appNamespace.split('.'), 'MainActivity.java');
+fs.mkdirSync(path.dirname(activityPath), { recursive: true });
+let activity = fs.existsSync(activityPath)
+  ? fs.readFileSync(activityPath, 'utf8')
+  : `package ${appNamespace};\n\nimport com.getcapacitor.BridgeActivity;\n\npublic class MainActivity extends BridgeActivity {\n}\n`;
+const immersiveMarker = 'PANTHORIUM_IMMERSIVE_MODE';
+if (!activity.includes(immersiveMarker)) {
+  if (!/class\s+MainActivity\s+extends\s+BridgeActivity\s*\{/.test(activity)) {
+    throw new Error('MainActivity must extend Capacitor BridgeActivity before immersive mode can be installed.');
+  }
+  if (/\bonResume\s*\(|onWindowFocusChanged\s*\(/.test(activity)) {
+    throw new Error('MainActivity already overrides a fullscreen lifecycle method; merge immersive mode manually to avoid replacing app behavior.');
+  }
+  if (!activity.includes('import android.os.Bundle;')) activity = activity.replace(/^(package [^;]+;)/m, '$1\n\nimport android.os.Bundle;');
+  if (!activity.includes('import android.view.View;')) activity = activity.replace(/^(package [^;]+;)/m, '$1\n\nimport android.view.View;');
+  const methods = `
+    // ${immersiveMarker}: status and navigation bars reappear temporarily on a swipe.
+    @Override
+    public void onResume() {
+        super.onResume();
+        panthoriumHideSystemBars();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) panthoriumHideSystemBars();
+    }
+
+    private void panthoriumHideSystemBars() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            android.view.WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                controller.hide(android.view.WindowInsets.Type.statusBars() | android.view.WindowInsets.Type.navigationBars());
+            }
+            return;
+        }
+        getWindow().getDecorView().setSystemUiVisibility(
+            View.SYSTEM_UI_FLAG_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        );
+    }
+`;
+  activity = activity.replace(/\n}\s*$/, '\n' + methods + '}\n');
+  fs.writeFileSync(activityPath, activity);
+}
+console.log('Android permissions, icons, immersive fullscreen, and app version ' + versionName + ' (' + versionCode + ') are prepared.');
