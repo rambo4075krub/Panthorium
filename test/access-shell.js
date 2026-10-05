@@ -110,7 +110,7 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
       assert.equal(w.document.querySelectorAll('#desktop-icons [data-app-id]').length, 0, 'an /admin URL must not give Guest the administrator desktop');
       assert.equal(w.getComputedStyle(w.document.getElementById('desktop-icons')).display, 'none', 'Guest desktop stays hidden even on /admin');
     }
-  } finally { w.close(); }
+  } finally { await new Promise(resolve => w.setTimeout(resolve, 50)); w.close(); }
 }
 (async () => {
   for (const role of ['admin', 'guest', 'user']) for (const desktop of [true, false]) await scenario(role, desktop);
