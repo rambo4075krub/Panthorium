@@ -87,6 +87,27 @@ const vector = seed => Array.from({ length: 32 }, (_, index) => (index === seed 
     assert.ok(repository.rows[0].encryptedTemplate && !repository.rows[0].encryptedTemplate.includes('0.01'));
     const accepted = await service.verify({ ownerUserId: 'u1', audio: audio(4) });
     assert.equal(accepted.matched, true);
+    const slightlyLoweredService = new BiometricIdentityService({
+      repository, providerUrl: 'https://speaker.test', providerToken: 'test-only-token',
+      encryptionKey: 'test-only-key', matchThreshold: 0.80, enrollmentThreshold: 0.76
+    });
+    const base = vector(2);
+    const baseNorm = Math.sqrt(base.reduce((sum, value) => sum + value * value, 0));
+    const unitBase = base.map(value => value / baseNorm);
+    const axis = Array.from({ length: base.length }, (_, index) => index === 1 ? 1 : 0);
+    const projection = axis.reduce((sum, value, index) => sum + value * unitBase[index], 0);
+    const orthogonal = axis.map((value, index) => value - projection * unitBase[index]);
+    const orthogonalNorm = Math.sqrt(orthogonal.reduce((sum, value) => sum + value * value, 0));
+    const targetScore = 0.81;
+    nextVector = unitBase.map((value, index) =>
+      value * targetScore + (orthogonal[index] / orthogonalNorm) * Math.sqrt(1 - targetScore * targetScore)
+    );
+    const oldThresholdResult = await service.verify({ ownerUserId: 'u1', audio: audio(40) });
+    assert.equal(oldThresholdResult.matched, false, 'a 0.81 match remains below the previous 0.82 threshold');
+    const loweredThresholdResult = await slightlyLoweredService.verify({ ownerUserId: 'u1', audio: audio(41) });
+    assert.equal(loweredThresholdResult.matched, true, 'a 0.81 match passes the small 0.80 staging adjustment');
+    assert.ok(Math.abs(loweredThresholdResult.score - targetScore) < 0.001, 'test probe exercises the intended threshold boundary');
+    nextVector = vector(2);
     nextVector = vector(20);
     const rejected = await service.verify({ ownerUserId: 'u1', audio: audio(5) });
     assert.equal(rejected.matched, false);
