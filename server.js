@@ -41,6 +41,7 @@ const { AgentAutomationPolicyService } = require("./services/agentAutomationPoli
 const { AgentMemoryRepository } = require("./services/agentMemoryRepository");
 const { AgentMemoryService } = require("./services/agentMemoryService");
 const { CloudFilesService } = require("./services/cloudFilesService");
+const { MediaStudioService } = require("./services/mediaStudioService");
 const { CloudNotesRepository } = require("./services/cloudNotesRepository");
 const { AgentKnowledgeRepository } = require("./services/agentKnowledgeRepository");
 const { AgentKnowledgeService } = require("./services/agentKnowledgeService");
@@ -61,6 +62,7 @@ const { createSecurityRouter } = require("./routes/security");
 const { createAutomationRouter } = require("./routes/automation");
 const { createMemoryRouter } = require("./routes/memory");
 const { createFilesRouter } = require("./routes/files");
+const { createMediaStudioRouter } = require("./routes/mediaStudio");
 const { createReminderRouter } = require("./routes/reminders");
 const { createKnowledgeRouter } = require("./routes/knowledge");
 const { createOrchestrationRouter } = require("./routes/orchestration");
@@ -104,8 +106,10 @@ const integrationRepository = new IntegrationRepository({ databaseUrl: config.da
 const integrationExecutions = new IntegrationExecutionRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const integrations = new IntegrationService({ repository: integrationRepository, executions: integrationExecutions, audit, allowedHosts: config.integrationAllowedHosts });
 const sentinel = new Sentinel({ conversations, audit });
+const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET });
+const mediaStudio = new MediaStudioService({ files: cloudFiles, providers: sentinel.providers, audit });
 const productionIntelligence = new ProductionIntelligenceService({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, audit, gateway: sentinel.gateway });
-const toolRegistry = new ToolRegistry({ sentinel, conversations, securityResponse, aiOperations, integrations });
+const toolRegistry = new ToolRegistry({ sentinel, conversations, securityResponse, aiOperations, integrations, mediaStudio });
 const agentPolicy = new AgentPolicyService();
 const agentService = new AgentService({ tools: toolRegistry, audit, policy: agentPolicy });
 const agentKnowledge = new AgentKnowledgeService({ repository: agentKnowledgeRepository, audit });
@@ -116,7 +120,6 @@ toolRegistry.register({
   run: async ({ user, args }) => agentKnowledge.search({ user, query: args.query, limit: args.limit == null ? 8 : Number(args.limit) })
 });
 const agentMemory = new AgentMemoryService({ repository: agentMemoryRepository, audit, knowledge: agentKnowledge });
-const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET });
 sentinel.memory = agentMemory;
 const agentPlanner = new AgentPlannerService({ agentService, gateway: sentinel.gateway, audit, memory: agentMemory });
 const agentWorkflow = new AgentWorkflowService({ agentService, gateway: sentinel.gateway, audit, runs: agentRuns, pendingStore: agentPending, memory: agentMemory });
@@ -184,6 +187,7 @@ app.use("/api/security", createSecurityRouter(authService, authRepository, audit
 app.use("/api/agent/automation", createAutomationRouter(authService, agentAutomation));
 app.use("/api/agent/memory", createMemoryRouter(authService, agentMemory));
 app.use("/api/files", createFilesRouter(authService, cloudFiles));
+app.use("/api/media", createMediaStudioRouter(authService, mediaStudio));
 app.use("/api/reminders", createReminderRouter(authService, reminders));
 app.use("/api/agent/knowledge", createKnowledgeRouter(authService, agentKnowledge));
 app.use("/api/agent/orchestration", createOrchestrationRouter(authService, multiAgent));
@@ -211,7 +215,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js"];
 for (const script of shellScripts) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -226,7 +230,7 @@ for (const script of shellScripts) {
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
   html = html.replace('<body>', `<body data-voice-identity-required="${config.biometricGateEnabled ? 'true' : 'false'}">`);
-  const version = `${require("./package.json").version}-guest-auth-single-audio-v1`;
+  const version = `${require("./package.json").version}-media-browser-v2`;
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
   }

@@ -106,6 +106,7 @@
         const node = document.querySelector(app.selector);
         if (node) {
           if (app.windowId && typeof closeWindow === 'function') closeWindow(app.windowId);
+          else if (app.closeButton && node.querySelector(app.closeButton)) node.querySelector(app.closeButton).click();
           else node.remove();
         }
       }

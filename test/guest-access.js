@@ -39,7 +39,7 @@ const catalog = require('../voice-window-catalog');
     findGuestOwnerByDeviceKeyHash: async hash => hash === deviceHash ? protectedGuestId : null,
     isDeviceBoundGuestOwner: async owner => owner === protectedGuestId
   };
-  const app = express(); app.use(express.json()); installGuestAccess(app, auth);
+  const app = express(); app.set('trust proxy', 1); app.use(express.json()); installGuestAccess(app, auth);
   app.use('/api/auth', createAuthRouter(auth, { isProduction: false, refreshTokenDays: 30 }, null, deviceRepository));
   app.use('/api/biometrics', createBiometricsRouter(auth, biometrics));
   const memoryOwners = [];
@@ -52,7 +52,7 @@ const catalog = require('../voice-window-catalog');
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const call = (url, principal, body) => fetch(base + url, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', ...(principal ? { Authorization: 'Bearer ' + auth.signAccessToken(principal) } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const call = (url, principal, body, testIp) => fetch(base + url, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', ...(principal ? { Authorization: 'Bearer ' + auth.signAccessToken(principal) } : {}), ...(testIp ? { 'X-Forwarded-For': testIp } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
   try {
     const noDevice = await (await call('/api/auth/guest', null, { guestSessionId })).json();
     assert.notEqual(noDevice.user.id, protectedGuestId, 'known voice owner requires its device credential');
@@ -75,12 +75,14 @@ const catalog = require('../voice-window-catalog');
       assert.equal((await call(url, admin)).status, 200, route);
     }
     assert.equal(serviceCalls, restrictedPaths.length);
-    for (const entry of catalog.apps) {
+    for (const [index, entry] of catalog.apps.entries()) {
       const guestAllowed = !entry.accountRequired && !excluded.includes(entry.id);
       assert.equal(catalog.allowed(entry, guest), guestAllowed, entry.id);
       assert.equal(catalog.allowed(entry, admin), true, entry.id);
       assert.equal(catalog.allowed(entry, user), !excluded.includes(entry.id), 'standard user access: ' + entry.id);
-      const res = await call('/api/sentinel/command', guest, { command: 'เปิด ' + entry.aliases[0] });
+      // Give each app command a separate test-only rate-limit key so this
+      // enumeration continues to test RBAC when the catalog grows.
+      const res = await call('/api/sentinel/command', guest, { command: 'เปิด ' + entry.aliases[0] }, `198.51.100.${index + 1}`);
       assert.equal(res.status, excluded.includes(entry.id) || entry.accountRequired ? 403 : 200, entry.id);
     }
     assert.equal(catalog.allowed(catalog.apps.find(entry => entry.id === 'voice-identity'), guest), true, 'guest can open voice enrollment');

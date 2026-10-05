@@ -15,7 +15,9 @@ const APPS=[
   {id:'training-lab',icon:'🎓',label:'Learning Lab',openers:['PanthoriumTraining.open'],launcherId:'sentinel-training-launcher'},
   {id:'production',icon:'📈',label:'Production Intelligence',openers:['PanthoriumProductionIntelligence.open'],launcherId:'phase10-production-launcher'},
   {id:'governance',icon:'🧭',label:'Governance',openers:['PanthoriumGovernance.open'],launcherId:'phase13-governance-launcher'},
-  {id:'sentinel-control',icon:'🛡️',label:'Sentinel Control',openers:['PanthoriumSentinelControl.open']}
+  {id:'sentinel-control',icon:'🛡️',label:'Sentinel Control',openers:['PanthoriumSentinelControl.open']},
+  {id:'media-studio',icon:'🎬',label:'Media Studio',openers:['PanthoriumMediaStudio.open']},
+  {id:'browser',icon:'🌐',label:'Panthorium Browser',openers:['PanthoriumBrowser.open']}
 ];
 
 let renderedFingerprint='';

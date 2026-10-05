@@ -16,7 +16,9 @@ Google Cloud กับ Google Play Billing เป็นคนละบริก�
 - ค่า AI ของ staging เลือก Vertex; การใช้ Vertex เป็นการเรียกบริการ AI เพิ่มเติมจาก API/ฐานข้อมูล และมีต้นทุน/การประมวลผลข้อมูลของตัวเอง
 - Files มี API สำหรับรายการ อัปโหลด ดาวน์โหลด และลบ โดย backend ใช้ account ID จาก session; ขีดจำกัดในโค้ดปัจจุบันคือ 20 MiB ต่อไฟล์, 100 MiB และ 1,000 ไฟล์ต่อบัญชี
 - Notes และ Files ใช้ bucket ที่ระบุผ่าน `PANTHORIUM_FILES_BUCKET`; staging/production ต้องใช้ bucket คนละใบและให้ Cloud Run runtime service account มี `roles/storage.objectUser` บน bucket ของสภาพแวดล้อมนั้นเท่านั้น
-- ปฏิทินและการเตือนมีโค้ด UI/API บางส่วนแล้ว แต่การซิงก์ครบทุกอุปกรณ์และการแจ้งเตือนขณะอุปกรณ์ออฟไลน์ยังต้องทดสอบและพัฒนาต่อ; การเก็บไฟล์สื่อขนาดใหญ่ยังต้องทดสอบกับ bucket จริง
+- Media Studio อ่านวิดีโอจาก Cloud Files, ถอดเสียง/สร้างคำบรรยาย และบันทึก transcript กับ MP4 ที่เรนเดอร์กลับเข้า Cloud Files ของบัญชีเดิม; จำกัดงานที่ 120 วินาที และผลลัพธ์ต้องผ่านการทดสอบกับ bucket จริงบน staging
+- Panthorium Browser มีหน้าต่างเว็บใน shell ของ Panthorium Browser; Guest ไม่มีสิทธิ์ใช้ Browser หรือ Media Studio ที่ผูกกับบัญชี
+- ปฏิทินและการเตือนมีโค้ด UI/API บางส่วนแล้ว แต่การซิงก์ครบทุกอุปกรณ์และการแจ้งเตือนขณะอุปกรณ์ออฟไลน์ยังต้องทดสอบและพัฒนาต่อ
 
 ## โครงสร้างเป้าหมาย
 
@@ -51,4 +53,4 @@ Cloud Storage มีต้นทุนหลายส่วน เช่น ป�
 
 ## ขอบเขตของ PR นี้
 
-PR นี้เพิ่มการย้าย Notes จาก Cloud SQL ไป Cloud Storage, API Cloud Files, การแยกข้อมูลตามบัญชี และเปิดการตรวจ Voice Identity ใน deployment ตามค่าที่กำหนด แต่ยังไม่สร้าง bucket/กำหนด IAM ให้อัตโนมัติ การทดสอบ Cloud Storage ใน CI ใช้ mock จึงต้องตรวจ bucket จริงและทำ staging acceptance ก่อน merge ส่วน Play Billing และการรองรับผู้ใช้ 10 ล้านคนยังไม่อยู่ในขอบเขตนี้
+ชุดเปลี่ยนแปลงบน staging เพิ่มการย้าย Notes ไป Cloud Storage, API Cloud Files, Media Studio ที่บันทึกไฟล์ผลลัพธ์ในบัญชีเดิม และหน้าต่าง Panthorium Browser พร้อมการแยกข้อมูลตามบัญชี; deployment ตรวจ Voice Identity ตามค่าที่กำหนด แต่ไม่ได้สร้าง bucket หรือ IAM ให้อัตโนมัติ การทดสอบ Cloud Storage ใน CI ใช้ mock จึงต้องตรวจ bucket จริงและทำ staging acceptance ก่อน merge ส่วน Play Billing และการรองรับผู้ใช้ 10 ล้านคนยังไม่อยู่ในขอบเขตนี้

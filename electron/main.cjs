@@ -20,6 +20,15 @@ function trustedOrigin(value){
     return false;
   }
 }
+function safeWebviewUrl(value){
+  try{
+    const url=new URL(value);
+    const host=url.hostname.toLowerCase().replace(/\.$/,'');
+    return url.protocol==='https:'&&!url.username&&!url.password&&!!host
+      &&host!=='localhost'&&!host.endsWith('.localhost')&&!host.endsWith('.local')&&!host.endsWith('.internal')
+      &&require('node:net').isIP(host)===0;
+  }catch(_){return false;}
+}
 function postTranscription(payload){
   return new Promise((resolve,reject)=>{
     const body=Buffer.from(JSON.stringify(payload));
@@ -193,6 +202,12 @@ async function checkForUpdates(options={}){
 function create(){const win=new BrowserWindow({width:1440,height:900,minWidth:960,minHeight:640,backgroundColor:'#050811',title:PRODUCT_NAME,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,spellcheck:false}});win.loadURL(START_URL);return win;}
 app.whenReady().then(()=>{
   installVoiceBridge();
+  app.on('web-contents-created',(_event,contents)=>{
+    if(contents.getType()!=='webview')return;
+    const guard=(event,url)=>{if(!safeWebviewUrl(url))event.preventDefault();};
+    contents.on('will-navigate',guard);
+    contents.on('will-redirect',guard);
+  });
   session.defaultSession.setPermissionCheckHandler((_wc,permission,origin)=>{
     return trustedOrigin(origin) && (permission==='media'||permission==='notifications');
   });

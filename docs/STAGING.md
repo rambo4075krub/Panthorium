@@ -59,9 +59,9 @@ Once configuration is complete, re-run the failed staging workflow.
 ## Routine
 
 After setting both repository bucket variables and the bucket IAM bindings, push reviewed changes to staging. The workflow tests, builds, deploys and publishes the /admin URL in its run summary.
-On staging, sign in to a test account and verify Notes can create, reload, edit, and delete a note; verify Files can upload, list, download, and delete; verify a second account cannot read the first account's objects. The current automated Cloud Storage tests use mocked requests, so this real-bucket check is required before promoting to `main`.
+On staging, sign in to test Admin and User accounts and verify Notes can create, reload, edit, and delete; verify Files can upload, list, download, and delete; confirm a second account cannot read the first account's objects and Guest cannot use private Files. In Media Studio, process a video from Cloud Files and confirm the transcript and rendered MP4 are saved to the same account's Cloud Files, with no local output. Verify Panthorium Browser opens from the product shell. The automated Cloud Storage tests use mocked requests, so this real-bucket check is required before promoting to `main`.
 Use a fresh test administrator and a separate ordinary test account created with existing user management.
-Do not use production passwords.
+Do not use production passwords. Log out of each test account when acceptance checks finish.
 Automated health and page checks are not voice acceptance tests.
 
 Before requesting production promotion:
