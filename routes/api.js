@@ -21,8 +21,9 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
   router.use(['/ai', '/agent'], auth, denyGuest);
   const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
   const speechLimiter = rateLimit({ windowMs: 60 * 1000, limit: 90, standardHeaders: true, legacyHeaders: false });
+  const identityNavigationLimiter = rateLimit({ windowMs: 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false });
   const agentLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
-  router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", release: process.env.K_REVISION || process.env.PANTHORIUM_RELEASE || require("../package.json").version, sentinel: sentinel.status(), time: new Date().toISOString() }));
+  router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", release: process.env.K_REVISION || process.env.PANTHORIUM_RELEASE || require("../package.json").version, sentinel: sentinel.status(), voiceIdentityConfigured: biometrics?.status?.().configured === true, voiceIdentityGateEnabled: biometrics?.gateEnabled === true, time: new Date().toISOString() }));
   router.get("/sentinel/status", auth, requirePermission("system:read"), (req, res) => res.json({ ok: true, ...sentinel.status() }));
   router.get("/ai/providers", auth, requirePermission("chat"), (req, res) => res.json({ ok: true, providers: sentinel.providerCatalog() }));
   router.get("/ai/operations", auth, requirePermission("chat"), async (req, res, next) => { try { res.json({ ok: true, metrics: await aiOperations.overview(req.user.sub, req.query.hours) }); } catch (error) { next(error); } });
@@ -55,6 +56,29 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     } catch (error) {
       audit.record("sentinel.speech_failed", { userId: req.user.sub, lang, error: error.message });
       res.status(502).json({ ok: false, error: "speech_unavailable" });
+    }
+  });
+  router.post("/speech/identity-navigation", auth, requirePermission("chat"), identityNavigationLimiter, async (req, res) => {
+    try {
+      if (!biometrics?.gateEnabled) return res.status(403).json({ ok: false, error: "voice_identity_gate_disabled" });
+      if (biometrics.status?.()?.configured === false) return res.status(503).json({ ok: false, error: "voice_verification_unavailable" });
+      const value = typeof req.body?.audio === "string" ? req.body.audio : "";
+      const match = /^data:(audio\/[a-z0-9.+-]+)(?:;[^,]*)?;base64,([A-Za-z0-9+/=]+)$/i.exec(value);
+      if (!match || match[2].length > 700000) return res.status(400).json({ ok: false, error: "invalid_audio" });
+      const audio = Buffer.from(match[2], "base64");
+      if (!audio.length || audio.length > 512 * 1024) return res.status(413).json({ ok: false, error: "audio_too_large" });
+      const profiles = await biometrics.list(req.user.sub);
+      if (profiles.length) return res.status(403).json({ ok: false, error: "voice_profile_exists" });
+      const transcription = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language || "th-TH");
+      const phrase = String(transcription?.text || "").normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
+      const registerPhrases = new Set(["ลงทะเบียน", "ลงทะเบียนเสียง", "เปิดลงทะเบียน", "เปิดลงทะเบียนเสียง"]);
+      const loginPhrases = new Set(["เข้าสู่ระบบ", "เปิดเข้าสู่ระบบ"]);
+      if (registerPhrases.has(phrase)) return res.json({ ok: true, intent: "register" });
+      if (loginPhrases.has(phrase)) return res.json({ ok: true, intent: "login" });
+      return res.status(403).json({ ok: false, error: "voice_navigation_not_recognized" });
+    } catch (error) {
+      audit.record("sentinel.identity_navigation_failed", { userId: req.user?.sub, error: String(error?.message || error).slice(0, 200) });
+      return res.status(503).json({ ok: false, error: "voice_navigation_unavailable" });
     }
   });
   router.get("/agent/tools", auth, agentLimiter, (req, res) => res.json({ ok: true, tools: agentService.catalogFor(req.user) }));

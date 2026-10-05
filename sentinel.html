@@ -506,6 +506,36 @@
             width: 16px; height: 16px;
             cursor: nwse-resize;
         }
+        /* Shared deep-space glass treatment for current and future windows. */
+        .window {
+            background: linear-gradient(148deg, rgba(17, 26, 48, .97), rgba(7, 13, 29, .98));
+            border-color: rgba(75, 232, 224, .3);
+            box-shadow: 0 18px 58px rgba(0, 0, 0, .56), 0 0 24px rgba(0, 205, 196, .09);
+        }
+        .window:focus-within { border-color: rgba(90, 239, 224, .58); box-shadow: 0 18px 58px rgba(0,0,0,.56), 0 0 28px rgba(0,205,196,.16); }
+        .window-titlebar { background: linear-gradient(100deg, rgba(21, 54, 77, .92), rgba(35, 31, 73, .9)); border-bottom: 1px solid rgba(84, 222, 228, .16); }
+        .window-title { color: #e5f6ff; text-shadow: 0 0 12px rgba(91, 222, 238, .16); }
+        .window-controls .win-btn:hover { background: rgba(64, 221, 217, .14); color: #c9fffb; }
+        #panthorium-voice-identity {
+            inset: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)) !important;
+            background: radial-gradient(ellipse at 85% 8%, rgba(64, 93, 170, .24), transparent 42%), linear-gradient(145deg, rgba(13, 25, 47, .98), rgba(5, 12, 27, .99)) !important;
+            border: 1px solid rgba(47, 225, 210, .43) !important;
+            box-shadow: 0 0 36px rgba(34, 219, 208, .12), 0 24px 80px rgba(0,0,0,.72) !important;
+            color: #e7f7ff !important;
+            backdrop-filter: blur(22px);
+        }
+        #panthorium-voice-identity section { background: linear-gradient(145deg, rgba(20, 39, 66, .88), rgba(10, 20, 40, .92)) !important; border-color: rgba(77, 206, 222, .26) !important; box-shadow: inset 0 1px rgba(255,255,255,.035); }
+        #panthorium-voice-identity h2, #panthorium-voice-identity h3 { color: #e8faff; text-shadow: 0 0 15px rgba(51, 215, 221, .18); }
+        #panthorium-voice-identity input, #panthorium-voice-identity select { background: rgba(4, 13, 29, .88) !important; border-color: rgba(72, 190, 211, .36) !important; border-radius: 10px !important; color: #effcff !important; outline: none; }
+        #panthorium-voice-identity input:focus, #panthorium-voice-identity select:focus { border-color: #43e6d3 !important; box-shadow: 0 0 0 3px rgba(67, 230, 211, .12); }
+        #panthorium-voice-identity button { border: 1px solid rgba(67, 230, 211, .36); border-radius: 10px; background: linear-gradient(120deg, rgba(22, 102, 111, .46), rgba(45, 48, 111, .43)); color: #e6fbff; padding: 8px 12px; cursor: pointer; }
+        #panthorium-voice-identity button:hover:not(:disabled) { border-color: rgba(93, 255, 230, .75); box-shadow: 0 0 18px rgba(51, 224, 212, .14); }
+        #panthorium-voice-identity button:disabled { opacity: .48; cursor: not-allowed; }
+        @media (max-width: 640px) {
+            #panthorium-voice-identity { inset: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)) !important; padding: 12px !important; border-radius: 14px !important; }
+            #panthorium-voice-identity > div:nth-child(2) { grid-template-columns: minmax(0, 1fr) !important; }
+            .window { max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+        }
 
         /* ========== APP CONTENT STYLES ========== */
         .app-content { padding: 16px; height: 100%; }
@@ -2029,9 +2059,7 @@
             };
             const transcribeRecorderBlob = async blob => {
                 const audio = await toDataUrl(blob);
-                if (!window.PanthoriumVoiceIdentity?.authorizeAudio) throw new Error("voice_verification_unavailable");
-                const authorization = await window.PanthoriumVoiceIdentity.authorizeAudio(audio);
-                if (authorization?.required && !authorization.matched) throw new Error(authorization.error || "voice_not_authorized");
+                // The backend verifies this exact audio once before sending it to STT.
                 const transcribeDirect = async () => {
                     const base = OS.config.backendUrl.replace(/\/$/, "");
                     const response = await authorizedFetch(base + "/api/speech/transcribe", {
@@ -2095,6 +2123,20 @@
                     }
                 } else {
                     ({ data, statusCode } = await transcribeWithFallback());
+                }
+
+                if (statusCode === 403 && data?.error === "voice_enrollment_required") {
+                    const base = OS.config.backendUrl.replace(/\/$/, "");
+                    const response = await authorizedFetch(base + "/api/speech/identity-navigation", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ audio, language: "th-TH" }),
+                        signal: AbortSignal.timeout(22000),
+                        cache: "no-store"
+                    });
+                    const navigation = await response.json().catch(() => ({}));
+                    if (response.ok && navigation.ok && ["register", "login"].includes(navigation.intent)) return { identityNavigation: navigation.intent };
+                    throw new Error(navigation.error || "voice_navigation_unavailable");
                 }
 
                 if (
@@ -2173,8 +2215,18 @@
                         voiceState = "processing";
                         status("processing", "กำลังถอดเสียง");
                         try {
-                            const text = await transcribeRecorderBlob(new Blob(chunks, { type: recorderMime }));
+                            const transcript = await transcribeRecorderBlob(new Blob(chunks, { type: recorderMime }));
                             if (captureTurnId !== voiceTurnId) return;
+                            if (transcript && typeof transcript === "object" && transcript.identityNavigation) {
+                                const identity = window.PanthoriumVoiceIdentity;
+                                if (transcript.identityNavigation === "login") identity?.openLogin?.();
+                                else identity?.open?.();
+                                voiceState = "idle";
+                                status("ready", "เปิดหน้าต่าง Voice Identity แล้ว");
+                                restartListening();
+                                return;
+                            }
+                            const text = String(transcript || "").trim();
                             window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
                             await processTranscript(text, captureTurnId);
                         } catch (error) {
@@ -3149,9 +3201,7 @@
             for (let offset = 0; offset < bytes.length; offset += step) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + step, bytes.length)));
             const mimeType = String(blob.type || chatRecorderMime).split(";")[0] || "audio/webm";
             const audio = "data:" + mimeType + ";base64," + btoa(binary);
-            if (!window.PanthoriumVoiceIdentity?.authorizeAudio) throw new Error("voice_verification_unavailable");
-            const authorization = await window.PanthoriumVoiceIdentity.authorizeAudio(audio);
-            if (authorization?.required && !authorization.matched) throw new Error(authorization.error || "voice_not_authorized");
+            // The backend verifies this exact audio once before sending it to STT.
             const base = OS.config.backendUrl.replace(/\/$/, "");
             const post = async () => {
                 const response = await authorizedFetch(base + "/api/speech/transcribe", {
@@ -3178,6 +3228,18 @@
                 }
             } else {
                 ({ data, statusCode } = await post());
+            }
+            if (statusCode === 403 && data?.error === "voice_enrollment_required") {
+                const response = await authorizedFetch(base + "/api/speech/identity-navigation", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ audio, language: "th-TH" }),
+                    signal: AbortSignal.timeout(22000),
+                    cache: "no-store"
+                });
+                const navigation = await response.json().catch(() => ({}));
+                if (response.ok && navigation.ok && ["register", "login"].includes(navigation.intent)) return { identityNavigation: navigation.intent };
+                throw new Error(navigation.error || "voice_navigation_unavailable");
             }
             if (statusCode < 200 || statusCode >= 300 || !data.ok || typeof data.text !== "string" || !data.text.trim()) {
                 throw new Error(data.error || "transcription_unavailable");
@@ -3210,7 +3272,16 @@
                 }
                 toast("กำลังถอดเสียง...", 4000);
                 try {
-                    const text = await transcribeChatBlob(new Blob(chunks, { type: chatRecorderMime }));
+                    const transcript = await transcribeChatBlob(new Blob(chunks, { type: chatRecorderMime }));
+                    if (transcript && typeof transcript === "object" && transcript.identityNavigation) {
+                        const identity = window.PanthoriumVoiceIdentity;
+                        if (transcript.identityNavigation === "login") identity?.openLogin?.();
+                        else identity?.open?.();
+                        toast("เปิดหน้าต่าง Voice Identity แล้ว");
+                        window.PanthoriumVoice?.resume();
+                        return;
+                    }
+                    const text = String(transcript || "").trim();
                     input.value = text;
                     window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
                     await send({ resumeGlobalVoice: true });
@@ -3734,7 +3805,6 @@
                 '<button id="files-refresh" type="button">รีเฟรช</button>' +
                 '<button id="files-upload" type="button">อัปโหลดไฟล์</button>' +
                 '<input id="files-input" type="file" hidden>' +
-                '<button id="files-login" type="button" hidden>เข้าสู่ระบบ / สมัครบัญชี</button>' +
             '</div>' +
             '<div style="font-size:12px;opacity:.72;">ไฟล์อยู่ใน Cloud Storage ส่วนตัวของบัญชีนี้ • จำกัด 20 MB ต่อไฟล์ และ 100 MB ต่อบัญชีในรุ่นทดสอบ</div>' +
             '<div id="files-list" style="overflow:auto;flex:1;display:flex;flex-direction:column;gap:7px;"></div>' +
@@ -3746,7 +3816,6 @@
         const refreshButton = document.getElementById("files-refresh");
         const uploadButton = document.getElementById("files-upload");
         const input = document.getElementById("files-input");
-        const loginButton = document.getElementById("files-login");
         let busy = false;
         const isCurrent = () => OS.windows.has("files");
         const apiBase = () => String(OS.config.backendUrl || "").replace(/\/$/, "");
@@ -3765,13 +3834,13 @@
         };
         const messageFor = error => {
             const code = String(error && error.message || "");
-            if (code === "account_required") return "เข้าสู่ระบบด้วยบัญชีผู้ใช้ก่อน จึงจะเปิดไฟล์บนคลาวด์ได้";
+            if (code === "account_required") return "ยังไม่สามารถใช้ Cloud Storage กับเซสชันนี้ได้";
             if (code === "files_storage_unconfigured") return "Staging ยังไม่ได้กำหนด bucket สำหรับ Files";
             if (code === "files_storage_permission_denied") return "Cloud Run ยังไม่มีสิทธิ์เข้าถึง bucket";
             if (code === "files_quota_exceeded") return "พื้นที่บัญชีถึงขีดจำกัด 100 MB";
             if (code === "files_count_limit") return "บัญชีมีไฟล์ถึงขีดจำกัดรุ่นทดสอบ";
             if (code === "file_too_large") return "ไฟล์ใหญ่เกิน 20 MB";
-            if (error && error.status === 401) return "เซสชันหมดอายุ • เข้าสู่ระบบแล้วลองอีกครั้ง";
+            if (error && error.status === 401) return "เซสชันใช้ Files ไม่ได้ • รีเฟรชเพื่อเชื่อมต่อใหม่";
             return "เชื่อมต่อ Cloud Storage ไม่สำเร็จ • ลองอีกครั้ง";
         };
         async function ensureAccount() {
@@ -3780,12 +3849,10 @@
             }
             if (!isCurrent()) return "";
             if (!isRegistered()) {
-                loginButton.hidden = false;
                 uploadButton.disabled = true;
-                status.textContent = "เข้าสู่ระบบหรือสมัครบัญชีเพื่อใช้ไฟล์บนคลาวด์";
+                status.textContent = "Cloud Storage ยังไม่พร้อมใช้งานสำหรับเซสชันนี้";
                 return "";
             }
-            loginButton.hidden = true;
             uploadButton.disabled = false;
             return ownerId();
         }
@@ -3819,12 +3886,6 @@
         }
         refreshButton.addEventListener("click", () => { loadFiles(); });
         uploadButton.addEventListener("click", () => input.click());
-        loginButton.addEventListener("click", () => {
-            const identity = window.PanthoriumVoiceIdentity;
-            if (typeof identity?.openLogin === "function") identity.openLogin();
-            else if (typeof identity?.open === "function") identity.open();
-            else if (typeof toast === "function") toast("เปิด Voice Identity เพื่อเข้าสู่ระบบหรือสมัครบัญชี");
-        });
         input.addEventListener("change", async () => {
             const file = input.files && input.files[0];
             input.value = "";

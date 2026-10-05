@@ -11,6 +11,7 @@ const { AgentWorkflowService } = require('../services/agentWorkflowService');
 const { createApiRouter } = require('../routes/api');
 const catalog = require('../voice-window-catalog');
 const source = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
+assert.equal((source('sentinel.html').match(/authorizeAudio\(audio\)/g) || []).length, 0, 'both voice input paths rely on the single server-side speaker check');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const admin = { id: 'voice-admin', username: 'admin', permissions: ['chat', 'system:read', 'settings', 'sentinel:command'], roles: ['administrator'] };
 const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'system:read'], roles: ['guest'] };
@@ -22,6 +23,8 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert.equal(catalog.parse(`${alias} เปิดขึ้น`)?.action, `open_${app.key}`, `target-first ${alias}`);
   }
   assert.equal(catalog.parse('ช่วยเปิดหน้าต่าง Learning Lab ให้หน่อยครับ')?.action, 'open_learning_lab');
+  assert.equal(catalog.parse('ลงทะเบียน')?.action, 'open_voice_identity', 'bare registration phrase opens Voice Identity');
+  assert.equal(catalog.parse('เข้าสู่ระบบ')?.action, 'open_voice_identity', 'bare login phrase opens Voice Identity');
   assert.equal(catalog.parse('เปิดโน้ต เปิดโน้ต')?.action, 'open_notes', 'collapse a duplicated Notes transcript');
   assert.equal(catalog.parse('เปิดโน้ต เปิดโน๊ต')?.action, 'open_notes', 'accept a duplicated transcript with alias variation');
   assert.equal(catalog.parse('เปิดโน้ต แล้วเปิด Settings'), null, 'do not discard a second app command');
@@ -157,6 +160,10 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       assert.equal(result.text, `เปิด ${app.label}`, 'on-screen result identifies the command');
       assert.equal(isVisible(app), true, `${app.label} did not appear`);
       const root = w.document.querySelector(app.selector);
+      if (app.id === 'files') {
+        assert.equal(root.querySelector('#files-login'), null, 'Files does not show login/signup controls');
+        assert.doesNotMatch(root.textContent, /เข้าสู่ระบบ|สมัครบัญชี/, 'Files does not send users through account creation');
+      }
       if (app.id === 'voice-identity') assert(root.querySelector('[data-type] option[value="administrator"]'), 'administrator enrollment option appears on admin page');
       if (app.external) {
         assert.equal(root.querySelector('iframe'), null, `${app.label}: must not embed an iframe`);
@@ -401,13 +408,17 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     const gw = guestDom.window;
     gw.OS = { config: { accessToken: 'guest-session-token' }, state: { user: guest } };
     gw.PanthoriumAuth = { isGuest: () => true, isAdministrator: () => false, isAdminEntry: () => false, hasPermission: permission => permission === 'chat' };
-    gw.fetch = async url => ({ ok: true, status: 200, json: async () => String(url).includes('/status') ? { configured: true, gateEnabled: false } : { profiles: [] } });
+    gw.fetch = async url => ({ ok: true, status: 200, json: async () => String(url).includes('/status') ? { configured: true, gateEnabled: true } : { profiles: [] } });
     gw.eval(source('voice-identity-ui.js'));
     gw.document.dispatchEvent(new gw.Event('DOMContentLoaded'));
     await tick();
     assert(gw.document.getElementById('voice-identity-launcher'), 'guest start menu keeps the Voice Identity icon');
+    assert.equal(gw.document.querySelector('#voice-identity-launcher span')?.textContent, 'ลงทะเบียน/เข้าสู่ระบบ/Voice Identity', 'launcher label describes registration and login');
     await gw.PanthoriumVoiceIdentity.open();
     await new Promise(resolve => setTimeout(resolve, 0));
+    gw.PanthoriumVoiceIdentity.openLogin();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(gw.document.activeElement, gw.document.querySelector('[data-login-email]'), 'voice login phrase focuses the login email without leaving Voice Identity');
     assert.deepEqual([...gw.document.querySelectorAll('[data-type] option')].map(option => option.value), ['user', 'family'], 'guest registration offers user and family only');
     assert(gw.document.querySelector('[data-email][type="email"]'), 'guest voice signup asks for email');
     assert(gw.document.querySelector('[data-password][type="password"]'), 'guest voice signup asks for a password');
@@ -416,8 +427,37 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert(gw.document.querySelector('[data-login-email]') && gw.document.querySelector('[data-forgot]'), 'guest can sign in or recover password');
     assert(gw.document.querySelector('[data-reset-email][type="email"]') && gw.document.querySelector('[data-reset-password-confirm][type="password"]'), 'password recovery has an email and password confirmation field');
     assert(gw.document.querySelector('[data-remember]') && gw.document.querySelector('[data-login-remember]'), 'remember choice appears on signup and login');
-    assert.match(gw.document.querySelector('#panthorium-voice-identity [data-state]').textContent, /โหมดลงทะเบียน\/ทดสอบ.*ยังปิดอยู่/, 'guest sees that voice gating is still disabled during staged testing');
+    assert.match(gw.document.querySelector('#panthorium-voice-identity [data-state]').textContent, /ด่านคัดเสียงเปิดใช้งานแล้ว/, 'guest sees the staged speaker gate enabled');
     gw.close();
-    console.log('PASS: guest start menu keeps voice registration and shows only user/family types');
+    const signedDom = new JSDOM('<!doctype html><html><body><div id="sm-apps"></div></body></html>', { url: 'https://panthorium-staging.example.run.app/', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
+    const sw = signedDom.window;
+    const securityRequests = [];
+    sw.OS = { config: { accessToken: 'signed-user-token' }, state: { user: { id: 'signed-user', email: 'owner@example.com', roles: ['user'], permissions: ['chat'] } } };
+    sw.PanthoriumAuth = { isGuest: () => false, isAdministrator: () => false, isAdminEntry: () => false, hasPermission: permission => permission === 'chat' };
+    sw.fetch = async (url, options = {}) => {
+      const path = String(url); securityRequests.push({ path, body: options.body ? JSON.parse(options.body) : null });
+      if (path.includes('/status')) return { ok: true, status: 200, json: async () => ({ configured: true, gateEnabled: true }) };
+      if (path.includes('/profiles')) return { ok: true, status: 200, json: async () => ({ profiles: [] }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    };
+    sw.eval(source('voice-identity-ui.js'));
+    sw.document.dispatchEvent(new sw.Event('DOMContentLoaded'));
+    await tick();
+    await sw.PanthoriumVoiceIdentity.open();
+    await tick();
+    assert.equal(sw.document.querySelector('[data-security-email]')?.value, 'owner@example.com', 'signed-in account email is used in security panel');
+    assert(sw.document.querySelector('[data-security-otp]') && sw.document.querySelector('[data-security-password]') && sw.document.querySelector('[data-security-password-confirm]'), 'password change requires email OTP and confirmation fields');
+    sw.document.querySelector('[data-security-request-otp]').click(); await new Promise(resolve => setTimeout(resolve, 0));
+    assert(securityRequests.some(request => request.path === '/api/auth/password/forgot'), 'password change requests an email OTP');
+    sw.document.querySelector('[data-security-otp]').value = '123456';
+    sw.document.querySelector('[data-security-password]').value = 'new-password-123';
+    sw.document.querySelector('[data-security-password-confirm]').value = 'new-password-123';
+    sw.document.querySelector('[data-security-password-submit]').click(); await new Promise(resolve => setTimeout(resolve, 0));
+    const resetRequest = securityRequests.find(request => request.path === '/api/auth/password/reset');
+    assert.equal(resetRequest?.body?.confirmPassword, 'new-password-123', 'confirmed password is sent with OTP');
+    assert.equal(sw.document.querySelector('[data-security-state]').textContent, 'เปลี่ยนรหัสผ่านสำเร็จ');
+    sw.close();
+    console.log('PASS: signed-in Voice Identity can change password with email OTP and confirmation');
+    console.log('PASS: guest and signed-in Voice Identity security flows are separated');
   } finally { w.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

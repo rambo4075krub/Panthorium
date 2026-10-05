@@ -16,7 +16,7 @@
     { id: 'goals', key: 'goals', label: 'Goals', permission: 'chat', accountRequired: true, aliases: ['Goals', 'Goal', 'เป้าหมาย', 'ติดตามเป้าหมาย', 'เป้าหมายของฉัน'], selector: '.window[data-id="goals"]', opener: 'PanthoriumGoals.open', windowId: 'goals', refresher: 'PanthoriumGoals.refresh' },
     { id: 'assistant-preferences', key: 'sentinel_preferences', label: 'Sentinel Preferences', permission: 'chat', accountRequired: true, aliases: ['Sentinel Preferences', 'ความชอบ Sentinel', 'ตั้งค่าความชอบ Sentinel', 'ปรับแต่ง Sentinel', 'ตั้งค่าการตอบ'], selector: '.window[data-id="assistant-preferences"]', opener: 'PanthoriumAssistantPreferences.open', windowId: 'assistant-preferences', refresher: 'PanthoriumAssistantPreferences.refresh' },
     { id: 'settings', key: 'settings', label: 'Settings', permission: 'settings', aliases: ['Settings', 'Setting', 'การตั้งค่า', 'ตั้งค่า'], selector: '.window[data-id="settings"]', opener: 'openSettings', windowId: 'settings' },
-    { id: 'voice-identity', key: 'voice_identity', label: 'Voice Identity', permission: 'chat', aliases: ['Voice Identity', 'จดจำเสียง', 'ลงทะเบียนเสียง', 'เสียงที่อนุญาต'], selector: '#panthorium-voice-identity', opener: 'PanthoriumVoiceIdentity.open', closeButton: '[data-close]', refresher: 'PanthoriumVoiceIdentity.refresh' },
+    { id: 'voice-identity', key: 'voice_identity', label: 'Voice Identity', permission: 'chat', aliases: ['Voice Identity', 'จดจำเสียง', 'ลงทะเบียนเสียง', 'ลงทะเบียน', 'เข้าสู่ระบบ', 'เสียงที่อนุญาต'], selector: '#panthorium-voice-identity', opener: 'PanthoriumVoiceIdentity.open', closeButton: '[data-close]', refresher: 'PanthoriumVoiceIdentity.refresh' },
     { id: 'security', key: 'security_dashboard', label: 'Security', permission: 'settings', role: 'administrator', aliases: ['Security Dashboard', 'Security', 'ซีเคียวริตี้', 'แดชบอร์ดความปลอดภัย', 'ความปลอดภัย'], selector: '.window[data-id="security-dashboard"]', opener: 'PanthoriumSecurityDashboard.open', windowId: 'security-dashboard', refreshButton: '[data-p3-refresh]' },
     { id: 'ai-platform', key: 'ai_dashboard', label: 'AI Platform', permission: 'chat', aliases: ['AI Platform', 'AI Dashboard', 'เอไอแพลตฟอร์ม', 'แดชบอร์ดเอไอ', 'สถานะเอไอ', 'สถานะ Sentinel', 'สถานะเซนทิเนล'], selector: '#phase4-ai-dashboard', opener: 'PanthoriumAI.open', closeButton: '#ai-close', refresher: 'PanthoriumAI.refresh' },
     { id: 'sentinel-agent', key: 'sentinel_agent', label: 'Sentinel Agent', permission: 'chat', aliases: ['Sentinel Agent', 'เซนทิเนลเอเจนต์', 'เซนติเนลเอเจนท์'], selector: '#phase5-agent-ui', opener: 'PanthoriumAgent.open', closeButton: '#agent-close', refresher: 'PanthoriumAgent.history' },
@@ -77,6 +77,7 @@
     const target = aliases.find(item => text.includes(item.alias));
     if (!target) return null;
     if (/อย่า|ห้าม|ไม่ต้อง|ไม่อยาก|ไม่ให้|dont|donot|never/.test(text)) return { error: 'voice_command_negated' };
+    if (target.app.id === 'voice-identity' && ['ลงทะเบียน', 'เข้าสู่ระบบ'].includes(text)) return { app: target.app, operation: 'open', action: 'open_voice_identity', focusLogin: text === 'เข้าสู่ระบบ' };
     // Mobile STT can repeat one short command or vary the final vowel on the retry.
     // Remove aliases only for the selected app; a second app name remains unparsed.
     let rest = text;

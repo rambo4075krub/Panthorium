@@ -8,6 +8,11 @@ const { JSDOM } = require('jsdom');
   const base = new URL(process.env.STAGING_URL);
   assert.equal(base.protocol, 'https:');
   assert(base.hostname.includes('staging') && base.hostname.endsWith('.run.app'), 'staging only');
+  const healthResponse = await fetch(new URL('/api/health', base), { signal: AbortSignal.timeout(15000) });
+  assert.equal(healthResponse.status, 200, 'staging health endpoint');
+  const health = await healthResponse.json();
+  assert.equal(health.voiceIdentityConfigured, true, 'speaker and template encryption must be configured');
+  assert.equal(health.voiceIdentityGateEnabled, true, 'staging must enforce enrolled-speaker verification');
   const post = (path, body, token) => fetch(new URL(path, base), {
     method: 'POST', headers: { Origin: base.origin, 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body), signal: AbortSignal.timeout(15000)
