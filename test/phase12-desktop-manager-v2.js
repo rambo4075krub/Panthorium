@@ -37,7 +37,7 @@ assert.match(shell, /panthorium\.window\.preferences\.v1/, 'window preferences a
 assert.match(shell, /fullscreenOnOpen:\s*true/, 'all managed app windows open fullscreen by default');
 assert.match(shell, /minimizeToStartMenu:\s*true/, 'the shared preference keeps minimized windows in Start Menu');
 assert.match(shell, /preserveStateUntilClose:\s*true/, 'window state persists until explicit close');
-assert.match(shell, /data-panthorium-immersive/, 'the shell tracks immersive fullscreen state');
+assert.match(shell, /dataset\.panthoriumImmersive/, 'the shell tracks immersive fullscreen state');
 assert.doesNotMatch(shell, /html\[data-panthorium-immersive="true"\]\s*\.window\.maximized[\s\S]*?padding:\s*0\s*!important;/, 'visible system-bar insets are never cleared in immersive fullscreen');
 assert.match(shell, /requestFullscreen\(\{ navigationUI: "hide" \}\)/, 'launcher taps request system/browser immersive mode');
 assert.doesNotMatch(shell, /class="win-btn max"/, 'native windows no longer expose a restore-size control');
