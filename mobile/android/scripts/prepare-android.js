@@ -116,8 +116,12 @@ if (!activity.includes(immersiveMarker)) {
         final int baseBottom = root.getPaddingBottom();
         final int types = WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout();
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
-            // Preserve safe-area spacing while immersive system bars are hidden.
-            Insets safe = insets.getInsetsIgnoringVisibility(types);
+            Insets visible = insets.getInsets(types);
+            Insets stable = insets.getInsetsIgnoringVisibility(types);
+            // Keep the top safe area while immersive; stable landscape side insets
+            // would otherwise shift the entire Panthorium surface inward.
+            Insets safe = Insets.of(visible.left, Math.max(visible.top, stable.top),
+                visible.right, visible.bottom);
             view.setPadding(baseLeft + safe.left, baseTop + safe.top,
                 baseRight + safe.right, baseBottom + safe.bottom);
             return new WindowInsetsCompat.Builder(insets).setInsets(types, Insets.NONE).build();

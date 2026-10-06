@@ -33,6 +33,20 @@ async function main() {
   assert.doesNotMatch(shell, /html\[data-panthorium-immersive="true"\][^{}]*\.panthorium-window-fullscreen[^{}]*\{[^}]*padding:\s*0\s*!important/i, 'immersive state cannot erase safe-area padding from function windows');
   assert.doesNotMatch(shell, /html\[data-panthorium-immersive="true"\]\s*\.window\.maximized[\s\S]*?padding:\s*0\s*!important;/, 'immersive fullscreen must not erase safe-area padding');
 
+  const sharedResponsiveRule = /\.window \*, \.panthorium-managed-window \* \{([^}]+)\}/.exec(shell)?.[1] || '';
+  assert.match(sharedResponsiveRule, /box-sizing:\s*border-box/, 'all current and future function window content uses border-box sizing');
+  assert.match(sharedResponsiveRule, /min-width:\s*0/, 'function window children can shrink instead of overflowing to the right');
+  const loginScreenRule = /#login-screen \{([^}]+)\}/.exec(shell)?.[1] || '';
+  const loginCardRule = /\.login-card \{([^}]+)\}/.exec(shell)?.[1] || '';
+  assert.match(loginScreenRule, /overflow-x:\s*hidden/);
+  assert.match(loginScreenRule, /overflow-y:\s*auto/);
+  assert.match(loginCardRule, /box-sizing:\s*border-box/);
+  assert.match(loginCardRule, /width:\s*100%[\s\S]*max-width:\s*360px/);
+  assert.match(shell, /@media \(max-height: 540px\) and \(orientation: landscape\)/, 'admin login is compact and scrollable on short landscape screens');
+  const voiceIdentity = fs.readFileSync(require.resolve('../voice-identity-ui.js'), 'utf8');
+  assert.match(voiceIdentity, /box-sizing:border-box;position:fixed;inset:5%;max-width:100vw/);
+  assert.match(voiceIdentity, /@media\(max-width:760px\)/, 'voice registration and login switch to a single column on phones');
+
   window.PanthoriumWindowManager = manager;
   window.PanthoriumWindowCatalog = {
     apps: [{ id: 'ai-platform', label: 'AI Platform', selector: '#ai-window', closeButton: '[data-close]' }]
