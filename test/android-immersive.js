@@ -32,11 +32,9 @@ try {
   assert.match(java, /onWindowFocusChanged\(boolean hasFocus\)/, 'immersive mode is restored when the app regains focus');
   assert.match(java, /BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE/, 'system bars can temporarily appear by swipe');
   assert.match(java, /ViewCompat\.setOnApplyWindowInsetsListener/, 'native insets are installed for the app content root');
-  assert.match(java, /Insets visible = insets\.getInsets\(types\)/, 'left, right and bottom keep the current visible-inset behavior');
-  assert.match(java, /Insets stable = insets\.getInsetsIgnoringVisibility\(types\)/, 'stable system insets are available while immersive bars are hidden');
-  assert.match(java, /Insets safe = Insets\.of\(visible\.left, Math\.max\(visible\.top, stable\.top\),\s*visible\.right, visible\.bottom\)/, 'only the top inset stays reserved while side insets remain unchanged');
-  assert.match(java, /setPadding\(baseLeft \+ safe\.left, baseTop \+ safe\.top/, 'the Capacitor content is moved inside visible system bars');
-  assert.match(java, /setInsets\(types, Insets\.NONE\)/, 'handled system insets are cleared before reaching WebView to avoid double padding');
+  assert.match(java, /WindowInsetsCompat\.Type\.systemBars\(\) \| WindowInsetsCompat\.Type\.displayCutout\(\)/, 'system-bar and display-cutout insets are handled');
+  assert.match(java, /view\.setPadding\(0, 0, 0, 0\)/, 'the native app surface fills every edge in portrait and landscape');
+  assert.match(java, /setInsets\(types, Insets\.NONE\)/, 'system bars and display-cutout insets are cleared before reaching WebView');
   assert.match(java, /SYSTEM_UI_FLAG_IMMERSIVE_STICKY/, 'older Android releases use sticky immersive mode');
   const first = java.match(/PANTHORIUM_IMMERSIVE_MODE/g).length;
   run();

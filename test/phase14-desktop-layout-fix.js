@@ -37,6 +37,17 @@ assert(shell.includes('orbAIActive || aiSpeechActive || synthesisSpeaking'), 'sp
 assert(shell.includes('1 - Math.exp(-delta * (aiTarget ? 8 : 3.5))'), 'AI motion should return smoothly to idle');
 assert(shell.includes('1 - Math.exp(-delta * (sensedVoice > orbVoiceEnergy ? 14 : 5))'), 'voice motion should return smoothly to idle');
 assert(shell.includes('id="orb-transcript"'), 'desktop should include the three-line AI transcript');
+const transcriptMarkup = shell.match(/<section id="orb-transcript"[\s\S]*?<\/section>/)?.[0] || '';
+assert(transcriptMarkup.includes('id="orb-system-notice"'), 'system notices should render below the Orb transcript');
+assert(transcriptMarkup.includes('aria-live="off"'), 'system notices should stay silent');
+assert(!shell.includes('id="toast"'), 'the top popup should be removed');
+const toastBody = shell.match(/function toast\(msg, duration = 2500\) \{([\s\S]*?)\n    \}/)?.[1] || '';
+assert(toastBody.includes('orb-system-notice'), 'toast text should target the under-Orb message box');
+assert(!/\bspeak\s*\(/.test(toastBody), 'system notices should never be spoken aloud');
+assert(shell.includes('const fullscreenOnOpen = id !== "calculator"'), 'calculator windows should open at their normal size');
+assert(shell.includes('const fullscreen = id !== "calculator"'), 'calculator is excluded from fullscreen window registration');
+const appFullscreenRules = shell.slice(shell.indexOf('.window.maximized {'), shell.indexOf('.window-titlebar {', shell.indexOf('.window.maximized {')));
+assert(!/safe-area-inset-/.test(appFullscreenRules), 'fullscreen apps fill all edges in portrait and landscape');
 assert(shell.includes('data-orb-line="previous"'), 'transcript should include the previous sentence');
 assert(shell.includes('data-orb-line="current"'), 'transcript should include the current sentence');
 assert(shell.includes('data-orb-line="next"'), 'transcript should include unread text');

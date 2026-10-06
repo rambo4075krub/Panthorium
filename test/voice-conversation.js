@@ -215,22 +215,22 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     failProvider = true;
     await utter('การเรียนรู้คืออะไร');
     assert.equal(playback.length, 7, 'never speak an API failure as a successful AI answer');
-    assert.match(w.document.getElementById('toast').textContent, /no_provider_available/);
+    assert.match(w.document.getElementById('orb-system-notice').textContent, /no_provider_available/);
     failProvider = false; blockPlayback = true;
     await utter('การเรียนรู้คืออะไร');
     assert.equal(playback.length, 7);
-    assert.match(w.document.getElementById('toast').textContent, /เล่นเสียง.*ไม่สำเร็จ/);
+    assert.match(w.document.getElementById('orb-system-notice').textContent, /เล่นเสียง.*ไม่สำเร็จ/);
     blockPlayback = false; failSpeech = true;
     const failedSpeechAttemptsBefore = speechAttempts;
     await utter('การเรียนรู้คืออะไร');
-    assert.match(w.document.getElementById('toast').textContent, /เล่นเสียง.*ไม่สำเร็จ/);
+    assert.match(w.document.getElementById('orb-system-notice').textContent, /เล่นเสียง.*ไม่สำเร็จ/);
     assert.equal(speechAttempts - failedSpeechAttemptsBefore, 1, 'a failed TTS request must not trigger a chain of duplicate retries');
     failSpeech = false;
 
     rejectAlways = '/api/chat/stream'; refreshOK = false;
     const before = requests.length;
     await utter('การเรียนรู้คืออะไร');
-    assert.match(w.document.getElementById('toast').textContent, /เข้าสู่ระบบ/);
+    assert.match(w.document.getElementById('orb-system-notice').textContent, /เข้าสู่ระบบ/);
     assert.equal(requests.slice(before).filter(r => r.pathname === '/api/chat/stream').length, 1, 'failed refresh must not retry as another user');
     assert.equal(playback.length, 7);
     rejectAlways = ''; refreshOK = true;
@@ -261,7 +261,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       [() => { throw Object.assign(new Error('timeout'), { name: 'TimeoutError' }); }, /รอคำตอบ AI เกินเวลา/]
     ]) {
       chatFailure = response; await utter('การเรียนรู้คืออะไร');
-      assert.match(w.document.getElementById('toast').textContent, expected);
+      assert.match(w.document.getElementById('orb-system-notice').textContent, expected);
       assert.equal(playback.length, playbackBeforeInvalidResponses, 'invalid/forbidden responses must not produce speech');
     }
     chatFailure = null;
@@ -324,7 +324,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     w.PanthoriumVoice.resume();
     await new Promise(resolve => setTimeout(resolve, 800));
     assert.equal(globalMic.starts, startsBeforeFailure, 'network failure latches across onend and resume');
-    assert.match(w.document.getElementById('toast').textContent, /Electron.*network/);
+    assert.match(w.document.getElementById('orb-system-notice').textContent, /Electron.*network/);
     assert.equal(w.PanthoriumVoice.state(), 'idle');
     await w.document.getElementById('global-voice').onclick();
     assert.equal(globalMic.starts, startsBeforeFailure + 1, 'explicit mic click permits a fresh attempt');
@@ -335,7 +335,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     await chatMic.stop();
     await new Promise(resolve => setTimeout(resolve, 800));
     assert.equal(globalMic.starts, beforeChatError, 'chat mic failure must not transfer the retry loop to global mic');
-    assert.match(w.document.getElementById('toast').textContent, /Electron.*network/);
+    assert.match(w.document.getElementById('orb-system-notice').textContent, /Electron.*network/);
     const afterMicFailure = await w.callAI('การเรียนรู้คืออะไร');
     assert.equal(afterMicFailure.text, answer, 'typing still works after recognition fails');
 

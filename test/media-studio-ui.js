@@ -61,8 +61,8 @@ async function main() {
   assert.match(css, /orientation:landscape/);
   const sharedShell = fs.readFileSync(require.resolve('../sentinel.html'), 'utf8');
   const sharedFullscreenRule = /\.panthorium-managed-window\.panthorium-window-fullscreen\s*\{([\s\S]*?)\n\s*\}/.exec(sharedShell)?.[1] || '';
-  assert.match(sharedFullscreenRule, /padding:\s*env\(safe-area-inset-top,\s*0px\)\s+env\(safe-area-inset-right,\s*0px\)\s+env\(safe-area-inset-bottom,\s*0px\)\s+env\(safe-area-inset-left,\s*0px\)/, 'Media Studio receives safe-area spacing from the shared window rule');
-  assert.doesNotMatch(css, /safe-area-inset|data-panthorium-immersive/, 'Media Studio does not override the shared safe-area rule');
+  assert.match(sharedFullscreenRule, /padding:\s*0px\s+0px\s+0px\s+0px/, 'Media Studio fills all viewport edges in portrait and landscape');
+  assert.doesNotMatch(css, /safe-area-inset|data-panthorium-immersive/, 'Media Studio follows the shared immersive edge-to-edge rule');
   assert.match(css, /100dvh/);
   assert.ok(root.classList.contains('panthorium-managed-window'), 'Media Studio is registered with the common window manager');
   assert.ok(root.classList.contains('panthorium-window-fullscreen'), 'Media Studio uses the common fullscreen window preference');
