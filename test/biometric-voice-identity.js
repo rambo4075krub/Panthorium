@@ -38,8 +38,15 @@ const vectorAtSimilarity = (reference, score) => {
 
 (async () => {
   const originalFetch = global.fetch;
-  let nextVector = vector(2), embeddingCalls = 0;
-  global.fetch = async () => { embeddingCalls += 1; return { ok: true, json: async () => ({ signalPresent: true, embedding: nextVector }) }; };
+  let nextVector = vector(2), embeddingCalls = 0, nextProviderError = null;
+  global.fetch = async () => {
+    embeddingCalls += 1;
+    if (nextProviderError) {
+      const error = nextProviderError; nextProviderError = null;
+      return { ok: false, status: 400, json: async () => ({ error }) };
+    }
+    return { ok: true, json: async () => ({ signalPresent: true, speechDurationSeconds: 1.4, embedding: nextVector }) };
+  };
   try {
     const repository = new Repository();
     const service = new BiometricIdentityService({ repository, providerUrl: 'https://speaker.test', providerToken: 'test-only-token', encryptionKey: 'test-only-key', matchThreshold: 0.82, enrollmentThreshold: 0.76 });
@@ -103,6 +110,9 @@ const vectorAtSimilarity = (reference, score) => {
       encryptionKey: 'test-only-key', matchThreshold: 0.75, enrollmentThreshold: 0.76
     });
     assert.equal(slightlyLoweredService.status().matchThreshold, 0.75, 'the configured staging threshold is exposed to the signed-in diagnostics UI');
+    assert.equal(slightlyLoweredService.status().minimumActiveSpeechSeconds, 1);
+    assert.equal(slightlyLoweredService.status().shortUtteranceCalibrationEnabled, false);
+    assert.equal(slightlyLoweredService.status().livenessSupported, false);
     const base = vector(2);
     const targetScore = 0.76;
     nextVector = vectorAtSimilarity(base, targetScore);
@@ -111,6 +121,8 @@ const vectorAtSimilarity = (reference, score) => {
     const loweredThresholdResult = await slightlyLoweredService.verify({ ownerUserId: 'u1', audio: audio(41) });
     assert.equal(loweredThresholdResult.matched, true, 'a 0.76 match passes the staging 0.75 threshold trial');
     assert.ok(Math.abs(loweredThresholdResult.score - targetScore) < 0.001, 'test probe exercises the intended threshold boundary');
+    assert.equal(loweredThresholdResult.speechDurationSeconds, 1.4);
+    assert.equal(loweredThresholdResult.speechDurationBucket, 'under_2s', 'short utterance duration is measured independently of match score');
     nextVector = vectorAtSimilarity(base, 0.74);
     const belowThresholdResult = await slightlyLoweredService.verify({ ownerUserId: 'u1', audio: audio(42) });
     assert.equal(belowThresholdResult.matched, false, 'a 0.74 match remains rejected at the staging 0.75 threshold');
@@ -119,6 +131,10 @@ const vectorAtSimilarity = (reference, score) => {
     assert.equal(rejected.matched, false);
     const isolated = await service.verify({ ownerUserId: 'different-owner', audio: audio(6) });
     assert.equal(isolated.matched, false);
+    nextProviderError = 'voice_signal_too_short';
+    await assert.rejects(() => service.extract(audio(7)), /voice_audio_too_short/, 'a short user recording is not reported as a cloud failure');
+    nextProviderError = 'voice_signal_missing';
+    await assert.rejects(() => service.extract(audio(8)), /voice_audio_unclear/);
     const originalModuleLoad = Module._load;
     let authenticatedRequest = null;
     Module._load = function(request, parent, isMain) {
