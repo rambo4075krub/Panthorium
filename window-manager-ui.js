@@ -15,6 +15,12 @@
     });
   }
 
+  function shouldOpenFullscreen(app, options = {}) {
+    return app.id !== 'calculator'
+      && app.fullscreenOnOpen !== false
+      && options.fullscreenOnOpen !== false;
+  }
+
   function closeAfterAppHandler(id, root) {
     window.setTimeout(() => {
       const entry = manager.findByAppId(id);
@@ -63,14 +69,15 @@
 
   function register(app, root) {
     if (!root || !root.isConnected || (root.classList.contains('window') && root.dataset.id)) return;
+    const fullscreenOnOpen = shouldOpenFullscreen(app);
     const current = manager.findByAppId(app.id);
     if (current?.el !== root) {
       manager.registerExternalWindow(app.id, app.label || app.id, root, {
         menuAppId: app.id,
-        fullscreenOnOpen: true
+        fullscreenOnOpen
       });
     }
-    manager.setFullscreen?.(app.id, true);
+    if (fullscreenOnOpen) manager.setFullscreen?.(app.id, true);
     root.dataset.panthoriumManagedWindow = app.id;
     bindControls(app, root);
     bindClose(app, root);
@@ -97,12 +104,13 @@
     const app = (window.PanthoriumWindowCatalog?.apps || []).find(entry => entry.id === id) || {
       id, label: title, selector: null, closeButton: null
     };
+    const fullscreenOnOpen = shouldOpenFullscreen(app, options);
     const record = manager.registerExternalWindow(id, title || app.label || id, root, {
       menuAppId: options.menuAppId || id,
-      fullscreenOnOpen: true
+      fullscreenOnOpen
     });
     if (!record || options.controls === false) return record;
-    manager.setFullscreen?.(id, true);
+    if (fullscreenOnOpen) manager.setFullscreen?.(id, true);
     root.dataset.panthoriumManagedWindow = id;
     bindControls(app, root);
     bindClose(app, root);
