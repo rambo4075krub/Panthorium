@@ -110,19 +110,11 @@ if (!activity.includes(immersiveMarker)) {
         android.view.View webView = getBridge().getWebView();
         android.view.ViewParent parent = webView.getParent();
         android.view.View root = parent instanceof android.view.View ? (android.view.View) parent : webView;
-        final int baseTop = root.getPaddingTop();
-        final int baseRight = root.getPaddingRight();
-        final int baseBottom = root.getPaddingBottom();
         final int types = WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout();
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
-            Insets visible = insets.getInsets(types);
-            Insets stable = insets.getInsetsIgnoringVisibility(types);
-            // Keep the top safe area while allowing fullscreen windows to reach the
-            // physical left edge. Preserve the current right and bottom safe areas.
-            Insets safe = Insets.of(0, Math.max(visible.top, stable.top),
-                visible.right, visible.bottom);
-            view.setPadding(0, baseTop + safe.top,
-                baseRight + safe.right, baseBottom + safe.bottom);
+            // Immersive mode hides system bars; clear every inset so the app fills
+            // the portrait or landscape viewport edge to edge.
+            view.setPadding(0, 0, 0, 0);
             return new WindowInsetsCompat.Builder(insets).setInsets(types, Insets.NONE).build();
         });
         ViewCompat.requestApplyInsets(root);
