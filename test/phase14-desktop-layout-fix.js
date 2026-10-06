@@ -46,6 +46,8 @@ assert(toastBody.includes('orb-system-notice'), 'toast text should target the un
 assert(!/\bspeak\s*\(/.test(toastBody), 'system notices should never be spoken aloud');
 assert(shell.includes('const fullscreenOnOpen = id !== "calculator"'), 'calculator windows should open at their normal size');
 assert(shell.includes('const fullscreen = id !== "calculator"'), 'calculator is excluded from fullscreen window registration');
+const appFullscreenRules = shell.slice(shell.indexOf('.window.maximized {'), shell.indexOf('.window-titlebar {', shell.indexOf('.window.maximized {')));
+assert(!/safe-area-inset-/.test(appFullscreenRules), 'fullscreen apps fill all edges in portrait and landscape');
 assert(shell.includes('data-orb-line="previous"'), 'transcript should include the previous sentence');
 assert(shell.includes('data-orb-line="current"'), 'transcript should include the current sentence');
 assert(shell.includes('data-orb-line="next"'), 'transcript should include unread text');
