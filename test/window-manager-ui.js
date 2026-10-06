@@ -27,7 +27,10 @@ async function main() {
   const shell = fs.readFileSync(require.resolve('../sentinel.html'), 'utf8');
   const maximizedRule = /\.window\.maximized\s*\{([\s\S]*?)\n\s*\}/.exec(shell)?.[1] || '';
   assert.match(maximizedRule, /box-sizing:\s*border-box/, 'fullscreen windows keep safe-area padding inside the viewport');
-  assert.match(maximizedRule, /padding:\s*env\(safe-area-inset-top,\s*0px\)[\s\S]*env\(safe-area-inset-bottom,\s*0px\)/, 'native and web fullscreen windows reserve visible system-bar insets');
+  assert.match(maximizedRule, /padding:\s*env\(safe-area-inset-top,\s*0px\)\s+env\(safe-area-inset-right,\s*0px\)\s+env\(safe-area-inset-bottom,\s*0px\)\s+env\(safe-area-inset-left,\s*0px\)/, 'native and web fullscreen windows reserve visible system-bar insets');
+  const managedFullscreenRule = /\.panthorium-managed-window\.panthorium-window-fullscreen\s*\{([\s\S]*?)\n\s*\}/.exec(shell)?.[1] || '';
+  assert.match(managedFullscreenRule, /padding:\s*env\(safe-area-inset-top,\s*0px\)[\s\S]*env\(safe-area-inset-bottom,\s*0px\)/, 'every catalog window reserves shared safe-area insets');
+  assert.doesNotMatch(shell, /html\[data-panthorium-immersive="true"\][^{}]*\.panthorium-window-fullscreen[^{}]*\{[^}]*padding:\s*0\s*!important/i, 'immersive state cannot erase safe-area padding from function windows');
   assert.doesNotMatch(shell, /html\[data-panthorium-immersive="true"\]\s*\.window\.maximized[\s\S]*?padding:\s*0\s*!important;/, 'immersive fullscreen must not erase safe-area padding');
 
   window.PanthoriumWindowManager = manager;

@@ -116,7 +116,8 @@ if (!activity.includes(immersiveMarker)) {
         final int baseBottom = root.getPaddingBottom();
         final int types = WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout();
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
-            Insets safe = insets.getInsets(types);
+            // Preserve safe-area spacing while immersive system bars are hidden.
+            Insets safe = insets.getInsetsIgnoringVisibility(types);
             view.setPadding(baseLeft + safe.left, baseTop + safe.top,
                 baseRight + safe.right, baseBottom + safe.bottom);
             return new WindowInsetsCompat.Builder(insets).setInsets(types, Insets.NONE).build();
