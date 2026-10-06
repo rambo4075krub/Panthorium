@@ -31,7 +31,9 @@ try {
   assert.match(java, /onResume\(\)/, 'immersive mode is restored when Android resumes the app');
   assert.match(java, /onWindowFocusChanged\(boolean hasFocus\)/, 'immersive mode is restored when the app regains focus');
   assert.match(java, /BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE/, 'system bars can temporarily appear by swipe');
-  assert.match(java, /ViewCompat\.setOnApplyWindowInsetsListener/, 'native window insets are tracked while system bars are visible');
+  assert.match(java, /ViewCompat\.setOnApplyWindowInsetsListener/, 'native insets are installed for the app content root');
+  assert.match(java, /getInsetsIgnoringVisibility\(types\)/, 'safe-area spacing remains reserved while immersive system bars are hidden');
+  assert.doesNotMatch(java, /Insets safe = insets\.getInsets\(types\)/, 'immersive layout does not collapse safe areas when bars are hidden');
   assert.match(java, /setPadding\(baseLeft \+ safe\.left, baseTop \+ safe\.top/, 'the Capacitor content is moved inside visible system bars');
   assert.match(java, /setInsets\(types, Insets\.NONE\)/, 'handled system insets are cleared before reaching WebView to avoid double padding');
   assert.match(java, /SYSTEM_UI_FLAG_IMMERSIVE_STICKY/, 'older Android releases use sticky immersive mode');
