@@ -66,7 +66,9 @@ def decode_audio(data_url):
     import numpy as np
 
     samples = np.frombuffer(result.stdout, dtype="<f4")
-    if len(samples) < MIN_SAMPLES or len(samples) > MAX_SAMPLES:
+    if len(samples) < MIN_SAMPLES:
+        raise ValueError("voice_signal_too_short")
+    if len(samples) > MAX_SAMPLES:
         raise ValueError("invalid_audio_duration")
     if not np.all(np.isfinite(samples)):
         raise ValueError("voice_signal_missing")
@@ -112,7 +114,7 @@ def handler_class(encoder):
 
         def do_GET(self):
             if self.path == "/healthz":
-                self.respond(200, {"ok": True})
+                self.respond(200, {"ok": True, "modelReady": encoder is not None})
             else:
                 self.respond(404, {"error": "not_found"})
 
@@ -125,7 +127,11 @@ def handler_class(encoder):
                     return self.respond(413, {"error": "audio_too_large"})
                 data = json.loads(self.rfile.read(size))
                 samples = decode_audio(data.get("audio"))
-                self.respond(200, {"signalPresent": True, "embedding": encoder.encode(samples)})
+                self.respond(200, {
+                    "signalPresent": True,
+                    "speechDurationSeconds": round(len(samples) / 16000, 3),
+                    "embedding": encoder.encode(samples),
+                })
             except (ValueError, TypeError, json.JSONDecodeError) as exc:
                 self.respond(400, {"error": str(exc)[:80]})
             except Exception:

@@ -62,6 +62,25 @@ service account `roles/run.invoker` on the private speaker service, and updates
 already be attached to `BIOMETRIC_TEMPLATE_KEY`. The workflow uses the staging
 project and does not alter production.
 
+## Voice reliability staging work
+
+The speaker endpoint returns an approximate active-speech duration after edge-silence trimming. It is a diagnostic signal; the existing ECAPA embedding and 0.75 staging threshold still decide the match. Short-utterance calibration remains disabled until measured owner and impostor samples support it.
+
+Known audio-input failures are surfaced separately from provider outages: too-short, unclear, unsupported-duration, and undecodable audio return HTTP 422 with a specific error code. Actual speaker-service timeouts and 5xx responses remain service-unavailable errors. The shell now gives retry guidance for short or unclear speech.
+
+The speech transcription endpoint records capture time supplied by the client (bounded to 60 seconds), profile lookup, biometric verification, transcription, total duration, outcome, and request ID. It never records raw audio or transcript in these timing events. `Server-Timing` exposes server phases to developer tools; staging-only `voiceTiming` response diagnostics support device testing.
+
+For threshold evaluation, prepare a local CSV manifest with columns `path,speaker_id,split,device` and `split=enroll` or `test`. Keep audio and the manifest outside the repository. Include held-out recordings for registered and unregistered speakers, with separate device and duration conditions. Run:
+
+```sh
+python3 -m unittest discover -s speaker-service -p 'test_*.py'
+python3 speaker-service/evaluate_speaker_identity.py --manifest /private/path/voice-tests.csv --threshold 0.75
+```
+
+The evaluator reports false-accept and false-reject rates at candidate thresholds, broken down by active speech duration and device. It does not choose or change the threshold automatically. Do not promote a threshold from the owner’s samples alone.
+
+`livenessSupported` is explicitly `false`: current speaker similarity does not detect replayed or synthesized speech. Until a separately evaluated anti-spoof/liveness model is integrated, voice similarity alone must not approve payments, account changes, or other sensitive actions; retain account permissions and an explicit second confirmation.
+
 ## Before promotion
 
 1. Verify `/api/biometrics/status` as a signed-in staging admin: `configured`,

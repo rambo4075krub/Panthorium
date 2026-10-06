@@ -36,6 +36,8 @@ class SpeakerServiceTests(unittest.TestCase):
         self.assertGreaterEqual(len(trimmed), 32000)
         self.assertLess(len(trimmed), 48000)
         with self.assertRaisesRegex(ValueError, "voice_signal_too_short"):
+            decode_audio(sample_audio(seconds=0.5))
+        with self.assertRaisesRegex(ValueError, "voice_signal_too_short"):
             decode_audio(sample_audio(seconds=0.5, leading_silence=1, trailing_silence=1))
         with self.assertRaisesRegex(ValueError, "voice_signal_missing"):
             decode_audio(sample_audio(amplitude=0))
@@ -53,7 +55,13 @@ class SpeakerServiceTests(unittest.TestCase):
             with urllib.request.urlopen(post(sample_audio())) as response:
                 result = json.load(response)
                 self.assertTrue(result["signalPresent"])
+                self.assertGreaterEqual(result["speechDurationSeconds"], 2.0)
+                self.assertLessEqual(result["speechDurationSeconds"], 2.5)
                 self.assertEqual(len(result["embedding"]), 192)
+            with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/healthz") as health:
+                readiness = json.load(health)
+                self.assertTrue(readiness["ok"])
+                self.assertTrue(readiness["modelReady"])
             with self.assertRaises(urllib.error.HTTPError) as rejected:
                 urllib.request.urlopen(post(sample_audio(amplitude=0)))
             self.assertEqual(rejected.exception.code, 400)
