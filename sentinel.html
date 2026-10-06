@@ -24,6 +24,8 @@
             --success: #44ff99;
             --window-radius: 12px;
             --taskbar-h: 48px;
+            --panthorium-native-safe-area-top: 0px;
+            --panthorium-safe-area-top: max(env(safe-area-inset-top, 0px), var(--panthorium-native-safe-area-top, 0px));
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -211,7 +213,7 @@
                 overflow-wrap: anywhere;
             }
             .orb-transcript-line.current { font-size: 15px; }
-            .orb-system-notice { max-height: 14vh; padding: 8px 10px; font-size: 12px; }
+            .orb-system-notice { max-height: 14vh; font-size: 12px; }
         }
 
         .desktop-icons {
@@ -484,8 +486,7 @@
             min-height: 0 !important;
             border-radius: 0;
             box-sizing: border-box !important;
-            padding: 0px 0px
-                0px 0px !important;
+            padding: var(--panthorium-safe-area-top) 0px 0px 0px !important;
         }
         .window.maximized .window-resize { display: none; }
         .panthorium-managed-window.panthorium-window-fullscreen {
@@ -494,8 +495,7 @@
             min-width: 0 !important; min-height: 0 !important;
             max-width: none !important; max-height: none !important;
             margin: 0 !important; border-radius: 0 !important; box-sizing: border-box !important;
-            padding: 0px 0px
-                0px 0px !important;
+            padding: var(--panthorium-safe-area-top) 0px 0px 0px !important;
             overflow: hidden !important;
         }
         .panthorium-window-control {
@@ -506,21 +506,18 @@
         }
         .panthorium-window-control:hover,.panthorium-window-control:focus-visible { border-color: #00d9b7; outline: none; }
         @media (max-width: 760px) and (orientation: portrait) {
-            .window.maximized { padding: 0px 0px
-                0px 0px !important; }
+            .window.maximized { padding: var(--panthorium-safe-area-top) 0px 0px 0px !important; }
             .panthorium-managed-window.panthorium-window-fullscreen {
-                padding-top: 0 !important;
+                padding-top: var(--panthorium-safe-area-top) !important;
             }
         }
         @media (orientation: landscape) {
             .window.maximized, .panthorium-managed-window.panthorium-window-fullscreen {
-                padding: 0px 0px
-                    0px 0px !important;
+                padding: var(--panthorium-safe-area-top) 0px 0px 0px !important;
             }
             html[data-window-landscape-edge-to-edge="false"] .window.maximized,
             html[data-window-landscape-edge-to-edge="false"] .panthorium-managed-window.panthorium-window-fullscreen {
-                padding: 0px 0px
-                    0px 0px !important;
+                padding: var(--panthorium-safe-area-top) 0px 0px 0px !important;
             }
         }
         .window-titlebar {
@@ -837,24 +834,31 @@
         }
 
         .orb-system-notice {
+            position: fixed;
+            top: calc(max(12px, env(safe-area-inset-top, 0px)) + clamp(28px, 7vh, 72px));
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 7501;
             display: none;
+            width: min(920px, calc(100vw - 32px));
             max-height: min(18vh, 160px);
-            margin-top: 8px;
-            padding: 9px 14px;
+            margin: 0;
+            padding: 0;
             overflow-y: auto;
-            border: 1px solid rgba(0,255,204,.28);
-            border-radius: 12px;
-            background: rgba(9,19,32,.9);
+            border: 0;
+            border-radius: 0;
+            background: transparent;
             color: #d9f7ff;
             font-size: clamp(12px, 1.05vw, 14px);
             line-height: 1.45;
+            text-align: center;
             overflow-wrap: anywhere;
             white-space: normal;
-            text-shadow: 0 1px 4px rgba(0,0,0,.7);
-            box-shadow: 0 8px 24px rgba(0,0,0,.25);
-            pointer-events: auto;
-            touch-action: pan-y;
-            user-select: text;
+            text-shadow: 0 1px 4px rgba(0,0,0,.8);
+            box-shadow: none;
+            backdrop-filter: none;
+            pointer-events: none;
+            user-select: none;
         }
         .orb-system-notice.show { display: block; }
 
@@ -897,11 +901,11 @@
     <div id="desktop">
         <div id="version-badge" aria-label="เวอร์ชัน">15.0.8</div>
         <canvas id="bg-canvas"></canvas>
+        <div id="orb-system-notice" class="orb-system-notice" role="status" aria-live="off" aria-atomic="true" aria-label="สถานะระบบ"></div>
         <section id="orb-transcript" tabindex="0" role="region" aria-label="ข้อความประกอบเสียงตอบของ AI">
             <div class="orb-transcript-line previous" data-orb-line="previous" aria-label="ประโยคก่อนหน้า"></div>
             <div class="orb-transcript-line current" data-orb-line="current" aria-live="polite" aria-label="ประโยคปัจจุบัน"></div>
             <div class="orb-transcript-line next" data-orb-line="next" aria-label="ข้อความที่เหลือซึ่งยังไม่อ่าน"></div>
-            <div id="orb-system-notice" class="orb-system-notice" role="status" aria-live="off" aria-atomic="true"></div>
         </section>
 
         <div class="desktop-icons" id="desktop-icons">

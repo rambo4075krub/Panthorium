@@ -34,14 +34,17 @@ try {
   assert.match(java, /ViewCompat\.setOnApplyWindowInsetsListener/, 'native insets are installed for the app content root');
   assert.match(java, /WindowInsetsCompat\.Type\.systemBars\(\) \| WindowInsetsCompat\.Type\.displayCutout\(\)/, 'system-bar and display-cutout insets are handled');
   assert.match(java, /view\.setPadding\(0, 0, 0, 0\)/, 'the native app surface fills every edge in portrait and landscape');
-  assert.match(java, /setInsets\(types, Insets\.NONE\)/, 'system bars and display-cutout insets are cleared before reaching WebView');
+  assert.match(java, /getInsetsIgnoringVisibility\(types\)/, 'top safe area is preserved while immersive system bars are hidden');
+  assert.match(java, /--panthorium-native-safe-area-top/, 'native system insets are exposed to fullscreen window CSS');
+  assert.match(java, /return insets;/, 'unmodified system and display-cutout insets reach the WebView');
+  assert.doesNotMatch(java, /setInsets\(types, Insets\.NONE\)/, 'native code no longer clears safe-area insets before WebView');
   assert.match(java, /SYSTEM_UI_FLAG_IMMERSIVE_STICKY/, 'older Android releases use sticky immersive mode');
   const first = java.match(/PANTHORIUM_IMMERSIVE_MODE/g).length;
   run();
   java = fs.readFileSync(javaPath, 'utf8');
   assert.equal(java.match(/PANTHORIUM_IMMERSIVE_MODE/g).length, first, 're-running Android preparation does not duplicate lifecycle hooks');
   assert.match(fs.readFileSync(path.join(temp, 'app/build.gradle'), 'utf8'), /versionCode 20001/);
-  console.log('Android immersive prep: edge-to-edge system bar hiding, swipe reveal, versioning and idempotency passed');
+  console.log('Android immersive prep: edge-to-edge app shell, persistent top safe area, swipe reveal, versioning and idempotency passed');
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });
 }

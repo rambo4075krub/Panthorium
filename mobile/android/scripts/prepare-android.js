@@ -107,15 +107,20 @@ if (!activity.includes(immersiveMarker)) {
 
     private void panthoriumInstallWindowInsets() {
         if (panthoriumWindowInsetsInstalled || getBridge() == null || getBridge().getWebView() == null) return;
-        android.view.View webView = getBridge().getWebView();
+        android.webkit.WebView webView = getBridge().getWebView();
         android.view.ViewParent parent = webView.getParent();
         android.view.View root = parent instanceof android.view.View ? (android.view.View) parent : webView;
         final int types = WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout();
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
-            // Immersive mode hides system bars; clear every inset so the app fills
-            // the portrait or landscape viewport edge to edge.
+            // Keep the native surface edge to edge and forward stable system-bar
+            // and display-cutout dimensions for the fullscreen window safe area.
             view.setPadding(0, 0, 0, 0);
-            return new WindowInsetsCompat.Builder(insets).setInsets(types, Insets.NONE).build();
+            Insets stableInsets = insets.getInsetsIgnoringVisibility(types);
+            float density = webView.getResources().getDisplayMetrics().density;
+            int safeTopCssPx = density > 0 ? Math.round(stableInsets.top / density) : stableInsets.top;
+            String safeAreaScript = "(function(){var root=document.documentElement;if(root){root.style.setProperty('--panthorium-native-safe-area-top','" + safeTopCssPx + "px');}})();";
+            webView.post(() -> webView.evaluateJavascript(safeAreaScript, null));
+            return insets;
         });
         ViewCompat.requestApplyInsets(root);
         panthoriumWindowInsetsInstalled = true;
