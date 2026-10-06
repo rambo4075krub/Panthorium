@@ -6,6 +6,8 @@ const { installGuestAccess, restrictedPaths } = require('../middleware/guestAcce
 const { createApiRouter } = require('../routes/api');
 const { createBiometricsRouter } = require('../routes/biometrics');
 const { createAuthRouter } = require('../routes/auth');
+const { createMemoryRouter } = require('../routes/memory');
+const { AgentMemoryService } = require('../services/agentMemoryService');
 const { ToolRegistry } = require('../services/toolRegistry');
 const { AgentService } = require('../services/agentService');
 const catalog = require('../voice-window-catalog');
@@ -37,9 +39,12 @@ const catalog = require('../voice-window-catalog');
     findGuestOwnerByDeviceKeyHash: async hash => hash === deviceHash ? protectedGuestId : null,
     isDeviceBoundGuestOwner: async owner => owner === protectedGuestId
   };
-  const app = express(); app.use(express.json()); installGuestAccess(app, auth);
+  const app = express(); app.set('trust proxy', 1); app.use(express.json()); installGuestAccess(app, auth);
   app.use('/api/auth', createAuthRouter(auth, { isProduction: false, refreshTokenDays: 30 }, null, deviceRepository));
   app.use('/api/biometrics', createBiometricsRouter(auth, biometrics));
+  const memoryOwners = [];
+  const memory = new AgentMemoryService({ repository: { list: async userId => { memoryOwners.push(userId); return []; } }, audit });
+  app.use('/api/agent/memory', createMemoryRouter(auth, memory));
   app.use('/api', createApiRouter(sentinel, auth, audit, {}, agent, {}, {}, {}, {}));
   // Verify every namespace is denied before any service side effect.
   let serviceCalls = 0;
@@ -47,13 +52,20 @@ const catalog = require('../voice-window-catalog');
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const call = (url, principal, body) => fetch(base + url, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', ...(principal ? { Authorization: 'Bearer ' + auth.signAccessToken(principal) } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const call = (url, principal, body, testIp) => fetch(base + url, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', ...(principal ? { Authorization: 'Bearer ' + auth.signAccessToken(principal) } : {}), ...(testIp ? { 'X-Forwarded-For': testIp } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
   try {
     const noDevice = await (await call('/api/auth/guest', null, { guestSessionId })).json();
     assert.notEqual(noDevice.user.id, protectedGuestId, 'known voice owner requires its device credential');
     const recognized = await (await call('/api/auth/guest', null, { guestSessionId: crypto.randomUUID(), deviceKey })).json();
     assert.equal(recognized.user.id, protectedGuestId, 'remembered device restores guest voice owner');
     assert.equal(recognized.deviceRecognized, true);
+    const userNotes = await call('/api/agent/memory?limit=30', user);
+    assert.equal(userNotes.status, 200, 'signed-in standard user can load personal cloud notes');
+    assert.deepEqual((await userNotes.json()).memories, []);
+    assert.deepEqual(memoryOwners, [user.id], 'notes remain scoped to the authenticated user id');
+    const guestNotes = await call('/api/agent/memory?limit=30', guest);
+    assert.equal(guestNotes.status, 403, 'guest cannot read personal cloud notes');
+    assert.deepEqual(memoryOwners, [user.id], 'guest denial occurs before any memory data access');
     for (const route of restrictedPaths) {
       const url = route + '/access-check';
       assert.equal((await call(url, null)).status, 401);
@@ -63,12 +75,15 @@ const catalog = require('../voice-window-catalog');
       assert.equal((await call(url, admin)).status, 200, route);
     }
     assert.equal(serviceCalls, restrictedPaths.length);
-    for (const entry of catalog.apps) {
-      assert.equal(catalog.allowed(entry, guest), !excluded.includes(entry.id), entry.id);
+    for (const [index, entry] of catalog.apps.entries()) {
+      const guestAllowed = !entry.accountRequired && !excluded.includes(entry.id);
+      assert.equal(catalog.allowed(entry, guest), guestAllowed, entry.id);
       assert.equal(catalog.allowed(entry, admin), true, entry.id);
       assert.equal(catalog.allowed(entry, user), !excluded.includes(entry.id), 'standard user access: ' + entry.id);
-      const res = await call('/api/sentinel/command', guest, { command: 'เปิด ' + entry.aliases[0] });
-      assert.equal(res.status, excluded.includes(entry.id) ? 403 : 200, entry.id);
+      // Give each app command a separate test-only rate-limit key so this
+      // enumeration continues to test RBAC when the catalog grows.
+      const res = await call('/api/sentinel/command', guest, { command: 'เปิด ' + entry.aliases[0] }, `198.51.100.${index + 1}`);
+      assert.equal(res.status, excluded.includes(entry.id) || entry.accountRequired ? 403 : 200, entry.id);
     }
     assert.equal(catalog.allowed(catalog.apps.find(entry => entry.id === 'voice-identity'), guest), true, 'guest can open voice enrollment');
     assert.equal((await call('/api/biometrics/status', guest)).status, 200, 'guest can read non-sensitive enrollment status');

@@ -18,6 +18,31 @@ MAX_SAMPLES = 16_000 * 18
 MIN_SAMPLES = 16_000
 
 
+def trim_edge_silence(samples):
+    """Trim quiet edges before embedding, while preserving brief speech onsets and tails."""
+    import numpy as np
+
+    frame_size = 320  # 20 ms at 16 kHz
+    frame_count = len(samples) // frame_size
+    if frame_count == 0:
+        return samples
+    frames = samples[:frame_count * frame_size].reshape(frame_count, frame_size)
+    frame_rms = np.sqrt(np.mean(frames * frames, axis=1))
+    peak_rms = float(np.percentile(frame_rms, 95))
+    threshold = max(0.002, peak_rms * 0.06)
+    active = np.flatnonzero(frame_rms >= threshold)
+    if active.size == 0:
+        return samples
+
+    padding = 2_400  # Preserve 150 ms around speech for natural consonant edges.
+    start = max(0, int(active[0]) * frame_size - padding)
+    end = min(len(samples), (int(active[-1]) + 1) * frame_size + padding)
+    trimmed = samples[start:end].copy()
+    if len(trimmed) < MIN_SAMPLES:
+        raise ValueError("voice_signal_too_short")
+    return trimmed
+
+
 def decode_audio(data_url):
     if not isinstance(data_url, str) or not data_url.startswith("data:audio/"):
         raise ValueError("invalid_audio")
@@ -41,11 +66,16 @@ def decode_audio(data_url):
     import numpy as np
 
     samples = np.frombuffer(result.stdout, dtype="<f4")
-    if len(samples) < MIN_SAMPLES or len(samples) > MAX_SAMPLES:
+    if len(samples) < MIN_SAMPLES:
+        raise ValueError("voice_signal_too_short")
+    if len(samples) > MAX_SAMPLES:
         raise ValueError("invalid_audio_duration")
-    if not np.all(np.isfinite(samples)) or float(np.sqrt(np.mean(samples ** 2))) < 0.003:
+    if not np.all(np.isfinite(samples)):
         raise ValueError("voice_signal_missing")
-    return samples.copy()
+    samples = trim_edge_silence(samples)
+    if float(np.sqrt(np.mean(samples ** 2))) < 0.003:
+        raise ValueError("voice_signal_missing")
+    return samples
 
 
 class SpeakerEncoder:
@@ -84,7 +114,7 @@ def handler_class(encoder):
 
         def do_GET(self):
             if self.path == "/healthz":
-                self.respond(200, {"ok": True})
+                self.respond(200, {"ok": True, "modelReady": encoder is not None})
             else:
                 self.respond(404, {"error": "not_found"})
 
@@ -97,7 +127,11 @@ def handler_class(encoder):
                     return self.respond(413, {"error": "audio_too_large"})
                 data = json.loads(self.rfile.read(size))
                 samples = decode_audio(data.get("audio"))
-                self.respond(200, {"signalPresent": True, "embedding": encoder.encode(samples)})
+                self.respond(200, {
+                    "signalPresent": True,
+                    "speechDurationSeconds": round(len(samples) / 16000, 3),
+                    "embedding": encoder.encode(samples),
+                })
             except (ValueError, TypeError, json.JSONDecodeError) as exc:
                 self.respond(400, {"error": str(exc)[:80]})
             except Exception:

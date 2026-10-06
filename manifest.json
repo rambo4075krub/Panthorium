@@ -3,7 +3,7 @@
   "short_name": "Panthorium",
   "description": "Panthorium Browser สำหรับ Windows, macOS, Linux, Android และ iOS",
   "start_url": "/",
-  "display": "standalone",
+  "display": "fullscreen",
   "orientation": "any",
   "background_color": "#000000",
   "theme_color": "#00ffcc",
@@ -25,8 +25,8 @@
   "scope": "/",
   "id": "/",
   "display_override": [
-    "standalone",
-    "fullscreen"
+    "fullscreen",
+    "standalone"
   ],
   "prefer_related_applications": false,
   "related_applications": []

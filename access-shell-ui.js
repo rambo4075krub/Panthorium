@@ -106,6 +106,7 @@
         const node = document.querySelector(app.selector);
         if (node) {
           if (app.windowId && typeof closeWindow === 'function') closeWindow(app.windowId);
+          else if (app.closeButton && node.querySelector(app.closeButton)) node.querySelector(app.closeButton).click();
           else node.remove();
         }
       }
@@ -127,7 +128,18 @@
       let voice = entries.find(el => /Voice Identity/i.test(el.textContent || ''));
       if (!sentinel) { sentinel = document.createElement('button'); sentinel.type = 'button'; sentinel.className = 'sm-app'; sentinel.innerHTML = '<div class="ico">🤖</div><span>Sentinel AI</span>'; sentinel.onclick = () => window.PanthoriumVoiceCommands?.windowAction?.('open_sentinel'); }
       if (!voice) { voice = document.createElement('button'); voice.type = 'button'; voice.className = 'sm-app'; voice.innerHTML = '<div class="ico">🎙️</div><span>Voice Identity</span>'; voice.onclick = () => window.PanthoriumVoiceIdentity?.open?.(); }
-      if (apps.children.length !== 2 || apps.children[0] !== sentinel || apps.children[1] !== voice) apps.replaceChildren(sentinel, voice);
+      const account = typeof OS !== 'undefined' ? OS?.state?.user : null;
+      const registered = entries.filter(el => {
+        const id = el.dataset.appId;
+        if (!id || restrictedLaunchers.includes(el.id) || el.dataset.productionIntelligence === '1') return false;
+        if (guest() && id !== 'sentinel' && id !== 'voice-identity') return false;
+        if ((id === 'notes' || id === 'files') && !account?.permissions?.includes('chat')) return false;
+        return true;
+      });
+      const registeredIds = new Set(['sentinel', 'voice-identity', ...registered.map(el => el.dataset.appId)]);
+      const minimized = entries.filter(el => el.dataset.minimizedWindow && registeredIds.has(el.dataset.minimizedWindow));
+      const safeEntries = [...new Set([sentinel, voice, ...registered, ...minimized].filter(Boolean))];
+      if (apps.children.length !== safeEntries.length || safeEntries.some((entry, index) => apps.children[index] !== entry)) apps.replaceChildren(...safeEntries);
     } else if (apps) menu.querySelectorAll('#sm-apps > *').forEach(el => { el.style.display = ''; });
     const settings = document.getElementById('btn-settings-quick');
     if (settings) settings.style.display = isStaff ? '' : 'none';

@@ -21,12 +21,14 @@
       await sleep(delay);
     }
   }
-  async function streamCall(prompt, { voiceMode = false } = {}) {
+  async function streamCall(prompt, { voiceMode = false, signal } = {}) {
     const system = getOS();
     if (window.PanthoriumAuth?.hasPermission && !window.PanthoriumAuth.hasPermission('chat')) return { ok: false, text: 'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat', provider: 'RBAC', via: 'rbac' };
     let token = await ensureToken(); if (!token) throw new Error('authentication_required');
     const base = (system?.config?.backendUrl || '').replace(/\/$/, '');
-    const request = async () => fetch(base + '/api/chat/stream', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-session-id': system.config.sessionId, Accept: 'text/event-stream' }, body: JSON.stringify({ message: prompt, sessionId: system.config.sessionId, mode: 'default', voice: voiceMode }), signal: AbortSignal.timeout(45000) });
+    const timeoutSignal = AbortSignal.timeout(45000);
+    const requestSignal = signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeoutSignal]) : signal || timeoutSignal;
+    const request = async () => fetch(base + '/api/chat/stream', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-session-id': system.config.sessionId, Accept: 'text/event-stream' }, body: JSON.stringify({ message: prompt, sessionId: system.config.sessionId, mode: 'default', voice: voiceMode }), signal: requestSignal });
     let res = await request();
     if (res.status === 401 && window.PanthoriumAuth?.refreshSession) { const ok = await window.PanthoriumAuth.refreshSession().catch(() => false); if (ok) { token = getOS()?.config?.accessToken || ''; res = await request(); } }
     if (!res.ok || !res.body) throw new Error(`stream_http_${res.status}`);
@@ -99,8 +101,9 @@
     const wrapped = async function (prompt, options = {}) {
       // Spoken conversations stream text and start TTS on the first short phrase.
       if (options?.conversationalVoice === true) {
-        try { return await streamCall(prompt, { voiceMode: true }); }
+        try { return await streamCall(prompt, { voiceMode: true, signal: options.signal }); }
         catch (error) {
+          if (options?.signal?.aborted) return { ok: false, text: "ยกเลิกรอบเสียงแล้ว", error: "voice_cancelled", provider: "Sentinel", via: "sentinel-stream" };
           console.warn('[Phase4 Voice Stream]', error.message);
           const raw = String(error?.message || 'voice_stream_failed');
           const status = /^stream_http_(\d+)$/.exec(raw)?.[1];

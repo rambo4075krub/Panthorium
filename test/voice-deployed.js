@@ -8,6 +8,11 @@ const { JSDOM } = require('jsdom');
   const base = new URL(process.env.STAGING_URL);
   assert.equal(base.protocol, 'https:');
   assert(base.hostname.includes('staging') && base.hostname.endsWith('.run.app'), 'staging only');
+  const healthResponse = await fetch(new URL('/api/health', base), { signal: AbortSignal.timeout(15000) });
+  assert.equal(healthResponse.status, 200, 'staging health endpoint');
+  const health = await healthResponse.json();
+  assert.equal(health.voiceIdentityConfigured, true, 'speaker and template encryption must be configured');
+  assert.equal(health.voiceIdentityGateEnabled, true, 'staging must enforce enrolled-speaker verification');
   const post = (path, body, token) => fetch(new URL(path, base), {
     method: 'POST', headers: { Origin: base.origin, 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body), signal: AbortSignal.timeout(15000)
@@ -34,6 +39,9 @@ const { JSDOM } = require('jsdom');
     const runtime = dom => [...dom.window.document.scripts].find(script => script.textContent.includes('const OS ='))?.textContent;
     assert(runtime(testedDOM), 'test checkout must contain the voice runtime');
     assert.equal(runtime(deployedDOM), runtime(testedDOM), 'deployed inline voice runtime must exactly match the tested shell');
+    assert(runtime(deployedDOM).includes('AbortSignal.timeout(40000)'), 'voice request allows the backend verification deadline to return');
+    assert(runtime(deployedDOM).includes('voice_verification_unavailable'), 'cloud verification failures have a specific user message');
+    assert(runtime(deployedDOM).includes('error?.voiceDiagnostic'), 'staging rejection feedback includes only match score metadata');
   } finally { deployedDOM.window.close(); testedDOM.window.close(); }
   assert.equal((await post('/api/sentinel/command', { command: 'เปิด AI Platform' })).status, 401);
   const sessionResponse = await post('/api/auth/guest', {});

@@ -24,6 +24,8 @@
             --success: #44ff99;
             --window-radius: 12px;
             --taskbar-h: 48px;
+            --panthorium-native-safe-area-top: 0px;
+            --panthorium-safe-area-top: max(env(safe-area-inset-top, 0px), var(--panthorium-native-safe-area-top, 0px));
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -49,10 +51,9 @@
         #boot-screen.hidden { opacity: 0; pointer-events: none; }
         .boot-logo {
             width: 120px; height: 120px;
-            border: 3px solid var(--accent);
             border-radius: 50%;
             display: flex; align-items: center; justify-content: center;
-            animation: pulse 2s ease-in-out infinite;
+            animation: none;
             margin-bottom: 28px;
         }
         .boot-logo inner {
@@ -79,7 +80,7 @@
             transition: width 0.3s ease;
         }
         .boot-status { margin-top: 16px; font-size: 12px; color: var(--text-dim); }
-        #global-voice { position: fixed; right: 18px; bottom: 68px; z-index: 10020; width: 48px; height: 48px; border: 1px solid var(--accent); border-radius: 50%; background: rgba(5,18,24,.9); color: var(--accent); font-size: 22px; cursor: pointer; box-shadow: 0 0 18px rgba(0,255,204,.25); }
+        #global-voice { position: fixed; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(env(safe-area-inset-bottom, 0px) + max(2px, calc((var(--taskbar-h) - 48px) / 2))); z-index: 10020; width: 48px; height: 48px; border: 1px solid var(--accent); border-radius: 50%; background: rgba(5,18,24,.9); color: var(--accent); font-size: 22px; cursor: pointer; box-shadow: 0 0 18px rgba(0,255,204,.25); }
         #global-voice.listening { background: var(--danger); border-color: #ff9aaa; color: #fff; animation: pulse-mic 1s infinite; }
         #global-voice.processing { border-color: #ffd166; color: #ffd166; }
         #voice-status-box { display: grid; gap: 4px; padding: 8px 12px 0; pointer-events: none; }
@@ -88,7 +89,10 @@
 
         /* ========== LOGIN ========== */
         #login-screen {
-            position: fixed; inset: 0;
+            position: fixed; inset: 0; box-sizing: border-box;
+            padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px))
+                max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+            overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
             background: radial-gradient(ellipse at center, #0d1520 0%, #000 70%);
             display: none; flex-direction: column;
             align-items: center; justify-content: center;
@@ -96,14 +100,19 @@
         }
         #login-screen.active { display: flex; }
         .login-card {
+            box-sizing: border-box; min-width: 0; width: 100%; max-width: 360px;
+            max-height: 100%; margin: auto; overflow-x: hidden; overflow-y: auto;
+            overscroll-behavior: contain;
             background: var(--surface);
             border: 1px solid rgba(0,255,204,0.2);
             border-radius: 20px;
-            padding: 40px 36px;
+            padding: clamp(20px, 5vw, 36px);
             text-align: center;
-            max-width: 360px; width: 90%;
             backdrop-filter: blur(20px);
         }
+        .login-card *, .login-card *::before, .login-card *::after { box-sizing: border-box; min-width: 0; }
+        .login-card input, .login-card select, .login-card textarea, .login-card button { max-width: 100%; }
+
         .login-avatar {
             width: 90px; height: 90px;
             border-radius: 50%;
@@ -127,6 +136,13 @@
         .login-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,255,204,0.3); }
         .login-btn:active { transform: scale(0.98); }
         .login-hint { margin-top: 16px; font-size: 12px; color: var(--text-dim); }
+        @media (max-height: 540px) and (orientation: landscape) {
+            #login-screen { justify-content: flex-start; }
+            .login-card { padding: 12px 20px; }
+            .login-avatar { width: 56px; height: 56px; margin-bottom: 8px; }
+            .login-sub { margin-bottom: 12px; }
+            .login-hint { margin-top: 8px; }
+        }
 
         /* ========== DESKTOP ========== */
         #desktop {
@@ -197,6 +213,7 @@
                 overflow-wrap: anywhere;
             }
             .orb-transcript-line.current { font-size: 15px; }
+            .orb-system-notice { max-height: 14vh; font-size: 12px; }
         }
 
         .desktop-icons {
@@ -231,73 +248,64 @@
             line-height: 1.25;
         }
 
-        /* ========== TASKBAR ========== */
-        #taskbar {
+        /* ========== BOTTOM SYSTEM CONTROLS ========== */
+        #system-controls {
             position: fixed;
-            bottom: 0; left: 0; right: 0;
+            left: 0; right: 0;
+            bottom: env(safe-area-inset-bottom, 0px);
             height: var(--taskbar-h);
-            background: rgba(10, 14, 22, 0.88);
-            backdrop-filter: blur(24px);
-            border-top: 1px solid rgba(255,255,255,0.06);
-            display: flex; align-items: center;
-            padding: 0 10px;
+            display: flex;
+            align-items: center;
+            padding-left: max(12px, env(safe-area-inset-left, 0px));
+            padding-right: max(12px, env(safe-area-inset-right, 0px));
             z-index: 8000;
-            gap: 6px;
+            pointer-events: none;
         }
-        .tb-btn {
-            height: 36px; min-width: 36px;
-            border-radius: 8px;
-            border: none;
-            background: transparent;
-            color: var(--text);
-            font-size: 18px;
+        #system-controls-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            pointer-events: auto;
+        }
+        #start-btn {
+            width: 44px; height: 44px;
+            padding: 0;
+            border: 0;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(10, 18, 32, .54);
             cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
-            padding: 0 10px;
-            transition: background 0.15s;
+            transition: background .16s ease, transform .16s ease;
+            pointer-events: auto;
         }
-        .tb-btn:hover { background: rgba(255,255,255,0.08); }
-        .tb-btn.active { background: rgba(0,255,204,0.15); color: var(--accent); }
-        .tb-apps {
-            flex: 1;
-            display: flex; align-items: center; gap: 4px;
-            overflow-x: auto;
-            scrollbar-width: none;
-        }
-        .tb-apps::-webkit-scrollbar { display: none; }
-        .tb-app {
-            height: 34px;
-            padding: 0 12px;
-            border-radius: 8px;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid transparent;
-            color: var(--text);
-            font-size: 13px;
-            cursor: pointer;
-            display: flex; align-items: center; gap: 6px;
-            white-space: nowrap;
-            transition: all 0.15s;
-        }
-        .tb-app:hover { background: rgba(255,255,255,0.1); }
-        .tb-app.active {
-            background: rgba(0,255,204,0.12);
-            border-color: rgba(0,255,204,0.3);
-        }
-        .tb-right {
-            display: flex; align-items: center; gap: 8px;
-            margin-left: auto;
-        }
-        #clock {
-            font-size: 13px;
-            color: var(--text-dim);
-            padding: 0 8px;
-            font-variant-numeric: tabular-nums;
-        }
+        #start-btn:hover, #start-btn:focus-visible { background: rgba(22, 42, 64, .82); }
+        #start-btn:active { transform: scale(.96); }
+        #start-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        #start-btn img { width: 34px; height: 34px; display: block; object-fit: contain; }
         #status-dot {
-            width: 8px; height: 8px;
+            width: 9px; height: 9px;
+            flex: 0 0 9px;
             border-radius: 50%;
             background: var(--success);
-            box-shadow: 0 0 6px var(--success);
+            box-shadow: 0 0 8px var(--success);
+            pointer-events: auto;
+        }
+        #clock {
+            position: absolute;
+            left: 50%;
+            max-width: calc(100vw - 164px);
+            transform: translateX(-50%);
+            color: var(--text-dim);
+            font-size: 13px;
+            line-height: 1.25;
+            font-variant-numeric: tabular-nums;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            pointer-events: none;
         }
 
         /* Version number — top-right, plain digits matching orb cyan */
@@ -328,25 +336,26 @@
         /* ========== START MENU ========== */
         #start-menu {
             position: fixed;
-            bottom: calc(var(--taskbar-h) + 8px);
-            left: 10px;
-            width: 280px;
-            max-height: 70vh;
-            background: var(--surface-2);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 16px;
+            bottom: calc(var(--taskbar-h) + env(safe-area-inset-bottom, 0px) + 10px);
+            left: max(10px, calc(env(safe-area-inset-left, 0px) + 10px));
+            width: min(340px, calc(100vw - 20px));
+            max-height: min(78dvh, calc(100dvh - var(--taskbar-h) - env(safe-area-inset-bottom, 0px) - 20px)) !important;
+            background: rgba(13, 21, 36, .94);
+            border: 1px solid rgba(106, 210, 255, .18);
+            border-radius: 18px;
             backdrop-filter: blur(30px);
             display: none;
             flex-direction: column;
             overflow: hidden;
             z-index: 8500;
-            box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+            box-shadow: 0 18px 54px rgba(0,0,0,.56), inset 0 1px rgba(255,255,255,.035);
         }
         #start-menu.open { display: flex; }
         .sm-header {
-            padding: 16px 18px 12px;
-            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 14px 16px 12px;
+            border-bottom: 1px solid rgba(255,255,255,.07);
             display: flex; align-items: center; gap: 12px;
+            flex: 0 0 auto;
         }
         .sm-avatar {
             width: 40px; height: 40px;
@@ -358,41 +367,102 @@
         }
         .sm-user { font-size: 14px; font-weight: 500; }
         .sm-status { font-size: 11px; color: var(--text-dim); }
-        .sm-apps {
-            padding: 10px;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 6px;
-            overflow-y: auto;
+        .sm-search { padding: 12px 12px 8px; flex: 0 0 auto; }
+        .sr-only {
+            position: absolute; width: 1px; height: 1px;
+            padding: 0; margin: -1px; overflow: hidden;
+            clip: rect(0,0,0,0); white-space: nowrap; border: 0;
         }
-        .sm-app {
-            display: flex; flex-direction: column; align-items: center;
-            padding: 14px 8px;
+        #start-search {
+            width: 100%; height: 42px;
+            border: 1px solid rgba(107, 215, 255, .25);
             border-radius: 12px;
-            cursor: pointer;
-            transition: background 0.15s;
-            gap: 6px;
+            padding: 0 13px;
+            outline: none;
+            background: rgba(4, 12, 24, .72);
+            color: var(--text);
+            font-family: inherit;
+            font-size: 13px;
         }
-        .sm-app:hover { background: rgba(255,255,255,0.06); }
-        .sm-app .ico { font-size: 26px; }
-        .sm-app span { font-size: 12px; color: var(--text-dim); }
+        #start-search::placeholder { color: #8595ae; }
+        #start-search:focus { border-color: rgba(0,255,204,.7); box-shadow: 0 0 0 3px rgba(0,255,204,.1); }
+        .sm-apps {
+            padding: 4px 10px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-height: 0;
+            flex: 1 1 auto;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(100, 200, 255, .34) transparent;
+        }
+        .sm-apps::-webkit-scrollbar { width: 5px; }
+        .sm-apps::-webkit-scrollbar-thumb { border-radius: 6px; background: rgba(100,200,255,.34); }
+        .sm-app[hidden], #sm-apps > [data-search-hidden="true"] { display: none !important; }
+        .sm-app {
+            width: 100%;
+            min-height: 48px;
+            padding: 8px 11px;
+            border: 1px solid transparent;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 12px;
+            background: transparent;
+            color: var(--text);
+            text-align: left;
+            font: inherit;
+            cursor: pointer;
+            transition: background .15s ease, border-color .15s ease;
+        }
+        .sm-app:hover, .sm-app:focus-visible {
+            background: rgba(62, 139, 180, .14);
+            border-color: rgba(88, 209, 255, .18);
+            outline: none;
+        }
+        .sm-app:active { background: rgba(0,255,204,.12); }
+        .sm-app .ico {
+            width: 30px;
+            flex: 0 0 30px;
+            font-size: 22px;
+            text-align: center;
+        }
+        .sm-app span {
+            flex: 1;
+            min-width: 0;
+            color: var(--text);
+            font-size: 13px;
+            line-height: 1.3;
+        }
+        .sm-app.sm-window-app { border-color: rgba(0,255,204,.1); }
+        #sm-empty {
+            padding: 14px 12px 18px;
+            color: var(--text-dim);
+            font-size: 13px;
+            text-align: center;
+        }
+        #sm-empty[hidden] { display: none; }
         .sm-footer {
             padding: 10px;
-            border-top: 1px solid rgba(255,255,255,0.06);
+            border-top: 1px solid rgba(255,255,255,.07);
             display: flex; gap: 6px;
+            flex: 0 0 auto;
         }
         .sm-footer button {
             flex: 1;
             padding: 10px;
-            border: none;
+            border: 1px solid rgba(255,255,255,.05);
             border-radius: 10px;
-            background: rgba(255,255,255,0.05);
+            background: rgba(255,255,255,.05);
             color: var(--text);
             font-size: 13px;
             cursor: pointer;
         }
-        .sm-footer button:hover { background: rgba(255,255,255,0.1); }
-
+        .sm-footer button:hover { background: rgba(255,255,255,.1); }
         /* ========== WINDOWS ========== */
         .window {
             position: absolute;
@@ -407,10 +477,48 @@
             backdrop-filter: blur(20px);
         }
         .window.maximized {
-            top: 0 !important; left: 0 !important;
-            width: 100% !important;
-            height: calc(100% - var(--taskbar-h)) !important;
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            height: 100dvh !important;
+            min-width: 0 !important;
+            min-height: 0 !important;
             border-radius: 0;
+            box-sizing: border-box !important;
+            padding: var(--panthorium-safe-area-top) 0px 0px 0px !important;
+        }
+        .window.maximized .window-resize { display: none; }
+        .panthorium-managed-window.panthorium-window-fullscreen {
+            position: fixed !important; inset: 0 !important;
+            width: 100vw !important; height: 100vh !important; height: 100dvh !important;
+            min-width: 0 !important; min-height: 0 !important;
+            max-width: none !important; max-height: none !important;
+            margin: 0 !important; border-radius: 0 !important; box-sizing: border-box !important;
+            padding: var(--panthorium-safe-area-top) 0px 0px 0px !important;
+            overflow: hidden !important;
+        }
+        .panthorium-window-control {
+            min-width: 38px; min-height: 38px; margin-left: 5px; padding: 5px 10px;
+            border: 1px solid rgba(255,255,255,.24); border-radius: 8px;
+            background: rgba(20,28,38,.92); color: #e8f0ff; font: 600 15px/1 system-ui,sans-serif;
+            cursor: pointer; touch-action: manipulation;
+        }
+        .panthorium-window-control:hover,.panthorium-window-control:focus-visible { border-color: #00d9b7; outline: none; }
+        @media (max-width: 760px) and (orientation: portrait) {
+            .window.maximized { padding: var(--panthorium-safe-area-top) 0px 0px 0px !important; }
+            .panthorium-managed-window.panthorium-window-fullscreen {
+                padding-top: var(--panthorium-safe-area-top) !important;
+            }
+        }
+        @media (orientation: landscape) {
+            .window.maximized, .panthorium-managed-window.panthorium-window-fullscreen {
+                padding: var(--panthorium-safe-area-top) 0px 0px 0px !important;
+            }
+            html[data-window-landscape-edge-to-edge="false"] .window.maximized,
+            html[data-window-landscape-edge-to-edge="false"] .panthorium-managed-window.panthorium-window-fullscreen {
+                padding: var(--panthorium-safe-area-top) 0px 0px 0px !important;
+            }
         }
         .window-titlebar {
             height: 38px;
@@ -447,12 +555,69 @@
             flex: 1;
             overflow: auto;
             position: relative;
+            min-width: 0; min-height: 0; overscroll-behavior: contain;
+        }
+        .window, .panthorium-managed-window {
+            box-sizing: border-box; min-width: 0;
+            max-width: 100vw; max-height: 100dvh;
+        }
+        .window *, .panthorium-managed-window * { box-sizing: border-box; min-width: 0; }
+        .window-body > *, .panthorium-managed-window > * { min-width: 0; max-width: 100%; }
+        .window img, .window video, .window canvas, .window iframe,
+        .panthorium-managed-window img, .panthorium-managed-window video,
+        .panthorium-managed-window canvas, .panthorium-managed-window iframe { max-width: 100%; }
+        @media (max-width: 520px) {
+            .window-titlebar { min-width: 0; gap: 4px; padding-inline: 8px; }
+            .window-title { min-width: 0; font-size: 12px; }
+            .window-controls { flex: 0 0 auto; gap: 3px; }
+            .panthorium-window-control { margin-left: 0; min-width: 34px; min-height: 34px; padding: 4px 7px; }
+        }
+        @media (max-height: 520px) and (orientation: landscape) {
+            .window-body { min-height: 0; overflow: auto; }
         }
         .window-resize {
             position: absolute;
             right: 0; bottom: 0;
             width: 16px; height: 16px;
             cursor: nwse-resize;
+        }
+        /* Shared deep-space glass treatment for current and future windows. */
+        .window {
+            background: linear-gradient(148deg, rgba(17, 26, 48, .97), rgba(7, 13, 29, .98));
+            border-color: rgba(75, 232, 224, .3);
+            box-shadow: 0 18px 58px rgba(0, 0, 0, .56), 0 0 24px rgba(0, 205, 196, .09);
+        }
+        .window:focus-within { border-color: rgba(90, 239, 224, .58); box-shadow: 0 18px 58px rgba(0,0,0,.56), 0 0 28px rgba(0,205,196,.16); }
+        .window-titlebar { background: linear-gradient(100deg, rgba(21, 54, 77, .92), rgba(35, 31, 73, .9)); border-bottom: 1px solid rgba(84, 222, 228, .16); }
+        .window-title { color: #e5f6ff; text-shadow: 0 0 12px rgba(91, 222, 238, .16); }
+        .window-controls .win-btn:hover { background: rgba(64, 221, 217, .14); color: #c9fffb; }
+        #panthorium-voice-identity {
+            box-sizing: border-box !important; max-width: 100vw; max-height: 100dvh;
+            overflow-x: hidden !important; overflow-y: auto !important; overscroll-behavior: contain;
+            inset: 0 !important;
+            background: radial-gradient(ellipse at 85% 8%, rgba(64, 93, 170, .24), transparent 42%), linear-gradient(145deg, rgba(13, 25, 47, .98), rgba(5, 12, 27, .99)) !important;
+            border: 1px solid rgba(47, 225, 210, .43) !important;
+            box-shadow: 0 0 36px rgba(34, 219, 208, .12), 0 24px 80px rgba(0,0,0,.72) !important;
+            color: #e7f7ff !important;
+            backdrop-filter: blur(22px);
+        }
+        #panthorium-voice-identity *, #panthorium-voice-identity *::before, #panthorium-voice-identity *::after { box-sizing: border-box; min-width: 0; }
+        #panthorium-voice-identity input, #panthorium-voice-identity select, #panthorium-voice-identity textarea { max-width: 100%; min-width: 0; }
+        #panthorium-voice-identity button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+        #panthorium-voice-identity section { background: linear-gradient(145deg, rgba(20, 39, 66, .88), rgba(10, 20, 40, .92)) !important; border-color: rgba(77, 206, 222, .26) !important; box-shadow: inset 0 1px rgba(255,255,255,.035); }
+        #panthorium-voice-identity h2, #panthorium-voice-identity h3 { color: #e8faff; text-shadow: 0 0 15px rgba(51, 215, 221, .18); }
+        #panthorium-voice-identity input, #panthorium-voice-identity select { background: rgba(4, 13, 29, .88) !important; border-color: rgba(72, 190, 211, .36) !important; border-radius: 10px !important; color: #effcff !important; outline: none; }
+        #panthorium-voice-identity input:focus, #panthorium-voice-identity select:focus { border-color: #43e6d3 !important; box-shadow: 0 0 0 3px rgba(67, 230, 211, .12); }
+        #panthorium-voice-identity button { border: 1px solid rgba(67, 230, 211, .36); border-radius: 10px; background: linear-gradient(120deg, rgba(22, 102, 111, .46), rgba(45, 48, 111, .43)); color: #e6fbff; padding: 8px 12px; cursor: pointer; }
+        #panthorium-voice-identity button:hover:not(:disabled) { border-color: rgba(93, 255, 230, .75); box-shadow: 0 0 18px rgba(51, 224, 212, .14); }
+        #panthorium-voice-identity button:disabled { opacity: .48; cursor: not-allowed; }
+        @media (max-width: 760px) {
+            #panthorium-voice-identity {
+                inset: 0 !important;
+                padding: clamp(10px, 3vw, 16px) !important; border-radius: 14px !important;
+            }
+            #panthorium-voice-identity > div:nth-child(2) { grid-template-columns: minmax(0, 1fr) !important; }
+            .window { max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
         }
 
         /* ========== APP CONTENT STYLES ========== */
@@ -661,28 +826,41 @@
         }
         .about-logo {
             width: 80px; height: 80px;
-            border: 2px solid var(--accent);
             border-radius: 50%;
+            border: 2px solid var(--accent);
             margin: 0 auto 16px;
             display: flex; align-items: center; justify-content: center;
             font-size: 32px;
         }
 
-        /* Toast */
-        #toast {
+        .orb-system-notice {
             position: fixed;
-            top: 20px; left: 50%;
-            transform: translateX(-50%) translateY(-80px);
-            background: var(--surface-2);
-            border: 1px solid rgba(0,255,204,0.3);
-            padding: 12px 22px;
-            border-radius: 12px;
-            font-size: 13px;
-            z-index: 10000;
-            transition: transform 0.3s ease;
+            top: calc(max(12px, env(safe-area-inset-top, 0px)) + clamp(28px, 7vh, 72px));
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 7501;
+            display: none;
+            width: min(920px, calc(100vw - 32px));
+            max-height: min(18vh, 160px);
+            margin: 0;
+            padding: 0;
+            overflow-y: auto;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            color: #d9f7ff;
+            font-size: clamp(12px, 1.05vw, 14px);
+            line-height: 1.45;
+            text-align: center;
+            overflow-wrap: anywhere;
+            white-space: normal;
+            text-shadow: 0 1px 4px rgba(0,0,0,.8);
+            box-shadow: none;
+            backdrop-filter: none;
             pointer-events: none;
+            user-select: none;
         }
-        #toast.show { transform: translateX(-50%) translateY(0); }
+        .orb-system-notice.show { display: block; }
 
         /* Responsive */
         @media (max-width: 600px) {
@@ -690,7 +868,7 @@
             .desk-icon { width: 64px; }
             .desk-icon .icon-img { width: 40px; height: 40px; font-size: 20px; }
             #start-menu { width: calc(100% - 20px); left: 10px; }
-            .window { min-width: 260px; }
+            .window { min-width: 0; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
             :root { --taskbar-h: 52px; }
         }
 
@@ -709,7 +887,7 @@
 
     <!-- BOOT -->
     <div id="boot-screen">
-        <div class="boot-logo"><img src="/panthorium-logo.svg" data-panthorium-logo alt="Panthorium" style="width:100%;height:100%;object-fit:contain;"></div>
+        <div class="boot-logo"><img src="/panthorium-logo-mark.svg" alt="Panthorium" style="width:100%;height:100%;object-fit:contain;"></div>
         <div class="boot-title">PANTHORIUM</div>
         <div class="boot-sub">OPERATING SYSTEM</div>
         <div class="boot-progress"><div class="boot-bar" id="boot-bar"></div></div>
@@ -723,6 +901,7 @@
     <div id="desktop">
         <div id="version-badge" aria-label="เวอร์ชัน">15.0.8</div>
         <canvas id="bg-canvas"></canvas>
+        <div id="orb-system-notice" class="orb-system-notice" role="status" aria-live="off" aria-atomic="true" aria-label="สถานะระบบ"></div>
         <section id="orb-transcript" tabindex="0" role="region" aria-label="ข้อความประกอบเสียงตอบของ AI">
             <div class="orb-transcript-line previous" data-orb-line="previous" aria-label="ประโยคก่อนหน้า"></div>
             <div class="orb-transcript-line current" data-orb-line="current" aria-live="polite" aria-label="ประโยคปัจจุบัน"></div>
@@ -737,7 +916,7 @@
         <div id="windows"></div>
 
         <!-- Start Menu -->
-        <div id="start-menu">
+        <div id="start-menu" role="region" aria-label="เมนูเริ่มต้น">
             <div class="sm-header">
                 <div class="sm-avatar"><img src="/panthorium-logo.svg" data-panthorium-logo alt="Panthorium" style="width:32px;height:32px;object-fit:contain;"></div>
                 <div>
@@ -745,40 +924,45 @@
                     <div class="sm-status" id="sm-status">Online · ฟรี</div>
                 </div>
             </div>
-            <div class="sm-apps" id="sm-apps"></div>
+            <div class="sm-search">
+                <label class="sr-only" for="start-search">ค้นหาแอปและเครื่องมือ</label>
+                <input id="start-search" type="search" placeholder="ค้นหาแอปหรือเครื่องมือ..." autocomplete="off" enterkeyhint="search">
+            </div>
+            <div class="sm-apps" id="sm-apps" aria-label="แอปและหน้าต่าง"></div>
+            <div id="sm-empty" hidden>ไม่พบแอปที่ตรงกับคำค้นหา</div>
             <div class="sm-footer">
                 <button id="btn-settings-quick">⚙️ ตั้งค่า</button>
                 <button id="btn-logout">🔄 รีสตาร์ท</button>
             </div>
         </div>
 
-        <!-- Taskbar -->
-        <div id="taskbar">
-            <button class="tb-btn" id="start-btn" title="Start">⊞</button>
-            <div class="tb-apps" id="tb-apps"></div>
-            <div class="tb-right">
-                <div id="status-dot" title="System Online"></div>
-                <div id="clock"></div>
+        <div id="system-controls" aria-label="ตัวควบคุมด้านล่าง">
+            <div id="system-controls-left">
+                <button id="start-btn" type="button" title="เมนูเริ่มต้น" aria-label="เปิดเมนูเริ่มต้น" aria-controls="start-menu" aria-expanded="false">
+                    <img src="/panthorium-logo.svg" data-panthorium-logo alt="" aria-hidden="true">
+                </button>
+                <span id="status-dot" role="status" aria-label="ออนไลน์" title="Online"></span>
             </div>
+            <time id="clock" lang="th" aria-label="วันที่และเวลา"></time>
         </div>
     </div>
 
-    <div id="toast"></div>
 
     <!-- External libs -->
     <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
     <script src="/vendor/three.min.js?v=r128-local"></script>
+    <script src="/start-menu-ui.js?v=start-menu-controls-v1"></script>
 
     <script>
     // =========================================================
     // Panthorium OS - Sentinel Runtime
     // =========================================================
     function defaultBackendOrigin() {
-        // Use the origin serving the shell; saved overrides can point at old
-        // staging deployments and lose the same-site refresh cookie.
+        // Resolve the cloud API from the served origin; native builds may inject a public endpoint.
+        const configured = String(window.PANTHORIUM_BACKEND_URL || "").trim();
+        if (configured && /^https?:\/\//i.test(configured)) return new URL(configured).origin;
         if (/^https?:$/.test(window.location.protocol)) return window.location.origin;
-        const stored = localStorage.getItem("pt_backend_url");
-        return stored || (/^https?:$/.test(window.location.protocol) ? window.location.origin : "http://localhost:8787");
+        return "https://panthorium-backend-staging-124818950958.asia-southeast1.run.app";
     }
     const OS = {
         // Web OS shell build (shown in About). Browser app version is releaseVersion.
@@ -793,15 +977,11 @@
         config: {
             // Backend / Sentinel
             backendUrl: defaultBackendOrigin(),
-            useBackend: localStorage.getItem("pt_use_backend") !== "0",
-            sessionId: localStorage.getItem("pt_session_id") || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
+            useBackend: true,
+            // Conversations use one account-scoped server session across devices.
+            sessionId: "account-default",
             // Access token stays in memory only; provider secrets remain server-side.
             accessToken: ""
-        },
-        biometrics: {
-            faceDescriptor: null,
-            voiceprint: null,
-            enrolled: false
         },
         conversationHistory: [],
         windows: new Map(),
@@ -810,13 +990,70 @@
         sentinelOnline: false
     };
 
-    // เก็บ session ถาวร
-    localStorage.setItem("pt_session_id", OS.config.sessionId);
+    const WINDOW_PREFERENCES_KEY = "panthorium.window.preferences.v1";
+    const DEFAULT_WINDOW_PREFERENCES = Object.freeze({
+        fullscreenOnOpen: true,
+        minimizeToStartMenu: true,
+        preserveStateUntilClose: true,
+        landscapeEdgeToEdge: true
+    });
+    function loadWindowPreferences() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(WINDOW_PREFERENCES_KEY) || "{}");
+            return Object.fromEntries(Object.keys(DEFAULT_WINDOW_PREFERENCES).map(key => [
+                key, key === "fullscreenOnOpen" ? true : typeof saved[key] === "boolean" ? saved[key] : DEFAULT_WINDOW_PREFERENCES[key]
+            ]));
+        } catch (_) { return { ...DEFAULT_WINDOW_PREFERENCES }; }
+    }
+    let windowPreferences = loadWindowPreferences();
+    document.documentElement.dataset.windowLandscapeEdgeToEdge = String(windowPreferences.landscapeEdgeToEdge);
+    function isNativeAndroidShell() {
+        try { return window.Capacitor?.isNativePlatform?.() === true && window.Capacitor?.getPlatform?.() === "android"; }
+        catch (_) { return false; }
+    }
+    function isFullscreenDisplayMode() {
+        try { return window.matchMedia?.("(display-mode: fullscreen)").matches === true; }
+        catch (_) { return false; }
+    }
+    function syncImmersiveMarker() {
+        const immersive = isNativeAndroidShell() || isFullscreenDisplayMode() || document.fullscreenElement === document.documentElement;
+        document.documentElement.dataset.panthoriumImmersive = String(immersive);
+    }
+    syncImmersiveMarker();
+    document.addEventListener("fullscreenchange", syncImmersiveMarker);
+    window.matchMedia?.("(display-mode: fullscreen)").addEventListener?.("change", syncImmersiveMarker);
+    document.addEventListener("click", event => {
+        const launcher = event.target?.closest?.(".sm-app[data-app-id], #desktop-icons [data-app-id]");
+        if (!launcher) return;
+        if (isNativeAndroidShell() || isFullscreenDisplayMode()) { syncImmersiveMarker(); return; }
+        if (document.fullscreenElement || !document.documentElement.requestFullscreen) return;
+        try {
+            const request = document.documentElement.requestFullscreen({ navigationUI: "hide" });
+            Promise.resolve(request).then(syncImmersiveMarker).catch(syncImmersiveMarker);
+        } catch (_) { syncImmersiveMarker(); }
+    }, true);
+    function saveWindowPreferences(next = {}) {
+        windowPreferences = Object.fromEntries(Object.keys(DEFAULT_WINDOW_PREFERENCES).map(key => [
+            key, key === "fullscreenOnOpen" ? true : typeof next[key] === "boolean" ? next[key] : windowPreferences[key]
+        ]));
+        document.documentElement.dataset.windowLandscapeEdgeToEdge = String(windowPreferences.landscapeEdgeToEdge);
+        try { localStorage.setItem(WINDOW_PREFERENCES_KEY, JSON.stringify(windowPreferences)); } catch (_) {}
+        return { ...windowPreferences };
+    }
+
+    // Retire device-only connection settings and sensitive local biometric descriptors.
+    (function clearLegacyDeviceStorage() {
+        try {
+            ["pt_backend_url", "pt_use_backend", "pt_session_id", "pt_face", "pt_voice", "pt_enrolled"]
+                .forEach(key => localStorage.removeItem(key));
+        } catch (error) { console.warn("Legacy device settings could not be cleared:", error); }
+    })();
 
     // ---------- Utilities ----------
     function toast(msg, duration = 2500) {
-        const el = document.getElementById("toast");
-        el.textContent = msg;
+        const el = document.getElementById("orb-system-notice");
+        if (!el) return;
+        el.textContent = String(msg ?? "");
         el.classList.add("show");
         clearTimeout(el.__voiceTimer);
         el.__voiceTimer = setTimeout(() => el.classList.remove("show"), duration);
@@ -824,12 +1061,17 @@
 
     function $(id) { return document.getElementById(id); }
 
-    // ---------- Clock ----------
+    // ---------- Gregorian calendar and local time ----------
     function updateClock() {
         const now = new Date();
-        const t = now.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
-        const d = now.toLocaleDateString("th-TH", { day: "numeric", month: "short" });
-        $("clock").textContent = `${d}  ${t}`;
+        const locale = "th-TH-u-ca-gregory-nu-latn";
+        const date = now.toLocaleDateString(locale, { day: "numeric", month: "short", year: "numeric" });
+        const time = now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+        const clock = $("clock");
+        if (clock) {
+            clock.textContent = `${date} · ${time}`;
+            clock.dateTime = now.toISOString();
+        }
     }
     setInterval(updateClock, 10000);
     updateClock();
@@ -855,16 +1097,22 @@
     })();
 
     // ---------- Network Status ----------
-    window.addEventListener("online", () => {
-        OS.state.online = true;
-        $("status-dot").style.background = "var(--success)";
-        $("sm-status").textContent = "Online";
-    });
-    window.addEventListener("offline", () => {
-        OS.state.online = false;
-        $("status-dot").style.background = "var(--danger)";
-        $("sm-status").textContent = "Offline";
-    });
+    function setNetworkStatus(online) {
+        const isOnline = Boolean(online);
+        OS.state.online = isOnline;
+        const dot = $("status-dot");
+        if (dot) {
+            dot.style.background = isOnline ? "var(--success)" : "var(--danger)";
+            dot.style.boxShadow = isOnline ? "0 0 8px var(--success)" : "0 0 8px var(--danger)";
+            dot.title = isOnline ? "Online" : "Offline";
+            dot.setAttribute("aria-label", isOnline ? "ออนไลน์" : "ออฟไลน์");
+        }
+        const label = $("sm-status");
+        if (label) label.textContent = isOnline ? "Online" : "Offline";
+    }
+    window.addEventListener("online", () => setNetworkStatus(true));
+    window.addEventListener("offline", () => setNetworkStatus(false));
+    setNetworkStatus(navigator.onLine);
 
     // ---------- Boot Sequence ----------
     async function boot() {
@@ -962,89 +1210,6 @@
         for (let i = 0; i < 48; i++) sum += data[i];
         return sum / 48;
     }
-
-    async function enrollBiometrics() {
-        toast("กำลังโหลดโมเดล AI...");
-        await loadFaceModels();
-        toast("กำลังเปิดกล้องและไมโครโฟน...");
-        const ok = await startCamera();
-        if (!ok) {
-            return false;
-        }
-
-        toast("กรุณามองกล้องสักครู่...");
-        await new Promise(r => setTimeout(r, 2200));
-
-        const video = $("faceVideo");
-        try {
-            const det = await faceapi
-                .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
-                .withFaceLandmarks()
-                .withFaceDescriptor();
-            if (det) {
-                OS.biometrics.faceDescriptor = Array.from(det.descriptor);
-                localStorage.setItem("pt_face", JSON.stringify(OS.biometrics.faceDescriptor));
-            }
-        } catch (e) {}
-
-        // Capture simple voiceprint
-        const vp = extractVoiceFeatures();
-        if (vp > 0) {
-            OS.biometrics.voiceprint = vp;
-            localStorage.setItem("pt_voice", vp);
-        }
-
-        OS.biometrics.enrolled = true;
-        localStorage.setItem("pt_enrolled", "1");
-        return true;
-    }
-
-    async function verifyBiometrics() {
-        if (!OS.biometrics.enrolled) return true; // first time
-        const video = $("faceVideo");
-        let faceOK = true;
-        let voiceOK = true;
-
-        if (OS.biometrics.faceDescriptor && faceModelsLoaded) {
-            try {
-                const det = await faceapi
-                    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
-                    .withFaceLandmarks()
-                    .withFaceDescriptor();
-                if (det) {
-                    const dist = faceapi.euclideanDistance(
-                        new Float32Array(OS.biometrics.faceDescriptor),
-                        det.descriptor
-                    );
-                    faceOK = dist < 0.52;
-                } else faceOK = false;
-            } catch (e) { faceOK = false; }
-        }
-
-        if (OS.biometrics.voiceprint) {
-            const cur = extractVoiceFeatures();
-            voiceOK = Math.abs(OS.biometrics.voiceprint - cur) < 18;
-        }
-
-        return faceOK; // prioritize face; voice is secondary
-    }
-
-    // Load saved biometrics
-    (function loadSavedBio() {
-        if (localStorage.getItem("pt_enrolled") === "1") {
-            OS.biometrics.enrolled = true;
-            try {
-                const f = localStorage.getItem("pt_face");
-                if (f) OS.biometrics.faceDescriptor = JSON.parse(f);
-                const v = localStorage.getItem("pt_voice");
-                if (v) OS.biometrics.voiceprint = parseFloat(v);
-            } catch (e) {}
-        }
-    })();
-
-    // ---------- Login (disabled - free access) ----------
-    // ระบบเปิดใช้ฟรีทันทีหลัง boot ไม่ต้อง login
-    // Biometric จะถูกใช้เฉพาะเมื่อผู้ใช้เลือกเปิดฟังก์ชันขั้นสูงเอง
 
     // ---------- Speech ----------
     let aiSpeechActive = false;
@@ -1673,7 +1838,7 @@
         while (streamingSpeechBuffer) {
             const sentence = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…\n])(?:\s|$)/u);
             const sentenceLength = sentence ? sentence[1].trim().length : 0;
-            const minimumSentenceLength = streamingSpeechActive ? 120 : 30;
+            const minimumSentenceLength = streamingSpeechActive ? 120 : 24;
             if (sentence && sentenceLength >= minimumSentenceLength) {
                 queueStreamingSpeech(sentence[1]);
                 streamingSpeechBuffer = streamingSpeechBuffer.slice(sentence[1].length).trimStart();
@@ -1683,10 +1848,10 @@
             // Keep later phrases small enough to synthesize while the
             // current clip is still playing; large buffers create audible gaps
             // on mobile networks and slower TTS responses.
-            const minimumChunkLength = firstChunk ? 32 : 120;
+            const minimumChunkLength = firstChunk ? 24 : 120;
             const maximumChunkLength = firstChunk ? 80 : 160;
             if (streamingSpeechBuffer.length >= minimumChunkLength) {
-                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength, firstChunk ? 24 : 120);
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength, firstChunk ? 18 : 120);
                 if (cut) {
                     queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
                     streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
@@ -1735,7 +1900,7 @@
         // Queue speech while text is still arriving so the first audio does
         // not wait for the complete answer to be synthesized on mobile.
         drainStreamingSpeech(false);
-        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 120 : 24)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 400 : 220);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 120 : 18)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 400 : 140);
     });
     // The SSE caller owns stream completion and awaits this method directly.
     // Do not finish here as well; racing two finish calls can consume success state.
@@ -1758,6 +1923,8 @@
         let autoResume = true;
         let recognitionBlocked = false;
         let voiceState = "idle";
+        let voiceTurnId = 0;
+        let activeVoiceRequestController = null;
         let silenceTimer = null;
         let transcriptParts = new Map();
         let latestInterim = "";
@@ -1866,7 +2033,9 @@
         window.addEventListener("panthorium:voice-stream-finished", stopSpeechInterruptionMonitor);
 
         // Shared transcript handler (Web Speech + MediaRecorder)
-        const processTranscript = async text => {
+        const processTranscript = async (text, expectedTurnId = null) => {
+            const turnId = expectedTurnId == null ? ++voiceTurnId : expectedTurnId;
+            if (turnId !== voiceTurnId) return;
             const value = String(text || "").trim();
             if (!value) {
                 voiceState = "idle";
@@ -1877,6 +2046,8 @@
             setOrbTranscript(value, 0);
             voiceState = "processing";
             status("processing", "กำลังประมวลผล");
+            const controller = new AbortController();
+            activeVoiceRequestController = controller;
             try {
                 if (interruptedSpeechText && isVoiceContinueCommand(value)) {
                     const continuation = interruptedSpeechText;
@@ -1885,11 +2056,12 @@
                     voiceState = "speaking";
                     status("processing", "พูดต่อ", false);
                     await speakVoiceResponse(continuation);
-                    status("ready", "พูดต่อจบแล้ว", false);
+                    if (turnId === voiceTurnId) status("ready", "พูดต่อจบแล้ว", false);
                     return;
                 }
                 speechInterruptedByUser = false;
-                const { intent, response: res } = await requestVoiceInput(value);
+                const { intent, response: res } = await requestVoiceInput(value, controller.signal);
+                if (turnId !== voiceTurnId || controller.signal.aborted) return;
                 if (!res || !res.ok || !res.text) {
                     const reason = res?.text || "ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง";
                     status("unresponsive", reason);
@@ -1898,7 +2070,7 @@
                 if (voiceResponseNeedsSpeech(intent, res)) {
                     voiceState = "speaking";
                     status("processing", res.confirmationRequired ? res.text : res.streamSpoken ? "กำลังพูดคำตอบ" : "กำลังเตรียมเสียงตอบ", false);
-                    if (speechInterruptedByUser) {
+                    if (turnId !== voiceTurnId || speechInterruptedByUser) {
                         status("ready", "หยุดเสียงแล้ว", false);
                         return;
                     }
@@ -1911,13 +2083,17 @@
                         return;
                     }
                 }
-                status("ready", "พร้อมใช้งาน", intent === "conversation");
+                if (turnId === voiceTurnId) status("ready", "พร้อมใช้งาน", intent === "conversation");
             } catch (error) {
+                if (turnId !== voiceTurnId || controller.signal.aborted) return;
                 console.warn("Global voice command failed", error);
                 status("unresponsive", "ไม่ตอบสนอง");
             } finally {
-                voiceState = "idle";
-                resumeAfterTranscript();
+                if (turnId === voiceTurnId) {
+                    if (activeVoiceRequestController === controller) activeVoiceRequestController = null;
+                    voiceState = "idle";
+                    resumeAfterTranscript();
+                }
             }
         };
 
@@ -1969,7 +2145,6 @@
                         // This recognizer only detects speech end on Android; the
                         // server STT remains authoritative for the final transcript.
                         endpointLastSpeechAt = performance.now();
-                        recorderLastVoiceAt = endpointLastSpeechAt;
                     }
                 };
                 endpoint.onerror = event => {
@@ -2031,22 +2206,19 @@
             };
             const transcribeRecorderBlob = async blob => {
                 const audio = await toDataUrl(blob);
-                if (!window.PanthoriumVoiceIdentity?.authorizeAudio) throw new Error("voice_verification_unavailable");
-                const authorization = await window.PanthoriumVoiceIdentity.authorizeAudio(audio);
-                if (authorization?.required && !authorization.matched) throw new Error(authorization.error || "voice_not_authorized");
+                // The backend verifies this exact audio once before sending it to STT.
                 const transcribeDirect = async () => {
                     const base = OS.config.backendUrl.replace(/\/$/, "");
                     const response = await authorizedFetch(base + "/api/speech/transcribe", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ audio, language: "th-TH" }),
-                        signal: AbortSignal.timeout(22000),
+                        body: JSON.stringify({ audio, language: "th-TH", clientCaptureMs: Math.max(0, Math.round(performance.now() - recorderStartedAt)) }),
+                        signal: AbortSignal.timeout(40000),
                         cache: "no-store"
                     });
-                    return {
-                        data: await response.json().catch(() => ({})),
-                        statusCode: response.status
-                    };
+                    const data = await response.json().catch(() => ({}));
+                    if (data.voiceTiming) console.debug("[Panthorium voice pipeline timing]", data.voiceTiming);
+                    return { data, statusCode: response.status };
                 };
                 const transcribeWithFallback = () => transcribeDirect();
 
@@ -2099,13 +2271,33 @@
                     ({ data, statusCode } = await transcribeWithFallback());
                 }
 
+                if (statusCode === 403 && data?.error === "voice_enrollment_required") {
+                    const base = OS.config.backendUrl.replace(/\/$/, "");
+                    const response = await authorizedFetch(base + "/api/speech/identity-navigation", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ audio, language: "th-TH" }),
+                        signal: AbortSignal.timeout(22000),
+                        cache: "no-store"
+                    });
+                    const navigation = await response.json().catch(() => ({}));
+                    if (response.ok && navigation.ok && ["register", "login"].includes(navigation.intent)) return { identityNavigation: navigation.intent };
+                    throw new Error(navigation.error || "voice_navigation_unavailable");
+                }
+
                 if (
                     statusCode < 200 ||
                     statusCode >= 300 ||
                     !data.ok ||
                     typeof data.text !== "string" ||
                     !data.text.trim()
-                ) throw new Error(data.error || "transcription_unavailable");
+                ) {
+                    const error = new Error(data.error || "transcription_unavailable");
+                    error.statusCode = statusCode;
+                    if (data.voiceDiagnostic && typeof data.voiceDiagnostic === "object") error.voiceDiagnostic = data.voiceDiagnostic;
+                    if (data.voiceTiming && typeof data.voiceTiming === "object") error.voiceTiming = data.voiceTiming;
+                    throw error;
+                }
 
                 return data.text.trim();
             };
@@ -2129,13 +2321,23 @@
                     const level = Math.sqrt(sum / recorderData.length);
                     if (recorderVoiceDetector.observe(level, now - recorderStartedAt)) recorderLastVoiceAt = now;
                 }
-                const meteredSilence = meterRunning && recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 850;
-                const endpointSilence = endpointLastSpeechAt > 0 && now - endpointLastSpeechAt > 1000;
-                if ((meteredSilence || endpointSilence) && now - recorderStartedAt > 700 || now - recorderStartedAt > 30000) { finishRecorder({ discard: false }); return; }
+                const meteredSilence = meterRunning && recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 1100;
+                const endpointSilence = endpointLastSpeechAt > 0 && now - endpointLastSpeechAt > 1700;
+                // Require both active signals to agree when the microphone meter is working. A stale browser recognition event must not cut speech that the microphone still hears.
+                const meterHasSpeech = meterRunning && recorderLastVoiceAt > 0;
+                const confirmedSilence = meterHasSpeech
+                    ? meteredSilence && (!endpointLastSpeechAt || endpointSilence)
+                    : endpointSilence;
+                // If neither detector can hear speech, stop the capture after a bounded wait.
+                const noDetectedSpeechTimeout = !recorderLastVoiceAt && !endpointLastSpeechAt && now - recorderStartedAt > 8000;
+                if ((confirmedSilence && now - recorderStartedAt > 1000) || noDetectedSpeechTimeout || now - recorderStartedAt > 30000) { finishRecorder({ discard: false }); return; }
                 recorderMonitor = setTimeout(monitorRecorder, 100);
             };
             const startRecorder = async () => {
                 if (!autoResume || voiceState !== "idle" || recorder) return;
+                activeVoiceRequestController?.abort();
+                activeVoiceRequestController = null;
+                const captureTurnId = ++voiceTurnId;
                 try {
                     // Resume/create the meter synchronously from the microphone
                     // gesture before awaiting permission or network work.
@@ -2161,6 +2363,7 @@
                         cleanupRecorder();
                         userSpeechActive = false;
                         window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
+                        if (captureTurnId !== voiceTurnId) { discardOnEnd = false; voiceState = "idle"; return; }
                         if (discard) { discardOnEnd = false; voiceState = "idle"; restartListening(); return; }
                         // Submit recorded audio even when a mobile browser has
                         // suspended its analyser; ASR can validate silence and
@@ -2169,13 +2372,26 @@
                         voiceState = "processing";
                         status("processing", "กำลังถอดเสียง");
                         try {
-                            const text = await transcribeRecorderBlob(new Blob(chunks, { type: recorderMime }));
+                            const transcript = await transcribeRecorderBlob(new Blob(chunks, { type: recorderMime }));
+                            if (captureTurnId !== voiceTurnId) return;
+                            if (transcript && typeof transcript === "object" && transcript.identityNavigation) {
+                                const identity = window.PanthoriumVoiceIdentity;
+                                if (transcript.identityNavigation === "login") identity?.openLogin?.();
+                                else identity?.open?.();
+                                voiceState = "idle";
+                                status("ready", "เปิดหน้าต่าง Voice Identity แล้ว");
+                                restartListening();
+                                return;
+                            }
+                            const text = String(transcript || "").trim();
                             window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
-                            await processTranscript(text);
+                            await processTranscript(text, captureTurnId);
                         } catch (error) {
+                            if (captureTurnId !== voiceTurnId) return;
                             console.warn("[Sentinel transcription]", error);
                             voiceState = "idle";
-                            const message = ({
+                            const errorCode = String(error?.message || "").split(":")[0];
+                            let message = ({
                                 transcription_provider_unavailable: "บริการถอดเสียงหลักขัดข้อง กรุณาพูดซ้ำอีกครั้ง",
                                 transcription_fallback_unavailable: "ระบบถอดเสียงสำรองใช้ไม่ได้ กรุณาลองใหม่อีกครั้ง",
                                 microphone_permission_denied: "กรุณาอนุญาตสิทธิ์ไมโครโฟนแล้วลองใหม่",
@@ -2190,11 +2406,25 @@
                                 browser_update_required: "Panthorium Browser รุ่นนี้เก่าเกินไป กรุณาอัปเดตเป็นรุ่นล่าสุด",
                                 transcription_timeout: "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง",
                                 untrusted_origin: "Panthorium Browser ไม่อนุญาตต้นทางนี้",
-                                voice_not_authorized: "ตรวจพบเสียงที่ไม่ได้รับอนุญาต จึงไม่นำไปประมวลผล",
+                                voice_not_authorized: "ยังยืนยันเสียงผู้พูดไม่ได้ คำสั่งยังไม่ถูกส่งไปประมวลผล ลองพูดใหม่ให้ชัดและต่อเนื่องขึ้น หากเป็นคำสั่งสั้นให้พูดเพิ่มอีกนิด",
+                                voice_audio_too_short: "เสียงพูดสั้นเกินไป กรุณาพูดต่อเนื่องเพิ่มอีกนิดแล้วลองใหม่",
+                                voice_audio_unclear: "รับเสียงพูดไม่ชัด กรุณาพูดใกล้ไมโครโฟนและลองอีกครั้ง",
+                                voice_audio_invalid_duration: "ความยาวเสียงอยู่นอกช่วงที่รองรับ กรุณาพูดใหม่แล้วลองอีกครั้ง",
+                                voice_audio_invalid: "อ่านเสียงที่บันทึกไม่ได้ กรุณาตรวจไมโครโฟนแล้วลองอีกครั้ง",
+                                voice_verification_unavailable: "บริการยืนยันเสียงขัดข้องจริง กรุณาลองอีกครั้งภายหลัง",
                                 speaker_verification_not_configured: "ระบบยืนยันตัวตนด้วยเสียงยังตั้งค่าไม่ครบ"
-                            })[String(error?.message || "").split(":")[0]] || (error?.name === "TimeoutError" || error?.name === "AbortError"
+                            })[errorCode] || (error?.name === "TimeoutError" || error?.name === "AbortError"
                                 ? "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง"
                                 : "ส่งเสียงไปยังบริการถอดเสียงไม่สำเร็จ กรุณาตรวจการเชื่อมต่อ");
+                            const diagnostic = error?.voiceDiagnostic;
+                            if (errorCode === "voice_not_authorized" && diagnostic && Number.isFinite(Number(diagnostic.score))) {
+                                const score = Number(diagnostic.score).toFixed(2);
+                                const threshold = Number(diagnostic.threshold);
+                                message += Number.isFinite(threshold) ? ` (คะแนน ${score} / เกณฑ์ ${threshold.toFixed(2)})` : ` (คะแนน ${score})`;
+                            }
+                            const activeSeconds = Number(diagnostic?.speechDurationSeconds);
+                            if (Number.isFinite(activeSeconds) && activeSeconds < 2) message += ` (เสียงที่ใช้ตรวจประมาณ ${activeSeconds.toFixed(1)} วินาที)`;
+                            if (error?.voiceTiming) console.debug("[Panthorium voice pipeline timing]", error.voiceTiming);
                             status("unresponsive", message);
                             if (String(error?.message || "").startsWith("transcription_uncertain")) {
                                 await speakVoiceResponse("โปรดพูดอีกครั้ง");
@@ -2257,7 +2487,16 @@
                     stopSentinelSpeech();
                     voiceState = "idle";
                 }
-                if (voiceState === "processing" || voiceState === "stopping") { status("processing", "กำลังประมวลผล"); return; }
+                if (voiceState === "processing" || voiceState === "stopping") {
+                    autoResume = false;
+                    voiceTurnId += 1;
+                    activeVoiceRequestController?.abort();
+                    activeVoiceRequestController = null;
+                    stopSentinelSpeech();
+                    voiceState = "idle";
+                    status("ready", "ยกเลิกรอบเสียงแล้ว", false);
+                    return;
+                }
                 if (voiceState === "listening") { autoResume = false; stopRecorder(); return; }
                 recognitionBlocked = false;
                 autoResume = true;
@@ -2413,7 +2652,16 @@
                 stopSentinelSpeech();
                 voiceState = "idle";
             }
-            if (voiceState === "processing" || voiceState === "stopping") { status("processing", "กำลังประมวลผล"); return; }
+            if (voiceState === "processing" || voiceState === "stopping") {
+                autoResume = false;
+                voiceTurnId += 1;
+                activeVoiceRequestController?.abort();
+                activeVoiceRequestController = null;
+                stopSentinelSpeech();
+                voiceState = "idle";
+                status("ready", "ยกเลิกรอบเสียงแล้ว", false);
+                return;
+            }
             if (voiceState === "listening") {
                 autoResume = false;
                 // A tap on the stop button means "finish this command". The
@@ -2505,11 +2753,11 @@
         return res;
     }
 
-    async function requestVoiceInput(text) {
+    async function requestVoiceInput(text, signal) {
         const classify = window.PanthoriumWindowCatalog?.classifyVoiceInput;
         if (!classify) return { intent: "command", response: { ok: false, text: "โมดูลคำสั่งเสียงยังโหลดไม่สำเร็จ กรุณาโหลดหน้าใหม่" } };
         const { kind, text: input } = classify(text);
-        const response = await callAI(input, { voiceMode: kind === "command", conversationalVoice: kind === "conversation" });
+        const response = await callAI(input, { voiceMode: kind === "command", conversationalVoice: kind === "conversation", signal });
         return { intent: kind, response };
     }
 
@@ -2615,6 +2863,8 @@
         const w = document.createElement("div");
         w.className = "window";
         w.dataset.id = id;
+        const fullscreenOnOpen = id !== "calculator" && opts.fullscreenOnOpen !== false;
+        if (fullscreenOnOpen) w.classList.add("maximized");
         const width = opts.width || Math.min(520, window.innerWidth - 40);
         const height = opts.height || Math.min(420, window.innerHeight - 80);
         const left = opts.left ?? Math.max(20, (window.innerWidth - width) / 2 + (OS.windows.size * 24) % 80);
@@ -2631,7 +2881,6 @@
                 <div class="window-title">${title}</div>
                 <div class="window-controls">
                     <button class="win-btn min" title="ย่อ">─</button>
-                    <button class="win-btn max" title="ขยาย">□</button>
                     <button class="win-btn close" title="ปิด">✕</button>
                 </div>
             </div>
@@ -2679,17 +2928,11 @@
         resizeHandle.addEventListener("pointerup", () => { resizing = false; });
 
         w.querySelector(".close").onclick = () => closeWindow(id);
-        w.querySelector(".min").onclick = () => {
-            w.style.display = "none";
-            updateTaskbar();
-        };
-        w.querySelector(".max").onclick = () => {
-            w.classList.toggle("maximized");
-        };
+        w.querySelector(".min").onclick = () => minimizeWindow(id);
 
         w.addEventListener("pointerdown", () => focusWindow(id));
 
-        OS.windows.set(id, { el: w, title, minimized: false });
+        OS.windows.set(id, { el: w, title, menuAppId: opts.menuAppId || id, minimized: false, external: false, fullscreen: fullscreenOnOpen });
         updateTaskbar();
         return OS.windows.get(id);
     }
@@ -2697,40 +2940,207 @@
     function focusWindow(id) {
         const win = OS.windows.get(id);
         if (!win) return;
-        win.el.style.display = "flex";
+        win.el.style.display = win.displayMode || "flex";
         win.el.style.zIndex = ++OS.zCounter;
         win.minimized = false;
         updateTaskbar();
     }
 
+    function minimizeWindow(id) {
+        const win = OS.windows.get(id);
+        if (!win) return false;
+        win.minimized = true;
+        win.el.style.display = "none";
+        updateTaskbar();
+        exitDocumentFullscreenIfNoVisibleWindow();
+        return true;
+    }
+
+    function exitDocumentFullscreenIfNoVisibleWindow() {
+        const anyVisible = Array.from(OS.windows.values()).some(win => win.el?.isConnected && win.el.style.display !== "none");
+        if (!anyVisible && document.fullscreenElement === document.documentElement && document.exitFullscreen) {
+            document.exitFullscreen().then(syncImmersiveMarker).catch(() => {});
+        }
+    }
+
     function closeWindow(id) {
         const win = OS.windows.get(id);
         if (!win) return;
+        if (document.fullscreenElement === win.el && document.exitFullscreen) document.exitFullscreen().catch(() => {});
         win.el.remove();
         OS.windows.delete(id);
         updateTaskbar();
+        exitDocumentFullscreenIfNoVisibleWindow();
+    }
+
+    function findWindowByAppId(appId) {
+        for (const [id, win] of OS.windows) if (win.menuAppId === appId || id === appId) return { id, ...win };
+        const catalogApp = window.PanthoriumWindowCatalog?.apps?.find(app => app.id === appId && app.windowId);
+        if (catalogApp) {
+            const win = OS.windows.get(catalogApp.windowId);
+            if (win) { win.menuAppId = appId; return { id: catalogApp.windowId, ...win }; }
+        }
+        return null;
+    }
+
+    function setWindowFullscreen(id, active) {
+        const win = OS.windows.get(id);
+        if (!win) return false;
+        if (id === "calculator" && active) return false;
+        if (win.external) {
+            if (active) win.el.classList.add("panthorium-window-fullscreen");
+            else win.el.classList.remove("panthorium-window-fullscreen");
+        } else {
+            win.el.classList.toggle("maximized", Boolean(active));
+        }
+        win.fullscreen = Boolean(active);
+        return true;
+    }
+
+    function registerExternalWindow(id, title, element, opts = {}) {
+        if (!element) return null;
+        const current = OS.windows.get(id);
+        if (current?.el === element) return current;
+        if (current) closeWindow(id);
+        const fullscreen = id !== "calculator"
+            && (typeof opts.fullscreenOnOpen === "boolean" ? opts.fullscreenOnOpen : windowPreferences.fullscreenOnOpen);
+        if (!element.dataset.panthoriumWindowedStyle) element.dataset.panthoriumWindowedStyle = element.getAttribute("style") || "";
+        element.classList.add("panthorium-managed-window");
+        if (fullscreen) element.classList.add("panthorium-window-fullscreen");
+        const displayMode = getComputedStyle(element).display === "none" ? (opts.displayMode || "flex") : getComputedStyle(element).display;
+        OS.zCounter = Math.max(OS.zCounter, 10030) + 1;
+        element.style.zIndex = String(OS.zCounter);
+        const record = {
+            el: element, title, menuAppId: opts.menuAppId || id,
+            minimized: element.style.display === "none", external: true,
+            fullscreen, displayMode
+        };
+        OS.windows.set(id, record);
+        if (element.dataset.panthoriumFocusBound !== "true") {
+            element.dataset.panthoriumFocusBound = "true";
+            element.addEventListener("pointerdown", () => focusWindow(id));
+        }
+        updateTaskbar();
+        return record;
+    }
+
+    function findWindowByAppId(appId) {
+        for (const [id, win] of OS.windows) if (win.menuAppId === appId || id === appId) return { id, ...win };
+        const catalogApp = window.PanthoriumWindowCatalog?.apps?.find(app => app.id === appId && app.windowId);
+        if (catalogApp) {
+            const win = OS.windows.get(catalogApp.windowId);
+            if (win) { win.menuAppId = appId; return { id: catalogApp.windowId, ...win }; }
+        }
+        return null;
+    }
+
+    function setWindowFullscreen(id, active) {
+        const win = OS.windows.get(id);
+        if (!win) return false;
+        if (id === "calculator" && active) return false;
+        if (win.external) {
+            win.el.classList.toggle("panthorium-window-fullscreen", Boolean(active));
+        } else {
+            win.el.classList.toggle("maximized", Boolean(active));
+        }
+        win.fullscreen = Boolean(active);
+        return true;
+    }
+
+    function registerExternalWindow(id, title, element, opts = {}) {
+        if (!element) return null;
+        const current = OS.windows.get(id);
+        if (current?.el === element) return current;
+        if (current) closeWindow(id);
+        const fullscreen = id !== "calculator"
+            && (typeof opts.fullscreenOnOpen === "boolean" ? opts.fullscreenOnOpen : windowPreferences.fullscreenOnOpen);
+        if (!element.dataset.panthoriumWindowedStyle) element.dataset.panthoriumWindowedStyle = element.getAttribute("style") || "";
+        element.classList.add("panthorium-managed-window");
+        if (fullscreen) element.classList.add("panthorium-window-fullscreen");
+        const displayMode = getComputedStyle(element).display === "none" ? (opts.displayMode || "flex") : getComputedStyle(element).display;
+        OS.zCounter = Math.max(OS.zCounter, 10030) + 1;
+        element.style.zIndex = String(OS.zCounter);
+        const record = {
+            el: element, title, menuAppId: opts.menuAppId || id,
+            minimized: element.style.display === "none", external: true,
+            fullscreen, displayMode
+        };
+        OS.windows.set(id, record);
+        if (element.dataset.panthoriumFocusBound !== "true") {
+            element.dataset.panthoriumFocusBound = "true";
+            element.addEventListener("pointerdown", () => focusWindow(id));
+        }
+        updateTaskbar();
+        return record;
     }
 
     function updateTaskbar() {
-        const container = $("tb-apps");
-        container.innerHTML = "";
-        OS.windows.forEach((win, id) => {
-            const btn = document.createElement("button");
-            btn.className = "tb-app" + (win.el.style.display !== "none" ? " active" : "");
-            btn.textContent = win.title;
-            btn.onclick = () => {
-                if (win.el.style.display === "none") {
-                    focusWindow(id);
-                } else {
-                    win.el.style.display = "none";
-                    win.minimized = true;
-                    updateTaskbar();
-                }
-            };
-            container.appendChild(btn);
+        const container = $("sm-apps");
+        if (!container || !OS?.windows?.forEach) return;
+        container.querySelectorAll("[data-minimized-window]").forEach(item => item.remove());
+        container.querySelectorAll(".sm-app[data-managed-minimized-window]").forEach(item => {
+            const label = item.querySelector("span:not(.ico)");
+            if (label && item.dataset.baseLabel) label.textContent = item.dataset.baseLabel;
+            delete item.dataset.managedMinimizedWindow;
+            item.classList.remove("sm-window-app");
         });
+        OS.windows.forEach((win, id) => {
+            if (win.el.style.display !== "none") return;
+            const catalogApp = window.PanthoriumWindowCatalog?.apps?.find(app => app.windowId === id);
+            const appId = catalogApp?.id || win.menuAppId || id;
+            win.menuAppId = appId;
+            const accessApp = window.PanthoriumWindowCatalog?.apps?.find(app => app.id === appId);
+            if (accessApp && !window.PanthoriumWindowCatalog.allowed(accessApp, OS.state?.user)) return;
+            const launcher = Array.from(container.querySelectorAll(".sm-app[data-app-id]"))
+                .find(item => item.dataset.appId === appId);
+            if (launcher) {
+                const label = launcher.querySelector("span:not(.ico)");
+                if (label) {
+                    if (!launcher.dataset.baseLabel) launcher.dataset.baseLabel = label.textContent || win.title;
+                    label.textContent = `ย่อไว้ · ${win.title}`;
+                }
+                launcher.dataset.managedMinimizedWindow = id;
+                launcher.classList.add("sm-window-app");
+                return;
+            }
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "sm-app sm-window-app";
+            button.dataset.minimizedWindow = id;
+            button.dataset.appId = win.menuAppId || id;
+            button.dataset.searchText = `${id} ${win.title}`;
+            const icon = document.createElement("span");
+            icon.className = "ico";
+            icon.setAttribute("aria-hidden", "true");
+            icon.textContent = "▱";
+            const label = document.createElement("span");
+            label.textContent = `ย่อไว้ · ${win.title}`;
+            button.append(icon, label);
+            button.onclick = () => {
+                focusWindow(id);
+                closeStartMenu();
+            };
+            container.appendChild(button);
+        });
+        applyStartMenuSearch();
     }
 
+    window.PanthoriumWindowManager = {
+        get preferences() { return { ...windowPreferences }; },
+        setPreferences: saveWindowPreferences,
+        focus: focusWindow,
+        restore: focusWindow,
+        minimize: minimizeWindow,
+        close: closeWindow,
+        findByAppId: findWindowByAppId,
+        registerExternalWindow,
+        setFullscreen: setWindowFullscreen,
+        toggleFullscreen(id) {
+            const win = OS.windows.get(id);
+            if (!win) return false;
+            return setWindowFullscreen(id, true);
+        }
+    };
     // ---------- Apps Definition ----------
     const BROWSER_RELEASE_URL = "/browser-download.html";
     function browserDownloadUrl() {
@@ -2779,40 +3189,184 @@
         window.open(browserDownloadUrl(), "_blank", "noopener,noreferrer");
     }
 
+    function openCalculator() {
+        if (OS.windows.has("calculator")) { focusWindow("calculator"); return; }
+        const math = window.PanthoriumCalculatorMath;
+        if (!math || typeof math.evaluate !== "function") {
+            toast("เครื่องคิดเลขยังโหลดไม่สำเร็จ กรุณาโหลดหน้าใหม่");
+            return;
+        }
+
+        const keys = [
+            { label: "C", action: "clear" }, { label: "⌫", action: "backspace" }, { label: "(", value: "(" }, { label: "÷", value: "÷" },
+            { label: "7", value: "7" }, { label: "8", value: "8" }, { label: "9", value: "9" }, { label: "×", value: "×" },
+            { label: "4", value: "4" }, { label: "5", value: "5" }, { label: "6", value: "6" }, { label: "−", value: "-" },
+            { label: "1", value: "1" }, { label: "2", value: "2" }, { label: "3", value: "3" }, { label: "+", value: "+" },
+            { label: "±", action: "sign" }, { label: "0", value: "0" }, { label: ".", value: "." }, { label: "=", action: "equals" }
+        ];
+        const keyHtml = keys.map(key => {
+            const action = key.action || "insert";
+            const value = key.value == null ? "" : key.value;
+            const accent = ["÷", "×", "−", "+", "="].includes(key.label);
+            return `<button type="button" data-calculator-action="${action}" data-calculator-value="${value}" aria-label="${key.label}" style="min-height:48px;border:1px solid ${accent ? "rgba(0,255,204,.28)" : "rgba(148,163,184,.2)"};border-radius:12px;background:${key.label === "=" ? "linear-gradient(135deg,#00d8b5,#168cff)" : accent ? "rgba(0,255,204,.08)" : "rgba(30,41,59,.82)"};color:${key.label === "=" ? "#03101a" : "var(--text)"};font-size:20px;font-weight:650;cursor:pointer;touch-action:manipulation;">${key.label}</button>`;
+        }).join("");
+        const html = `
+            <div style="height:100%;display:flex;flex-direction:column;gap:12px;padding:14px;background:linear-gradient(145deg,rgba(16,34,52,.97),rgba(5,10,21,.99));box-sizing:border-box;">
+                <input id="calculator-display" type="text" aria-label="ผลคำนวณ" value="0" readonly style="width:100%;min-height:66px;box-sizing:border-box;border:1px solid rgba(0,255,204,.2);border-radius:12px;background:rgba(3,9,18,.72);color:var(--text);padding:12px;font-size:30px;text-align:right;font-variant-numeric:tabular-nums;outline:none;">
+                <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;flex:1;">${keyHtml}</div>
+                <div style="font-size:11px;color:var(--text-dim);text-align:center;">การคำนวณไม่ส่งหรือบันทึกข้อมูล</div>
+            </div>`;
+        const calculator = createWindow("calculator", "เครื่องคิดเลข", html, {
+            width: Math.min(320, Math.max(240, window.innerWidth - 48)),
+            height: Math.min(460, window.innerHeight - 80)
+        });
+        const display = calculator.el.querySelector("#calculator-display");
+        let expression = "";
+        let justEvaluated = false;
+        const render = () => { display.value = expression || "0"; };
+        const insert = value => {
+            if (justEvaluated && (/[0-9.]/.test(value) || value === "(")) expression = "";
+            justEvaluated = false;
+            expression += value;
+            render();
+        };
+        const calculate = () => {
+            if (!expression) return;
+            try {
+                expression = String(math.evaluate(expression));
+                justEvaluated = true;
+                render();
+            } catch (_) {
+                expression = "";
+                justEvaluated = true;
+                display.value = "Error";
+            }
+        };
+        calculator.el.querySelectorAll("[data-calculator-action]").forEach(button => {
+            button.addEventListener("click", () => {
+                const action = button.dataset.calculatorAction;
+                if (action === "clear") { expression = ""; justEvaluated = false; render(); }
+                else if (action === "backspace") {
+                    if (justEvaluated) expression = "";
+                    else expression = expression.slice(0, -1);
+                    justEvaluated = false;
+                    render();
+                } else if (action === "sign") {
+                    if (!expression) expression = "-";
+                    else expression = "-(" + expression + ")";
+                    justEvaluated = false;
+                    render();
+                } else if (action === "equals") calculate();
+                else insert(button.dataset.calculatorValue || "");
+            });
+        });
+        calculator.el.addEventListener("keydown", event => {
+            if (/^[0-9.+\-*/()]$/.test(event.key)) { event.preventDefault(); insert(event.key); }
+            else if (event.key === "Enter" || event.key === "=") { event.preventDefault(); calculate(); }
+            else if (event.key === "Backspace") {
+                event.preventDefault();
+                expression = justEvaluated ? "" : expression.slice(0, -1);
+                justEvaluated = false;
+                render();
+            } else if (event.key === "Escape") { expression = ""; justEvaluated = false; render(); }
+        });
+    }
+
     const APP_LIST = [
         { id: "sentinel", name: "Sentinel AI", icon: "🤖", open: openSentinel },
-        { id: "voice-identity", name: "Voice Identity", icon: "🎙️", open: () => window.PanthoriumVoiceIdentity?.open?.() }
+        { id: "voice-identity", name: "Voice Identity", icon: "🎙️", open: () => window.PanthoriumVoiceIdentity?.open?.() },
+        { id: "calculator", name: "เครื่องคิดเลข", icon: "🧮", open: openCalculator },
+        { id: "notes", name: "บันทึก", icon: "📝", open: openNotes, visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
+        { id: "files", name: "ไฟล์", icon: "📁", open: openFiles, visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
+        { id: "goals", name: "เป้าหมาย", icon: "🎯", open: () => window.PanthoriumGoals?.open?.(), visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
+        { id: "assistant-preferences", name: "ความชอบ Sentinel", icon: "⚙️", open: () => window.PanthoriumAssistantPreferences?.open?.(), visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
+        { id: "privacy-policy", name: "Privacy/Policy", icon: "🔐", startMenuOnly: true, open: () => window.PanthoriumPrivacyPolicy?.open?.() }
     ];
 
     function visibleApps() {
         return APP_LIST.filter(app => !app.visible || app.visible());
     }
 
-    function initDesktop() {
-        // Desktop icons
+    function applyStartMenuSearch() {
+        const search = $("start-search");
+        const list = $("sm-apps");
+        if (!search || !list) return 0;
+        const emptyState = $("sm-empty");
+        return window.PanthoriumStartMenuUI?.filter(search.value, list, emptyState) ?? 0;
+    }
+
+    function renderAppLaunchers() {
+        const apps = visibleApps();
+        const adminManager = window.PanthoriumStagingAdminDesktop;
+        const baseAppIds = new Set(apps.map(app => app.id));
+        if (typeof adminManager?.menuApps === "function") {
+            adminManager.menuApps().forEach(app => {
+                if (baseAppIds.has(app.id)) return;
+                baseAppIds.add(app.id);
+                apps.push({
+                    id: app.id,
+                    name: app.label,
+                    icon: app.icon,
+                    open: () => adminManager.open(app.id)
+                });
+            });
+        }
         const desk = $("desktop-icons");
+        const sm = $("sm-apps");
+        if (!desk || !sm) return;
+
         desk.innerHTML = "";
-        visibleApps().forEach(app => {
+        apps.filter(app => !app.startMenuOnly).forEach(app => {
             const el = document.createElement("div");
             el.className = "desk-icon";
+            el.dataset.appId = app.id;
             el.innerHTML = `<div class="icon-img">${app.icon}</div><span>${app.name}</span>`;
-            el.onclick = () => app.open();
+            el.onclick = () => {
+                const existingWindow = findWindowByAppId(app.id);
+                if (existingWindow) focusWindow(existingWindow.id);
+                else app.open();
+            };
             desk.appendChild(el);
         });
 
-        // Start menu apps
-        const sm = $("sm-apps");
         sm.innerHTML = "";
-        visibleApps().forEach(app => {
-            const el = document.createElement("div");
+        apps.forEach(app => {
+            const el = document.createElement("button");
+            el.type = "button";
             el.className = "sm-app";
-            el.innerHTML = `<div class="ico">${app.icon}</div><span>${app.name}</span>`;
+            el.dataset.appId = app.id;
+            el.dataset.baseLabel = app.name;
+            el.dataset.searchText = `${app.id} ${app.name}`;
+            el.innerHTML = `<div class="ico" aria-hidden="true">${app.icon}</div><span>${app.name}</span>`;
             el.onclick = () => {
-                app.open();
+                const existingWindow = findWindowByAppId(app.id);
+                if (existingWindow) focusWindow(existingWindow.id);
+                else app.open();
                 closeStartMenu();
             };
             sm.appendChild(el);
         });
+        window.PanthoriumStartMenuUI?.pinLast?.("privacy-policy", sm);
+        window.PanthoriumStartMenuUI?.keepPinnedLast?.(sm);
+        updateTaskbar();
+        applyStartMenuSearch();
+    }
+
+
+    function initDesktop() {
+        renderAppLaunchers();
 
         try {
             initBackground();
@@ -2825,17 +3379,41 @@
         });
     }
 
-    // Start menu toggle
+    window.addEventListener("panthorium:auth-changed", () => {
+        try { renderAppLaunchers(); }
+        catch (error) { console.error("Launcher refresh failed", error); }
+    });
+
+    // Start menu and searchable vertical launcher list.
     $("start-btn").onclick = () => {
-        $("start-menu").classList.toggle("open");
+        renderAppLaunchers();
+        const menu = $("start-menu");
+        const opening = !menu.classList.contains("open");
+        menu.classList.toggle("open", opening);
+        $("start-btn").setAttribute("aria-expanded", String(opening));
     };
+    $("start-search").addEventListener("input", applyStartMenuSearch);
+    $("start-search").addEventListener("keydown", event => {
+        if (event.key === "Escape") {
+            closeStartMenu();
+            $("start-btn").focus();
+        } else if (event.key === "Enter" && event.currentTarget.value.trim()) {
+            const firstVisible = Array.from($("sm-apps").children).find(item => !item.hidden && item.dataset.searchHidden !== "true" && item.style.display !== "none");
+            firstVisible?.click();
+        }
+    });
+    if (window.MutationObserver && $("sm-apps")) {
+        const launcherObserver = new MutationObserver(() => applyStartMenuSearch());
+        launcherObserver.observe($("sm-apps"), { childList: true });
+    }
     document.addEventListener("click", (e) => {
-        if (!$("start-menu").contains(e.target) && e.target !== $("start-btn")) {
+        if (!$("start-menu").contains(e.target) && !$("start-btn").contains(e.target)) {
             closeStartMenu();
         }
     });
     function closeStartMenu() {
         $("start-menu").classList.remove("open");
+        $("start-btn").setAttribute("aria-expanded", "false");
     }
 
     $("btn-settings-quick").onclick = () => { openSettings(); closeStartMenu(); };
@@ -2959,9 +3537,7 @@
             for (let offset = 0; offset < bytes.length; offset += step) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + step, bytes.length)));
             const mimeType = String(blob.type || chatRecorderMime).split(";")[0] || "audio/webm";
             const audio = "data:" + mimeType + ";base64," + btoa(binary);
-            if (!window.PanthoriumVoiceIdentity?.authorizeAudio) throw new Error("voice_verification_unavailable");
-            const authorization = await window.PanthoriumVoiceIdentity.authorizeAudio(audio);
-            if (authorization?.required && !authorization.matched) throw new Error(authorization.error || "voice_not_authorized");
+            // The backend verifies this exact audio once before sending it to STT.
             const base = OS.config.backendUrl.replace(/\/$/, "");
             const post = async () => {
                 const response = await authorizedFetch(base + "/api/speech/transcribe", {
@@ -2988,6 +3564,18 @@
                 }
             } else {
                 ({ data, statusCode } = await post());
+            }
+            if (statusCode === 403 && data?.error === "voice_enrollment_required") {
+                const response = await authorizedFetch(base + "/api/speech/identity-navigation", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ audio, language: "th-TH" }),
+                    signal: AbortSignal.timeout(22000),
+                    cache: "no-store"
+                });
+                const navigation = await response.json().catch(() => ({}));
+                if (response.ok && navigation.ok && ["register", "login"].includes(navigation.intent)) return { identityNavigation: navigation.intent };
+                throw new Error(navigation.error || "voice_navigation_unavailable");
             }
             if (statusCode < 200 || statusCode >= 300 || !data.ok || typeof data.text !== "string" || !data.text.trim()) {
                 throw new Error(data.error || "transcription_unavailable");
@@ -3020,7 +3608,16 @@
                 }
                 toast("กำลังถอดเสียง...", 4000);
                 try {
-                    const text = await transcribeChatBlob(new Blob(chunks, { type: chatRecorderMime }));
+                    const transcript = await transcribeChatBlob(new Blob(chunks, { type: chatRecorderMime }));
+                    if (transcript && typeof transcript === "object" && transcript.identityNavigation) {
+                        const identity = window.PanthoriumVoiceIdentity;
+                        if (transcript.identityNavigation === "login") identity?.openLogin?.();
+                        else identity?.open?.();
+                        toast("เปิดหน้าต่าง Voice Identity แล้ว");
+                        window.PanthoriumVoice?.resume();
+                        return;
+                    }
+                    const text = String(transcript || "").trim();
                     input.value = text;
                     window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
                     await send({ resumeGlobalVoice: true });
@@ -3056,7 +3653,9 @@
                     const level = Math.sqrt(sum / chatRecorderData.length);
                     if (chatVoiceDetector.observe(level, now - chatRecorderStartedAt)) chatRecorderLastVoiceAt = now;
                 }
-                if ((chatRecorderLastVoiceAt > 0 && now - chatRecorderLastVoiceAt > 1800 && now - chatRecorderStartedAt > 700) || now - chatRecorderStartedAt > 30000) {
+                const chatSpeechEnded = chatRecorderLastVoiceAt > 0 && now - chatRecorderLastVoiceAt > 1800 && now - chatRecorderStartedAt > 700;
+                const noChatSpeechTimeout = !chatRecorderLastVoiceAt && now - chatRecorderStartedAt > 8000;
+                if (chatSpeechEnded || noChatSpeechTimeout || now - chatRecorderStartedAt > 30000) {
                     try { chatRecorder.stop(); } catch (_) {}
                     return;
                 }
@@ -3193,104 +3792,292 @@
         const html = `
             <div class="app-content">
                 <div class="settings-section">
-                    <h3>🧠 Sentinel (Backend)</h3>
+                    <h3>🧠 Sentinel · Cloud</h3>
                     <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px;">
                         สถานะ: <strong id="sentinel-status-text">${sentinelStatus}</strong><br>
-                        <span style="font-size:12px;">AI หลักอยู่บนเซิร์ฟเวอร์ — API Key ไม่โผล่ฝั่งผู้ใช้</span>
+                        <span style="font-size:12px;">AI ประมวลผลผ่านเซิร์ฟเวอร์ ข้อมูลบัญชีถูกแยกตามผู้ใช้ และ API Key ไม่ถูกเก็บบนอุปกรณ์</span>
                     </p>
                     <div class="setting-row">
-                        <label>Backend URL</label>
-                        <input type="text" id="backend-url" placeholder="http://localhost:8787" value="${OS.config.backendUrl}">
+                        <label>เซิร์ฟเวอร์: <strong id="backend-url-display"></strong></label>
                     </div>
-                    <div class="setting-row">
-                        <label>
-                            <input type="checkbox" id="use-backend" ${OS.config.useBackend ? "checked" : ""} style="width:auto;margin-right:8px;">
-                            ใช้ Sentinel เป็นหลัก
-                        </label>
-                    </div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                        <button class="btn-primary" id="save-backend">บันทึก Backend</button>
-                        <button class="btn-primary" id="test-sentinel" style="background:rgba(0,255,204,0.2);color:var(--accent);">ทดสอบการเชื่อมต่อ</button>
-                    </div>
+                    <button class="btn-primary" id="test-sentinel" style="background:rgba(0,255,204,0.2);color:var(--accent);">ตรวจสอบการเชื่อมต่อเซิร์ฟเวอร์</button>
                 </div>
                 <div class="settings-section">
-                    <h3>🛡️ Biometric (ไม่บังคับ)</h3>
+                    <h3>🔐 Voice Identity · บัญชีบนเซิร์ฟเวอร์</h3>
                     <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px;">
-                        สถานะ: ${OS.biometrics.enrolled ? "ลงทะเบียนแล้ว" : "ยังไม่ได้ลงทะเบียน"}
+                        การลงทะเบียนชีวมิติแบบเก็บข้อมูลบนอุปกรณ์ถูกปิดแล้ว ใช้ Voice Identity เพื่อจัดการตัวตนผ่านบัญชีและเซิร์ฟเวอร์
                     </p>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                        <button class="btn-primary" id="enroll-bio">ลงทะเบียน Biometric</button>
-                        <button class="btn-danger" id="reset-bio">ล้างข้อมูล</button>
-                    </div>
+                    <button class="btn-primary" id="open-cloud-identity">เปิด Voice Identity</button>
                 </div>
                 <div class="settings-section">
                     <h3>ℹ️ ระบบ</h3>
                     <p style="font-size:13px;color:var(--text-dim);line-height:1.6;">
                         Panthorium OS v${OS.version}<br>
-                        สถาปัตยกรรม: Frontend + Sentinel Backend<br>
-                        รองรับ: คอมพิวเตอร์ · แท็บเล็ต · สมาร์ทโฟน<br>
-                        <strong style="color:var(--accent);">ใช้งานฟรีทันที ไม่ต้อง login</strong>
+                        สถาปัตยกรรม: Panthorium Client + Sentinel Cloud API<br>
+                        โน้ตและความทรงจำซิงก์ตามบัญชีที่เข้าสู่ระบบ
                     </p>
                 </div>
             </div>
         `;
-        createWindow("settings", "ตั้งค่า", html, { width: 420, height: 620 });
-
-        $("save-backend").onclick = () => {
-            const url = $("backend-url").value.trim().replace(/\/$/, "") || "http://localhost:8787";
-            const use = $("use-backend").checked;
-            OS.config.backendUrl = url;
-            OS.config.useBackend = use;
-            localStorage.setItem("pt_backend_url", url);
-            localStorage.setItem("pt_use_backend", use ? "1" : "0");
-            toast("บันทึกการตั้งค่า Backend แล้ว");
-            checkSentinelStatus();
-        };
+        createWindow("settings", "ตั้งค่า", html, { width: 420, height: 560 });
+        $("backend-url-display").textContent = OS.config.backendUrl;
 
         $("test-sentinel").onclick = async () => {
-            toast("กำลังทดสอบ Sentinel...");
+            toast("กำลังตรวจสอบเซิร์ฟเวอร์...");
             const ok = await checkSentinelStatus();
             const el = $("sentinel-status-text");
             if (el) el.textContent = ok ? "🟢 Online" : "🔴 Offline";
-            toast(ok ? "เชื่อมต่อ Sentinel สำเร็จ" : "เชื่อมต่อไม่ได้ — ตรวจ URL หรือเปิด Backend");
+            toast(ok ? "เชื่อมต่อ Sentinel สำเร็จ" : "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้");
         };
 
-        $("enroll-bio").onclick = async () => {
-            toast("กำลังเริ่มลงทะเบียน Biometric...");
-            const ok = await enrollBiometrics();
-            if (ok) {
-                toast("ลงทะเบียน Biometric สำเร็จ");
-                closeWindow("settings");
-                openSettings();
-            } else {
-                toast("ไม่สามารถลงทะเบียนได้ (ต้องอนุญาตกล้อง/ไมค์)");
-            }
-        };
-
-        $("reset-bio").onclick = () => {
-            if (confirm("ล้างข้อมูลใบหน้าและเสียง?")) {
-                localStorage.removeItem("pt_face");
-                localStorage.removeItem("pt_voice");
-                localStorage.removeItem("pt_enrolled");
-                OS.biometrics = { faceDescriptor: null, voiceprint: null, enrolled: false };
-                toast("ล้างข้อมูล Biometric แล้ว");
-                closeWindow("settings");
-                openSettings();
-            }
+        $("open-cloud-identity").onclick = () => {
+            const identity = window.PanthoriumVoiceIdentity;
+            if (typeof identity?.open === "function") identity.open();
+            else toast("Voice Identity ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่");
         };
     }
 
     // ---------- App: Notes ----------
     function openNotes() {
-        const saved = localStorage.getItem("pt_notes") || "";
-        const html = `<textarea class="notes-area" id="notes-area" placeholder="เขียนบันทึกที่นี่...">${saved}</textarea>`;
-        createWindow("notes", "บันทึก", html, { width: 420, height: 400 });
-        const area = $("notes-area");
-        area.addEventListener("input", () => {
-            localStorage.setItem("pt_notes", area.value);
-        });
-    }
+        if (OS.windows.has("notes")) { focusWindow("notes"); return; }
+        openNotes.instance = (openNotes.instance || 0) + 1;
+        const instance = openNotes.instance;
+        if (openNotes.authChangedHandler) window.removeEventListener("panthorium:auth-changed", openNotes.authChangedHandler);
 
+        const html =
+            '<div style="height:100%;display:flex;flex-direction:column;">' +
+                '<div style="padding:8px 12px;min-height:42px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+                    '<span id="notes-sync-status" role="status" aria-live="polite">กำลังโหลดบัญชี…</span>' +
+                    '<button id="notes-account-login" type="button" hidden style="border:1px solid rgba(0,255,204,.3);background:rgba(0,255,204,.08);color:var(--text);border-radius:8px;padding:7px 10px;">เข้าสู่ระบบ / สมัครบัญชี</button>' +
+                    '<button id="notes-import-legacy" type="button" hidden style="border:1px solid rgba(0,255,204,.3);background:rgba(0,255,204,.08);color:var(--text);border-radius:8px;padding:7px 10px;">นำเข้าบันทึกเดิมจากอุปกรณ์นี้</button>' +
+                    '<button id="notes-save-retry" type="button" hidden style="border:1px solid rgba(0,255,204,.3);background:rgba(0,255,204,.08);color:var(--text);border-radius:8px;padding:7px 10px;">ลองอีกครั้ง</button>' +
+                '</div>' +
+                '<textarea class="notes-area" id="notes-area" maxlength="12000" disabled placeholder="เขียนบันทึกที่นี่..."></textarea>' +
+            '</div>';
+        createWindow("notes", "บันทึก", html, { width: 420, height: 400 });
+
+        const area = $("notes-area");
+        const status = $("notes-sync-status");
+        const loginButton = $("notes-account-login");
+        const importButton = $("notes-import-legacy");
+        const retryButton = $("notes-save-retry");
+        area.style.height = "auto";
+        area.style.flex = "1";
+        area.style.minHeight = "0";
+        const noteTitle = "บันทึกจากแอป Panthorium";
+        let activeOwner = "";
+        let noteMemoryId = "";
+        let remoteSync = false;
+        let ready = false;
+        let pendingLegacyImport = false;
+        let saveTimer = null;
+        let revision = 0;
+        let saveQueue = Promise.resolve();
+        const isCurrent = () => openNotes.instance === instance && OS.windows.has("notes");
+        const currentUserId = () => {
+            const user = OS.state.user || {};
+            return String(user.sub || user.id || "");
+        };
+        const isRegisteredUser = () => {
+            const user = OS.state.user || {};
+            const id = currentUserId();
+            return Boolean(id) && !id.startsWith("guest:") && !user.roles?.includes("guest");
+        };
+        const legacyNote = () => { try { return localStorage.getItem("pt_notes") || ""; } catch (_) { return ""; } };
+        const setStatus = (value) => { status.textContent = value; };
+        const showLegacyImport = () => { importButton.hidden = !legacyNote(); };
+
+        async function loadNotes() {
+            ready = false;
+            remoteSync = false;
+            area.disabled = true;
+            retryButton.hidden = true;
+            importButton.hidden = true;
+            loginButton.hidden = true;
+            setStatus("กำลังโหลดบันทึกบนคลาวด์…");
+            try {
+                if (window.PanthoriumAuth?.ensureSession) await window.PanthoriumAuth.ensureSession();
+                else await ensureAuth();
+                if (!isCurrent()) return;
+
+                activeOwner = currentUserId();
+                if (!activeOwner) throw new Error("account_unavailable");
+                if (!isRegisteredUser()) {
+                    area.value = "";
+                    loginButton.hidden = false;
+                    setStatus("เข้าสู่ระบบหรือสมัครบัญชีเพื่อบันทึกและซิงก์โน้ตบนคลาวด์");
+                    return;
+                }
+
+                const owner = activeOwner;
+                const response = await authorizedFetch(OS.config.backendUrl.replace(/\/$/, "") + "/api/agent/memory?kind=note&limit=100", { signal: AbortSignal.timeout(10000) });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) {
+                    const error = new Error(data.error || "notes_load_failed");
+                    error.httpStatus = response.status;
+                    error.requestId = response.headers.get("x-request-id") || "";
+                    throw error;
+                }
+                if (!isCurrent() || owner !== currentUserId()) return;
+
+                remoteSync = true;
+                const savedNote = (data.memories || []).find(item => item.title === noteTitle);
+                if (savedNote) {
+                    noteMemoryId = savedNote.memoryId;
+                    area.value = savedNote.content || "";
+                    setStatus("บันทึกและซิงก์กับบัญชีของคุณบนคลาวด์แล้ว");
+                    importButton.hidden = true;
+                } else {
+                    noteMemoryId = "";
+                    area.value = "";
+                    setStatus("โน้ตใหม่จะบันทึกบนเซิร์ฟเวอร์และใช้ได้บนอุปกรณ์อื่นเมื่อเข้าสู่บัญชีนี้");
+                    showLegacyImport();
+                }
+                ready = true;
+                area.disabled = false;
+            } catch (error) {
+                if (!isCurrent()) return;
+                ready = false;
+                remoteSync = false;
+                area.disabled = true;
+                const code = String(error?.message || "unknown").slice(0, 64);
+                const httpStatus = Number(error?.httpStatus) || 0;
+                console.warn("[Notes] Cloud load failed", { code, httpStatus, requestId: error?.requestId || "" });
+                let message = "โหลดโน้ตจากคลาวด์ไม่สำเร็จ";
+                if (httpStatus === 401 || code === "authentication_required") {
+                    message = "เซสชันบัญชีหมดอายุ • เข้าสู่ระบบใหม่แล้วลองอีกครั้ง";
+                } else if (httpStatus === 403 && code === "permission_denied") {
+                    message = "บัญชีที่เข้าสู่ระบบไม่มีสิทธิ์ Chat สำหรับเรียกข้อมูล • ออกจากระบบแล้วเข้าบัญชีที่ได้รับสิทธิ์";
+                } else if (httpStatus === 403 && code === "user_feature_restricted") {
+                    message = "เซิร์ฟเวอร์จำกัดสิทธิ์ Notes ของบัญชีนี้ผิดพลาด • ไม่ต้องเข้าสู่ระบบซ้ำ";
+                } else if (httpStatus === 403 && code === "memory_requires_account") {
+                    if (isRegisteredUser()) {
+                        message = "เซิร์ฟเวอร์ยังไม่ยืนยันสิทธิ์ Notes ของบัญชีนี้ • แตะลองอีกครั้งเพื่อซิงก์";
+                    } else {
+                        message = "เซสชันปัจจุบันเป็น Guest • เข้าสู่ระบบด้วยบัญชีผู้ใช้แล้วลองอีกครั้ง";
+                        loginButton.hidden = false;
+                    }
+                } else if (httpStatus === 403) {
+                    message = "เซิร์ฟเวอร์ปฏิเสธสิทธิ์บัญชี • ตรวจสอบบัญชีที่เข้าสู่ระบบ";
+                } else if (code === "notes_storage_unconfigured") {
+                    message = "ยังไม่ได้ตั้งค่าพื้นที่ bucket สำหรับ Notes • ข้อมูลเดิมยังไม่ถูกลบ";
+                } else if (code === "notes_storage_permission_denied") {
+                    message = "บริการ bucket ไม่มีสิทธิ์เข้าถึง Notes • เซสชันบัญชียังอยู่ ลองอีกครั้งภายหลัง";
+                } else if (code === "notes_migration_conflict" || code === "note_conflict") {
+                    message = "ตรวจพบข้อมูล Notes ที่ไม่ตรงกัน • ระบบคงข้อมูลเดิมไว้เพื่อป้องกันข้อมูลสูญหาย";
+                } else if (code === "notes_storage_corrupt") {
+                    message = "ไฟล์ Notes บน bucket อ่านไม่ได้ • ข้อมูล SQL เดิมจะไม่ถูกลบก่อนตรวจสอบ";
+                } else if (code === "note_too_large" || code === "notes_count_limit") {
+                    message = "Notes เกินขีดจำกัดพื้นที่หรือจำนวนที่รองรับ";
+                } else if (httpStatus === 429) {
+                    message = "มีคำขอมากเกินไป • รอสักครู่แล้วลองอีกครั้ง";
+                } else if (httpStatus >= 500) {
+                    message = "เซิร์ฟเวอร์คลาวด์ขัดข้อง (HTTP " + httpStatus + ") • ลองอีกครั้งภายหลัง";
+                } else if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+                    message = "เซิร์ฟเวอร์คลาวด์ตอบช้าเกินไป • แตะลองอีกครั้ง";
+                } else if (error instanceof TypeError || code === "Failed to fetch") {
+                    message = "เชื่อมต่อเซิร์ฟเวอร์คลาวด์ไม่ได้ • ตรวจสอบอินเทอร์เน็ตแล้วลองอีกครั้ง";
+                } else if (httpStatus) {
+                    message = "เซิร์ฟเวอร์ปฏิเสธคำขอ (HTTP " + httpStatus + ") • ลองเข้าสู่ระบบใหม่";
+                }
+                if (error?.requestId) message += " • รหัส " + String(error.requestId).slice(0, 36);
+                setStatus(message);
+                retryButton.hidden = false;
+            }
+        }
+
+        async function saveSnapshot(content, owner, version) {
+            if (!ready || !remoteSync || !isCurrent() || owner !== activeOwner || owner !== currentUserId() || version !== revision || !isRegisteredUser()) return;
+            let response;
+            if (!content.trim()) {
+                if (!noteMemoryId) { setStatus("บันทึกแล้วบนคลาวด์"); return; }
+                response = await authorizedFetch(OS.config.backendUrl.replace(/\/$/, "") + "/api/agent/memory/" + encodeURIComponent(noteMemoryId), {
+                    method: "DELETE",
+                    signal: AbortSignal.timeout(10000)
+                });
+            } else if (noteMemoryId) {
+                response = await authorizedFetch(OS.config.backendUrl.replace(/\/$/, "") + "/api/agent/memory/" + encodeURIComponent(noteMemoryId), {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ content }),
+                    signal: AbortSignal.timeout(10000)
+                });
+            } else {
+                response = await authorizedFetch(OS.config.backendUrl.replace(/\/$/, "") + "/api/agent/memory", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ kind: "note", title: noteTitle, content, tags: ["notes-app"], source: "notes-app", importance: 50 }),
+                    signal: AbortSignal.timeout(10000)
+                });
+            }
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.ok) throw new Error(data.error || "notes_save_failed");
+            if (owner !== currentUserId()) return;
+            if (content.trim()) noteMemoryId = data.memory?.memoryId || noteMemoryId;
+            else noteMemoryId = "";
+            setStatus("บันทึกแล้ว • ซิงก์กับบัญชีบนคลาวด์");
+            retryButton.hidden = true;
+            if (pendingLegacyImport && legacyNote() === content) {
+                try { localStorage.removeItem("pt_notes"); } catch (_) {}
+                pendingLegacyImport = false;
+            }
+        }
+
+        function scheduleSave(immediate = false) {
+            if (!ready || !remoteSync || !isRegisteredUser() || !activeOwner) return;
+            clearTimeout(saveTimer);
+            const owner = activeOwner;
+            const content = area.value;
+            const version = ++revision;
+            retryButton.hidden = true;
+            setStatus("กำลังบันทึกและซิงก์บนคลาวด์…");
+            const enqueue = () => {
+                saveQueue = saveQueue.catch(() => {}).then(() => saveSnapshot(content, owner, version)).catch(() => {
+                    if (!isCurrent() || version !== revision) return;
+                    setStatus("บันทึกบนเซิร์ฟเวอร์ไม่สำเร็จ • ข้อความยังอยู่ในช่องนี้");
+                    retryButton.hidden = false;
+                });
+            };
+            if (immediate) enqueue();
+            else saveTimer = setTimeout(enqueue, 600);
+        }
+
+        loginButton.addEventListener("click", () => {
+            const identity = window.PanthoriumVoiceIdentity;
+            if (typeof identity?.openLogin === "function") identity.openLogin();
+            else if (typeof identity?.open === "function") identity.open();
+            else if (typeof toast === "function") toast("เปิดเมนู Voice Identity เพื่อเข้าสู่ระบบหรือสมัครบัญชี");
+        });
+        importButton.addEventListener("click", () => {
+            if (!ready || !remoteSync || !isRegisteredUser()) return;
+            const oldValue = legacyNote();
+            if (!oldValue) return;
+            area.value = oldValue.slice(0, 12000);
+            pendingLegacyImport = true;
+            importButton.hidden = true;
+            scheduleSave(true);
+        });
+        retryButton.addEventListener("click", () => {
+            if (ready) scheduleSave(true);
+            else loadNotes();
+        });
+        area.addEventListener("input", () => {
+            if (!pendingLegacyImport) importButton.hidden = true;
+            scheduleSave();
+        });
+
+        const authChanged = () => {
+            const nextOwner = currentUserId();
+            if (!activeOwner || nextOwner === activeOwner || !isCurrent()) return;
+            clearTimeout(saveTimer);
+            ready = false;
+            closeWindow("notes");
+            if (nextOwner) openNotes();
+        };
+        openNotes.authChangedHandler = authChanged;
+        window.addEventListener("panthorium:auth-changed", authChanged);
+        loadNotes();
+    }
     // ---------- App: Calculator ----------
     function openCalc() {
         const html = `
@@ -3347,40 +4134,179 @@
         });
     }
 
-    // ---------- App: Files (simple) ----------
+    // ---------- App: Files ----------
     function openFiles() {
-        let files = JSON.parse(localStorage.getItem("pt_files") || "[]");
-        function render() {
-            const list = files.map((f, i) => `
-                <div class="file-item" data-i="${i}">
-                    <div class="fico">📄</div>
-                    <div class="fname">${f.name}</div>
-                    <div class="fsize">${f.size}</div>
-                </div>
-            `).join("") || `<p style="color:var(--text-dim);font-size:13px;padding:12px;">ยังไม่มีไฟล์ — ใช้แอปบันทึกเพื่อสร้าง</p>`;
+        if (OS.windows.has("files")) { focusWindow("files"); return; }
+        const html = '<div style="height:100%;display:flex;flex-direction:column;gap:10px;padding:12px;">' +
+            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+                '<span id="files-sync-status" role="status" aria-live="polite" style="flex:1;">กำลังตรวจสอบบัญชี…</span>' +
+                '<button id="files-refresh" type="button">รีเฟรช</button>' +
+                '<button id="files-upload" type="button">อัปโหลดไฟล์</button>' +
+                '<input id="files-input" type="file" hidden>' +
+            '</div>' +
+            '<div style="font-size:12px;opacity:.72;">ไฟล์อยู่ใน Cloud Storage ส่วนตัวของบัญชีนี้ • จำกัด 20 MB ต่อไฟล์ และ 100 MB ต่อบัญชีในรุ่นทดสอบ</div>' +
+            '<div id="files-list" style="overflow:auto;flex:1;display:flex;flex-direction:column;gap:7px;"></div>' +
+        '</div>';
+        createWindow("files", "ไฟล์บนคลาวด์", html, { width: 620, height: 460 });
 
-            return `
-                <div class="app-content">
-                    <div style="display:flex;gap:8px;margin-bottom:14px;">
-                        <button class="btn-primary" id="new-file">+ สร้างไฟล์ใหม่</button>
-                    </div>
-                    <div class="file-list" id="file-list">${list}</div>
-                </div>
-            `;
-        }
-
-        createWindow("files", "ตัวจัดการไฟล์", render(), { width: 400, height: 380 });
-
-        const win = OS.windows.get("files").el;
-        win.querySelector("#new-file").onclick = () => {
-            const name = prompt("ชื่อไฟล์:");
-            if (!name) return;
-            files.push({ name, size: "0 B", content: "", created: Date.now() });
-            localStorage.setItem("pt_files", JSON.stringify(files));
-            closeWindow("files");
-            openFiles();
+        const status = document.getElementById("files-sync-status");
+        const list = document.getElementById("files-list");
+        const refreshButton = document.getElementById("files-refresh");
+        const uploadButton = document.getElementById("files-upload");
+        const input = document.getElementById("files-input");
+        let busy = false;
+        const isCurrent = () => OS.windows.has("files");
+        const apiBase = () => String(OS.config.backendUrl || "").replace(/\/$/, "");
+        const escapeHtml = value => String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+        const formatBytes = value => {
+            const bytes = Math.max(0, Number(value) || 0);
+            if (bytes < 1024) return bytes + " B";
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+            return (bytes / (1024 * 1024)).toFixed(1) + " MB";
         };
+        const ownerId = () => {
+            const user = OS.state.user || {};
+            return String(user.sub || user.id || "");
+        };
+        const isRegistered = () => {
+            const user = OS.state.user || {};
+            const id = ownerId();
+            return Boolean(id && !id.startsWith("guest:") && !(user.roles || []).includes("guest"));
+        };
+        const messageFor = error => {
+            const code = String(error && error.message || "");
+            if (code === "account_required") return "ยังไม่สามารถใช้ Cloud Storage กับเซสชันนี้ได้";
+            if (code === "files_storage_unconfigured") return "Staging ยังไม่ได้กำหนด bucket สำหรับ Files";
+            if (code === "files_storage_permission_denied") return "Cloud Run ยังไม่มีสิทธิ์เข้าถึง bucket";
+            if (code === "files_quota_exceeded") return "พื้นที่บัญชีถึงขีดจำกัด 100 MB";
+            if (code === "files_count_limit") return "บัญชีมีไฟล์ถึงขีดจำกัดรุ่นทดสอบ";
+            if (code === "file_too_large") return "ไฟล์ใหญ่เกิน 20 MB";
+            if (error && error.status === 401) return "เซสชันใช้ Files ไม่ได้ • รีเฟรชเพื่อเชื่อมต่อใหม่";
+            return "เชื่อมต่อ Cloud Storage ไม่สำเร็จ • ลองอีกครั้ง";
+        };
+        async function ensureAccount() {
+            if (window.PanthoriumAuth && typeof window.PanthoriumAuth.ensureSession === "function") {
+                await window.PanthoriumAuth.ensureSession();
+            }
+            if (!isCurrent()) return "";
+            if (!isRegistered()) {
+                uploadButton.disabled = true;
+                status.textContent = "Cloud Storage ยังไม่พร้อมใช้งานสำหรับเซสชันนี้";
+                return "";
+            }
+            uploadButton.disabled = false;
+            return ownerId();
+        }
+        async function loadFiles() {
+            if (!isCurrent() || busy) return;
+            busy = true;
+            status.textContent = "กำลังโหลดรายการจาก bucket ส่วนตัว…";
+            try {
+                const owner = await ensureAccount();
+                if (!owner) return;
+                const response = await authorizedFetch(apiBase() + "/api/files", { signal: AbortSignal.timeout(15000) });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) throw Object.assign(new Error(data.error || "files_load_failed"), { status: response.status });
+                if (!isCurrent() || owner !== ownerId()) return;
+                const files = Array.isArray(data.files) ? data.files : [];
+                list.innerHTML = files.length ? files.map(file =>
+                    '<div style="display:flex;gap:8px;align-items:center;padding:10px;border:1px solid rgba(0,255,204,.18);border-radius:10px;background:rgba(12,24,44,.65);">' +
+                        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(file.name) + '">' + escapeHtml(file.name) + '</span>' +
+                        '<span style="font-size:12px;opacity:.7;">' + formatBytes(file.size) + '</span>' +
+                        '<button type="button" data-files-action="download" data-file-id="' + escapeHtml(file.id) + '" data-file-name="' + escapeHtml(file.name) + '">ดาวน์โหลด</button>' +
+                        '<button type="button" data-files-action="delete" data-file-id="' + escapeHtml(file.id) + '">ลบ</button>' +
+                    '</div>'
+                ).join("") : '<div style="padding:18px;text-align:center;opacity:.7;">ยังไม่มีไฟล์ในบัญชีนี้</div>';
+                status.textContent = "ซิงก์แล้ว • " + files.length + " ไฟล์ • ใช้ " + formatBytes(data.usedBytes) + " จาก " + formatBytes(data.maxBytes);
+            } catch (error) {
+                if (isCurrent()) status.textContent = messageFor(error);
+                list.innerHTML = "";
+            } finally {
+                busy = false;
+            }
+        }
+        refreshButton.addEventListener("click", () => { loadFiles(); });
+        uploadButton.addEventListener("click", () => input.click());
+        input.addEventListener("change", async () => {
+            const file = input.files && input.files[0];
+            input.value = "";
+            if (!file || busy) return;
+            if (file.size > 20 * 1024 * 1024) { status.textContent = "ไฟล์ใหญ่เกิน 20 MB"; return; }
+            busy = true;
+            uploadButton.disabled = true;
+            status.textContent = "กำลังอัปโหลดไฟล์ไปยัง Cloud Storage…";
+            try {
+                const owner = await ensureAccount();
+                if (!owner) return;
+                const response = await authorizedFetch(apiBase() + "/api/files", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/octet-stream",
+                        "X-File-Name": encodeURIComponent(file.name),
+                        "X-File-Content-Type": file.type || "application/octet-stream"
+                    },
+                    body: file,
+                    signal: AbortSignal.timeout(120000)
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) throw Object.assign(new Error(data.error || "files_upload_failed"), { status: response.status });
+                status.textContent = "อัปโหลดและบันทึกในบัญชีคลาวด์แล้ว";
+                busy = false;
+                await loadFiles();
+            } catch (error) {
+                status.textContent = messageFor(error);
+            } finally {
+                busy = false;
+                uploadButton.disabled = !isRegistered();
+            }
+        });
+        list.addEventListener("click", async event => {
+            const button = event.target.closest("[data-files-action]");
+            if (!button || busy) return;
+            const id = button.getAttribute("data-file-id") || "";
+            const action = button.getAttribute("data-files-action");
+            busy = true;
+            try {
+                if (action === "download") {
+                    status.textContent = "กำลังดาวน์โหลดจาก Cloud Storage…";
+                    const response = await authorizedFetch(apiBase() + "/api/files/" + encodeURIComponent(id), { signal: AbortSignal.timeout(120000) });
+                    if (!response.ok) {
+                        const data = await response.json().catch(() => ({}));
+                        throw Object.assign(new Error(data.error || "files_download_failed"), { status: response.status });
+                    }
+                    const blob = await response.blob();
+                    const link = document.createElement("a");
+                    const href = URL.createObjectURL(blob);
+                    link.href = href;
+                    link.download = button.getAttribute("data-file-name") || "file";
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    setTimeout(() => URL.revokeObjectURL(href), 1000);
+                    status.textContent = "ดาวน์โหลดไฟล์แล้ว";
+                } else if (action === "delete" && window.confirm("ลบไฟล์นี้ออกจากบัญชีคลาวด์หรือไม่?")) {
+                    const response = await authorizedFetch(apiBase() + "/api/files/" + encodeURIComponent(id), { method: "DELETE" });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok || !data.ok) throw Object.assign(new Error(data.error || "files_delete_failed"), { status: response.status });
+                    status.textContent = "ลบไฟล์แล้ว";
+                    busy = false;
+                    await loadFiles();
+                    return;
+                }
+            } catch (error) {
+                status.textContent = messageFor(error);
+            } finally {
+                busy = false;
+            }
+        });
+        openFiles.authChangedHandler = openFiles.authChangedHandler || (() => {
+            if (OS.windows.has("files")) loadFiles();
+        });
+        window.removeEventListener("panthorium:auth-changed", openFiles.authChangedHandler);
+        window.addEventListener("panthorium:auth-changed", openFiles.authChangedHandler);
+        loadFiles();
     }
+
 
     // ---------- App: Terminal ----------
     function openTerminal() {
@@ -3766,7 +4692,7 @@
         orbCore.material.uniforms.uTime.value = time;
         orbCore.material.uniforms.uPulse.value = smoothPulse;
         const breathe = 1 + Math.sin(time * 1.35) * .022 + smoothPulse * .16 + orbAIEnergy * (.15 + Math.sin(time * 9) * .01) + orbVoiceEnergy * .018;
-        orbGroup.scale.setScalar(breathe);
+        orbGroup.scale.setScalar(.98 * breathe);
         orbHalo.material.opacity = Math.max(.08, .2 + Math.sin(time * 1.6) * .035 - smoothPulse * .08 + orbAIEnergy * .035 + orbVoiceEnergy * .012);
         renderer.render(scene, camera);
     }

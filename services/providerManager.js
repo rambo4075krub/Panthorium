@@ -114,9 +114,9 @@ class ProviderManager {
     const languageName = String(language).toLowerCase().startsWith("th") ? "Thai" : String(language).toLowerCase().startsWith("en") ? "English" : "the spoken language";
     const prompt = [
       `Transcribe the attached audio exactly in ${languageName}.`,
-      "Return only the words that are clearly spoken. Do not translate, summarize, explain, or add speaker labels.",
-      "Preserve Thai and English as spoken, including names Panthorium, Sentinel, Niwat, AI, API, and ProviderManager.",
-      "If there is no intelligible speech or you cannot determine the words, return exactly: TRANSCRIPTION_UNCERTAIN"
+      "Return only words that are clearly audible in the attached audio. Do not translate, summarize, explain, or add speaker labels.",
+      "Do not infer missing words or use names, brands, model names, or technical terms from these instructions or the application context unless they are clearly spoken in the audio.",
+      "If the audio is silent, contains only background noise, is clipped, or the speech is not intelligible, return exactly: TRANSCRIPTION_UNCERTAIN"
     ].join(" ");
     const response = await fetchProvider(async () => fetch(url, {
       method: "POST",

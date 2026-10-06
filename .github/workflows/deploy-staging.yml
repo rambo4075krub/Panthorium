@@ -27,6 +27,8 @@ jobs:
       VERTEX_MODEL: sentinel-v4
       REGION: asia-southeast1
       SERVICE: panthorium-backend-staging
+      PANTHORIUM_FILES_BUCKET: ${{ vars.PANTHORIUM_STAGING_FILES_BUCKET || '' }}
+      PANTHORIUM_PRODUCTION_FILES_BUCKET: ${{ vars.PANTHORIUM_PRODUCTION_FILES_BUCKET || '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Check isolated staging configuration
@@ -34,7 +36,7 @@ jobs:
           PRODUCTION_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
         run: |
           set -euo pipefail
-          for name in PROJECT RUNTIME_SA SQL_INSTANCE DEPLOY_SA WIF_PROVIDER; do
+          for name in PROJECT RUNTIME_SA SQL_INSTANCE DEPLOY_SA WIF_PROVIDER PANTHORIUM_FILES_BUCKET PANTHORIUM_PRODUCTION_FILES_BUCKET; do
             if [ -z "${!name}" ]; then
               echo "::error::Missing staging configuration: $name. See docs/STAGING.md"
               exit 1
@@ -49,6 +51,15 @@ jobs:
           [[ "$WIF_PROVIDER" == "projects/124818950958/locations/global/workloadIdentityPools/github-staging/providers/github" ]]
           [[ "$RUNTIME_SA" == *"@$PROJECT.iam.gserviceaccount.com" ]]
           [[ "$SQL_INSTANCE" == "$PROJECT:$REGION:"* ]]
+          bucket_pattern='^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$'
+          if ! [[ "$PANTHORIUM_FILES_BUCKET" =~ $bucket_pattern ]] || ! [[ "$PANTHORIUM_PRODUCTION_FILES_BUCKET" =~ $bucket_pattern ]]; then
+            echo "::error::Set valid Cloud Storage bucket names in the repository variables."
+            exit 1
+          fi
+          if [ "$PANTHORIUM_FILES_BUCKET" = "$PANTHORIUM_PRODUCTION_FILES_BUCKET" ]; then
+            echo "::error::Staging and production must use different Cloud Storage buckets."
+            exit 1
+          fi
           configured=0
           for name in VERTEX_PROJECT VERTEX_TUNING_JOB_LOCATION VERTEX_TUNING_JOB_ID; do
             if [ -n "${!name}" ]; then configured=$((configured + 1)); fi
@@ -87,7 +98,7 @@ jobs:
             --image="$IMAGE" --service-account="$RUNTIME_SA" --allow-unauthenticated \
             --port=8787 --max-instances=1 --min-instances=0 --cpu-throttling \
             --set-cloudsql-instances="$SQL_INSTANCE" \
-            --update-env-vars="^@^NODE_ENV=production@HOST=0.0.0.0@TRUST_PROXY=1@DATABASE_SSL_MODE=disable@ALLOW_ELECTRON_ORIGIN=1@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_RELEASE_GATE_AUTO_GATE=0@SENTINEL_RELEASE_GATE_AUTO_BENCHMARK=0@SENTINEL_RELEASE_GATE_AUTO_IMPROVE=0@PANTHORIUM_GOVERNANCE_MODE=off@PANTHORIUM_SENTINEL_CONTROL_MODE=off@AI_PRIORITY=vertex@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT@SENTINEL_VERTEX_LOCATION=$VERTEX_TUNING_JOB_LOCATION@SENTINEL_VERTEX_TUNING_JOB_LOCATION=$VERTEX_TUNING_JOB_LOCATION@SENTINEL_VERTEX_TUNING_JOB_ID=$VERTEX_TUNING_JOB_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@SENTINEL_VERTEX_AUDIO_MODEL=gemini-2.5-flash-lite@SENTINEL_VERTEX_AUDIO_LOCATION=europe-west4@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex@SENTINEL_MIN_EVALUATORS=1@SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=1" \
+            --update-env-vars="^@^NODE_ENV=production@HOST=0.0.0.0@TRUST_PROXY=1@DATABASE_SSL_MODE=disable@ALLOW_ELECTRON_ORIGIN=1@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_RELEASE_GATE_AUTO_GATE=0@SENTINEL_RELEASE_GATE_AUTO_BENCHMARK=0@SENTINEL_RELEASE_GATE_AUTO_IMPROVE=0@PANTHORIUM_GOVERNANCE_MODE=off@PANTHORIUM_SENTINEL_CONTROL_MODE=off@AI_PRIORITY=vertex@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT@SENTINEL_VERTEX_LOCATION=$VERTEX_TUNING_JOB_LOCATION@SENTINEL_VERTEX_TUNING_JOB_LOCATION=$VERTEX_TUNING_JOB_LOCATION@SENTINEL_VERTEX_TUNING_JOB_ID=$VERTEX_TUNING_JOB_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@SENTINEL_VERTEX_AUDIO_MODEL=gemini-2.5-flash-lite@SENTINEL_VERTEX_AUDIO_LOCATION=europe-west4@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex@SENTINEL_MIN_EVALUATORS=1@SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=1@PANTHORIUM_FILES_BUCKET=$PANTHORIUM_FILES_BUCKET@BIOMETRIC_GATE_ENABLED=1@BIOMETRIC_VOICE_THRESHOLD=0.13@BIOMETRIC_DIAGNOSTICS_ENABLED=1" \
             --update-secrets="DATABASE_URL=panthorium-staging-database-url:latest,JWT_SECRET=panthorium-staging-jwt:latest,ADMIN_PASSWORD=panthorium-staging-admin-password:latest" \
             --remove-secrets=GROQ_API_KEY,OPENAI_API_KEY,GEMINI_API_KEY,ANTHROPIC_API_KEY --quiet
           if [ -n "$RESEND_SECRET" ]; then
@@ -106,7 +117,7 @@ jobs:
           curl --fail --silent --show-error "$URL/admin" -o /dev/null
           # Verify the running revision serves the files that passed the DOM and
           # routing tests, rather than treating a green health check as UI proof.
-          for asset in voice-window-catalog.js external-apps-ui.js voice-command-client.js phase2-auth.js ai-stream-client.js; do
+          for asset in voice-window-catalog.js external-apps-ui.js voice-command-client.js voice-identity-ui.js phase2-auth.js ai-stream-client.js; do
             curl --fail --silent --show-error "$URL/$asset" -o "$RUNNER_TEMP/deployed-$asset"
             cmp "$asset" "$RUNNER_TEMP/deployed-$asset"
           done

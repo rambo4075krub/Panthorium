@@ -9,6 +9,25 @@ const cosine = (a, b) => {
   return aa && bb ? dot / Math.sqrt(aa * bb) : -1;
 };
 const mean = vectors => vectors[0].map((_, i) => vectors.reduce((sum, vector) => sum + Number(vector[i]), 0) / vectors.length);
+const SPEAKER_INPUT_ERRORS = Object.freeze({
+  voice_signal_too_short: 'voice_audio_too_short',
+  voice_signal_missing: 'voice_audio_unclear',
+  invalid_audio_duration: 'voice_audio_invalid_duration',
+  invalid_audio: 'voice_audio_invalid',
+  invalid_audio_size: 'voice_audio_invalid',
+  audio_decode_failed: 'voice_audio_invalid',
+  audio_too_large: 'voice_audio_invalid_duration'
+});
+const speakerProviderError = (status, payload) => {
+  const providerCode = String(payload?.error || '');
+  if ((Number(status) === 400 || Number(status) === 413) && SPEAKER_INPUT_ERRORS[providerCode]) {
+    return new Error(SPEAKER_INPUT_ERRORS[providerCode]);
+  }
+  return new Error(`speaker_verification_http_${Number(status)}`);
+};
+const durationBucket = seconds => !Number.isFinite(seconds) ? 'unknown'
+  : seconds < 2 ? 'under_2s'
+  : seconds < 5 ? '2_to_5s' : '5s_or_more';
 
 class BiometricIdentityService {
   constructor({ repository, audit, providerUrl, providerToken, encryptionKey, gateEnabled = false, matchThreshold = 0.82, enrollmentThreshold = 0.76 }) {
@@ -18,7 +37,7 @@ class BiometricIdentityService {
     this.matchThreshold = Number(matchThreshold); this.enrollmentThreshold = Number(enrollmentThreshold);
   }
   async init() { await this.repository.init(); }
-  status() { return { configured: Boolean(this.providerUrl && this.key), gateEnabled: this.gateEnabled, providerConfigured: Boolean(this.providerUrl), encryptionConfigured: Boolean(this.key), minEnrollmentSamples: 3, maxEnrollmentSamples: 5, allowedSubjects: [...TYPES] }; }
+  status() { return { configured: Boolean(this.providerUrl && this.key), gateEnabled: this.gateEnabled, providerConfigured: Boolean(this.providerUrl), encryptionConfigured: Boolean(this.key), matchThreshold: this.matchThreshold, minEnrollmentSamples: 3, maxEnrollmentSamples: 5, minimumActiveSpeechSeconds: 1, shortUtteranceCalibrationEnabled: false, livenessSupported: false, allowedSubjects: [...TYPES] }; }
   validateAudio(audio) {
     if (typeof audio !== 'string' || audio.length < 4000 || audio.length > 1400000) return false;
     const comma = audio.indexOf(',');
@@ -30,7 +49,7 @@ class BiometricIdentityService {
   }
   encrypt(template) { if (!this.key) throw new Error('biometric_encryption_not_configured'); const iv = crypto.randomBytes(12); const cipher = crypto.createCipheriv('aes-256-gcm', this.key, iv); const body = Buffer.concat([cipher.update(JSON.stringify(template)), cipher.final()]); return [iv.toString('base64url'), cipher.getAuthTag().toString('base64url'), body.toString('base64url')].join('.'); }
   decrypt(value) { if (!this.key) throw new Error('biometric_encryption_not_configured'); const [iv, tag, body] = String(value).split('.'); const decipher = crypto.createDecipheriv('aes-256-gcm', this.key, Buffer.from(iv, 'base64url')); decipher.setAuthTag(Buffer.from(tag, 'base64url')); return JSON.parse(Buffer.concat([decipher.update(Buffer.from(body, 'base64url')), decipher.final()]).toString('utf8')); }
-  async extract(audio) {
+  async extractDetailed(audio) {
     if (!this.providerUrl) throw new Error('speaker_verification_not_configured');
     const requestUrl = `${this.providerUrl}/embed`;
     let result;
@@ -41,8 +60,9 @@ class BiometricIdentityService {
         body: JSON.stringify({ audio }),
         signal: AbortSignal.timeout(30000),
       });
-      if (!response.ok) throw new Error(`speaker_verification_http_${response.status}`);
-      result = await response.json();
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw speakerProviderError(response.status, payload);
+      result = payload;
     } else {
       // Let IDTokenClient make the request so it attaches the Google-signed
       // Authorization header itself. The token audience is the receiving
@@ -60,22 +80,28 @@ class BiometricIdentityService {
         result = response.data;
       } catch (error) {
         const status = Number(error?.response?.status);
-        if (status) throw new Error(`speaker_verification_http_${status}`);
+        if (status) throw speakerProviderError(status, error?.response?.data);
         throw error;
       }
     }
-    // signalPresent means sufficient non-silent audio. It is not proof that
-    // the recording is live; replay resistance requires a separate mechanism.
-    if (result?.signalPresent !== true && result?.live !== true) throw new Error('voice_signal_missing');
+    // A non-silent signal is not proof that the speaker is live. Replay
+    // resistance is reported separately and is not inferred from this field.
+    if (result?.signalPresent !== true) throw new Error('voice_audio_unclear');
     if (!Array.isArray(result.embedding) || result.embedding.length < 16 || result.embedding.length > 4096) throw new Error('invalid_voice_embedding');
-    return result.embedding.map(Number);
+    const duration = Number(result.speechDurationSeconds);
+    return {
+      embedding: result.embedding.map(Number),
+      speechDurationSeconds: Number.isFinite(duration) && duration > 0 ? duration : null
+    };
   }
+  async extract(audio) { return (await this.extractDetailed(audio)).embedding; }
   async enroll({ ownerUserId, actorRoles = [], displayName, subjectType, relationship, consent, samples, email, deviceKey }) {
     const name = String(displayName || '').trim();
     if (name.length < 1 || name.length > 80) throw new Error('invalid_display_name');
     if (!TYPES.has(subjectType)) throw new Error('invalid_subject_type');
     if (subjectType === 'administrator' && !actorRoles.includes('administrator')) throw new Error('administrator_role_required');
     if (consent !== true) throw new Error('biometric_consent_required');
+    if (subjectType === 'user' && (await this.repository.list(ownerUserId)).some(profile => profile.subjectType === 'user')) throw new Error('voice_profile_exists');
     const guest = actorRoles.includes('guest');
     const normalizedEmail = String(email || '').trim().toLowerCase();
     if (guest && (normalizedEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail))) throw new Error('valid_email_required');
@@ -93,15 +119,55 @@ class BiometricIdentityService {
   }
   async list(ownerUserId) { return (await this.repository.list(ownerUserId)).map(publicProfile); }
   async remove(ownerUserId, profileId) { const removed = await this.repository.remove(profileId, ownerUserId); if (removed) this.audit?.record('biometric.voice_removed', { ownerUserId, profileId }); return removed; }
+  async addSamples({ ownerUserId, actorRoles = [], profileId, consent, samples }) {
+    if (consent !== true) throw new Error('biometric_consent_required');
+    if (!Array.isArray(samples) || samples.length < 3 || samples.length > 5 || samples.some(sample => !this.validateAudio(sample))) throw new Error('invalid_voice_samples');
+    const profile = await this.repository.get(profileId, ownerUserId);
+    if (!profile || profile.status && profile.status !== 'active') throw new Error('voice_profile_not_found');
+    if (profile.subjectType === 'administrator' && !actorRoles.includes('administrator')) throw new Error('administrator_role_required');
+
+    const vectors = [];
+    for (const sample of samples) vectors.push(await this.extract(sample));
+    if (!vectors.every(vector => vector.length === vectors[0].length)) throw new Error('inconsistent_voice_embeddings');
+    const candidate = mean(vectors);
+    const consistency = Math.min(...vectors.map(vector => cosine(candidate, vector)));
+    if (consistency < this.enrollmentThreshold) throw new Error('voice_samples_do_not_match');
+
+    const previous = this.decrypt(profile.encryptedTemplate);
+    if (previous.length !== candidate.length) throw new Error('inconsistent_voice_embeddings');
+    const profileConsistency = cosine(candidate, previous);
+    if (profileConsistency < this.enrollmentThreshold) throw new Error('voice_samples_do_not_match');
+
+    const oldCount = Math.max(1, Number(profile.sampleCount) || 1);
+    const sampleCount = oldCount + vectors.length;
+    const mergedTemplate = previous.map((value, index) =>
+      (Number(value) * oldCount + vectors.reduce((sum, vector) => sum + Number(vector[index]), 0)) / sampleCount
+    );
+    const updated = await this.repository.updateTemplate(profileId, ownerUserId, {
+      encryptedTemplate: this.encrypt(mergedTemplate),
+      sampleCount,
+      expectedRevision: Number(profile.templateRevision) || 1
+    });
+    if (!updated) throw new Error('voice_profile_samples_conflict');
+    this.audit?.record('biometric.voice_samples_added', { ownerUserId, profileId, addedSamples: vectors.length, sampleCount });
+    return publicProfile(updated);
+  }
   async verify({ ownerUserId, audio }) {
     if (!this.validateAudio(audio)) throw new Error('invalid_voice_sample');
-    const probe = await this.extract(audio);
     const profiles = await this.repository.list(ownerUserId);
+    if (!profiles.length) {
+      this.audit?.record('biometric.voice_rejected', { ownerUserId, profileId: null, score: null, reason: 'no_enrolled_profiles' });
+      return { ok: true, matched: false, score: null, profile: null, acceptCommands: false };
+    }
+    const probeDetails = await this.extractDetailed(audio);
+    const probe = probeDetails.embedding;
+    const speechDurationSeconds = probeDetails.speechDurationSeconds;
+    const speechDurationBucket = durationBucket(speechDurationSeconds);
     let best = null;
     for (const profile of profiles) { const score = cosine(probe, this.decrypt(profile.encryptedTemplate)); if (!best || score > best.score) best = { profile, score }; }
     const matched = Boolean(best && best.score >= this.matchThreshold);
-    this.audit?.record(matched ? 'biometric.voice_matched' : 'biometric.voice_rejected', { ownerUserId, profileId: matched ? best.profile.profileId : null, score: best ? Number(best.score.toFixed(4)) : null });
-    return { ok: true, matched, score: best ? Number(best.score.toFixed(4)) : null, profile: matched ? publicProfile(best.profile) : null, acceptCommands: matched };
+    this.audit?.record(matched ? 'biometric.voice_matched' : 'biometric.voice_rejected', { ownerUserId, profileId: matched ? best.profile.profileId : null, score: best ? Number(best.score.toFixed(4)) : null, speechDurationSeconds, speechDurationBucket });
+    return { ok: true, matched, score: best ? Number(best.score.toFixed(4)) : null, profile: matched ? publicProfile(best.profile) : null, acceptCommands: matched, speechDurationSeconds, speechDurationBucket };
   }
 }
 

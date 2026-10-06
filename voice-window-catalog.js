@@ -8,8 +8,15 @@
   // function name or selector supplied by an AI response or a transcript.
   const apps = [
     { id: 'sentinel', key: 'sentinel', label: 'Sentinel AI', permission: 'chat', aliases: ['Sentinel AI', 'เซนทิเนลเอไอ', 'แชต', 'แชท'], selector: '.window[data-id="sentinel"]', opener: 'openSentinel', windowId: 'sentinel' },
+    { id: 'notes', key: 'notes', label: 'Notes', permission: 'chat', aliases: ['Notes', 'Note', 'โน้ต', 'โน๊ต', 'บันทึก', 'แอปบันทึก'], selector: '.window[data-id="notes"]', opener: 'openNotes', windowId: 'notes' },
+    { id: 'files', key: 'files', label: 'Files', permission: 'chat', accountRequired: true, aliases: ['Files', 'File', 'ไฟล์', 'จัดการไฟล์', 'ไฟล์ของฉัน'], selector: '.window[data-id="files"]', opener: 'openFiles', windowId: 'files' },
+    { id: 'calculator', key: 'calculator', label: 'Calculator', permission: 'chat', aliases: ['Calculator', 'เครื่องคิดเลข', 'คิดเลข'], selector: '.window[data-id="calculator"]', opener: 'openCalculator', windowId: 'calculator' },
+    { id: 'calendar', key: 'calendar', label: 'Calendar', permission: 'chat', accountRequired: true, aliases: ['Calendar', 'ปฏิทิน', 'นัดหมาย', 'ตารางนัด'], selector: '.window[data-id="calendar"]', opener: 'PanthoriumCalendar.open', windowId: 'calendar', refresher: 'PanthoriumCalendar.refresh' },
+    { id: 'reminders', key: 'reminders', label: 'Reminders', permission: 'chat', accountRequired: true, aliases: ['Reminders', 'เตือนความจำ', 'เตือนยา', 'เตือนนัด', 'การเตือน'], selector: '.window[data-id="reminders"]', opener: 'PanthoriumReminders.open', windowId: 'reminders', refresher: 'PanthoriumReminders.refresh' },
+    { id: 'goals', key: 'goals', label: 'Goals', permission: 'chat', accountRequired: true, aliases: ['Goals', 'Goal', 'เป้าหมาย', 'ติดตามเป้าหมาย', 'เป้าหมายของฉัน'], selector: '.window[data-id="goals"]', opener: 'PanthoriumGoals.open', windowId: 'goals', refresher: 'PanthoriumGoals.refresh' },
+    { id: 'assistant-preferences', key: 'sentinel_preferences', label: 'Sentinel Preferences', permission: 'chat', accountRequired: true, aliases: ['Sentinel Preferences', 'ความชอบ Sentinel', 'ตั้งค่าความชอบ Sentinel', 'ปรับแต่ง Sentinel', 'ตั้งค่าการตอบ'], selector: '.window[data-id="assistant-preferences"]', opener: 'PanthoriumAssistantPreferences.open', windowId: 'assistant-preferences', refresher: 'PanthoriumAssistantPreferences.refresh' },
     { id: 'settings', key: 'settings', label: 'Settings', permission: 'settings', aliases: ['Settings', 'Setting', 'การตั้งค่า', 'ตั้งค่า'], selector: '.window[data-id="settings"]', opener: 'openSettings', windowId: 'settings' },
-    { id: 'voice-identity', key: 'voice_identity', label: 'Voice Identity', permission: 'chat', aliases: ['Voice Identity', 'จดจำเสียง', 'ลงทะเบียนเสียง', 'เสียงที่อนุญาต'], selector: '#panthorium-voice-identity', opener: 'PanthoriumVoiceIdentity.open', closeButton: '[data-close]', refresher: 'PanthoriumVoiceIdentity.refresh' },
+    { id: 'voice-identity', key: 'voice_identity', label: 'Voice Identity', permission: 'chat', aliases: ['Voice Identity', 'จดจำเสียง', 'ลงทะเบียนเสียง', 'ลงทะเบียน', 'เข้าสู่ระบบ', 'เสียงที่อนุญาต'], selector: '#panthorium-voice-identity', opener: 'PanthoriumVoiceIdentity.open', closeButton: '[data-close]', refresher: 'PanthoriumVoiceIdentity.refresh' },
     { id: 'security', key: 'security_dashboard', label: 'Security', permission: 'settings', role: 'administrator', aliases: ['Security Dashboard', 'Security', 'ซีเคียวริตี้', 'แดชบอร์ดความปลอดภัย', 'ความปลอดภัย'], selector: '.window[data-id="security-dashboard"]', opener: 'PanthoriumSecurityDashboard.open', windowId: 'security-dashboard', refreshButton: '[data-p3-refresh]' },
     { id: 'ai-platform', key: 'ai_dashboard', label: 'AI Platform', permission: 'chat', aliases: ['AI Platform', 'AI Dashboard', 'เอไอแพลตฟอร์ม', 'แดชบอร์ดเอไอ', 'สถานะเอไอ', 'สถานะ Sentinel', 'สถานะเซนทิเนล'], selector: '#phase4-ai-dashboard', opener: 'PanthoriumAI.open', closeButton: '#ai-close', refresher: 'PanthoriumAI.refresh' },
     { id: 'sentinel-agent', key: 'sentinel_agent', label: 'Sentinel Agent', permission: 'chat', aliases: ['Sentinel Agent', 'เซนทิเนลเอเจนต์', 'เซนติเนลเอเจนท์'], selector: '#phase5-agent-ui', opener: 'PanthoriumAgent.open', closeButton: '#agent-close', refresher: 'PanthoriumAgent.history' },
@@ -21,16 +28,22 @@
     { id: 'production', key: 'production_intelligence', label: 'Production Intelligence', permission: 'settings', aliases: ['Production Intelligence', 'Production', 'ข้อมูลการผลิต'], selector: '#panthorium-production-intelligence', opener: 'PanthoriumProductionIntelligence.open', closeButton: '[data-production-close]', refresher: 'PanthoriumProductionIntelligence.open' },
     { id: 'governance', key: 'governance', label: 'Governance', permission: 'settings', aliases: ['Governance', 'กัฟเวอร์แนนซ์', 'ธรรมาภิบาล'], selector: '#panthorium-governance-dashboard', opener: 'PanthoriumGovernance.open', closeButton: '#gov-close', refresher: 'PanthoriumGovernance.refresh' },
     { id: 'sentinel-control', key: 'sentinel_control', label: 'Sentinel Control', permission: 'settings', aliases: ['Sentinel Control', 'เซนทิเนลคอนโทรล', 'ควบคุมเซนทิเนล'], selector: '#panthorium-sentinel-control-dashboard', opener: 'PanthoriumSentinelControl.open', closeButton: '#dai-close', refresher: 'PanthoriumSentinelControl.refresh' },
+    { id: 'media-studio', key: 'media_studio', label: 'Media Studio', permission: 'chat', accountRequired: true, aliases: ['Media Studio', 'Video Studio', 'ตัดต่อวิดีโอ', 'สตูดิโอวิดีโอ'], selector: '#media-studio-dashboard', opener: 'PanthoriumMediaStudio.open', closeButton: '[data-close]' },
+    { id: 'browser', key: 'browser', label: 'Panthorium Browser', permission: 'chat', accountRequired: true, aliases: ['Panthorium Browser', 'Browser', 'เบราว์เซอร์', 'เปิดเว็บไซต์'], selector: '#panthorium-browser-dashboard', opener: 'PanthoriumBrowser.open', closeButton: '[data-browser-close]' },
     { id: 'external-youtube', key: 'external_youtube', label: 'YouTube', permission: 'chat', aliases: ['YouTube', 'ยูทูบ', 'ยูทูป'], selector: '.window[data-id="external-youtube"]', opener: 'PanthoriumExternalApps.openYoutube', windowId: 'external-youtube', external: true, externalUrl: 'https://www.youtube.com/' },
     { id: 'external-facebook', key: 'external_facebook', label: 'Facebook', permission: 'chat', aliases: ['Facebook', 'เฟซบุ๊ก', 'เฟสบุ๊ค', 'เฟซบุ๊ค'], selector: '.window[data-id="external-facebook"]', opener: 'PanthoriumExternalApps.openFacebook', windowId: 'external-facebook', external: true, externalUrl: 'https://www.facebook.com/' },
     { id: 'external-line', key: 'external_line', label: 'LINE', permission: 'chat', aliases: ['LINE', 'ไลน์'], selector: '.window[data-id="external-line"]', opener: 'PanthoriumExternalApps.openLine', windowId: 'external-line', external: true, externalUrl: 'https://line.me/' },
     { id: 'external-tiktok', key: 'external_tiktok', label: 'TikTok', permission: 'chat', aliases: ['TikTok', 'ติ๊กต็อก', 'ติ๊กต๊อก', 'ติ๊กตอก'], selector: '.window[data-id="external-tiktok"]', opener: 'PanthoriumExternalApps.openTiktok', windowId: 'external-tiktok', external: true, externalUrl: 'https://www.tiktok.com/' },
     { id: 'external-instagram', key: 'external_instagram', label: 'Instagram', permission: 'chat', aliases: ['Instagram', 'อินสตาแกรม', 'ไอจี'], selector: '.window[data-id="external-instagram"]', opener: 'PanthoriumExternalApps.openInstagram', windowId: 'external-instagram', external: true, externalUrl: 'https://www.instagram.com/' },
-    { id: 'external-x', key: 'external_x', label: 'X', permission: 'chat', aliases: ['X', 'Twitter', 'ทวิตเตอร์'], selector: '.window[data-id="external-x"]', opener: 'PanthoriumExternalApps.openX', windowId: 'external-x', external: true, externalUrl: 'https://x.com/' }
+    { id: 'external-x', key: 'external_x', label: 'X', permission: 'chat', aliases: ['X', 'Twitter', 'ทวิตเตอร์'], selector: '.window[data-id="external-x"]', opener: 'PanthoriumExternalApps.openX', windowId: 'external-x', external: true, externalUrl: 'https://x.com/' },
+    { id: 'privacy-policy', key: 'privacy_policy', label: 'Privacy/Policy', permission: 'chat', aliases: ['Privacy Policy', 'Privacy/Policy', 'นโยบายความเป็นส่วนตัว', 'นโยบายความเป็นส่วนตัวและข้อกำหนด'], selector: '#panthorium-privacy-policy', opener: 'PanthoriumPrivacyPolicy.open', closeButton: '[data-close]' }
   ];
   const userRestrictedIds = new Set(['settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control']);
   function allowed(app, user) {
-    return !!app && !(!(user?.roles || []).some(role => ['administrator', 'operator'].includes(role)) && userRestrictedIds.has(app.id)) && (user?.permissions || []).includes(app.permission) && (!app.role || (user?.roles || []).includes(app.role));
+    const roles = user?.roles || [];
+    const id = String(user?.sub || user?.id || '');
+    const hasAccount = !!id && !id.startsWith('guest:') && !roles.includes('guest');
+    return !!app && (!app.accountRequired || hasAccount) && !(!roles.some(role => ['administrator', 'operator'].includes(role)) && userRestrictedIds.has(app.id)) && (user?.permissions || []).includes(app.permission) && (!app.role || roles.includes(app.role));
   }
   const normalize = text => String(text || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
   const aliases = apps.flatMap(app => app.aliases.map(alias => ({ app, alias: normalize(alias) }))).sort((a, b) => b.alias.length - a.alias.length);
@@ -67,7 +80,13 @@
     const target = aliases.find(item => text.includes(item.alias));
     if (!target) return null;
     if (/อย่า|ห้าม|ไม่ต้อง|ไม่อยาก|ไม่ให้|dont|donot|never/.test(text)) return { error: 'voice_command_negated' };
-    let rest = text.replace(target.alias, '');
+    if (target.app.id === 'voice-identity' && ['ลงทะเบียน', 'เข้าสู่ระบบ'].includes(text)) return { app: target.app, operation: 'open', action: 'open_voice_identity', focusLogin: text === 'เข้าสู่ระบบ' };
+    // Mobile STT can repeat one short command or vary the final vowel on the retry.
+    // Remove aliases only for the selected app; a second app name remains unparsed.
+    let rest = text;
+    for (const item of aliases) {
+      if (item.app.id === target.app.id) rest = rest.split(item.alias).join('');
+    }
     // Ignore polite framing, but not arbitrary text such as delete/train/change.
     rest = rest.replace(/ช่วย|กรุณา|ขอ|หน้าต่าง|หน้าจอ|ฟังก์ชั่น|ฟังก์ชัน|ฟังชั่น|ฟังชัน|ฟังชั่น|โปรแกรม|ของ|ให้หน่อย|ให้ด้วย|ให้ฉัน|ให้ผม|ให้|หน่อยสิ|หน่อย|ด้วย|ได้ไหม|ได้มั้ย|ได้หรือไม่|นะ|ครับ|ค่ะ|คะ|ที|please|can you|canyou|the|window|app/g, '');
     // Thai "เปิด" contains "ปิด". Tokenize longest verbs first instead of

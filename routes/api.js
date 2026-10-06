@@ -21,8 +21,9 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
   router.use(['/ai', '/agent'], auth, denyGuest);
   const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
   const speechLimiter = rateLimit({ windowMs: 60 * 1000, limit: 90, standardHeaders: true, legacyHeaders: false });
+  const identityNavigationLimiter = rateLimit({ windowMs: 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false });
   const agentLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
-  router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", release: process.env.K_REVISION || process.env.PANTHORIUM_RELEASE || require("../package.json").version, sentinel: sentinel.status(), time: new Date().toISOString() }));
+  router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", release: process.env.K_REVISION || process.env.PANTHORIUM_RELEASE || require("../package.json").version, sentinel: sentinel.status(), voiceIdentityConfigured: biometrics?.status?.().configured === true, voiceIdentityGateEnabled: biometrics?.gateEnabled === true, time: new Date().toISOString() }));
   router.get("/sentinel/status", auth, requirePermission("system:read"), (req, res) => res.json({ ok: true, ...sentinel.status() }));
   router.get("/ai/providers", auth, requirePermission("chat"), (req, res) => res.json({ ok: true, providers: sentinel.providerCatalog() }));
   router.get("/ai/operations", auth, requirePermission("chat"), async (req, res, next) => { try { res.json({ ok: true, metrics: await aiOperations.overview(req.user.sub, req.query.hours) }); } catch (error) { next(error); } });
@@ -57,43 +58,113 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       res.status(502).json({ ok: false, error: "speech_unavailable" });
     }
   });
+  router.post("/speech/identity-navigation", auth, requirePermission("chat"), identityNavigationLimiter, async (req, res) => {
+    try {
+      if (!biometrics?.gateEnabled) return res.status(403).json({ ok: false, error: "voice_identity_gate_disabled" });
+      if (biometrics.status?.()?.configured === false) return res.status(503).json({ ok: false, error: "voice_verification_unavailable" });
+      const value = typeof req.body?.audio === "string" ? req.body.audio : "";
+      const match = /^data:(audio\/[a-z0-9.+-]+)(?:;[^,]*)?;base64,([A-Za-z0-9+/=]+)$/i.exec(value);
+      if (!match || match[2].length > 700000) return res.status(400).json({ ok: false, error: "invalid_audio" });
+      const audio = Buffer.from(match[2], "base64");
+      if (!audio.length || audio.length > 512 * 1024) return res.status(413).json({ ok: false, error: "audio_too_large" });
+      const profiles = await biometrics.list(req.user.sub);
+      if (profiles.length) return res.status(403).json({ ok: false, error: "voice_profile_exists" });
+      const transcription = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language || "th-TH");
+      const phrase = String(transcription?.text || "").normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
+      const registerPhrases = new Set(["ลงทะเบียน", "ลงทะเบียนเสียง", "เปิดลงทะเบียน", "เปิดลงทะเบียนเสียง"]);
+      const loginPhrases = new Set(["เข้าสู่ระบบ", "เปิดเข้าสู่ระบบ"]);
+      if (registerPhrases.has(phrase)) return res.json({ ok: true, intent: "register" });
+      if (loginPhrases.has(phrase)) return res.json({ ok: true, intent: "login" });
+      return res.status(403).json({ ok: false, error: "voice_navigation_not_recognized" });
+    } catch (error) {
+      audit.record("sentinel.identity_navigation_failed", { userId: req.user?.sub, error: String(error?.message || error).slice(0, 200) });
+      return res.status(503).json({ ok: false, error: "voice_navigation_unavailable" });
+    }
+  });
   router.get("/agent/tools", auth, agentLimiter, (req, res) => res.json({ ok: true, tools: agentService.catalogFor(req.user) }));
-  router.post("/speech/transcribe", auth, requirePermission("chat"), speechLimiter, async (req, res) => {
+    router.post("/speech/transcribe", auth, requirePermission("chat"), speechLimiter, async (req, res) => {
+    const pipelineStartedAt = performance.now();
+    let profileLookupMs = null, biometricMs = null, transcriptionMs = null, speechDurationSeconds = null;
+    const captureCandidate = Number(req.body?.clientCaptureMs);
+    const clientCaptureMs = Number.isFinite(captureCandidate) && captureCandidate >= 0 && captureCandidate <= 60000
+      ? Math.round(captureCandidate) : null;
+    const emitVoiceTiming = outcome => {
+      const totalMs = Math.max(0, Math.round(performance.now() - pipelineStartedAt));
+      const parts = [];
+      if (profileLookupMs !== null) parts.push(`profiles;dur=${profileLookupMs}`);
+      if (biometricMs !== null) parts.push(`biometric;dur=${biometricMs}`);
+      if (transcriptionMs !== null) parts.push(`stt;dur=${transcriptionMs}`);
+      parts.push(`total;dur=${totalMs}`);
+      res.setHeader("Server-Timing", parts.join(", "));
+      const timing = { clientCaptureMs, profileLookupMs, biometricMs, transcriptionMs, totalMs, outcome };
+      audit.record("sentinel.voice_pipeline_timing", { userId: req.user?.sub, requestId: req.requestId || null, ...timing });
+      return timing;
+    };
     try {
       const value = typeof req.body?.audio === "string" ? req.body.audio : "";
       const match = /^data:(audio\/[a-z0-9.+-]+)(?:;[^,]*)?;base64,([A-Za-z0-9+/=]+)$/i.exec(value);
       if (!match || match[2].length > 700000) return res.status(400).json({ ok: false, error: "invalid_audio" });
       const audio = Buffer.from(match[2], "base64");
       if (!audio.length || audio.length > 512 * 1024) return res.status(413).json({ ok: false, error: "audio_too_large" });
-      // Enforce this on the server as well as the UI: neither a modified
-      // browser nor a direct API call may reach paid transcription unchecked.
+      // Verify this exact recording on the server before paid transcription.
       if (biometrics?.gateEnabled) {
+        let phaseStartedAt = performance.now();
         const profiles = await biometrics.list(req.user.sub);
-        if (!profiles.length) return res.status(403).json({ ok: false, error: "voice_enrollment_required" });
+        profileLookupMs = Math.max(0, Math.round(performance.now() - phaseStartedAt));
+        if (!profiles.length) {
+          emitVoiceTiming("voice_profile_missing");
+          return res.status(403).json({ ok: false, error: "voice_enrollment_required" });
+        }
+        phaseStartedAt = performance.now();
         const verification = await biometrics.verify({ ownerUserId: req.user.sub, audio: value });
-        if (!verification.matched) return res.status(403).json({ ok: false, error: "voice_not_authorized" });
+        biometricMs = Math.max(0, Math.round(performance.now() - phaseStartedAt));
+        speechDurationSeconds = Number.isFinite(Number(verification.speechDurationSeconds))
+          ? Number(verification.speechDurationSeconds) : null;
+        if (!verification.matched) {
+          const denied = { ok: false, error: "voice_not_authorized" };
+          if (process.env.BIOMETRIC_DIAGNOSTICS_ENABLED === "1") {
+            const configuredThreshold = Number(biometrics.status?.().matchThreshold);
+            denied.voiceDiagnostic = {};
+            if (Number.isFinite(Number(verification.score))) denied.voiceDiagnostic.score = Number(Number(verification.score).toFixed(4));
+            denied.voiceDiagnostic.threshold = Number.isFinite(configuredThreshold) ? configuredThreshold : null;
+            if (speechDurationSeconds !== null) denied.voiceDiagnostic.speechDurationSeconds = speechDurationSeconds;
+            denied.voiceDiagnostic.speechDurationBucket = verification.speechDurationBucket || null;
+            denied.voiceTiming = emitVoiceTiming("voice_rejected");
+          } else {
+            emitVoiceTiming("voice_rejected");
+          }
+          return res.status(403).json(denied);
+        }
       }
+      const transcriptionStartedAt = performance.now();
       const result = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language);
-      res.json({ ok: true, text: result.text, provider: result.provider, model: result.model, confidence: result.confidence, crossCheckedBy: result.crossCheckedBy || null });
+      transcriptionMs = Math.max(0, Math.round(performance.now() - transcriptionStartedAt));
+      const timing = emitVoiceTiming("success");
+      const payload = { ok: true, text: result.text, provider: result.provider, model: result.model, confidence: result.confidence, crossCheckedBy: result.crossCheckedBy || null };
+      if (process.env.BIOMETRIC_DIAGNOSTICS_ENABLED === "1") payload.voiceTiming = timing;
+      res.json(payload);
     } catch (error) {
+      const timing = emitVoiceTiming("error");
       audit.record("sentinel.transcription_failed", { userId: req.user?.sub, error: error.message });
-      const safeMessage = String(error?.message || "unknown_error")
-        .replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]")
-        .replace(/(key|token|secret)\s*[=:]\s*[^\s,;]+/gi, "$1=[redacted]")
-        .slice(0, 500);
-      console.error(JSON.stringify({
-        event: "sentinel.transcription_failed",
-        requestId: req.requestId || null,
-        code: error?.code || null,
-        status: error?.status || null,
-        name: error?.name || "Error",
-        message: safeMessage
-      }));
-      const code = /speaker_verification|biometric_encryption|voice_signal/.test(error?.message || "") ? "voice_verification_unavailable" : ["transcription_provider_unavailable", "transcription_uncertain"].includes(error?.code) ? error.code : "transcription_unavailable";
-      res.status(code === "transcription_uncertain" ? 422 : code === "transcription_provider_unavailable" || code === "voice_verification_unavailable" ? 503 : 502).json({ ok: false, error: code });
+      const errorMessage = String(error?.message || "");
+      const voiceInputErrors = {
+        voice_audio_too_short: "voice_audio_too_short",
+        voice_audio_unclear: "voice_audio_unclear",
+        voice_audio_invalid_duration: "voice_audio_invalid_duration",
+        voice_audio_invalid: "voice_audio_invalid",
+        invalid_voice_sample: "voice_audio_invalid"
+      };
+      const inputCode = voiceInputErrors[errorMessage];
+      const code = inputCode || (/speaker_verification|biometric_encryption|voice_signal/.test(errorMessage)
+        ? "voice_verification_unavailable"
+        : ["transcription_provider_unavailable", "transcription_uncertain"].includes(error?.code)
+          ? error.code : "transcription_unavailable");
+      res.status(inputCode ? 422 : code === "transcription_uncertain" ? 422
+        : code === "transcription_provider_unavailable" || code === "voice_verification_unavailable" ? 503 : 502)
+        .json({ ok: false, error: code, ...(process.env.BIOMETRIC_DIAGNOSTICS_ENABLED === "1" ? { voiceTiming: timing } : {}) });
     }
   });
-  router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { res.json({ ok: true, runs: await agentRuns.list(req.user.sub, Number(req.query.limit) || 30) }); } catch (error) { next(error); } });
+router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { res.json({ ok: true, runs: await agentRuns.list(req.user.sub, Number(req.query.limit) || 30) }); } catch (error) { next(error); } });
   router.get("/agent/runs/:workflowId", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { if (!validText(req.params.workflowId, 80)) return res.status(400).json({ ok: false, error: "invalid_workflow_id" }); const run = await agentRuns.get(req.user.sub, req.params.workflowId); if (!run) return res.status(404).json({ ok: false, error: "agent_run_not_found" }); res.json({ ok: true, run }); } catch (error) { next(error); } });
   router.get("/agent/jobs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { res.json({ ok: true, jobs: await agentScheduler.list(req.user.sub, Number(req.query.limit) || 30) }); } catch (error) { next(error); } });
   router.get("/agent/jobs/:jobId", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { if (!validText(req.params.jobId, 80)) return res.status(400).json({ ok: false, error: "invalid_job_id" }); const job = await agentScheduler.get(req.user.sub, req.params.jobId); if (!job) return res.status(404).json({ ok: false, error: "agent_job_not_found" }); res.json({ ok: true, job }); } catch (error) { next(error); } });

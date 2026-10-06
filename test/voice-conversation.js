@@ -20,6 +20,8 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
   const synthesized = [], conversations = [], streamConversations = [], requests = [], playback = [], revoked = [], recognizers = [];
   let failProvider = false, failSpeech = false, blockPlayback = false, rejectOnce = '', rejectAlways = '', refreshOK = true, playing = false, holdPlayback = false, chatFailure = null, ttsInFlight = 0, maxTtsInFlight = 0, fakeTts = false, speechAttempts = 0, pendingDeltaAt = 0, firstSpeechLatencyMs = null;
   let mobileSpeechFixture = null;
+  let holdNextVoiceReply = false;
+  let releaseHeldVoiceReply = null;
   // No network access to an AI or speech provider in CI.
   require('../services/sentinelSpeechAudio').synthesizeSentinelMaleVoice = async (text, lang) => {
     speechAttempts += 1;
@@ -33,7 +35,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
   const sentinel = {
     status: () => ({ name: 'Sentinel', providers: ['fixture'] }),
     chat: async input => { conversations.push(input); return failProvider ? { ok: false, error: 'no_provider_available' } : { ok: true, text: answer, provider: 'fixture' }; },
-    streamChat: async input => { streamConversations.push(input); if (failProvider) return { ok: false, error: 'no_provider_available', text: 'no_provider_available' }; const text = mobileSpeechFixture || answer; if (mobileSpeechFixture) { for (let i = 0; i < text.length; i += 12) { input.onDelta(text.slice(i, i + 12)); await tick(); } } else input.onDelta(text); return { ok: true, text, provider: 'fixture', streaming: 'native' }; }
+    streamChat: async input => { streamConversations.push(input); if (failProvider) return { ok: false, error: 'no_provider_available', text: 'no_provider_available' }; const text = mobileSpeechFixture || answer; if (holdNextVoiceReply) { holdNextVoiceReply = false; await new Promise(resolve => { releaseHeldVoiceReply = resolve; }); } if (mobileSpeechFixture) { for (let i = 0; i < text.length; i += 12) { input.onDelta(text.slice(i, i + 12)); await tick(); } } else input.onDelta(text); return { ok: true, text, provider: 'fixture', streaming: 'native' }; }
   };
   const tools = new ToolRegistry({ sentinel });
   const agent = new AgentService({ tools, audit });
@@ -213,22 +215,22 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     failProvider = true;
     await utter('การเรียนรู้คืออะไร');
     assert.equal(playback.length, 7, 'never speak an API failure as a successful AI answer');
-    assert.match(w.document.getElementById('toast').textContent, /no_provider_available/);
+    assert.match(w.document.getElementById('orb-system-notice').textContent, /no_provider_available/);
     failProvider = false; blockPlayback = true;
     await utter('การเรียนรู้คืออะไร');
     assert.equal(playback.length, 7);
-    assert.match(w.document.getElementById('toast').textContent, /เล่นเสียง.*ไม่สำเร็จ/);
+    assert.match(w.document.getElementById('orb-system-notice').textContent, /เล่นเสียง.*ไม่สำเร็จ/);
     blockPlayback = false; failSpeech = true;
     const failedSpeechAttemptsBefore = speechAttempts;
     await utter('การเรียนรู้คืออะไร');
-    assert.match(w.document.getElementById('toast').textContent, /เล่นเสียง.*ไม่สำเร็จ/);
+    assert.match(w.document.getElementById('orb-system-notice').textContent, /เล่นเสียง.*ไม่สำเร็จ/);
     assert.equal(speechAttempts - failedSpeechAttemptsBefore, 1, 'a failed TTS request must not trigger a chain of duplicate retries');
     failSpeech = false;
 
     rejectAlways = '/api/chat/stream'; refreshOK = false;
     const before = requests.length;
     await utter('การเรียนรู้คืออะไร');
-    assert.match(w.document.getElementById('toast').textContent, /เข้าสู่ระบบ/);
+    assert.match(w.document.getElementById('orb-system-notice').textContent, /เข้าสู่ระบบ/);
     assert.equal(requests.slice(before).filter(r => r.pathname === '/api/chat/stream').length, 1, 'failed refresh must not retry as another user');
     assert.equal(playback.length, 7);
     rejectAlways = ''; refreshOK = true;
@@ -259,10 +261,23 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       [() => { throw Object.assign(new Error('timeout'), { name: 'TimeoutError' }); }, /รอคำตอบ AI เกินเวลา/]
     ]) {
       chatFailure = response; await utter('การเรียนรู้คืออะไร');
-      assert.match(w.document.getElementById('toast').textContent, expected);
+      assert.match(w.document.getElementById('orb-system-notice').textContent, expected);
       assert.equal(playback.length, playbackBeforeInvalidResponses, 'invalid/forbidden responses must not produce speech');
     }
     chatFailure = null;
+
+    // Cancelling during a pending voice answer must abort the stream and never
+    // allow its delayed response to speak into the next interaction.
+    holdNextVoiceReply = true;
+    const playbackBeforeCancelledTurn = playback.length;
+    globalMic.start(); transcript(globalMic, 'การเรียนรู้คืออะไร'); globalMic.stop();
+    for (let i = 0; i < 200 && !releaseHeldVoiceReply; i++) await tick();
+    assert.equal(typeof releaseHeldVoiceReply, 'function', 'the voice reply is pending before cancellation');
+    await w.document.getElementById('global-voice').onclick();
+    assert.equal(w.PanthoriumVoice.state(), 'idle', 'tapping while processing cancels the pending turn');
+    releaseHeldVoiceReply(); releaseHeldVoiceReply = null;
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.equal(playback.length, playbackBeforeCancelledTurn, 'a cancelled stale voice answer must not play');
 
     // Unsupported commands stay commands: never convert a failure to AI prose.
     const chats = streamConversations.length, audioCount = synthesized.length;
@@ -309,7 +324,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     w.PanthoriumVoice.resume();
     await new Promise(resolve => setTimeout(resolve, 800));
     assert.equal(globalMic.starts, startsBeforeFailure, 'network failure latches across onend and resume');
-    assert.match(w.document.getElementById('toast').textContent, /Electron.*network/);
+    assert.match(w.document.getElementById('orb-system-notice').textContent, /Electron.*network/);
     assert.equal(w.PanthoriumVoice.state(), 'idle');
     await w.document.getElementById('global-voice').onclick();
     assert.equal(globalMic.starts, startsBeforeFailure + 1, 'explicit mic click permits a fresh attempt');
@@ -320,7 +335,7 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
     await chatMic.stop();
     await new Promise(resolve => setTimeout(resolve, 800));
     assert.equal(globalMic.starts, beforeChatError, 'chat mic failure must not transfer the retry loop to global mic');
-    assert.match(w.document.getElementById('toast').textContent, /Electron.*network/);
+    assert.match(w.document.getElementById('orb-system-notice').textContent, /Electron.*network/);
     const afterMicFailure = await w.callAI('การเรียนรู้คืออะไร');
     assert.equal(afterMicFailure.text, answer, 'typing still works after recognition fails');
 

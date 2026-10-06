@@ -1,0 +1,51 @@
+name: Android preview build
+
+on:
+  pull_request:
+    branches:
+      - staging
+    paths:
+      - "mobile/android/**"
+      - ".github/workflows/android-preview-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-debug-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+      - name: Install Capacitor
+        working-directory: mobile/android
+        run: npm install --no-audit --no-fund
+      - name: Generate Android project and sync
+        working-directory: mobile/android
+        run: |
+          npx cap add android
+          npx cap sync android
+          npm run android:prepare
+      - name: Build debug APK
+        working-directory: mobile/android/android
+        run: ./gradlew assembleDebug
+      - name: Upload APK for device testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: panthorium-android-preview
+          path: mobile/android/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

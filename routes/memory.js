@@ -1,6 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { requireAuth, requirePermission } = require('../middleware/auth');
+const { CloudNotesError } = require('../services/cloudNotesRepository');
 
 function createMemoryRouter(authService, memory) {
   const router = express.Router();
@@ -39,12 +40,28 @@ function createMemoryRouter(authService, memory) {
     } catch (error) { next(error); }
   });
 
+  router.patch('/:memoryId', auth, requirePermission('chat'), limiter, async (req, res, next) => {
+    try {
+      const { title, content, tags, importance } = req.body || {};
+      const out = await memory.update({ user: req.user, memoryId: req.params.memoryId, title, content, tags, importance, requestId: req.requestId });
+      const status = out.ok ? 200 : out.error === 'memory_not_found' ? 404 : out.error === 'memory_requires_account' ? 403 : 400;
+      res.status(status).json(out);
+    } catch (error) { next(error); }
+  });
+
   router.delete('/:memoryId', auth, requirePermission('chat'), limiter, async (req, res, next) => {
     try {
       const out = await memory.remove({ user: req.user, memoryId: req.params.memoryId, requestId: req.requestId });
       const status = out.ok ? 200 : out.error === 'memory_not_found' ? 404 : out.error === 'memory_requires_account' ? 403 : 400;
       res.status(status).json(out);
     } catch (error) { next(error); }
+  });
+
+  router.use((error, req, res, next) => {
+    if (error instanceof CloudNotesError) {
+      return res.status(error.status).json({ ok: false, error: error.code, requestId: req.requestId || null });
+    }
+    return next(error);
   });
 
   return router;

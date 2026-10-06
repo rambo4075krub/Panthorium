@@ -9,7 +9,7 @@ function boundedInteger(value, min, max) { const n = Number(value); return Numbe
 function validateNoArgs(args) { return plainObject(args) && Object.keys(args).length === 0 ? null : 'invalid_tool_args'; }
 
 class ToolRegistry {
-  constructor({ sentinel, conversations, securityResponse, aiOperations, integrations, knowledge, training } = {}) {
+  constructor({ sentinel, conversations, securityResponse, aiOperations, integrations, knowledge, training, mediaStudio } = {}) {
     this.tools = new Map();
     for (const operation of ['open', 'close', 'refresh']) {
       this.register({
@@ -50,6 +50,65 @@ class ToolRegistry {
       validateArgs: (args) => onlyKeys(args, ['query', 'limit']) && typeof args.query === 'string' && args.query.trim().length > 0 && args.query.length <= 500 && (args.limit == null || boundedInteger(args.limit, 1, 20)) ? null : 'invalid_tool_args',
       run: async ({ user, args, userId }) => knowledge.search({ user: { ...user, sub: userId }, query: args.query, limit: args.limit == null ? 8 : Number(args.limit) })
     });
+    if (mediaStudio) {
+      this.register({
+        id: 'media.video.plan_edit', description: 'Ask Sentinel to prepare a reviewable edit plan for a video owned by the current user account; this uses paid AI capacity and requires confirmation',
+        permission: 'chat', risk: 'medium', mutates: false, requiresConfirmation: true,
+        argsSchema: { fileId: 'required video file UUID from the current account Cloud Files', instruction: 'required edit instruction max 2400 characters', transcript: 'optional transcript text max 12000 characters' },
+        validateArgs: args => onlyKeys(args, ['fileId', 'instruction', 'transcript'])
+          && UUID_RE.test(String(args.fileId || ''))
+          && typeof args.instruction === 'string' && args.instruction.trim().length > 0 && args.instruction.length <= 2400
+          && (args.transcript == null || typeof args.transcript === 'string' && args.transcript.length <= 12000) ? null : 'invalid_media_args',
+        run: async ({ user, args }) => mediaStudio.planEdit({ user, ...args })
+      });
+      this.register({
+        id: 'media.video.ai_edit', description: 'Use Sentinel to plan and render a requested edit from an exact current-account Cloud Files video name; saves the MP4 back to that account and requires confirmation',
+        permission: 'chat', risk: 'high', mutates: true, requiresConfirmation: true,
+        argsSchema: { fileName: 'required exact current-account video filename', instruction: 'required edit instruction max 2400 characters', transcript: 'optional transcript text max 12000 characters', name: 'optional output filename max 150 characters' },
+        validateArgs: args => onlyKeys(args, ['fileName', 'instruction', 'transcript', 'name'])
+          && typeof args.fileName === 'string' && args.fileName.trim().length > 0 && args.fileName.length <= 180
+          && typeof args.instruction === 'string' && args.instruction.trim().length > 0 && args.instruction.length <= 2400
+          && (args.transcript == null || typeof args.transcript === 'string' && args.transcript.length <= 12000)
+          && (args.name == null || typeof args.name === 'string' && args.name.length <= 150) ? null : 'invalid_media_args',
+        run: async ({ user, args }) => mediaStudio.aiEdit({ user, ...args })
+      });
+      this.register({
+        id: 'media.video.generate', description: 'Use Sentinel to prepare a video prompt and generate a short Veo video into the current user Cloud Files; paid generation and Cloud Files creation require confirmation',
+        permission: 'chat', risk: 'high', mutates: true, requiresConfirmation: true,
+        argsSchema: { prompt: 'required video concept max 1600 characters', durationSeconds: '4, 6, or 8 (optional)', aspectRatio: '16:9 or 9:16 (optional)', name: 'optional output filename max 150 characters' },
+        validateArgs: args => onlyKeys(args, ['prompt', 'durationSeconds', 'aspectRatio', 'name'])
+          && typeof args.prompt === 'string' && args.prompt.trim().length > 0 && args.prompt.length <= 1600
+          && (args.durationSeconds == null || [4, 6, 8].includes(Number(args.durationSeconds)))
+          && (args.aspectRatio == null || ['16:9', '9:16'].includes(args.aspectRatio))
+          && (args.name == null || typeof args.name === 'string' && args.name.length <= 150) ? null : 'invalid_media_args',
+        run: async ({ user, args }) => mediaStudio.startGeneration({ user, ...args, confirmed: true })
+      });
+      this.register({
+        id: 'media.video.transcribe', description: 'Transcribe speech from a video owned by the current user account; transcription uses paid AI capacity and requires confirmation',
+        permission: 'chat', risk: 'medium', mutates: false, requiresConfirmation: true,
+        argsSchema: { fileId: 'required video file UUID owned by the current account', language: 'th or en (optional)' },
+        validateArgs: args => onlyKeys(args, ['fileId', 'language'])
+          && UUID_RE.test(String(args.fileId || ''))
+          && (args.language == null || ['th', 'en'].includes(args.language)) ? null : 'invalid_media_args',
+        run: async ({ user, args }) => mediaStudio.transcribe({ user, fileId: args.fileId, language: args.language || 'th' })
+      });
+      this.register({
+        id: 'media.video.render', description: 'Trim a current-account video, optionally burn sanitized SRT captions, and save the MP4 to the same account; requires confirmation',
+        permission: 'chat', risk: 'high', mutates: true, requiresConfirmation: true,
+        argsSchema: { fileId: 'required video file UUID owned by the current account', startSeconds: 'number', endSeconds: 'number up to 120 seconds after start', captionsSrt: 'SRT text up to 100KB (optional)', aspect: 'original, vertical, square, or widescreen (optional)', name: 'output filename (optional)' },
+        validateArgs: args => {
+          if (!onlyKeys(args, ['fileId', 'startSeconds', 'endSeconds', 'captionsSrt', 'aspect', 'name'])) return 'invalid_media_args';
+          if (!UUID_RE.test(String(args.fileId || ''))) return 'invalid_file_id';
+          const start = Number(args.startSeconds), end = Number(args.endSeconds);
+          if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start || end - start > 120) return 'invalid_clip_range';
+          if (args.captionsSrt != null && (typeof args.captionsSrt !== 'string' || Buffer.byteLength(args.captionsSrt, 'utf8') > 100 * 1024)) return 'invalid_captions';
+          if (args.aspect != null && !['original', 'vertical', 'square', 'widescreen'].includes(args.aspect)) return 'invalid_aspect';
+          if (args.name != null && (typeof args.name !== 'string' || args.name.length > 180)) return 'invalid_output_name';
+          return null;
+        },
+        run: async ({ user, args }) => mediaStudio.render({ user, ...args })
+      });
+    }
     if (training) {
       this.register({ id: 'training.status', description: 'Read Sentinel Learning Lab status', permission: 'settings', risk: 'low', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async () => training.list({ limit: 1 }) });
       this.register({ id: 'learning_lab.open', description: 'Open the Learning Lab in the admin interface', permission: 'settings', risk: 'low', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async () => ({ ok: true, uiAction: 'open_learning_lab' }) });

@@ -5,36 +5,57 @@ const { JSDOM } = require('jsdom');
 
 const source = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
 const svg = source('panthorium-logo.svg');
-const group = svg.match(/<g transform="([^"]+)">([\s\S]*?)<\/g>/);
-assert(group, 'all logo artwork is contained by one safe-inset group');
-assert.equal(group[1], 'matrix(0.68 0 0 0.68 40.96 40.96)');
-assert.equal((group[2].match(/<path /g) || []).length, 4, 'all colored logo facets remain in the scaled group');
+const mark = source('panthorium-logo-mark.svg');
+const shell = source('sentinel.html');
+const branding = source('branding.js');
+const bootStart = shell.indexOf('<div id="boot-screen">');
+const bootEnd = shell.indexOf('<!-- LOGIN', bootStart);
+const bootMarkup = bootStart >= 0 && bootEnd > bootStart ? shell.slice(bootStart, bootEnd) : '';
+const cssBlock = selector => {
+  const start = shell.indexOf(selector + ' {');
+  const end = shell.indexOf('}', start);
+  return start >= 0 && end > start ? shell.slice(start, end) : '';
+};
+
+assert(bootMarkup.includes('panthorium-logo-mark.svg'), 'restart retains the plain logo mark');
+assert(!bootMarkup.includes('data-panthorium-logo'), 'restart remains outside shared avatar branding');
+assert(mark.includes('viewBox="0 0 256 256"') && !mark.includes('<circle'), 'restart mark remains plain');
+assert(bootMarkup.includes('boot-title') && bootMarkup.includes('boot-progress') && bootMarkup.includes('boot-status'), 'restart keeps its existing text and progress');
+
+const groupStart = svg.indexOf('<g transform="matrix(0.68 0 0 0.68 40.96 40.96)">');
+const groupEnd = svg.indexOf('</g>', groupStart);
+const group = groupStart >= 0 && groupEnd > groupStart ? svg.slice(groupStart, groupEnd + 4) : '';
+assert(group, 'logo artwork is contained by its original safe-inset group');
+assert(svg.includes('<rect width="256" height="256" fill="none"/>'), 'logo outside the mark stays transparent');
+assert(!svg.includes('<circle'), 'the shared SVG does not add a second circle to the shell frame');
+assert.equal((group.match(/<path /g) || []).length, 4, 'all original logo facets remain');
+assert(!branding.includes('.sm-avatar > img[data-panthorium-logo]'), 'avatar art is never enlarged beyond its frame');
+assert(branding.includes('overflow: hidden !important;'), 'logo frames clip their contents');
+assert(cssBlock('.sm-avatar').includes('background: rgba(0,255,204,0.15);') && cssBlock('.sm-avatar').includes('border: 1px solid var(--accent);'), 'restore the original guest avatar fill and border');
+assert(cssBlock('.login-avatar').includes('border: 2px solid var(--accent);') && cssBlock('.login-avatar').includes('background: rgba(0,255,204,0.08);'), 'restore the original login avatar frame');
+assert(cssBlock('.about-logo').includes('border: 2px solid var(--accent);'), 'restore the original about logo frame');
 
 const dom = new JSDOM(`<!doctype html><html><head></head><body>
-  <div class="boot-logo" style="width:120px;height:120px;border:3px solid #00ffcc;border-radius:50%"></div>
-  <div class="login-avatar" style="width:90px;height:90px;border:2px solid #00ffcc;border-radius:50%"></div>
-  <div class="sm-avatar" style="width:40px;height:40px;border:1px solid #00ffcc;border-radius:50%"></div>
-  <div class="about-logo" style="width:80px;height:80px;border:2px solid #00ffcc;border-radius:50%"></div>
+  <div class="boot-logo" style="width:120px;height:120px;border-radius:50%"><img src="/panthorium-logo-mark.svg" alt="Panthorium"></div>
+  <div class="login-avatar" style="width:90px;height:90px;border-radius:50%;border:2px solid #00ffcc"></div>
+  <div class="sm-avatar" style="width:40px;height:40px;border-radius:50%;border:1px solid #00ffcc"></div>
+  <div class="about-logo" style="width:80px;height:80px;border-radius:50%;border:2px solid #00ffcc"></div>
 </body></html>`, { runScripts: 'outside-only', pretendToBeVisual: true });
 try {
   const w = dom.window;
-  w.eval(source('branding.js'));
-  assert(w.document.getElementById('panthorium-logo-fit-style').textContent.includes('overflow: hidden'), 'logo frames clip any future oversized artwork');
-  for (const selector of ['.boot-logo', '.login-avatar', '.sm-avatar', '.about-logo']) {
+  w.eval(branding);
+  assert(w.document.getElementById('panthorium-logo-fit-style').textContent.includes('overflow: hidden'), 'logo frames clip any oversized artwork');
+  const restartFrame = w.document.querySelector('.boot-logo');
+  assert.equal(restartFrame.querySelector('img').getAttribute('src'), '/panthorium-logo-mark.svg');
+  assert(!restartFrame.classList.contains('panthorium-logo-frame'), 'restart page is untouched by shared branding');
+  for (const selector of ['.login-avatar', '.sm-avatar', '.about-logo']) {
     const frame = w.document.querySelector(selector);
-    assert.equal(frame.style.borderRadius, '50%', selector + ' retains its circular frame');
-    assert(frame.querySelector('img[data-panthorium-logo]'), selector + ' contains the shared logo');
+    assert.equal(frame.style.borderRadius, '50%', selector + ' retains its circle');
+    assert(frame.querySelector('img[data-panthorium-logo]'), selector + ' contains the original logo');
     assert(frame.classList.contains('panthorium-logo-frame'));
   }
-  assert.equal(w.document.querySelector('.boot-logo').style.width, '120px', 'boot branding does not override responsive frame sizing');
-  const future = w.document.createElement('div');
-  future.dataset.panthoriumLogoFrame = '';
-  future.style.cssText = 'width:48px;height:48px;border-radius:50%;border:1px solid #00ffcc';
-  w.document.body.appendChild(future);
-  w.PanthoriumBranding.refresh();
-  assert(future.querySelector('img[data-panthorium-logo]'), 'future app logo frames use the same safe-inset logo');
-  assert.equal(future.style.borderRadius, '50%', 'future app frame remains circular');
+  assert.equal(restartFrame.style.width, '120px', 'restart logo keeps its original size');
 } finally {
   dom.window.close();
 }
-console.log('Branding logo: SVG safe inset fits every shell frame and future app logo frames preserve their circles');
+console.log('Branding logo: restore original mark sizing and shell frames; restart remains unchanged');

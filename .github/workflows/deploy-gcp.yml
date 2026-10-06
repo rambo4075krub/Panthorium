@@ -14,6 +14,8 @@ env:
   VERTEX_LOCATION: ${{ vars.SENTINEL_VERTEX_LOCATION || '' }}
   VERTEX_ENDPOINT_ID: ${{ vars.SENTINEL_VERTEX_ENDPOINT_ID || '' }}
   VERTEX_MODEL: ${{ vars.SENTINEL_VERTEX_MODEL || 'sentinel-v4' }}
+  PANTHORIUM_PRODUCTION_FILES_BUCKET: ${{ vars.PANTHORIUM_PRODUCTION_FILES_BUCKET || '' }}
+  PANTHORIUM_STAGING_FILES_BUCKET: ${{ vars.PANTHORIUM_STAGING_FILES_BUCKET || '' }}
 
 jobs:
   deploy:
@@ -23,6 +25,23 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Require isolated Cloud Storage buckets
+        run: |
+          set -euo pipefail
+          if [ -z "$PANTHORIUM_PRODUCTION_FILES_BUCKET" ] || [ -z "$PANTHORIUM_STAGING_FILES_BUCKET" ]; then
+            echo "::error::Set repository variables PANTHORIUM_PRODUCTION_FILES_BUCKET and PANTHORIUM_STAGING_FILES_BUCKET before deploying."
+            exit 1
+          fi
+          bucket_pattern='^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$'
+          if ! [[ "$PANTHORIUM_PRODUCTION_FILES_BUCKET" =~ $bucket_pattern ]] || ! [[ "$PANTHORIUM_STAGING_FILES_BUCKET" =~ $bucket_pattern ]]; then
+            echo "::error::Cloud Storage bucket names are invalid."
+            exit 1
+          fi
+          if [ "$PANTHORIUM_PRODUCTION_FILES_BUCKET" = "$PANTHORIUM_STAGING_FILES_BUCKET" ]; then
+            echo "::error::Production and staging must use different Cloud Storage buckets."
+            exit 1
+          fi
 
       - name: Require production Sentinel V4 on Vertex AI
         run: |
@@ -58,6 +77,14 @@ jobs:
       - name: Setup Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Verify production Voice Identity prerequisites
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format=json |
+            python3 -c 'import json,sys; service=json.load(sys.stdin); containers=service.get("spec",{}).get("template",{}).get("spec",{}).get("containers",[]); names={entry.get("name") for container in containers for entry in container.get("env",[])}; missing={"BIOMETRIC_SPEAKER_URL","BIOMETRIC_TEMPLATE_KEY"}-names; print("::error::Configure BIOMETRIC_SPEAKER_URL and BIOMETRIC_TEMPLATE_KEY on the existing production Cloud Run service before deploying.") if missing else None; sys.exit(1 if missing else 0)'
+
       - name: Create Artifact Registry Repository (if not exists)
         run: |
           gcloud artifacts repositories create ${{ env.REPOSITORY_NAME }} \
@@ -80,7 +107,7 @@ jobs:
       - name: Deploy to Cloud Run
         run: |
           IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
-          ENV_VARS="^@^NODE_ENV=production@HOST=0.0.0.0@AI_PRIORITY=vertex@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_ACTIVE_LEARNING_NEVER=0@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex@SENTINEL_MIN_EVALUATORS=1@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL"
+          ENV_VARS="^@^NODE_ENV=production@HOST=0.0.0.0@AI_PRIORITY=vertex@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_ACTIVE_LEARNING_NEVER=0@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex@SENTINEL_MIN_EVALUATORS=1@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@PANTHORIUM_FILES_BUCKET=$PANTHORIUM_PRODUCTION_FILES_BUCKET@BIOMETRIC_GATE_ENABLED=1"
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image "$IMAGE_URI" \
             --region ${{ env.REGION }} \
@@ -92,3 +119,11 @@ jobs:
             --update-env-vars="$ENV_VARS" \
             --remove-secrets=GROQ_API_KEY,OPENAI_API_KEY,GEMINI_API_KEY,ANTHROPIC_API_KEY \
             --quiet
+
+      - name: Verify production health and Voice Identity gate
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          URL="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          curl --fail --silent --show-error "$URL/api/health" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True, "production health check failed"; assert health.get("voiceIdentityConfigured") is True, "production Voice Identity provider or encryption key is not configured"; assert health.get("voiceIdentityGateEnabled") is True, "production Voice Identity gate is not enabled"'
