@@ -32,10 +32,10 @@ async function main() {
   const fullscreenCss = shell.slice(fullscreenCssStart, fullscreenCssEnd);
   const maximizedRule = /\.window\.maximized\s*\{([\s\S]*?)\n\s*\}/.exec(shell)?.[1] || '';
   assert.match(maximizedRule, /box-sizing:\s*border-box/, 'fullscreen windows keep safe-area padding inside the viewport');
-  assert.match(maximizedRule, /padding:\s*env\(safe-area-inset-top,\s*0px\)\s+env\(safe-area-inset-right,\s*0px\)\s+env\(safe-area-inset-bottom,\s*0px\)\s+0px/, 'native and web fullscreen windows preserve vertical and right insets but reach the left edge');
+  assert.match(maximizedRule, /padding:\s*0px\s+0px\s+0px\s+0px/, 'native and web windows fill the full viewport in both orientations');
   const managedFullscreenRule = /\.panthorium-managed-window\.panthorium-window-fullscreen\s*\{([\s\S]*?)\n\s*\}/.exec(shell)?.[1] || '';
-  assert.match(managedFullscreenRule, /padding:\s*env\(safe-area-inset-top,\s*0px\)\s+env\(safe-area-inset-right,\s*0px\)[\s\S]*env\(safe-area-inset-bottom,\s*0px\)\s+0px/, 'every catalog window preserves top/right/bottom insets with zero left padding');
-  assert.doesNotMatch(fullscreenCss, /safe-area-inset-left/, 'no fullscreen window rule restores a left safe-area gap');
+  assert.match(managedFullscreenRule, /padding:\s*0px\s+0px\s+0px\s+0px/, 'every catalog window fills all four screen edges');
+  assert.doesNotMatch(fullscreenCss, /safe-area-inset-/, 'fullscreen window rules do not reintroduce any safe-area gaps');
   assert.doesNotMatch(shell, /html\[data-panthorium-immersive="true"\][^{}]*\.panthorium-window-fullscreen[^{}]*\{[^}]*padding:\s*0\s*!important/i, 'immersive state cannot erase safe-area padding from function windows');
   assert.doesNotMatch(shell, /html\[data-panthorium-immersive="true"\]\s*\.window\.maximized[\s\S]*?padding:\s*0\s*!important;/, 'immersive fullscreen must not erase safe-area padding');
 
@@ -51,7 +51,7 @@ async function main() {
   assert.match(shell, /@media \(max-height: 540px\) and \(orientation: landscape\)/, 'admin login is compact and scrollable on short landscape screens');
   const voiceIdentity = fs.readFileSync(require.resolve('../voice-identity-ui.js'), 'utf8');
   assert.match(voiceIdentity, /box-sizing:border-box;position:fixed;inset:0;max-width:100vw/, 'voice registration can reach the left edge');
-  assert.match(voiceIdentity, /0px!important;padding:clamp\(10px,3vw,16px\)/, 'voice registration keeps phone top/right/bottom spacing without a left gutter');
+  assert.match(voiceIdentity, /inset:0!important;padding:clamp\(10px,3vw,16px\)/, 'voice registration fills the phone viewport');
   assert.match(voiceIdentity, /@media\(max-width:760px\)/, 'voice registration and login switch to a single column on phones');
 
   window.PanthoriumWindowManager = manager;
