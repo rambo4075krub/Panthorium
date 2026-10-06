@@ -34,9 +34,8 @@ try {
   assert.match(java, /ViewCompat\.setOnApplyWindowInsetsListener/, 'native insets are installed for the app content root');
   assert.match(java, /Insets visible = insets\.getInsets\(types\)/, 'left, right and bottom keep the current visible-inset behavior');
   assert.match(java, /Insets stable = insets\.getInsetsIgnoringVisibility\(types\)/, 'stable system insets are available while immersive bars are hidden');
-  assert.match(java, /Insets safe = Insets\.of\(0, Math\.max\(visible\.top, stable\.top\),\s*visible\.right, visible\.bottom\)/, 'the left edge stays flush while top, right and bottom safe areas are preserved');
-  assert.match(java, /setPadding\(0, baseTop \+ safe\.top,\s*baseRight \+ safe\.right, baseBottom \+ safe\.bottom\)/, 'the WebView reaches the left edge and retains the other safe areas');
-  assert.doesNotMatch(java, /safe\.left|baseLeft \+/, 'no native left inset shifts the app surface inward');
+  assert.match(java, /view\.setPadding\(0, 0, 0, 0\)/, 'the native app surface fills every edge in portrait and landscape');
+  assert.match(java, /setInsets\(types, Insets\.NONE\)/, 'system bars and display cutout insets are cleared before reaching WebView');
   assert.match(java, /setInsets\(types, Insets\.NONE\)/, 'handled system insets are cleared before reaching WebView to avoid double padding');
   assert.match(java, /SYSTEM_UI_FLAG_IMMERSIVE_STICKY/, 'older Android releases use sticky immersive mode');
   const first = java.match(/PANTHORIUM_IMMERSIVE_MODE/g).length;
