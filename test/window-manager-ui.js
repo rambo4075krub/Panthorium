@@ -32,10 +32,12 @@ async function main() {
   const fullscreenCss = shell.slice(fullscreenCssStart, fullscreenCssEnd);
   const maximizedRule = /\.window\.maximized\s*\{([\s\S]*?)\n\s*\}/.exec(shell)?.[1] || '';
   assert.match(maximizedRule, /box-sizing:\s*border-box/, 'fullscreen windows keep safe-area padding inside the viewport');
-  assert.match(maximizedRule, /padding:\s*0px\s+0px\s+0px\s+0px/, 'native and web windows fill the full viewport in both orientations');
+  assert.match(maximizedRule, /padding:\s*var\(--panthorium-safe-area-top\)\s+0px\s+0px\s+0px/, 'native and web windows keep the top safe area while filling the other edges');
   const managedFullscreenRule = /\.panthorium-managed-window\.panthorium-window-fullscreen\s*\{([\s\S]*?)\n\s*\}/.exec(shell)?.[1] || '';
-  assert.match(managedFullscreenRule, /padding:\s*0px\s+0px\s+0px\s+0px/, 'every catalog window fills all four screen edges');
-  assert.doesNotMatch(fullscreenCss, /safe-area-inset-/, 'fullscreen window rules do not reintroduce any safe-area gaps');
+  assert.match(managedFullscreenRule, /padding:\s*var\(--panthorium-safe-area-top\)\s+0px\s+0px\s+0px/, 'every catalog window keeps the top safe area while filling the other edges');
+  assert.match(shell, /--panthorium-safe-area-top:\s*max\(env\(safe-area-inset-top,\s*0px\),\s*var\(--panthorium-native-safe-area-top,\s*0px\)\)/, 'fullscreen content uses browser and native safe-area values');
+  assert.match(fullscreenCss, /@media \(orientation:\s*landscape\)[\s\S]*padding:\s*var\(--panthorium-safe-area-top\)/, 'landscape fullscreen keeps the top safe area');
+  assert.match(fullscreenCss, /data-window-landscape-edge-to-edge="false"[\s\S]*padding:\s*var\(--panthorium-safe-area-top\)/, 'landscape preference cannot remove the top safe area');
   assert.doesNotMatch(shell, /html\[data-panthorium-immersive="true"\][^{}]*\.panthorium-window-fullscreen[^{}]*\{[^}]*padding:\s*0\s*!important/i, 'immersive state cannot erase safe-area padding from function windows');
   assert.doesNotMatch(shell, /html\[data-panthorium-immersive="true"\]\s*\.window\.maximized[\s\S]*?padding:\s*0\s*!important;/, 'immersive fullscreen must not erase safe-area padding');
 
