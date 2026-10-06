@@ -42,7 +42,7 @@ const noticeMarkup = shell.match(/<div id="orb-system-notice"[^>]*>/)?.[0] || ''
 assert(!transcriptMarkup.includes('id="orb-system-notice"'), 'system notices should be separate from the transcript and above the Orb');
 assert(noticeMarkup.includes('aria-live="off"'), 'system notices should stay silent');
 assert(shell.indexOf('id="orb-system-notice"') < shell.indexOf('id="orb-transcript"'), 'system notice markup should precede the transcript');
-const noticeStyleStart = shell.indexOf('.orb-system-notice {');
+const noticeStyleStart = shell.lastIndexOf('.orb-system-notice {');
 const noticeStyleEnd = shell.indexOf('\n        }', noticeStyleStart);
 const noticeStyle = shell.slice(noticeStyleStart, noticeStyleEnd);
 assert(noticeStyle.includes('position: fixed') && noticeStyle.includes('top:'), 'system notices should be positioned above the Orb');
