@@ -467,6 +467,9 @@
             min-width: 0 !important;
             min-height: 0 !important;
             border-radius: 0;
+            box-sizing: border-box !important;
+            padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+                env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px) !important;
         }
         .window.maximized .window-resize { display: none; }
         .panthorium-managed-window.panthorium-window-fullscreen {
@@ -478,10 +481,6 @@
             padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
                 env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px) !important;
             overflow: hidden !important;
-        }
-        html[data-panthorium-immersive="true"] .window.maximized,
-        html[data-panthorium-immersive="true"] .panthorium-managed-window.panthorium-window-fullscreen {
-            padding: 0 !important;
         }
         .panthorium-window-control {
             min-width: 38px; min-height: 38px; margin-left: 5px; padding: 5px 10px;

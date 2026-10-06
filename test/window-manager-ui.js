@@ -24,6 +24,12 @@ async function main() {
     close(id) { const record = windows.get(id); if (record) record.el.remove(); windows.delete(id); return Boolean(record); },
     setFullscreen(id) { const record = windows.get(id); if (!record) return false; record.fullscreen = true; record.el.classList.add('panthorium-window-fullscreen'); return true; }
   };
+  const shell = fs.readFileSync(require.resolve('../sentinel.html'), 'utf8');
+  const maximizedRule = /\.window\.maximized\s*\{([\s\S]*?)\n\s*\}/.exec(shell)?.[1] || '';
+  assert.match(maximizedRule, /box-sizing:\s*border-box/, 'fullscreen windows keep safe-area padding inside the viewport');
+  assert.match(maximizedRule, /padding:\s*env\(safe-area-inset-top,\s*0px\)[\s\S]*env\(safe-area-inset-bottom,\s*0px\)/, 'native and web fullscreen windows reserve visible system-bar insets');
+  assert.doesNotMatch(shell, /html\[data-panthorium-immersive="true"\]\s*\.window\.maximized[\s\S]*?padding:\s*0\s*!important;/, 'immersive fullscreen must not erase safe-area padding');
+
   window.PanthoriumWindowManager = manager;
   window.PanthoriumWindowCatalog = {
     apps: [{ id: 'ai-platform', label: 'AI Platform', selector: '#ai-window', closeButton: '[data-close]' }]
