@@ -87,7 +87,10 @@
     const state = root.querySelector('[data-state]');
     try {
       const [status, list] = await Promise.all([api('/api/biometrics/status'), profiles(true)]);
-      state.textContent = !status.configured ? 'ยังต้องตั้งค่าบริการ Speaker Verification และกุญแจเข้ารหัสบนเซิร์ฟเวอร์' : status.gateEnabled ? 'ด่านคัดเสียงเปิดใช้งานแล้ว' : 'โหมดลงทะเบียน/ทดสอบ: ด่านยังปิดอยู่ จึงยังไม่กรองเสียงก่อนส่งไปถอดคำพูด';
+      const stateText = !status.configured ? 'ยังต้องตั้งค่าบริการ Speaker Verification และกุญแจเข้ารหัสบนเซิร์ฟเวอร์' : status.gateEnabled ? 'ด่านคัดเสียงเปิดใช้งานแล้ว' : 'โหมดลงทะเบียน/ทดสอบ: ด่านยังปิดอยู่ จึงยังไม่กรองเสียงก่อนส่งไปถอดคำพูด';
+      const shortSpeechNote = status.shortUtteranceCalibrationEnabled === false ? ' · คำสั่งสั้นอาจมีข้อมูลเสียงไม่พอ กรุณาพูดต่อเนื่องเพิ่ม' : '';
+      const livenessNote = status.livenessSupported === false ? ' · ยังไม่ป้องกันเสียงบันทึกซ้ำ เสียงอย่างเดียวไม่พอยืนยันรายการสำคัญ' : '';
+      state.textContent = stateText + shortSpeechNote + livenessNote;
       state.style.color = status.configured && status.gateEnabled ? '#6ee7b7' : '#fbbf24';
       const upgrade = root.querySelector('[data-upgrade]'); if (upgrade) upgrade.style.display = list.length ? '' : 'none'; const testPanel = root.querySelector('[data-voice-test-panel]'); if (testPanel) testPanel.style.display = list.length ? '' : 'none'; root.dataset.voiceMatchThreshold = Number.isFinite(Number(status.matchThreshold)) ? String(status.matchThreshold) : '';
       root.querySelector('[data-list]').innerHTML = list.length ? list.map(item => `<div style="padding:10px;border-bottom:1px solid #243448"><b>${esc(item.displayName)}</b> · ${esc(label(item.subjectType))}<div style="font-size:11px;color:#8ea3b8">ตัวอย่าง ${esc(item.sampleCount)} ครั้ง${item.relationship ? ` · ${esc(item.relationship)}` : ''}</div><button type="button" data-add-samples="${esc(item.profileId)}" style="margin-top:6px">เพิ่มตัวอย่างเสียงในโปรไฟล์นี้</button> <button type="button" data-remove="${esc(item.profileId)}" style="margin-top:6px">ลบเสียงนี้</button></div>`).join('') : '<div style="color:#94a3b8">ยังไม่มีเสียงที่ลงทะเบียน ระบบจะยังไม่เปิดด่านคัดกรอง</div>';
