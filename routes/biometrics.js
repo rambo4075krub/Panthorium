@@ -13,6 +13,7 @@ function createBiometricsRouter(authService, biometrics) {
       : code === 'voice_profile_not_found' ? 404
       : code === 'voice_profile_samples_conflict' ? 409
       : code === 'administrator_role_required' ? 403
+      : ['voice_audio_too_short', 'voice_audio_unclear', 'voice_audio_invalid_duration', 'voice_audio_invalid', 'invalid_voice_sample'].includes(code) ? 422
       : /required|invalid|do_not_match|liveness/.test(code) ? 400
       : code === 'inconsistent_voice_embeddings' ? 503 : 500;
     res.status(status).json({ ok: false, error: status === 500 ? 'biometric_operation_failed' : code });
