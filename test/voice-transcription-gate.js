@@ -4,12 +4,13 @@ const { AuthService } = require('../services/authService');
 const { createApiRouter } = require('../routes/api');
 
 (async () => {
-  let transcripts = 0, profiles = [], matched = false, transcribedText = 'hello', voiceScore = 0.74;
+  let transcripts = 0, profiles = [], matched = false, transcribedText = 'hello', voiceScore = 0.74, verifyError = null;
+  const auditEvents = [];
   process.env.BIOMETRIC_DIAGNOSTICS_ENABLED = '1';
-  const audit = { record() {} };
+  const audit = { record(event, details) { auditEvents.push({ event, details }); } };
   const auth = new AuthService({ config: { jwtSecret: 'voice-gate-test-key', accessTokenTtl: '1h' }, audit });
   const user = { id: 'owner', username: 'owner', roles: ['administrator'], permissions: ['chat'] };
-  const biometrics = { gateEnabled: true, status: () => ({ configured: true, matchThreshold: 0.8 }), list: async () => profiles, verify: async () => ({ matched, score: voiceScore }) };
+  const biometrics = { gateEnabled: true, status: () => ({ configured: true, matchThreshold: 0.8 }), list: async () => profiles, verify: async () => { if (verifyError) throw verifyError; return { matched, score: voiceScore, speechDurationSeconds: 1.4, speechDurationBucket: 'under_2s' }; } };
   const sentinel = { providers: { transcribeAudio: async () => { transcripts += 1; return { text: transcribedText }; } } };
   const app = express();
   app.use(express.json({ limit: '2mb' }));
@@ -19,7 +20,7 @@ const { createApiRouter } = require('../routes/api');
   try {
     const endpoint = `http://127.0.0.1:${server.address().port}/api/speech/transcribe`;
     const navigationEndpoint = `http://127.0.0.1:${server.address().port}/api/speech/identity-navigation`;
-    const payload = { audio: `data:audio/webm;base64,${Buffer.alloc(4000).toString('base64')}`, language: 'th-TH' };
+    const payload = { audio: `data:audio/webm;base64,${Buffer.alloc(4000).toString('base64')}`, language: 'th-TH', clientCaptureMs: 2500 };
     const request = url => fetch(url || endpoint, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth.signAccessToken(user)}` },
       body: JSON.stringify(payload)
@@ -47,10 +48,26 @@ const { createApiRouter } = require('../routes/api');
     process.env.BIOMETRIC_DIAGNOSTICS_ENABLED = '1';
     const denied = await request();
     assert.equal(denied.status, 403, 'unknown speaker must not reach general STT');
-    assert.deepEqual((await denied.json()).voiceDiagnostic, { score: 0.74, threshold: 0.8 }, 'staging reports match score and threshold without audio');
+    const deniedBody = await denied.json();
+    assert.deepEqual(deniedBody.voiceDiagnostic, { score: 0.74, threshold: 0.8, speechDurationSeconds: 1.4, speechDurationBucket: 'under_2s' }, 'staging reports match and duration diagnostics without audio');
+    assert.match(denied.headers.get('server-timing'), /biometric;dur=/, 'the response exposes safe stage timing');
     assert.equal(transcripts, 3);
+
+    verifyError = new Error('voice_audio_too_short');
+    const shortAudio = await request();
+    assert.equal(shortAudio.status, 422, 'short speech is an input issue, not a cloud outage');
+    assert.equal((await shortAudio.json()).error, 'voice_audio_too_short');
+    assert.equal(transcripts, 3, 'short audio never reaches paid STT');
+
+    verifyError = null;
     matched = true;
-    assert.equal((await request()).status, 200, 'enrolled speaker may use STT');
+    const accepted = await request();
+    assert.equal(accepted.status, 200, 'enrolled speaker may use STT');
+    const acceptedBody = await accepted.json();
+    assert.equal(acceptedBody.voiceTiming.clientCaptureMs, 2500);
+    assert.ok(acceptedBody.voiceTiming.biometricMs >= 0);
+    assert.ok(acceptedBody.voiceTiming.transcriptionMs >= 0);
+    assert.ok(auditEvents.some(entry => entry.event === 'sentinel.voice_pipeline_timing' && entry.details.outcome === 'success'));
     assert.equal(transcripts, 4);
     biometrics.gateEnabled = false;
     profiles = [];
