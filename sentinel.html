@@ -211,6 +211,7 @@
                 overflow-wrap: anywhere;
             }
             .orb-transcript-line.current { font-size: 15px; }
+            .orb-system-notice { max-height: 14vh; padding: 8px 10px; font-size: 12px; }
         }
 
         .desktop-icons {
@@ -484,7 +485,7 @@
             border-radius: 0;
             box-sizing: border-box !important;
             padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
-                env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px) !important;
+                env(safe-area-inset-bottom, 0px) 0px !important;
         }
         .window.maximized .window-resize { display: none; }
         .panthorium-managed-window.panthorium-window-fullscreen {
@@ -494,7 +495,7 @@
             max-width: none !important; max-height: none !important;
             margin: 0 !important; border-radius: 0 !important; box-sizing: border-box !important;
             padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
-                env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px) !important;
+                env(safe-area-inset-bottom, 0px) 0px !important;
             overflow: hidden !important;
         }
         .panthorium-window-control {
@@ -506,7 +507,7 @@
         .panthorium-window-control:hover,.panthorium-window-control:focus-visible { border-color: #00d9b7; outline: none; }
         @media (max-width: 760px) and (orientation: portrait) {
             .window.maximized { padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
-                env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px) !important; }
+                env(safe-area-inset-bottom, 0px) 0px !important; }
             .panthorium-managed-window.panthorium-window-fullscreen {
                 padding-top: env(safe-area-inset-top, 0px) !important;
             }
@@ -514,12 +515,12 @@
         @media (orientation: landscape) {
             .window.maximized, .panthorium-managed-window.panthorium-window-fullscreen {
                 padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
-                    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px) !important;
+                    env(safe-area-inset-bottom, 0px) 0px !important;
             }
             html[data-window-landscape-edge-to-edge="false"] .window.maximized,
             html[data-window-landscape-edge-to-edge="false"] .panthorium-managed-window.panthorium-window-fullscreen {
                 padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
-                    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px) !important;
+                    env(safe-area-inset-bottom, 0px) 0px !important;
             }
         }
         .window-titlebar {
@@ -597,7 +598,7 @@
             box-sizing: border-box !important; max-width: 100vw; max-height: 100dvh;
             overflow-x: hidden !important; overflow-y: auto !important; overscroll-behavior: contain;
             inset: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px))
-                max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)) !important;
+                max(12px, env(safe-area-inset-bottom, 0px)) 0px !important;
             background: radial-gradient(ellipse at 85% 8%, rgba(64, 93, 170, .24), transparent 42%), linear-gradient(145deg, rgba(13, 25, 47, .98), rgba(5, 12, 27, .99)) !important;
             border: 1px solid rgba(47, 225, 210, .43) !important;
             box-shadow: 0 0 36px rgba(34, 219, 208, .12), 0 24px 80px rgba(0,0,0,.72) !important;
@@ -617,7 +618,7 @@
         @media (max-width: 760px) {
             #panthorium-voice-identity {
                 inset: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px))
-                    max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)) !important;
+                    max(8px, env(safe-area-inset-bottom, 0px)) 0px !important;
                 padding: clamp(10px, 3vw, 16px) !important; border-radius: 14px !important;
             }
             #panthorium-voice-identity > div:nth-child(2) { grid-template-columns: minmax(0, 1fr) !important; }
@@ -837,21 +838,27 @@
             font-size: 32px;
         }
 
-        /* Toast */
-        #toast {
-            position: fixed;
-            top: 20px; left: 50%;
-            transform: translateX(-50%) translateY(-80px);
-            background: var(--surface-2);
-            border: 1px solid rgba(0,255,204,0.3);
-            padding: 12px 22px;
+        .orb-system-notice {
+            display: none;
+            max-height: min(18vh, 160px);
+            margin-top: 8px;
+            padding: 9px 14px;
+            overflow-y: auto;
+            border: 1px solid rgba(0,255,204,.28);
             border-radius: 12px;
-            font-size: 13px;
-            z-index: 10000;
-            transition: transform 0.3s ease;
-            pointer-events: none;
+            background: rgba(9,19,32,.9);
+            color: #d9f7ff;
+            font-size: clamp(12px, 1.05vw, 14px);
+            line-height: 1.45;
+            overflow-wrap: anywhere;
+            white-space: normal;
+            text-shadow: 0 1px 4px rgba(0,0,0,.7);
+            box-shadow: 0 8px 24px rgba(0,0,0,.25);
+            pointer-events: auto;
+            touch-action: pan-y;
+            user-select: text;
         }
-        #toast.show { transform: translateX(-50%) translateY(0); }
+        .orb-system-notice.show { display: block; }
 
         /* Responsive */
         @media (max-width: 600px) {
@@ -896,6 +903,7 @@
             <div class="orb-transcript-line previous" data-orb-line="previous" aria-label="ประโยคก่อนหน้า"></div>
             <div class="orb-transcript-line current" data-orb-line="current" aria-live="polite" aria-label="ประโยคปัจจุบัน"></div>
             <div class="orb-transcript-line next" data-orb-line="next" aria-label="ข้อความที่เหลือซึ่งยังไม่อ่าน"></div>
+            <div id="orb-system-notice" class="orb-system-notice" role="status" aria-live="off" aria-atomic="true"></div>
         </section>
 
         <div class="desktop-icons" id="desktop-icons">
@@ -937,7 +945,6 @@
         </div>
     </div>
 
-    <div id="toast"></div>
 
     <!-- External libs -->
     <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
@@ -1042,8 +1049,9 @@
 
     // ---------- Utilities ----------
     function toast(msg, duration = 2500) {
-        const el = document.getElementById("toast");
-        el.textContent = msg;
+        const el = document.getElementById("orb-system-notice");
+        if (!el) return;
+        el.textContent = String(msg ?? "");
         el.classList.add("show");
         clearTimeout(el.__voiceTimer);
         el.__voiceTimer = setTimeout(() => el.classList.remove("show"), duration);
@@ -2853,7 +2861,7 @@
         const w = document.createElement("div");
         w.className = "window";
         w.dataset.id = id;
-        const fullscreenOnOpen = true;
+        const fullscreenOnOpen = id !== "calculator" && opts.fullscreenOnOpen !== false;
         if (fullscreenOnOpen) w.classList.add("maximized");
         const width = opts.width || Math.min(520, window.innerWidth - 40);
         const height = opts.height || Math.min(420, window.innerHeight - 80);
@@ -2976,13 +2984,14 @@
     function setWindowFullscreen(id, active) {
         const win = OS.windows.get(id);
         if (!win) return false;
+        if (id === "calculator" && active) return false;
         if (win.external) {
-            win.el.classList.add("panthorium-window-fullscreen");
-            win.fullscreen = true;
+            if (active) win.el.classList.add("panthorium-window-fullscreen");
+            else win.el.classList.remove("panthorium-window-fullscreen");
         } else {
-            win.el.classList.add("maximized");
-            win.fullscreen = true;
+            win.el.classList.toggle("maximized", Boolean(active));
         }
+        win.fullscreen = Boolean(active);
         return true;
     }
 
@@ -2991,7 +3000,8 @@
         const current = OS.windows.get(id);
         if (current?.el === element) return current;
         if (current) closeWindow(id);
-        const fullscreen = true;
+        const fullscreen = id !== "calculator"
+            && (typeof opts.fullscreenOnOpen === "boolean" ? opts.fullscreenOnOpen : windowPreferences.fullscreenOnOpen);
         if (!element.dataset.panthoriumWindowedStyle) element.dataset.panthoriumWindowedStyle = element.getAttribute("style") || "";
         element.classList.add("panthorium-managed-window");
         if (fullscreen) element.classList.add("panthorium-window-fullscreen");
@@ -3025,14 +3035,13 @@
     function setWindowFullscreen(id, active) {
         const win = OS.windows.get(id);
         if (!win) return false;
+        if (id === "calculator" && active) return false;
         if (win.external) {
-            if (active) win.el.classList.add("panthorium-window-fullscreen");
-            else win.el.classList.remove("panthorium-window-fullscreen");
-            win.fullscreen = Boolean(active);
+            win.el.classList.toggle("panthorium-window-fullscreen", Boolean(active));
         } else {
             win.el.classList.toggle("maximized", Boolean(active));
-            win.fullscreen = Boolean(active);
         }
+        win.fullscreen = Boolean(active);
         return true;
     }
 
@@ -3041,7 +3050,8 @@
         const current = OS.windows.get(id);
         if (current?.el === element) return current;
         if (current) closeWindow(id);
-        const fullscreen = typeof opts.fullscreenOnOpen === "boolean" ? opts.fullscreenOnOpen : windowPreferences.fullscreenOnOpen;
+        const fullscreen = id !== "calculator"
+            && (typeof opts.fullscreenOnOpen === "boolean" ? opts.fullscreenOnOpen : windowPreferences.fullscreenOnOpen);
         if (!element.dataset.panthoriumWindowedStyle) element.dataset.panthoriumWindowedStyle = element.getAttribute("style") || "";
         element.classList.add("panthorium-managed-window");
         if (fullscreen) element.classList.add("panthorium-window-fullscreen");
