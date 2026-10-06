@@ -110,7 +110,6 @@ if (!activity.includes(immersiveMarker)) {
         android.view.View webView = getBridge().getWebView();
         android.view.ViewParent parent = webView.getParent();
         android.view.View root = parent instanceof android.view.View ? (android.view.View) parent : webView;
-        final int baseLeft = root.getPaddingLeft();
         final int baseTop = root.getPaddingTop();
         final int baseRight = root.getPaddingRight();
         final int baseBottom = root.getPaddingBottom();
@@ -118,11 +117,11 @@ if (!activity.includes(immersiveMarker)) {
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
             Insets visible = insets.getInsets(types);
             Insets stable = insets.getInsetsIgnoringVisibility(types);
-            // Keep the top safe area while immersive; stable landscape side insets
-            // would otherwise shift the entire Panthorium surface inward.
-            Insets safe = Insets.of(visible.left, Math.max(visible.top, stable.top),
+            // Keep the top safe area while allowing fullscreen windows to reach the
+            // physical left edge. Preserve the current right and bottom safe areas.
+            Insets safe = Insets.of(0, Math.max(visible.top, stable.top),
                 visible.right, visible.bottom);
-            view.setPadding(baseLeft + safe.left, baseTop + safe.top,
+            view.setPadding(0, baseTop + safe.top,
                 baseRight + safe.right, baseBottom + safe.bottom);
             return new WindowInsetsCompat.Builder(insets).setInsets(types, Insets.NONE).build();
         });
