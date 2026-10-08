@@ -59,7 +59,7 @@ async function main() {
   const responseFrame = JSON.stringify({ serverContent: { turnComplete: true } });
   upstream.emit("message", responseFrame, false);
   assert.equal(client.sent[2], responseFrame);
-  upstream.emit("message", JSON.stringify({ toolCall: { functionCalls: [{ id: 'call-1', name: 'panthorium_ai_providers', args: {} }] } }), false);
+  upstream.emit("message", Buffer.from(JSON.stringify({ toolCall: { functionCalls: [{ id: 'call-1', name: 'panthorium_ai_providers', args: {} }] } })), true);
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(JSON.parse(upstream.sent.at(-1)), { tool_response: { function_responses: [{ name: 'panthorium_ai_providers', id: 'call-1', response: { output: { providers: ['vertex'] } } }] } });
   upstream.emit("message", JSON.stringify({ tool_call: { function_calls: [{ id: 'call-2', name: 'panthorium_window_open', args: { appId: 'calculator' } }] } }), false);
@@ -71,6 +71,23 @@ async function main() {
   assert.deepEqual(JSON.parse(upstream.sent.at(-1)).tool_response.function_responses[0].response.output, { ok: true, action: 'open_calculator', text: 'เปิดเครื่องคิดเลข' });
   client.close(1000, "done");
   assert.equal(gateway.activeSessions(), 0);
+
+  const binaryClient = new FakeSocket();
+  FakeWebSocketServer.instance.client = binaryClient;
+  server.emit("upgrade", { url: "/api/live", headers: { origin: "https://panthorium.test", host: "panthorium.test" } }, {}, Buffer.alloc(0));
+  binaryClient.emit("message", JSON.stringify({ type: "auth", token: "valid" }), false);
+  await new Promise(resolve => setImmediate(resolve));
+  upstream.emit("message", Buffer.from(JSON.stringify({ setup_complete: {} })), true);
+  assert.equal(JSON.parse(binaryClient.sent[0]).type, "ready", "binary JSON setup must acknowledge readiness");
+  assert.equal(typeof binaryClient.sent[1], "string", "provider JSON is relayed as text for the browser");
+  const binaryAudioFrame = { serverContent: { modelTurn: { parts: [{ inlineData: { mimeType: 'audio/pcm;rate=24000', data: 'AAA=' } }] } } };
+  upstream.emit("message", Buffer.from(JSON.stringify(binaryAudioFrame)), true);
+  assert.equal(typeof binaryClient.sent.at(-1), "string");
+  assert.deepEqual(JSON.parse(binaryClient.sent.at(-1)), binaryAudioFrame);
+  const providerError = { error: { code: 403, message: 'test provider rejection' } };
+  upstream.emit("message", Buffer.from(JSON.stringify(providerError)), true);
+  assert.deepEqual(JSON.parse(binaryClient.sent.at(-1)), providerError, "binary provider errors remain visible");
+  binaryClient.close(1000, "done");
 
   const failedClient = new FakeSocket();
   FakeWebSocketServer.instance.client = failedClient;
@@ -91,3 +108,4 @@ async function main() {
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });
+

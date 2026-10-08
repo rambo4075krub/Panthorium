@@ -202,12 +202,15 @@ function createGeminiLiveWebSocketGateway({
       });
       upstream.on("message", (message, binary) => {
         let frame = null;
-        if (!binary) {
-          try { frame = JSON.parse(String(message)); } catch (_) {}
+        // Vertex can send JSON in binary WebSocket frames. The opcode does not
+        // identify raw PCM: audio is base64 inside the JSON server message.
+        try { frame = JSON.parse(String(message)); } catch (_) {}
+        if (frame && typeof frame === "object" && !Array.isArray(frame)) {
           if (frame?.error) console.warn("[Gemini Live] upstream message error", JSON.stringify(frame.error).slice(0, 500));
           if (!readySent && (frame?.setupComplete || frame?.setup_complete)) {
             readySent = true;
             clearTimeout(setupTimer);
+            console.info("[Gemini Live] setup complete", JSON.stringify({ elapsedMs: Date.now() - setupStartedAt, binary: binary === true }));
             sendClient({ type: "ready" });
           }
           const cancellation = frame?.toolCallCancellation || frame?.tool_call_cancellation;
@@ -224,8 +227,13 @@ function createGeminiLiveWebSocketGateway({
             });
             return;
           }
+        } else {
+          console.warn("[Gemini Live] invalid upstream JSON frame");
+          if (client.readyState < 2) client.close(1011, "live_upstream_invalid_frame");
+          return;
         }
-        if (client.readyState === 1) client.send(message, { binary });
+        // Normalize provider JSON to text so browser clients can parse it.
+        sendClient(frame);
       });
       upstream.once("close", (code, reason) => {
         const closeReason = Buffer.isBuffer(reason) ? reason.toString("utf8") : String(reason || "");
@@ -265,3 +273,4 @@ function createGeminiLiveWebSocketGateway({
 }
 
 module.exports = { AUTH_TIMEOUT_MS, MAX_SESSIONS_PER_INSTANCE, isAllowedOrigin, createGeminiLiveWebSocketGateway };
+

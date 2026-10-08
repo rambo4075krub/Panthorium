@@ -135,10 +135,11 @@
     await audioContext.resume();
     microphone = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     socket = new WebSocket(backendWebSocketUrl());
+    socket.binaryType = "arraybuffer";
     setStatus("กำลังเชื่อม Gemini Live", "processing");
 
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("เชื่อม Gemini Live ไม่สำเร็จ")), 12000);
+      const timeout = setTimeout(() => reject(new Error("เชื่อม Gemini Live ไม่สำเร็จ")), 45000);
       socket.onopen = () => socket.send(JSON.stringify({ type: "auth", token }));
       socket.onerror = () => { clearTimeout(timeout); reject(new Error("เชื่อม Gemini Live ไม่สำเร็จ")); };
       socket.onclose = event => {
@@ -148,7 +149,10 @@
       };
       socket.onmessage = event => {
         let frame;
-        try { frame = JSON.parse(event.data); } catch (_) { return; }
+        try {
+          const json = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data);
+          frame = JSON.parse(json);
+        } catch (_) { return; }
         if (frame.type === "ready") { clearTimeout(timeout); serverReady = true; resolve(); }
         handleModelFrame(frame);
         if (frame.error) {
@@ -198,3 +202,4 @@
     finally { starting = false; }
   }, true);
 })();
+

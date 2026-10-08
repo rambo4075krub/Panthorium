@@ -1,5 +1,5 @@
-// Post-deploy staging smoke check. No provider calls, database mutations or
-// administrator credentials. Never print the transient guest token.
+// Post-deploy staging smoke check, including real provider handshake and audio.
+// No administrator credentials. Never print the transient guest token.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -86,13 +86,53 @@ const WebSocket = require('ws');
     liveSocket.once('error', error => finish(new Error(`Gemini Live WebSocket failed: ${String(error?.message || error).slice(0, 160)}`)));
     liveSocket.once('close', (code, reason) => finish(new Error(`Gemini Live closed before ready (${code}: ${String(reason).slice(0, 120)})`)));
   });
+  console.log('Gemini Live staging handshake passed: authenticated WebSocket received provider setupComplete.');
+  await new Promise((resolve, reject) => {
+    let audioBytes = 0;
+    let settled = false;
+    const finish = error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      liveSocket.removeListener('message', onMessage);
+      liveSocket.removeListener('error', onError);
+      liveSocket.removeListener('close', onClose);
+      if (error) { liveSocket.terminate(); reject(error); }
+      else { console.log(`Gemini Live staging audio passed: received ${audioBytes} bytes of PCM audio.`); resolve(); }
+    };
+    const onError = error => finish(new Error(`Gemini Live audio socket failed: ${String(error?.message || error).slice(0, 160)}`));
+    const onClose = (code, reason) => finish(new Error(`Gemini Live closed before audio (${code}: ${String(reason).slice(0, 120)})`));
+    const onMessage = data => {
+      let frame;
+      try { frame = JSON.parse(String(data)); } catch { return; }
+      if (frame.error) return finish(new Error(`Gemini Live audio rejected: ${JSON.stringify(frame.error).slice(0, 400)}`));
+      const content = frame.serverContent || frame.server_content;
+      if (!content) return;
+      for (const part of content.modelTurn?.parts || content.model_turn?.parts || []) {
+        const audio = part.inlineData || part.inline_data;
+        if (!audio?.data) continue;
+        const mime = audio.mimeType || audio.mime_type || '';
+        if (!mime.startsWith('audio/pcm')) return finish(new Error(`Unexpected Gemini Live audio format: ${mime}`));
+        const bytes = Buffer.from(audio.data, 'base64');
+        if (!bytes.length || bytes.length % 2) return finish(new Error('Gemini Live returned invalid PCM audio'));
+        audioBytes += bytes.length;
+      }
+      if (content.turnComplete || content.turn_complete) {
+        finish(audioBytes > 0 ? null : new Error('Gemini Live finished without audio'));
+      }
+    };
+    const timer = setTimeout(() => finish(new Error('Gemini Live audio response timed out')), 45000);
+    liveSocket.on('message', onMessage);
+    liveSocket.once('error', onError);
+    liveSocket.once('close', onClose);
+    liveSocket.send(JSON.stringify({ clientContent: { turns: [{ role: 'user', parts: [{ text: 'พูดสั้น ๆ ว่า สวัสดี พร้อมใช้งาน โดยไม่เรียกใช้ฟังก์ชันใด' }] }], turnComplete: true } }));
+  });
   await new Promise(resolve => {
     if (liveSocket.readyState === WebSocket.CLOSED) return resolve();
     const timer = setTimeout(() => { liveSocket.terminate(); resolve(); }, 2000);
     liveSocket.once('close', () => { clearTimeout(timer); resolve(); });
     liveSocket.close(1000, 'staging-smoke-complete');
   });
-  console.log('Gemini Live staging handshake passed: authenticated WebSocket received provider setupComplete.');
 
   const guestVoiceStatus = await fetch(new URL('/api/biometrics/status', base), { headers: { Origin: base.origin, Authorization: `Bearer ${session.accessToken}` } });
   assert.equal(guestVoiceStatus.status, 200, 'guest voice enrollment status API');
@@ -172,3 +212,4 @@ const WebSocket = require('ws');
   console.log(`Staging stream: provider=vertex model=sentinel-v4 firstDeltaMs=${firstDeltaMs} streaming=native`);
   console.log('Staging: browser and Electron CORS passed; guest command, tuned Vertex chat/stream, and Gemini Live provider handshake passed. Browser microphone/TTS and function-action acceptance remain.');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });
+
