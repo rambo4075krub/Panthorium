@@ -114,6 +114,7 @@ jobs:
           # two documented development ports.
           gcloud run services update "$SERVICE" --project="$PROJECT" --region="$REGION" --update-env-vars="ALLOWED_ORIGINS=$URL" --quiet
           curl --fail --silent --show-error "$URL/api/health" | python3 -c 'import json,sys; assert json.load(sys.stdin)["ok"] is True'
+          curl --fail --silent --show-error "$URL/healthz" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True, "staging database, Cloud Storage IAM, or Vertex readiness failed"'
           curl --fail --silent --show-error "$URL/admin" -o /dev/null
           # Verify the running revision serves the files that passed the DOM and
           # routing tests, rather than treating a green health check as UI proof.

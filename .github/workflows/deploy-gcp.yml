@@ -126,4 +126,5 @@ jobs:
         run: |
           set -euo pipefail
           URL="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          curl --fail --silent --show-error "$URL/healthz" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True, "production database, Cloud Storage IAM, or Vertex readiness failed"'
           curl --fail --silent --show-error "$URL/api/health" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True, "production health check failed"; assert health.get("voiceIdentityConfigured") is True, "production Voice Identity provider or encryption key is not configured"; assert health.get("voiceIdentityGateEnabled") is True, "production Voice Identity gate is not enabled"'
