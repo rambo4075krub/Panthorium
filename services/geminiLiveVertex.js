@@ -1,0 +1,95 @@
+const MODEL_ID = "gemini-3.8-live";
+const ALLOWED_LOCATIONS = new Set(["eu", "us", "us-central1"]);
+const CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
+
+function resolveLiveTarget({ projectId, location = "eu" } = {}) {
+  const resolvedProjectId = String(projectId || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || "").trim();
+  const resolvedLocation = String(location || "").trim();
+  if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(resolvedProjectId)) {
+    throw new Error("gemini_live_project_id_required");
+  }
+  if (!ALLOWED_LOCATIONS.has(resolvedLocation)) {
+    throw new Error("gemini_live_location_unsupported");
+  }
+  return {
+    model: `projects/${resolvedProjectId}/locations/${resolvedLocation}/publishers/google/models/${MODEL_ID}`,
+    url: `wss://${resolvedLocation}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent`
+  };
+}
+
+function createSetupMessage({ model, systemInstruction = "" } = {}) {
+  const setup = {
+    model,
+    generation_config: {
+      response_modalities: ["audio", "text"]
+    }
+  };
+  const instruction = String(systemInstruction || "").trim();
+  if (instruction) setup.system_instruction = { parts: [{ text: instruction }] };
+  return { setup };
+}
+
+async function getVertexAccessToken(authClient) {
+  let client = authClient;
+  if (!client) {
+    const { GoogleAuth } = require("google-auth-library");
+    client = await new GoogleAuth({ scopes: [CLOUD_PLATFORM_SCOPE] }).getClient();
+  }
+  const result = await client.getAccessToken();
+  const token = typeof result === "string" ? result : result?.token;
+  if (!token) throw new Error("gemini_live_vertex_auth_unavailable");
+  return token;
+}
+
+async function connectGeminiLive({
+  projectId,
+  location = process.env.GEMINI_LIVE_LOCATION || "eu",
+  systemInstruction,
+  authClient,
+  WebSocketImpl,
+  handshakeTimeoutMs = 10000
+} = {}) {
+  const target = resolveLiveTarget({ projectId, location });
+  const token = await getVertexAccessToken(authClient);
+  const Socket = WebSocketImpl || require("ws");
+  const socket = new Socket(target.url, {
+    headers: { Authorization: `Bearer ${token}` },
+    handshakeTimeout: handshakeTimeoutMs,
+    maxPayload: 8 * 1024 * 1024,
+    perMessageDeflate: false
+  });
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      socket.removeListener("open", onOpen);
+      socket.removeListener("error", onError);
+    };
+    const onOpen = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      socket.send(JSON.stringify(createSetupMessage({ model: target.model, systemInstruction })), error => {
+        if (error) socket.close(1011, "setup_failed");
+      });
+      resolve(socket);
+    };
+    const onError = error => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    socket.once("open", onOpen);
+    socket.once("error", onError);
+  });
+}
+
+module.exports = {
+  MODEL_ID,
+  ALLOWED_LOCATIONS,
+  resolveLiveTarget,
+  createSetupMessage,
+  getVertexAccessToken,
+  connectGeminiLive
+};
