@@ -80,11 +80,25 @@ function createGeminiLiveWebSocketGateway({
         return;
       }
       if (client.readyState !== 1) return release();
-      client.send(JSON.stringify({ type: "ready" }));
+      let readySent = false;
+      const setupTimer = setTimeout(() => {
+        if (!readySent && client.readyState < 2) client.close(1011, "live_setup_timeout");
+      }, 10000);
+      setupTimer.unref?.();
       client.on("message", (message, binary) => {
         if (upstream?.readyState === 1) upstream.send(message, { binary });
       });
       upstream.on("message", (message, binary) => {
+        if (!readySent && !binary) {
+          try {
+            const frame = JSON.parse(String(message));
+            if (frame.setupComplete || frame.setup_complete) {
+              readySent = true;
+              clearTimeout(setupTimer);
+              if (client.readyState === 1) client.send(JSON.stringify({ type: "ready" }));
+            }
+          } catch (_) {}
+        }
         if (client.readyState === 1) client.send(message, { binary });
       });
       upstream.once("close", () => { if (client.readyState < 2) client.close(1011, "live_upstream_closed"); });
