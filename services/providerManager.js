@@ -179,7 +179,7 @@ class ProviderManager {
       if (!this.vertexConfigured()) return null;
       const model = this.resolveModel(provider, options.model);
       if (!model) throw new Error("model_not_allowed");
-      return this.callVertexTuned(systemPrompt, history);
+      return this.callVertexTuned(systemPrompt, history, options);
     }
     const key = this.keys[provider]; if (!key) return null; const model = this.resolveModel(provider, options.model); if (!model) throw new Error("model_not_allowed");
     if (provider === "groq") return this.callOpenAICompatible(GROQ_CHAT_URL, key, model, systemPrompt, history);
@@ -226,7 +226,7 @@ class ProviderManager {
     }
     throw new Error("vertex_adc_token_missing");
   }
-  async callVertexTuned(systemPrompt, history) {
+  async callVertexTuned(systemPrompt, history, options = {}) {
     await this.resolveTunedVertexEndpoint();
     const { project, location, endpointId, maxOutputTokens } = this.vertex;
     const host = process.env.VERTEX_HOST
@@ -236,7 +236,9 @@ class ProviderManager {
         : (location === "eu" || location === "us"
         ? `https://aiplatform.${location}.rep.googleapis.com`
         : `https://${location}-aiplatform.googleapis.com`);
-    const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: String(m.content || "") }] }));
+    const contents = history.map((m) => Array.isArray(m.parts)
+      ? { role: m.role === "assistant" ? "model" : m.role, parts: m.parts }
+      : { role: m.role === "assistant" ? "model" : "user", parts: [{ text: String(m.content || "") }] });
     const url = `${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(location)}/endpoints/${encodeURIComponent(endpointId)}:generateContent`;
     const request = async () => fetch(url, {
       method: "POST",
@@ -245,15 +247,23 @@ class ProviderManager {
         Authorization: `Bearer ${await this.vertexAccessToken()}`,
         "X-Goog-User-Project": String(project)
       },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: systemPrompt }] }, contents, generationConfig: { temperature: 0.65, maxOutputTokens } }),
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        generationConfig: { temperature: 0.65, maxOutputTokens },
+        ...(Array.isArray(options.tools) && options.tools.length ? { tools: [{ functionDeclarations: options.tools }] } : {})
+      }),
       signal: AbortSignal.timeout(60000)
     });
     const response = await fetchProvider(request);
     const data = await response.json();
-    const text = (data.candidates?.[0]?.content?.parts || []).map((part) => part.text || "").join("").trim();
+    const modelParts = data.candidates?.[0]?.content?.parts || [];
+    const text = modelParts.filter(part => part.text && !part.thought).map((part) => part.text).join("").trim();
+    const functionCalls = modelParts.map(part => part.functionCall).filter(call => call && typeof call.name === 'string');
     const usage = data.usageMetadata;
     return {
       text: text || null,
+      ...(functionCalls.length ? { functionCalls, modelParts } : {}),
       model: this.models.vertex,
       usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null
     };
