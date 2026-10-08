@@ -36,9 +36,9 @@ async function main() {
   const managedFullscreenRule = /\.panthorium-managed-window\.panthorium-window-fullscreen\s*\{([\s\S]*?)\n\s*\}/.exec(shell)?.[1] || '';
   assert.match(managedFullscreenRule, /padding:\s*var\(--panthorium-safe-area-top\)/, 'every catalog window keeps the top safe area');
   assert.match(shell, /--panthorium-safe-area-top:\s*max\(env\(safe-area-inset-top,\s*0px\),\s*var\(--panthorium-native-safe-area-top,\s*0px\)\)/, 'fullscreen content uses browser and native safe-area values');
-  assert.match(shell, /--panthorium-shell-dock-clearance:\s*calc\(var\(--taskbar-h\) \+ env\(safe-area-inset-bottom,\s*0px\) \+ 8px\)/, 'fullscreen windows reserve the persistent shell dock and bottom inset');
-  assert.match(fullscreenCss, /@media \(max-width: 760px\) and \(orientation: portrait\)[\s\S]*\.window\.maximized, \.panthorium-managed-window\.panthorium-window-fullscreen\s*\{\s*padding:\s*var\(--panthorium-safe-area-top\) 0px var\(--panthorium-shell-dock-clearance\) 0px/, 'portrait fullscreen content clears the bottom dock');
-  assert.match(fullscreenCss, /@media \(orientation: landscape\)[\s\S]*padding:\s*var\(--panthorium-safe-area-top\) 0px var\(--panthorium-shell-dock-clearance\) 0px/, 'landscape fullscreen content clears the bottom dock');
+  assert.match(shell, /--panthorium-shell-dock-clearance:\s*calc\(var\(--taskbar-h\) \+ env\(safe-area-inset-bottom,\s*0px\) \+ 8px\)/, 'fullscreen windows reserve the system dock and bottom inset');
+  assert.match(fullscreenCss, /@media \(orientation: portrait\)[\s\S]*\.window\.maximized, \.panthorium-managed-window\.panthorium-window-fullscreen\s*\{\s*padding:\s*var\(--panthorium-safe-area-top\) 0px var\(--panthorium-shell-dock-clearance\) 0px/, 'portrait fullscreen windows including tablets clear the bottom dock');
+  assert.match(fullscreenCss, /@media \(orientation: landscape\)[\s\S]*padding:\s*var\(--panthorium-safe-area-top\) 0px var\(--panthorium-shell-dock-clearance\) 0px/, 'landscape fullscreen windows clear the bottom dock');
   assert.match(fullscreenCss, /@media \(orientation:\s*landscape\)[\s\S]*padding:\s*var\(--panthorium-safe-area-top\)/, 'landscape fullscreen keeps the top safe area');
   assert.match(fullscreenCss, /data-window-landscape-edge-to-edge="false"[\s\S]*padding:\s*var\(--panthorium-safe-area-top\)/, 'landscape preference cannot remove the top safe area');
   assert.doesNotMatch(shell, /html\[data-panthorium-immersive="true"\][^{}]*\.panthorium-window-fullscreen[^{}]*\{[^}]*padding:\s*0\s*!important/i, 'immersive state cannot erase safe-area padding from function windows');
@@ -56,13 +56,22 @@ async function main() {
   assert.match(shell, /@media \(max-height: 540px\) and \(orientation: landscape\)/, 'admin login is compact and scrollable on short landscape screens');
   const voiceIdentity = fs.readFileSync(require.resolve('../voice-identity-ui.js'), 'utf8');
   assert.match(voiceIdentity, /box-sizing:border-box;position:fixed;inset:0;max-width:100vw/, 'voice registration can reach the left edge');
-  assert.match(voiceIdentity, /inset:0!important;padding:clamp\(10px,3vw,16px\)/, 'voice registration fills the phone viewport');
+  assert.match(voiceIdentity, /#panthorium-voice-identity\.panthorium-managed-window\.panthorium-window-fullscreen\{padding:calc\(var\(--panthorium-safe-area-top,0px\)/, 'voice registration preserves the top device safe area in both orientations');
+  assert.match(voiceIdentity, /var\(--panthorium-shell-dock-clearance,56px\)/, 'voice registration reserves the bottom system dock');
+  assert.match(voiceIdentity, /overflow-y:auto!important/, 'voice registration remains scrollable after safe-area padding');
   assert.match(voiceIdentity, /@media\(max-width:760px\)/, 'voice registration and login switch to a single column on phones');
 
   window.PanthoriumWindowManager = manager;
   window.PanthoriumWindowCatalog = {
     apps: [
       { id: 'ai-platform', label: 'AI Platform', selector: '#ai-window', closeButton: '[data-close]' },
+      { id: 'sentinel', label: 'Sentinel AI', selector: '#sentinel-window', closeButton: '[data-close]' },
+      { id: 'notes', label: 'Notes', selector: '#notes-window', closeButton: '[data-close]' },
+      { id: 'files', label: 'Files', selector: '#files-window', closeButton: '[data-close]' },
+      { id: 'calendar', label: 'Calendar', selector: '#calendar-window', closeButton: '[data-close]' },
+      { id: 'reminders', label: 'Reminders', selector: '#reminders-window', closeButton: '[data-close]' },
+      { id: 'media-studio', label: 'Media Studio', selector: '#media-studio-window', closeButton: '[data-close]' },
+      { id: 'voice-identity', label: 'Voice Identity', selector: '#voice-identity-window', closeButton: '[data-close]' },
       { id: 'calculator', label: 'Calculator', selector: '#calculator-window', closeButton: '[data-close]' }
     ]
   };
@@ -82,6 +91,15 @@ async function main() {
   calculator.style.cssText = 'position:fixed;inset:6%;display:flex';
   calculator.innerHTML = '<header><strong>Calculator</strong><button type="button" data-fullscreen>⛶</button><button type="button" data-close>✕</button></header>';
   window.document.body.appendChild(calculator);
+  const additionalWindows = new Map();
+  for (const appId of ['sentinel', 'notes', 'files', 'calendar', 'reminders', 'media-studio', 'voice-identity']) {
+    const appWindow = window.document.createElement('section');
+    appWindow.id = appId + '-window';
+    appWindow.style.cssText = 'position:fixed;inset:1%;display:flex';
+    appWindow.innerHTML = '<header><strong>' + appId + '</strong><button type="button" data-close>✕</button></header>';
+    window.document.body.appendChild(appWindow);
+    additionalWindows.set(appId, appWindow);
+  }
   await new Promise(resolve => window.setTimeout(resolve, 0));
 
   assert.equal(manager.findByAppId('ai-platform').el, root, 'new catalog windows register with the shared manager');
@@ -89,6 +107,10 @@ async function main() {
   assert.ok(root.querySelector('[data-panthorium-window-action="minimize"]'), 'catalog windows receive a minimize control');
   assert.equal(root.querySelector('[data-fullscreen], [data-panthorium-window-action="fullscreen"]'), null, 'catalog windows do not expose a size-restore control');
   assert.ok(root.querySelector('[data-close]'), 'catalog windows keep a close control');
+  for (const [appId, appWindow] of additionalWindows) {
+    assert.equal(manager.findByAppId(appId).el, appWindow, appId + ' registers with the shared manager');
+    assert.ok(appWindow.classList.contains('panthorium-window-fullscreen'), appId + ' opens fullscreen by default');
+  }
   assert.equal(manager.findByAppId('calculator').el, calculator, 'calculator registers with the shared manager');
   assert.equal(manager.findByAppId('calculator').fullscreen, false, 'calculator keeps its normal window size');
   assert.equal(calculator.classList.contains('panthorium-window-fullscreen'), false, 'calculator does not receive the fullscreen class');
