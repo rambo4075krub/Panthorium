@@ -78,6 +78,7 @@ const { BiometricIdentityService } = require("./services/biometricIdentityServic
 const { createEmailOtpRepository } = require("./services/emailOtpRepository");
 const { EmailOtpService } = require("./services/emailOtpService");
 const { requestContext } = require("./middleware/requestContext");
+const { createGeminiLiveWebSocketGateway } = require("./services/geminiLiveWebSocket");
 
 const app = express();
 if (config.trustProxy) app.set("trust proxy", 1);
@@ -215,7 +216,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "privacy-policy-ui.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "privacy-policy-ui.js", "live-voice-client.js"];
 for (const script of shellScripts) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -229,7 +230,7 @@ for (const script of shellScripts) {
 
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
-  html = html.replace('<body>', `<body data-voice-identity-required="${config.biometricGateEnabled ? 'true' : 'false'}">`);
+  html = html.replace('<body>', '<body data-gemini-live-enabled="' + (process.env.GEMINI_LIVE_ENABLED === "1" ? "true" : "false") + '" data-voice-identity-required="' + (config.biometricGateEnabled ? "true" : "false") + '">');
   const version = `${require("./package.json").version}-media-browser-v2`;
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
@@ -385,6 +386,9 @@ async function start() {
   await autonomousGovernance.init();
   await sentinelOrchestrator.init();
 
+  const liveGateway = process.env.GEMINI_LIVE_ENABLED === "1"
+    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "eu" })
+    : null;
   const server = app.listen(config.port, config.host, () => {
     console.log("========================================");
     console.log("  Panthorium OS Backend · Phase 15 Single Sentinel");
@@ -399,11 +403,16 @@ async function start() {
     console.log(`  http://localhost:${config.port}`);
     console.log("========================================");
   });
+  if (liveGateway) {
+    liveGateway.attach(server);
+    console.log("  Gemini Live WebSocket enabled · " + (process.env.GEMINI_LIVE_LOCATION || "eu"));
+  }
   agentScheduler.start();
   sentinelTraining.start();
   autonomousGovernance.start();
   sentinelOrchestrator.start();
   server.on('close', stopBackgroundWorkers);
+  if (liveGateway) server.on('close', () => liveGateway.close());
   return server;
 }
 
