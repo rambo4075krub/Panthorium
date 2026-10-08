@@ -53,6 +53,6 @@ module.exports = {
   resendApiKey: process.env.RESEND_API_KEY || "",
   emailFrom: process.env.EMAIL_FROM || "",
   biometricGateEnabled: process.env.BIOMETRIC_GATE_ENABLED === "1",
-  biometricVoiceThreshold: Number(process.env.BIOMETRIC_VOICE_THRESHOLD || 0.82),
+  biometricVoiceThreshold: Number(process.env.BIOMETRIC_VOICE_THRESHOLD || 0.21),
   biometricEnrollmentThreshold: Number(process.env.BIOMETRIC_ENROLLMENT_THRESHOLD || 0.76)
 };

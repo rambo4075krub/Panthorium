@@ -30,7 +30,7 @@ const durationBucket = seconds => !Number.isFinite(seconds) ? 'unknown'
   : seconds < 5 ? '2_to_5s' : '5s_or_more';
 
 class BiometricIdentityService {
-  constructor({ repository, audit, providerUrl, providerToken, encryptionKey, gateEnabled = false, matchThreshold = 0.82, enrollmentThreshold = 0.76 }) {
+  constructor({ repository, audit, providerUrl, providerToken, encryptionKey, gateEnabled = false, matchThreshold = 0.21, enrollmentThreshold = 0.76 }) {
     this.repository = repository; this.audit = audit; this.providerUrl = String(providerUrl || '').replace(/\/$/, ''); this.providerToken = providerToken || '';
     this.key = encryptionKey ? crypto.createHash('sha256').update(encryptionKey).digest() : null;
     this.gateEnabled = gateEnabled === true;

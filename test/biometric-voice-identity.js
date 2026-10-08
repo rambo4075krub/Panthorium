@@ -49,6 +49,8 @@ const vectorAtSimilarity = (reference, score) => {
   };
   try {
     const repository = new Repository();
+    const defaultThresholdService = new BiometricIdentityService({ repository, providerUrl: 'https://speaker.test', providerToken: 'test-only-token', encryptionKey: 'test-only-key' });
+    assert.equal(defaultThresholdService.status().matchThreshold, 0.21, 'the default voice threshold is 0.21');
     const service = new BiometricIdentityService({ repository, providerUrl: 'https://speaker.test', providerToken: 'test-only-token', encryptionKey: 'test-only-key', matchThreshold: 0.82, enrollmentThreshold: 0.76 });
     await service.init();
     const beforeEmptyOwner = embeddingCalls;
@@ -105,27 +107,27 @@ const vectorAtSimilarity = (reference, score) => {
     assert.ok(repository.rows[0].encryptedTemplate && !repository.rows[0].encryptedTemplate.includes('0.01'));
     const accepted = await service.verify({ ownerUserId: 'u1', audio: audio(4) });
     assert.equal(accepted.matched, true);
-    const slightlyLoweredService = new BiometricIdentityService({
+    const configuredThresholdService = new BiometricIdentityService({
       repository, providerUrl: 'https://speaker.test', providerToken: 'test-only-token',
-      encryptionKey: 'test-only-key', matchThreshold: 0.75, enrollmentThreshold: 0.76
+      encryptionKey: 'test-only-key', matchThreshold: 0.21, enrollmentThreshold: 0.76
     });
-    assert.equal(slightlyLoweredService.status().matchThreshold, 0.75, 'the configured staging threshold is exposed to the signed-in diagnostics UI');
-    assert.equal(slightlyLoweredService.status().minimumActiveSpeechSeconds, 1);
-    assert.equal(slightlyLoweredService.status().shortUtteranceCalibrationEnabled, false);
-    assert.equal(slightlyLoweredService.status().livenessSupported, false);
+    assert.equal(configuredThresholdService.status().matchThreshold, 0.21, 'the configured threshold is exposed to the signed-in diagnostics UI');
+    assert.equal(configuredThresholdService.status().minimumActiveSpeechSeconds, 1);
+    assert.equal(configuredThresholdService.status().shortUtteranceCalibrationEnabled, false);
+    assert.equal(configuredThresholdService.status().livenessSupported, false);
     const base = vector(2);
-    const targetScore = 0.76;
+    const targetScore = 0.22;
     nextVector = vectorAtSimilarity(base, targetScore);
     const oldThresholdResult = await service.verify({ ownerUserId: 'u1', audio: audio(40) });
-    assert.equal(oldThresholdResult.matched, false, 'a 0.76 match remains below the previous 0.82 threshold');
-    const loweredThresholdResult = await slightlyLoweredService.verify({ ownerUserId: 'u1', audio: audio(41) });
-    assert.equal(loweredThresholdResult.matched, true, 'a 0.76 match passes the staging 0.75 threshold trial');
+    assert.equal(oldThresholdResult.matched, false, 'a 0.22 match remains below the 0.82 threshold');
+    const loweredThresholdResult = await configuredThresholdService.verify({ ownerUserId: 'u1', audio: audio(41) });
+    assert.equal(loweredThresholdResult.matched, true, 'a 0.22 match passes the configured 0.21 threshold');
     assert.ok(Math.abs(loweredThresholdResult.score - targetScore) < 0.001, 'test probe exercises the intended threshold boundary');
     assert.equal(loweredThresholdResult.speechDurationSeconds, 1.4);
     assert.equal(loweredThresholdResult.speechDurationBucket, 'under_2s', 'short utterance duration is measured independently of match score');
-    nextVector = vectorAtSimilarity(base, 0.74);
-    const belowThresholdResult = await slightlyLoweredService.verify({ ownerUserId: 'u1', audio: audio(42) });
-    assert.equal(belowThresholdResult.matched, false, 'a 0.74 match remains rejected at the staging 0.75 threshold');
+    nextVector = vectorAtSimilarity(base, 0.20);
+    const belowThresholdResult = await configuredThresholdService.verify({ ownerUserId: 'u1', audio: audio(42) });
+    assert.equal(belowThresholdResult.matched, false, 'a 0.20 match remains rejected at the configured 0.21 threshold');
     nextVector = vector(20);
     const rejected = await service.verify({ ownerUserId: 'u1', audio: audio(5) });
     assert.equal(rejected.matched, false);
