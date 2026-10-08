@@ -153,7 +153,7 @@ jobs:
           TAG="prelive-$GITHUB_RUN_ID"
           CANDIDATE_URL="$(python3 -c 'import json,sys; service=json.load(sys.stdin); entries=[item for item in service.get("status",{}).get("traffic",[]) if item.get("tag")==sys.argv[1]]; assert len(entries)==1, "candidate tag is not present"; print(entries[0].get("url",""))' "$TAG" <<< "$SERVICE_JSON")"
           test -n "$CANDIDATE_URL"
-          curl --retry 12 --retry-connrefused --retry-delay 5 --fail --silent --show-error "$CANDIDATE_URL/healthz" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True, "production database, Cloud Storage IAM, or Vertex readiness failed"'
+          curl --retry 12 --retry-connrefused --retry-delay 5 --fail --silent --show-error "$CANDIDATE_URL/health" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True, "production database, Cloud Storage IAM, or Vertex readiness failed"'
           curl --retry 5 --retry-connrefused --retry-delay 3 --fail --silent --show-error "$CANDIDATE_URL/api/health" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True, "production health check failed"; assert health.get("voiceIdentityConfigured") is True, "production Voice Identity provider or encryption key is not configured"; assert health.get("voiceIdentityGateEnabled") is True, "production Voice Identity gate is not enabled"'
           echo "Candidate health and Voice Identity checks passed before traffic shift." >> "$GITHUB_STEP_SUMMARY"
 
@@ -168,7 +168,7 @@ jobs:
           test -n "$CANDIDATE_REVISION" && test -n "$PREVIOUS_TRAFFIC"
           gcloud run services update-traffic "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --to-revisions="$CANDIDATE_REVISION=100" --quiet
           URL="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
-          if ! curl --retry 5 --retry-connrefused --retry-delay 3 --fail --silent --show-error "$URL/healthz" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True'; then
+          if ! curl --retry 5 --retry-connrefused --retry-delay 3 --fail --silent --show-error "$URL/health" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True'; then
             echo "::error::Post-routing health check failed; restoring previous production traffic."
             gcloud run services update-traffic "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --to-revisions="$PREVIOUS_TRAFFIC" --quiet
             exit 1

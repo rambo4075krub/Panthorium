@@ -10,7 +10,7 @@ Phase 10 starts from the accepted Phase 9 production baseline `1d56b9b8ded5019a2
 - Capacity signals for overdue Agent jobs, HTTP 5xx pressure, Agent failure rate, heap pressure and rate-limit pressure.
 - Actionable scale recommendations without granting the application direct infrastructure-control privileges.
 - Persistent `panthorium_production_snapshots` table for operator-requested production snapshots.
-- Minimal public `/healthz` endpoint exposing only readiness state, suitable for Render health checks.
+- Minimal public `/health` endpoint exposing only readiness state, compatible with the Cloud Run service URL.
 - Authenticated `system:read` endpoints under `/api/production` for overview, readiness and persisted snapshots.
 
 ## Next milestones

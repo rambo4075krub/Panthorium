@@ -58,7 +58,7 @@ class SpeakerServiceTests(unittest.TestCase):
                 self.assertGreaterEqual(result["speechDurationSeconds"], 2.0)
                 self.assertLessEqual(result["speechDurationSeconds"], 2.5)
                 self.assertEqual(len(result["embedding"]), 192)
-            with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/healthz") as health:
+            with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/health") as health:
                 readiness = json.load(health)
                 self.assertTrue(readiness["ok"])
                 self.assertTrue(readiness["modelReady"])
