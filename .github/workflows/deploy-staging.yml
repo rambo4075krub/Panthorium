@@ -125,7 +125,13 @@ jobs:
             curl --fail --silent --show-error "$URL/$asset" -o "$RUNNER_TEMP/deployed-$asset"
             cmp "$asset" "$RUNNER_TEMP/deployed-$asset"
           done
-          STAGING_URL="$URL" node test/voice-deployed.js
+          if ! STAGING_URL="$URL" node test/voice-deployed.js; then
+            echo "Recent Gemini Live staging diagnostics:" >&2
+            gcloud logging read \
+              'resource.type="cloud_run_revision" AND resource.labels.service_name="panthorium-backend-staging" AND resource.labels.location="asia-southeast1" AND textPayload:"[Gemini Live]"' \
+              --project="$PROJECT" --freshness=10m --limit=20 --format='value(timestamp,textPayload)' || true
+            exit 1
+          fi
           echo "Staging admin: $URL/admin" >> "$GITHUB_STEP_SUMMARY"
           echo "Commit tested: $GITHUB_SHA. Await owner voice acceptance before merging main." >> "$GITHUB_STEP_SUMMARY"
 
