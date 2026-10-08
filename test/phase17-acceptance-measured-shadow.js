@@ -105,7 +105,7 @@ async function fixture(withEvaluator = true) {
   };
   const measuredLearning = {
     repository: measuredRepository,
-    policy: { maxRegressionPct: 5 },
+    policy: { shadowMinSamples: 30, maxRegressionPct: 5 },
     async recordShadow(id, { score }) {
       sampleCount++;
       measuredVersion.shadowSamples++;
@@ -116,7 +116,13 @@ async function fixture(withEvaluator = true) {
   const evaluator = new SentinelShadowEvaluator({
     sentinel: { async answerForEvaluation({ prompt, shadowExample }) { return { ok: true, text: `${shadowExample ? 'candidate' : 'baseline'} ${prompt}`, provider: 'vertex' }; } },
     benchmark: { async evaluateAnswer() { return { score: 68.33333333333333, judges: [{ provider: 'one', score: 68, safety: 100 }, { provider: 'two', score: 69, safety: 100 }] }; } },
-    providers: { available() { return ['vertex', 'groq']; } },
+    providers: {
+      available() { return ['vertex', 'groq']; },
+      async callDetailed() {
+        const suite = Math.floor(sampleCount / 3);
+        return { text: JSON.stringify({ prompts: [`suite ${suite} case one`, `suite ${suite} case two`, `suite ${suite} case three`] }) };
+      }
+    },
     learning: measuredLearning
   });
   const measured = await evaluator.evaluate(measuredVersion, { exampleId: 'example-1', prompt: 'example prompt' });
@@ -124,9 +130,17 @@ async function fixture(withEvaluator = true) {
   assert.equal(measured.evidence.sampleCount, 3);
   assert.equal(measuredVersion.shadowSamples, 3);
   assert.equal(measuredVersion.shadowScore, 68);
+  for (let cycle = 1; cycle < 10; cycle += 1) {
+    const next = await evaluator.evaluate(measuredVersion, { exampleId: 'example-1', prompt: 'example prompt' });
+    assert.equal(next.samples, 3, 'each later cycle contributes only its new independent cases');
+    assert.equal(next.evidence.sampleCount, (cycle + 1) * 3, 'measured evidence must accumulate rather than reset');
+  }
+  assert.equal(measuredVersion.shadowSamples, 30);
+  assert.equal(measuredVersion.metadata.measuredShadow.comparisons.length, 30);
 
   console.log('Phase 17 measured-shadow acceptance tests passed');
 })().catch((error) => {
   console.error(error);
   process.exit(1);
 });
+

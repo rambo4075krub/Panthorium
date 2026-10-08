@@ -102,16 +102,23 @@ Autonomous learning loop ห้าม promote เนื้อหาที่เ�
 
 รายการเหล่านี้ต้องใช้ explicit administrator-controlled change workflow แยกจาก Training Lab
 
-## New services to implement
+## Research-aligned runtime controls
 
-- `services/sentinelLearningPolicyService.js` — state/risk/promotion policy
-- `services/sentinelEvaluationService.js` — multi-evaluator rubric + deterministic checks
-- `services/sentinelLearningRepository.js` — versions, evidence, outcomes, rollback pointers
-- `services/sentinelShadowEvaluationService.js` — replay/control-vs-candidate comparison
-- `services/sentinelDriftMonitorService.js` — rolling production quality/drift signals
-- `services/sentinelLearningOrchestrator.js` — durable state machine coordinating the loop
+- Vertex-only deployments use `SENTINEL_VERTEX_EVALUATOR_MODELS` for two or three separate Google publisher models and `SENTINEL_VERTEX_EVALUATOR_LOCATION` for their endpoint location. Evaluator location is separate from the tuned Sentinel endpoint and must be explicitly chosen when the provider region does not support every configured model. Staging defaults to the `eu` multi-region endpoint with `gemini-3.5-flash,gemini-3.1-flash-lite`; production has no evaluator model or location default, to avoid routing evaluation prompts to an unconfigured region. Configure production repository variables only after selecting at least two distinct models supported in the approved region. The aliases `vertex_eval_1` and `vertex_eval_2` are available to training and evaluation only; they are not chat fallbacks. Set `SENTINEL_EVALUATOR_PROVIDERS=vertex_eval_1,vertex_eval_2` and `SENTINEL_MIN_EVALUATORS=2`. If no evaluator models are configured, manual learning refuses to start with `no_independent_evaluators`.
+- Automatic training stays disabled in deployment. An administrator-started learning run explicitly evaluates the generated pending examples, records approved/rejected/evaluation-failure counts, and requires the configured evaluator quorum.
+- Shadow evidence accumulates in batches of up to three new, uniquely identified held-out cases. The default promotion gate requires 30 measured cases, two distinct judge providers per comparison, no unsafe case, and regression within policy. Repeated cases do not increment the measured count.
+- Promotion is checked by both the runtime learning policy and the research gate: deterministic safety, PII/secret scan, poisoning scan, provenance, evaluator quorum, benchmark evidence, protected-domain exclusion, and hourly promotion rate limit.
+- Long-term memory retrieval segments Thai with `Intl.Segmenter`, ranks title and tags above body-only matches, then uses confidence, importance, and recency. Memories can carry a confidence score and optional expiry; expired items are excluded from list and retrieval. Memory queries remain scoped to the authenticated account.
+- Reflection is an opt-in ablation through `POST /api/training/benchmark/reflection`. It compares direct answers with self-critique-and-revision on at most ten supplied cases, reports score delta, safety regressions, and latency, and never executes tools or changes the live chat path.
+- Multi-agent orchestration now has an orchestration-wide tool-step budget (default 10, configurable with `PANTHORIUM_MULTI_AGENT_MAX_TOOL_STEPS`). Each role's workflow receives only the remaining budget; exhausted runs stop before another role can act.
 
-Existing `trainingService` remains the ingestion bridge during migration.
+## Remaining experiments
+
+1. Run the reflection ablation on a fixed Thai/English suite with at least 30 cases; compare accuracy, safety, and added latency against direct generation before enabling reflection in normal chat.
+2. Measure memory retrieval precision@k and recall@k on tenant-separated Thai, English, and mixed-language queries; compare the current weighted lexical baseline with a hybrid retriever before adding embeddings.
+3. Compare 30-case shadow outcomes against a frozen baseline and inspect per-case judge disagreement. Treat generated paraphrases as held-out operational checks, not as a substitute for a curated benchmark.
+4. Use admin-only `POST /api/agent/evaluate` with expected action/tool/argument labels to measure tool selection and argument accuracy in dry-run. Track confirmation rate, task completion, and tool-budget exhaustion separately; this benchmark never executes tools.
+5. Production drift currently needs an explicit monitor action and benchmark evidence is not automatically attributed to each active knowledge version. Add a version-linked outcome stream before enabling autonomous drift rollback.
 
 ## API target
 
@@ -155,14 +162,15 @@ shadow sampling, monitoring, audit events and rollback/recovery remain available
 1. No knowledge becomes active without deterministic safety + evaluator + shadow gates.
 2. Failed/partial evaluator calls fail closed.
 3. Duplicate/secret/PII/poisoned candidates cannot promote.
-4. Every active version can roll back to previous-good atomically.
+4. Every active version can roll back to previous-good idempotently.
 5. Critical safety regression triggers automatic quarantine + rollback.
 6. Protected-domain content cannot be autonomously promoted.
 7. Cross-user data isolation tests pass.
 8. Restart does not lose state when PostgreSQL is configured.
 9. All transitions emit audit events.
-10. CI includes deterministic tests for promotion, rejection, drift and rollback.
+10. CI includes deterministic tests for promotion, rejection, shadow accumulation, evaluator quorum, retrieval, reflection ablation, tool budgets and rollback.
 
 ## Quality objective
 
 เป้าหมายไม่ใช่การอ้างว่า Sentinel ดีกว่าโมเดลชั้นนำทุกด้านโดยไม่มีหลักฐาน แต่สร้างระบบที่สามารถพิสูจน์ผลบน Panthorium Benchmark ได้: task success, grounded correctness, safety, retrieval precision, latency, cost, recovery และ regression rate ต้องถูกวัดเทียบ baseline/model/provider อย่างต่อเนื่อง ก่อนจะประกาศ superiority ในโดเมนใดโดเมนหนึ่ง
+
