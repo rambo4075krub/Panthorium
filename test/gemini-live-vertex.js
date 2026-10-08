@@ -42,7 +42,7 @@ async function main() {
   }
   const socket = await connectGeminiLive({
     projectId: "panthorium-staging",
-    location: "eu",
+    location: "global",
     systemInstruction: "Sentinel",
     tools,
     authClient: { getAccessToken: async () => ({ token: "adc-token" }) },
