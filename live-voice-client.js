@@ -185,19 +185,16 @@
     setStatus("กดไมค์เพื่อเริ่มเสียงสด");
   }
 
-  const waitForVoiceButton = () => {
-    if (!button.dataset.ready || typeof button.onclick !== "function") {
-      setTimeout(waitForVoiceButton, 100);
-      return;
-    }
-    button.onclick = async () => {
-      if (starting) return;
-      if (socket && socket.readyState < WebSocket.CLOSING) { cleanup(); return; }
-      starting = true;
-      try { await openLiveSession(); }
-      catch (error) { console.warn("Gemini Live voice session failed", error); cleanup(); setStatus(error.message || "เชื่อมเสียงสดไม่สำเร็จ"); }
-      finally { starting = false; }
-    };
-  };
-  waitForVoiceButton();
+  // Intercept the global voice button during capture so the legacy
+  // Sentinel transcription onclick cannot consume the click first.
+  button.addEventListener("click", async event => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (starting) return;
+    if (socket && socket.readyState < WebSocket.CLOSING) { cleanup(); return; }
+    starting = true;
+    try { await openLiveSession(); }
+    catch (error) { console.warn("Gemini Live voice session failed", error); cleanup(); setStatus(error.message || "เชื่อมเสียงสดไม่สำเร็จ"); }
+    finally { starting = false; }
+  }, true);
 })();

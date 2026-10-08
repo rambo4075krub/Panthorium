@@ -1,8 +1,8 @@
 const MODEL_ID = "gemini-3.8-live";
-const ALLOWED_LOCATIONS = new Set(["eu", "us", "us-central1"]);
+const ALLOWED_LOCATIONS = new Set(["global"]);
 const CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
 
-function resolveLiveTarget({ projectId, location = "eu" } = {}) {
+function resolveLiveTarget({ projectId, location = "global" } = {}) {
   const resolvedProjectId = String(projectId || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || "").trim();
   const resolvedLocation = String(location || "").trim();
   if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(resolvedProjectId)) {
@@ -11,9 +11,12 @@ function resolveLiveTarget({ projectId, location = "eu" } = {}) {
   if (!ALLOWED_LOCATIONS.has(resolvedLocation)) {
     throw new Error("gemini_live_location_unsupported");
   }
+  const host = resolvedLocation === "global"
+    ? "aiplatform.googleapis.com"
+    : `${resolvedLocation}-aiplatform.googleapis.com`;
   return {
     model: `projects/${resolvedProjectId}/locations/${resolvedLocation}/publishers/google/models/${MODEL_ID}`,
-    url: `wss://${resolvedLocation}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent`
+    url: `wss://${host}/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent`
   };
 }
 
@@ -44,7 +47,7 @@ async function getVertexAccessToken(authClient) {
 
 async function connectGeminiLive({
   projectId,
-  location = process.env.GEMINI_LIVE_LOCATION || "eu",
+  location = process.env.GEMINI_LIVE_LOCATION || "global",
   systemInstruction,
   tools = [],
   authClient,

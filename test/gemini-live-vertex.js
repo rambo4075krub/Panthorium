@@ -10,21 +10,22 @@ const {
 
 async function main() {
   assert.equal(MODEL_ID, "gemini-3.8-live");
-  assert.deepEqual(resolveLiveTarget({ projectId: "panthorium-staging", location: "eu" }), {
-    model: "projects/panthorium-staging/locations/eu/publishers/google/models/gemini-3.8-live",
-    url: "wss://eu-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent"
+  assert.deepEqual(resolveLiveTarget({ projectId: "panthorium-staging", location: "global" }), {
+    model: "projects/panthorium-staging/locations/global/publishers/google/models/gemini-3.8-live",
+    url: "wss://aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent"
   });
+  assert.throws(() => resolveLiveTarget({ projectId: "panthorium-staging", location: "eu" }), /location_unsupported/);
   assert.throws(() => resolveLiveTarget({ projectId: "panthorium-staging", location: "asia-southeast1" }), /location_unsupported/);
-  assert.throws(() => resolveLiveTarget({ projectId: "", location: "eu" }), /project_id_required/);
-  assert.deepEqual(createSetupMessage({ model: "projects/demo/locations/eu/publishers/google/models/gemini-3.8-live", systemInstruction: "ตอบภาษาไทย" }), {
+  assert.throws(() => resolveLiveTarget({ projectId: "", location: "global" }), /project_id_required/);
+  assert.deepEqual(createSetupMessage({ model: "projects/demo/locations/global/publishers/google/models/gemini-3.8-live", systemInstruction: "ตอบภาษาไทย" }), {
     setup: {
-      model: "projects/demo/locations/eu/publishers/google/models/gemini-3.8-live",
+      model: "projects/demo/locations/global/publishers/google/models/gemini-3.8-live",
       generation_config: { response_modalities: ["audio", "text"] },
       system_instruction: { parts: [{ text: "ตอบภาษาไทย" }] }
     }
   });
   const tools = [{ name: "panthorium_ai_providers", description: "List providers", parameters: { type: "OBJECT", properties: {} } }];
-  assert.deepEqual(createSetupMessage({ model: "projects/demo/locations/eu/publishers/google/models/gemini-3.8-live", tools }).setup.tools, [{ function_declarations: tools }]);
+  assert.deepEqual(createSetupMessage({ model: "projects/demo/locations/global/publishers/google/models/gemini-3.8-live", tools }).setup.tools, [{ function_declarations: tools }]);
   assert.equal(await getVertexAccessToken({ getAccessToken: async () => ({ token: "adc-token" }) }), "adc-token");
   await assert.rejects(() => getVertexAccessToken({ getAccessToken: async () => ({}) }), /auth_unavailable/);
 

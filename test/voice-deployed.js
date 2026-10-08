@@ -30,7 +30,8 @@ const { JSDOM } = require('jsdom');
     const shell = await fetch(new URL(route, base));
     assert.equal(shell.status, 200, `${route} guest/admin shell`);
     const page = await shell.text();
-    assert(page.includes('/voice-window-catalog.js?') && page.includes('/external-apps-ui.js?') && page.includes('/voice-command-client.js?'), `${route} must load the tested voice app assets`);
+    assert(page.includes('/voice-window-catalog.js?') && page.includes('/external-apps-ui.js?') && page.includes('/voice-command-client.js?') && page.includes('/live-voice-client.js?'), `${route} must load the tested voice and Gemini Live assets`);
+    assert(page.includes('data-gemini-live-enabled="true"'), `${route} must enable Gemini Live on staging`);
     if (route === '/') html = page;
   }
   const deployedDOM = new JSDOM(html);
