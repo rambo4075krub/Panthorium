@@ -14,6 +14,8 @@ const { app } = require("../server");
   try {
     let r = await fetch(base + "/api/health");
     if (r.status !== 200) throw new Error("health failed");
+    r = await fetch(base + "/health");
+    if (r.status !== 200) throw new Error("readiness failed");
     r = await fetch(base + "/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: "test" }) });
     if (r.status !== 401) throw new Error("chat should require auth");
     r = await fetch(base + "/api/auth/guest", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });

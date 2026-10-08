@@ -28,6 +28,20 @@ const { AgentMemoryService } = require('../services/agentMemoryService');
   assert.equal(found.ok, true);
   assert.equal(found.memories.length, 1);
 
+  const thai = await memory.remember({ user, kind: 'preference', title: 'ภาษาไทย', content: 'ผู้ใช้ชอบคำตอบภาษาไทยที่ชัดเจน', tags: ['ภาษาไทย'], importance: 70 });
+  const thaiFound = await memory.search({ user, query: 'คำตอบภาษาไทย' });
+  assert(thaiFound.memories.some(item => item.memoryId === thai.memory.memoryId), 'Thai word segmentation should retrieve Thai memories');
+  const topical = await memory.remember({ user, kind: 'fact', title: 'Sentinel memory architecture', content: 'A note about long-term user context', importance: 50 });
+  await memory.remember({ user, kind: 'fact', title: 'Other note', content: 'Sentinel appears only in the body', importance: 95 });
+  const ranked = await memory.search({ user, query: 'Sentinel' });
+  assert.equal(ranked.memories[0].memoryId, topical.memory.memoryId, 'title matches should rank above body-only matches');
+  const expiring = await memory.remember({ user, kind: 'fact', title: 'Project deadline', content: 'The deadline is stored with a confidence score.', confidence: 0.95, expiresAt: new Date(Date.now() + 86400000).toISOString() });
+  assert.equal(expiring.memory.confidence, 0.95);
+  assert(expiring.memory.expiresAt);
+  await repository.create({ userId: 'u1', kind: 'fact', title: 'Expired unpublishedmarker fact', content: 'This expired fact must not be retrieved.', expiresAt: new Date(Date.now() - 1000).toISOString() });
+  const expired = await memory.search({ user, query: 'unpublishedmarker' });
+  assert.equal(expired.memories.length, 0, 'expired long-term memories must be excluded from retrieval');
+
   const updated = await memory.update({ user, memoryId: created.memory.memoryId, content: 'Respond in Thai and English', importance: 95 });
   assert.equal(updated.ok, true);
   assert.equal(updated.memory.content, 'Respond in Thai and English');
@@ -47,7 +61,7 @@ const { AgentMemoryService } = require('../services/agentMemoryService');
 
   const removed = await memory.remove({ user, memoryId: created.memory.memoryId });
   assert.equal(removed.ok, true);
-  assert.equal((await memory.list({ user })).memories.length, 0);
+  assert.equal((await memory.list({ user })).memories.some(item => item.memoryId === created.memory.memoryId), false);
   assert(events.some((e) => e.event === 'agent.memory_created'));
   assert(events.some((e) => e.event === 'agent.memory_searched'));
   assert(events.some((e) => e.event === 'agent.memory_deleted'));

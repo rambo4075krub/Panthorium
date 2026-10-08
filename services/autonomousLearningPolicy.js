@@ -3,11 +3,12 @@
 class AutonomousLearningPolicy {
   constructor(options = {}) {
     this.promotionScore = clampInt(options.promotionScore ?? process.env.SENTINEL_AUTONOMOUS_PROMOTION_THRESHOLD, 90, 60, 100);
-    this.shadowMinSamples = clampInt(options.shadowMinSamples ?? process.env.SENTINEL_AUTONOMOUS_SHADOW_MIN_SAMPLES, 3, 1, 10000);
+    this.shadowMinSamples = clampInt(options.shadowMinSamples ?? process.env.SENTINEL_AUTONOMOUS_SHADOW_MIN_SAMPLES, 30, 1, 10000);
     this.shadowScore = clampInt(options.shadowScore ?? process.env.SENTINEL_AUTONOMOUS_SHADOW_SCORE, 90, 0, 100);
     this.maxRegressionPct = clampNumber(options.maxRegressionPct ?? process.env.SENTINEL_AUTONOMOUS_MAX_REGRESSION_PCT, 5, 0, 100);
     this.rollbackScore = clampInt(options.rollbackScore ?? process.env.SENTINEL_AUTONOMOUS_ROLLBACK_SCORE, 82, 0, 100);
     this.minReviewers = clampInt(options.minReviewers ?? process.env.SENTINEL_AUTONOMOUS_MIN_REVIEWERS, 2, 1, 8);
+    this.maxPromotionsPerHour = clampInt(options.maxPromotionsPerHour ?? process.env.SENTINEL_AUTONOMOUS_MAX_PROMOTIONS_PER_HOUR, 20, 1, 1000);
     this.promotionEnabled = options.promotionEnabled ?? process.env.SENTINEL_AUTONOMOUS_PROMOTION_ENABLED !== '0';
     this.promotionPausedAt = this.promotionEnabled ? null : new Date().toISOString();
     this.promotionPausedBy = this.promotionEnabled ? null : 'environment';
@@ -37,7 +38,7 @@ class AutonomousLearningPolicy {
     ];
   }
 
-  promotionDecision({ score, safe, reviewers = [], risk = 'normal', shadowSamples = 0, shadowScore = null, regressionPct = 0 } = {}) {
+  promotionDecision({ score, safe, reviewers = [], risk = 'normal', shadowSamples = 0, shadowScore = null, regressionPct = 0, recentPromotions = 0 } = {}) {
     const reasons = [];
     const uniqueReviewers = new Set((reviewers || []).filter(Boolean));
 
@@ -49,6 +50,7 @@ class AutonomousLearningPolicy {
     if (Number(shadowSamples) < this.shadowMinSamples) reasons.push('insufficient_shadow_samples');
     if (shadowScore == null || Number(shadowScore) < this.shadowScore) reasons.push('shadow_score_below_threshold');
     if (Number(regressionPct) > this.maxRegressionPct) reasons.push('shadow_regression_exceeded');
+    if (Number(recentPromotions) >= this.maxPromotionsPerHour) reasons.push('promotion_rate_limited');
 
     return {
       ok: reasons.length === 0,
@@ -59,7 +61,8 @@ class AutonomousLearningPolicy {
         shadowMinSamples: this.shadowMinSamples,
         shadowScore: this.shadowScore,
         maxRegressionPct: this.maxRegressionPct,
-        promotionEnabled: this.promotionEnabled
+        promotionEnabled: this.promotionEnabled,
+        maxPromotionsPerHour: this.maxPromotionsPerHour
       }
     };
   }
@@ -104,3 +107,4 @@ function clampNumber(value, fallback, min, max) {
 }
 
 module.exports = { AutonomousLearningPolicy };
+

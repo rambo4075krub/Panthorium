@@ -50,7 +50,13 @@ const { AgentWorkflowService } = require('../services/agentWorkflowService');
   const bad = await invalid.run({ user, request: 'invent something' });
   assert.equal(bad.error, 'invalid_workflow_tool');
 
+  const bounded = new AgentWorkflowService({ agentService, gateway, audit });
+  const overBudget = await bounded.run({ user, request: 'do two things', maxSteps: 1 });
+  assert.equal(overBudget.error, 'invalid_workflow_steps', 'the planner must reject plans larger than the caller budget');
+  assert.match(bounded.prompt(tools, [], 1), /Maximum 1 steps/);
+
   assert(events.some(e => e.event === 'agent.workflow_plan_completed'));
   assert(events.some(e => e.event === 'agent.workflow_completed'));
   console.log('Phase 5 agent workflow tests passed');
 })().catch((error) => { console.error(error); process.exit(1); });
+

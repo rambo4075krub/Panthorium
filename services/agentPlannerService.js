@@ -1,5 +1,11 @@
 const { randomUUID } = require('crypto');
 
+function stableJSON(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJSON).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJSON(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
 class AgentPlannerService {
   constructor({ agentService, gateway, audit, memory } = {}) { this.agentService = agentService; this.gateway = gateway; this.audit = audit; this.memory = memory || null; }
   toolCatalog(user) { return this.agentService.catalogFor(user).map((tool) => ({ id: tool.id, description: tool.description, argsSchema: tool.argsSchema || {}, permission: tool.permission || null, risk: tool.risk || 'low', mutates: !!tool.mutates, requiresConfirmation: !!tool.requiresConfirmation })); }
@@ -30,6 +36,42 @@ class AgentPlannerService {
     const response = { ok: true, planId, plan: parsed.plan, provider: result.provider || null, model: result.model || null, memoryMatches: memories.length, latencyMs: Date.now() - started };
     this.audit?.record('agent.plan_completed', { userId: user?.sub, requestId, planId, action: parsed.plan.action, toolId: parsed.plan.toolId || null, risk: parsed.plan.risk || null, provider: response.provider, memoryMatches: memories.length, durationMs: response.latencyMs }); return response;
   }
+  async evaluateCases({ user, cases = [], preferredProvider, requestId } = {}) {
+    if (!user?.sub || String(user.sub).startsWith('guest:') || !Array.isArray(user.permissions) || !user.permissions.includes('chat')) return { ok: false, error: 'planner_evaluation_requires_account' };
+    const suite = Array.isArray(cases) ? cases.slice(0, 20) : [];
+    if (!suite.length) return { ok: false, error: 'planner_evaluation_cases_required' };
+    const rows = [];
+    for (let index = 0; index < suite.length; index += 1) {
+      const item = typeof suite[index] === 'string' ? { request: suite[index] } : (suite[index] || {});
+      const request = String(item.request || item.prompt || '').trim();
+      const expected = item.expected || {};
+      const expectedAction = expected.action || (expected.toolId ? 'tool' : 'answer');
+      if (!request || request.length > 8000 || !['tool', 'answer'].includes(expectedAction)) {
+        rows.push({ caseId: item.id || `case-${index + 1}`, valid: false, error: 'invalid_evaluation_case' });
+        continue;
+      }
+      const result = await this.plan({ user, request, preferredProvider, requestId: `${requestId || 'planner-eval'}:${index + 1}` });
+      const actualAction = result.ok ? result.plan.action : 'invalid';
+      const actualToolId = result.ok ? result.plan.toolId : null;
+      const actionCorrect = actualAction === expectedAction;
+      const toolCorrect = expectedAction !== 'tool' || actualToolId === expected.toolId;
+      const argumentsMatch = expectedAction !== 'tool' || (result.ok && stableJSON(result.plan.args || {}) === stableJSON(expected.args || {}));
+      rows.push({ caseId: item.id || `case-${index + 1}`, valid: true, actionCorrect, toolCorrect, argumentsMatch, actualAction, actualToolId, latencyMs: Number(result.latencyMs || 0), ...(result.ok ? {} : { error: result.error || 'invalid_plan' }) });
+    }
+    const valid = rows.filter(row => row.valid);
+    const rate = (predicate) => valid.length ? Math.round(valid.filter(predicate).length * 100 / valid.length) : 0;
+    const summary = {
+      caseCount: rows.length,
+      validCases: valid.length,
+      actionAccuracy: rate(row => row.actionCorrect),
+      toolSelectionAccuracy: rate(row => row.toolCorrect),
+      argumentAccuracy: rate(row => row.argumentsMatch),
+      invalidPlanRate: valid.length ? Math.round(valid.filter(row => row.actualAction === 'invalid').length * 100 / valid.length) : 0,
+      meanLatencyMs: valid.length ? Math.round(valid.reduce((sum, row) => sum + row.latencyMs, 0) / valid.length) : 0
+    };
+    this.audit?.record('agent.planner_benchmark_completed', { userId: user?.sub, requestId, summary });
+    return { ok: valid.length === rows.length && rows.length > 0, summary, cases: rows };
+  }
   async run({ user, request, preferredProvider, confirmed = false, requestId }) {
     const planned = await this.plan({ user, request, preferredProvider, requestId }); if (!planned.ok) return planned;
     if (planned.plan.action === 'answer') return { ...planned, executed: false, answer: planned.plan.answer || '' };
@@ -38,3 +80,4 @@ class AgentPlannerService {
   }
 }
 module.exports = { AgentPlannerService };
+

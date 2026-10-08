@@ -30,5 +30,10 @@ const{MultiAgentOrchestrator}=require('../services/multiAgentOrchestrator');
  let cancelCount=0;const cancelWorkflow={async run(){return{ok:true,confirmationRequired:true,workflowId:'wf-cancel'};},async confirm(){return{ok:true};},async cancel(){cancelCount++;return{ok:true,cancelled:true};}};
  const cancelService=new MultiAgentOrchestrator({workflow:cancelWorkflow,audit,runs});const pending=await cancelService.run({user,request:'cancel me',roles:['operator']});assert.equal(pending.status,'waiting_confirmation');const cancelled=await cancelService.cancel({user,orchestrationId:pending.orchestrationId});assert.equal(cancelled.status,'cancelled');assert.equal(cancelCount,1);const cancelAgain=await cancelService.cancel({user,orchestrationId:pending.orchestrationId});assert.equal(cancelAgain.error,'orchestration_not_active');
  const otherConfirm=await waitingService.confirm({user:other,orchestrationId:waiting.orchestrationId});assert.equal(otherConfirm.error,'orchestration_not_found');
+ let budgetCalls=0;const budgetWorkflow={async run({maxSteps}){budgetCalls++;return{ok:true,status:'completed',workflowId:`wf-budget-${budgetCalls}`,results:Array.from({length:maxSteps},(_,index)=>({index,ok:true}))};}};
+ const boundedService=new MultiAgentOrchestrator({workflow:budgetWorkflow,audit,runs,maxToolSteps:3});
+ const bounded=await boundedService.run({user,request:'bounded tools',roles:['researcher','analyst']});
+ assert.equal(bounded.status,'failed');assert.equal(bounded.lastError,'orchestration_tool_budget_exhausted');assert.equal(bounded.toolBudget.used,3);assert.equal(budgetCalls,1,'a later specialist must not exceed the orchestration-wide tool budget');
  console.log('Phase 8 orchestration resume tests passed');
 })().catch(e=>{console.error(e);process.exit(1);});
+

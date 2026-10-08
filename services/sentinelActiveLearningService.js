@@ -232,6 +232,27 @@ class SentinelActiveLearningService {
     if (current.running) return { ok: true, alreadyRunning: true, ...current };
     const normalized = this.normalizeOptions(options);
     if (!normalized.providers.length) return { ok: false, error: 'no_active_learning_provider', providers: this.providers?.catalog?.() || [] };
+    // Manual active-learning starts must be runnable under the same strict
+    // evaluator quorum as background training. In particular, do not start a
+    // run that can only generate pending examples and silently leave them there.
+    if (Array.isArray(this.training?.evaluatorProviders)) {
+      const evaluatorAvailable = this.providers?.evaluationAvailable?.() || this.providers?.available?.() || [];
+      const teachers = this.training.teacherProviders?.length
+        ? normalized.providers.filter(name => this.training.teacherProviders.includes(name))
+        : normalized.providers;
+      const eligible = teachers.filter(teacher => this.training.evaluatorProviders
+        .filter(name => evaluatorAvailable.includes(name) && name !== teacher).length >= Number(this.training.minEvaluators || 2));
+      if (!eligible.length) {
+        return {
+          ok: false,
+          error: 'no_independent_evaluators',
+          requiredEvaluators: Number(this.training.minEvaluators || 2),
+          teacherProviders: teachers,
+          availableEvaluators: this.training.evaluatorProviders.filter(name => evaluatorAvailable.includes(name))
+        };
+      }
+      normalized.providers = eligible;
+    }
     const run = {
       runId: randomUUID(),
       status: 'running',
@@ -430,7 +451,7 @@ class SentinelActiveLearningService {
   }
 
   async runCycle(run) {
-    const delta = { prompts: 0, candidates: 0, failures: 0, shadowSamples: 0, unsafeShadow: 0, promotions: 0, failureDetails: [] };
+    const delta = { prompts: 0, candidates: 0, evaluations: 0, approved: 0, rejected: 0, evaluationFailures: 0, failures: 0, shadowSamples: 0, unsafeShadow: 0, promotions: 0, failureDetails: [] };
     // Spend the available evaluator budget on existing non-acceptance learning
     // candidates first. Teacher quota exhaustion must not starve Shadow checks.
     if (run.options?.autoShadow !== false) {
@@ -460,6 +481,33 @@ class SentinelActiveLearningService {
       for (const failure of result.failures || (result.ok === false ? [{ provider: null, error: result.error || 'teacher_failed' }] : [])) {
         delta.failureDetails.push({ stage: 'teacher', provider: failure.provider || null, error: safeFailureMessage(failure.error || 'teacher_failed') });
       }
+      // An explicitly started run is operator authorization to evaluate these
+      // candidates even while automatic background training remains disabled.
+      // Keep ordinary chat/capture and startup behavior unchanged.
+      for (const candidate of result.candidates || []) {
+        if (!candidate.example || candidate.example.status !== 'pending' || !this.training?.autoEvaluateExample) continue;
+        delta.evaluations += 1;
+        try {
+          const evaluation = await this.training.autoEvaluateExample(candidate.example, {
+            requestId: `active-learning:${run.runId}:${Number(run.stats?.cycles || 0) + 1}:${i + 1}`,
+            force: true
+          });
+          candidate.evaluation = evaluation;
+          candidate.example = evaluation.example || candidate.example;
+          candidate.learning = evaluation.learning || candidate.learning || null;
+          if (evaluation.status === 'approved') delta.approved += 1;
+          else if (evaluation.status === 'rejected') delta.rejected += 1;
+          if (!evaluation.ok || evaluation.error === 'incomplete_evaluation' || evaluation.error === 'insufficient_independent_evaluators') {
+            delta.evaluationFailures += 1;
+            delta.failures += 1;
+            delta.failureDetails.push({ stage: 'evaluation', provider: candidate.provider || null, error: safeFailureMessage(evaluation.error || 'evaluation_failed') });
+          }
+        } catch (error) {
+          delta.evaluationFailures += 1;
+          delta.failures += 1;
+          delta.failureDetails.push({ stage: 'evaluation', provider: candidate.provider || null, error: safeFailureMessage(error) });
+        }
+      }
       const rateLimited = result.failures?.find((failure) => rateLimitDelayMs(failure?.error || failure) > 0);
       if (run.options?.never && rateLimited) {
         delta.rateLimitError = String(rateLimited.error || rateLimited);
@@ -480,7 +528,7 @@ class SentinelActiveLearningService {
       const evidenceReady = measured?.schema === 1
         && Number(measured.sampleCount || 0) >= minSamples
         && Array.isArray(measured.comparisons)
-        && measured.comparisons.length === 3
+        && measured.comparisons.length === Number(measured.sampleCount || 0)
         && Number(measured.worstRegression ?? measured.maxRegression) <= maxRegression;
       return Number(version.shadowSamples || 0) < minSamples || !evidenceReady;
     }).slice(0, 1);
@@ -493,9 +541,10 @@ class SentinelActiveLearningService {
         const latest = await this.learning.repository.get(version.versionId);
         const measured = latest?.metadata?.measuredShadow;
         const minSamples = Number(this.learning.policy?.shadowMinSamples || 3);
-        if (measured?.schema !== 1 || !Array.isArray(measured.comparisons) || measured.comparisons.length !== 3 || Number(measured.sampleCount || 0) < minSamples) throw new Error('measured_shadow_evidence_required');
-        // Count only evaluator-backed samples. Older raw scores are not evidence.
-        delta.samples += Math.max(0, Math.min(Number(measured.sampleCount || 0), Number(latest.shadowSamples || 0)));
+        if (measured?.schema !== 1 || !Array.isArray(measured.comparisons) || measured.comparisons.length !== Number(measured.sampleCount || 0) || Number(measured.sampleCount || 0) !== Number(latest.shadowSamples || 0)) throw new Error('measured_shadow_evidence_required');
+        // The evaluator returns only this cycle's new cases. Cumulative evidence
+        // is stored on the version and must not be added to run stats repeatedly.
+        delta.samples += Math.max(0, Number(evaluation.samples || 0));
         if (evaluation.safe === false) delta.unsafe += 1;
       } catch (error) {
         delta.failures += 1;
@@ -553,3 +602,4 @@ class SentinelActiveLearningService {
 }
 
 module.exports = { SentinelActiveLearningService, rateLimitDelayMs };
+

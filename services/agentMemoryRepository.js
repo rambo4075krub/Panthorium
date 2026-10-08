@@ -2,6 +2,28 @@ const { getDatabasePool } = require('./databasePool');
 const { randomUUID } = require('crypto');
 const { CloudNotesError } = require('./cloudNotesRepository');
 
+const thaiWordSegmenter = new Intl.Segmenter('th', { granularity: 'word' });
+function normalizedText(value) { return String(value || '').normalize('NFKC').toLowerCase(); }
+function scoreMemory(item, terms) {
+  const title = normalizedText(item.title);
+  const content = normalizedText(item.content);
+  const tags = normalizedText((item.tags || []).join(' '));
+  let score = 0;
+  for (const term of terms) {
+    if (title.includes(term)) score += 4;
+    if (tags.includes(term)) score += 3;
+    if (content.includes(term)) score += 1;
+  }
+  const ageDays = Math.max(0, (Date.now() - Date.parse(item.updatedAt || 0)) / 86400000);
+  const recency = Number.isFinite(ageDays) ? Math.max(0, 1 - ageDays / 365) : 0;
+  return score * Math.max(0, Math.min(1, Number(item.confidence ?? 0.8))) + Number(item.importance || 50) / 1000 + recency / 10;
+}
+function matchesMemory(item, terms) {
+  const haystack = normalizedText(`${item.title}\n${item.content}\n${(item.tags || []).join(' ')}`);
+  return terms.some(term => haystack.includes(term));
+}
+function isCurrent(item) { return !item.expiresAt || Date.parse(item.expiresAt) > Date.now(); }
+
 function timestamp(value) {
   const date = new Date(value || 0);
   return Number.isNaN(date.getTime()) ? String(value || '') : date.toISOString();
@@ -44,11 +66,15 @@ class AgentMemoryRepository {
         tags JSONB NOT NULL DEFAULT '[]'::jsonb,
         source TEXT,
         importance INTEGER NOT NULL DEFAULT 50,
+        confidence REAL NOT NULL DEFAULT 0.8,
+        expires_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_panthorium_agent_memories_user_time ON panthorium_agent_memories(user_id, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_panthorium_agent_memories_user_kind ON panthorium_agent_memories(user_id, kind);
+      ALTER TABLE panthorium_agent_memories ADD COLUMN IF NOT EXISTS confidence REAL NOT NULL DEFAULT 0.8;
+      ALTER TABLE panthorium_agent_memories ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
     `);
   }
 
@@ -62,6 +88,8 @@ class AgentMemoryRepository {
       tags: Array.isArray(input.tags) ? input.tags.map((x) => String(x).slice(0, 64)).slice(0, 20) : [],
       source: input.source ? String(input.source).slice(0, 120) : null,
       importance: Math.min(Math.max(Number(input.importance) || 50, 1), 100),
+      confidence: Math.min(1, Math.max(0, input.confidence == null ? 0.8 : (Number.isFinite(Number(input.confidence)) ? Number(input.confidence) : 0.8))),
+      expiresAt: input.expiresAt && Number.isFinite(Date.parse(input.expiresAt)) ? new Date(input.expiresAt).toISOString() : null,
       createdAt: input.createdAt || new Date().toISOString(),
       updatedAt: input.updatedAt || new Date().toISOString()
     };
@@ -69,11 +97,16 @@ class AgentMemoryRepository {
 
   mapRow(row) {
     if (!row) return null;
-    return this.normalize({ memoryId: row.memoryId, userId: row.userId, kind: row.kind, title: row.title, content: row.content, tags: row.tags, source: row.source, importance: row.importance, createdAt: row.createdAt, updatedAt: row.updatedAt });
+    return this.normalize({ memoryId: row.memoryId, userId: row.userId, kind: row.kind, title: row.title, content: row.content, tags: row.tags, source: row.source, importance: row.importance, confidence: row.confidence, expiresAt: row.expiresAt, createdAt: row.createdAt, updatedAt: row.updatedAt });
   }
 
   queryTerms(query) {
-    return [...new Set(String(query || '').toLowerCase().match(/[\p{L}\p{N}_:-]+/gu) || [])]
+    const text = normalizedText(query);
+    const segmented = Array.from(thaiWordSegmenter.segment(text))
+      .filter(part => part.isWordLike)
+      .map(part => part.segment);
+    const fallback = text.match(/[\p{L}\p{N}_:-]+/gu) || [];
+    return [...new Set([...segmented, ...fallback])]
       .filter((term) => term.length > 1)
       .slice(0, 16);
   }
@@ -144,13 +177,13 @@ class AgentMemoryRepository {
       return this.notesRepository.create(item);
     }
     if (!this.pool) { this.memory.set(item.memoryId, item); return item; }
-    const r = await this.pool.query(`INSERT INTO panthorium_agent_memories(memory_id,user_id,kind,title,content,tags,source,importance,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10) RETURNING memory_id AS "memoryId",user_id AS "userId",kind,title,content,tags,source,importance,created_at AS "createdAt",updated_at AS "updatedAt"`, [item.memoryId,item.userId,item.kind,item.title,item.content,JSON.stringify(item.tags),item.source,item.importance,item.createdAt,item.updatedAt]);
+    const r = await this.pool.query(`INSERT INTO panthorium_agent_memories(memory_id,user_id,kind,title,content,tags,source,importance,confidence,expires_at,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12) RETURNING memory_id AS "memoryId",user_id AS "userId",kind,title,content,tags,source,importance,confidence,expires_at AS "expiresAt",created_at AS "createdAt",updated_at AS "updatedAt"`, [item.memoryId,item.userId,item.kind,item.title,item.content,JSON.stringify(item.tags),item.source,item.importance,item.confidence,item.expiresAt,item.createdAt,item.updatedAt]);
     return this.mapRow(r.rows[0]);
   }
 
   async getSql(userId, memoryId) {
     if (!this.pool) { const item = this.memory.get(String(memoryId || '')); return item && item.userId === userId ? item : null; }
-    const r = await this.pool.query(`SELECT memory_id AS "memoryId",user_id AS "userId",kind,title,content,tags,source,importance,created_at AS "createdAt",updated_at AS "updatedAt" FROM panthorium_agent_memories WHERE memory_id=$1 AND user_id=$2`, [memoryId,userId]);
+    const r = await this.pool.query(`SELECT memory_id AS "memoryId",user_id AS "userId",kind,title,content,tags,source,importance,confidence,expires_at AS "expiresAt",created_at AS "createdAt",updated_at AS "updatedAt" FROM panthorium_agent_memories WHERE memory_id=$1 AND user_id=$2`, [memoryId,userId]);
     return this.mapRow(r.rows[0]);
   }
 
@@ -167,19 +200,19 @@ class AgentMemoryRepository {
     const safe = Math.min(Math.max(Number(limit) || 30, 1), 100);
     if (!this.pool) {
       return [...this.memory.values()]
-        .filter(item => item.userId === userId && (!kind || item.kind === kind) && (!excludeNotes || item.kind !== 'note'))
+        .filter(item => item.userId === userId && isCurrent(item) && (!kind || item.kind === kind) && (!excludeNotes || item.kind !== 'note'))
         .sort((a,b) => Date.parse(b.updatedAt)-Date.parse(a.updatedAt))
         .slice(0,safe);
     }
     const args = [userId, safe];
-    let where = 'user_id=$1';
+    let where = '(user_id=$1 AND (expires_at IS NULL OR expires_at>NOW()))';
     if (kind) {
       args.push(kind);
       where += ' AND kind=$3';
     } else if (excludeNotes) {
       where += " AND kind <> 'note'";
     }
-    const r = await this.pool.query(`SELECT memory_id AS "memoryId",user_id AS "userId",kind,title,content,tags,source,importance,created_at AS "createdAt",updated_at AS "updatedAt" FROM panthorium_agent_memories WHERE ${where} ORDER BY updated_at DESC LIMIT $2`, args);
+    const r = await this.pool.query(`SELECT memory_id AS "memoryId",user_id AS "userId",kind,title,content,tags,source,importance,confidence,expires_at AS "expiresAt",created_at AS "createdAt",updated_at AS "updatedAt" FROM panthorium_agent_memories WHERE ${where} ORDER BY updated_at DESC LIMIT $2`, args);
     return r.rows.map((row) => this.mapRow(row));
   }
 
@@ -194,6 +227,7 @@ class AgentMemoryRepository {
       this.notesRepository.list(userId, safe)
     ]);
     return [...memories, ...notes]
+      .filter(isCurrent)
       .sort((a,b) => Date.parse(b.updatedAt)-Date.parse(a.updatedAt))
       .slice(0,safe);
   }
@@ -206,24 +240,25 @@ class AgentMemoryRepository {
     if (!terms.length) return [];
     if (!this.pool) {
       return [...this.memory.values()]
-        .filter(item => item.userId === userId && (!this.notesRepository || item.kind !== 'note'))
+        .filter(item => item.userId === userId && isCurrent(item) && (!this.notesRepository || item.kind !== 'note'))
         .map(item => {
-          const haystack = `${item.title}\n${item.content}\n${item.tags.join(' ')}`.toLowerCase();
-          const relevance = terms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0);
+          const relevance = scoreMemory(item, terms);
           return { item, relevance };
         })
-        .filter(entry => entry.relevance > 0)
-        .sort((a,b) => b.relevance-a.relevance || b.item.importance-a.item.importance || Date.parse(b.item.updatedAt)-Date.parse(a.item.updatedAt))
+        .filter(entry => matchesMemory(entry.item, terms) && entry.relevance > Number(entry.item.importance || 50) / 1000 + 0.09)
+        .sort((a,b) => b.relevance-a.relevance || Date.parse(b.item.updatedAt)-Date.parse(a.item.updatedAt))
         .slice(0,safe)
         .map(entry => entry.item);
     }
     const patterns = terms.map((term) => `%${term.replace(/[%_]/g, '')}%`);
     const noteFilter = this.notesRepository ? " AND kind <> 'note'" : '';
     const r = await this.pool.query(`
-      SELECT memory_id AS "memoryId",user_id AS "userId",kind,title,content,tags,source,importance,created_at AS "createdAt",updated_at AS "updatedAt",
-        (SELECT COUNT(*) FROM unnest($2::text[]) AS pattern WHERE title ILIKE pattern OR content ILIKE pattern OR tags::text ILIKE pattern) AS relevance
+      SELECT memory_id AS "memoryId",user_id AS "userId",kind,title,content,tags,source,importance,confidence,expires_at AS "expiresAt",created_at AS "createdAt",updated_at AS "updatedAt",
+        ((SELECT COUNT(*) FROM unnest($2::text[]) AS pattern WHERE title ILIKE pattern) * 4
+        + (SELECT COUNT(*) FROM unnest($2::text[]) AS pattern WHERE tags::text ILIKE pattern) * 3
+        + (SELECT COUNT(*) FROM unnest($2::text[]) AS pattern WHERE content ILIKE pattern)) * confidence AS relevance
       FROM panthorium_agent_memories
-      WHERE user_id=$1${noteFilter} AND (title ILIKE ANY($2::text[]) OR content ILIKE ANY($2::text[]) OR tags::text ILIKE ANY($2::text[]))
+      WHERE user_id=$1 AND (expires_at IS NULL OR expires_at>NOW())${noteFilter} AND (title ILIKE ANY($2::text[]) OR content ILIKE ANY($2::text[]) OR tags::text ILIKE ANY($2::text[]))
       ORDER BY relevance DESC, importance DESC, updated_at DESC
       LIMIT $3`, [userId, patterns, safe]);
     return r.rows.map((row) => this.mapRow(row));
@@ -238,14 +273,11 @@ class AgentMemoryRepository {
       this.notesRepository.search(userId, query, safe)
     ]);
     const terms = this.queryTerms(query);
-    const relevance = item => terms.reduce((score, term) => {
-      const haystack = (item.title + '\n' + item.content + '\n' + (item.tags || []).join(' ')).toLowerCase();
-      return score + (haystack.includes(term) ? 1 : 0);
-    }, 0);
+    const relevance = item => scoreMemory(item, terms);
     return [...memories, ...notes]
       .map(item => ({ item, relevance: relevance(item) }))
-      .filter(entry => entry.relevance > 0)
-      .sort((a,b) => b.relevance-a.relevance || b.item.importance-a.item.importance || Date.parse(b.item.updatedAt)-Date.parse(a.item.updatedAt))
+      .filter(entry => isCurrent(entry.item) && matchesMemory(entry.item, terms) && entry.relevance > Number(entry.item.importance || 50) / 1000 + 0.09)
+      .sort((a,b) => b.relevance-a.relevance || Date.parse(b.item.updatedAt)-Date.parse(a.item.updatedAt))
       .slice(0,safe)
       .map(entry => entry.item);
   }
@@ -258,7 +290,7 @@ class AgentMemoryRepository {
       return this.notesRepository.update(userId, memoryId, { title: item.title, content: item.content, tags: item.tags, source: item.source, importance: item.importance });
     }
     if (!this.pool) { this.memory.set(item.memoryId, item); return item; }
-    const r = await this.pool.query(`UPDATE panthorium_agent_memories SET title=$3,content=$4,tags=$5::jsonb,importance=$6,updated_at=NOW() WHERE memory_id=$1 AND user_id=$2 RETURNING memory_id AS "memoryId",user_id AS "userId",kind,title,content,tags,source,importance,created_at AS "createdAt",updated_at AS "updatedAt"`, [memoryId,userId,item.title,item.content,JSON.stringify(item.tags),item.importance]);
+    const r = await this.pool.query(`UPDATE panthorium_agent_memories SET title=$3,content=$4,tags=$5::jsonb,importance=$6,confidence=$7,expires_at=$8,updated_at=NOW() WHERE memory_id=$1 AND user_id=$2 RETURNING memory_id AS "memoryId",user_id AS "userId",kind,title,content,tags,source,importance,confidence,expires_at AS "expiresAt",created_at AS "createdAt",updated_at AS "updatedAt"`, [memoryId,userId,item.title,item.content,JSON.stringify(item.tags),item.importance,item.confidence,item.expiresAt]);
     return this.mapRow(r.rows[0]);
   }
 
@@ -273,3 +305,4 @@ class AgentMemoryRepository {
 }
 
 module.exports = { AgentMemoryRepository, sameNote };
+

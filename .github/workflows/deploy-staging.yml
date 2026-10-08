@@ -25,6 +25,8 @@ jobs:
       VERTEX_TUNING_JOB_LOCATION: europe-west4
       VERTEX_TUNING_JOB_ID: '3837217584332144640'
       VERTEX_MODEL: sentinel-v4
+      VERTEX_EVALUATOR_MODELS: ${{ vars.STAGING_SENTINEL_VERTEX_EVALUATOR_MODELS || 'gemini-3.5-flash,gemini-3.1-flash-lite' }}
+      VERTEX_EVALUATOR_LOCATION: ${{ vars.STAGING_SENTINEL_VERTEX_EVALUATOR_LOCATION || 'eu' }}
       REGION: asia-southeast1
       SERVICE: panthorium-backend-staging
       PANTHORIUM_FILES_BUCKET: ${{ vars.PANTHORIUM_STAGING_FILES_BUCKET || '' }}
@@ -98,7 +100,7 @@ jobs:
             --image="$IMAGE" --service-account="$RUNTIME_SA" --allow-unauthenticated \
             --port=8787 --max-instances=1 --min-instances=0 --cpu-throttling \
             --set-cloudsql-instances="$SQL_INSTANCE" \
-            --update-env-vars="^@^NODE_ENV=production@HOST=0.0.0.0@TRUST_PROXY=1@DATABASE_SSL_MODE=disable@ALLOW_ELECTRON_ORIGIN=1@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_RELEASE_GATE_AUTO_GATE=0@SENTINEL_RELEASE_GATE_AUTO_BENCHMARK=0@SENTINEL_RELEASE_GATE_AUTO_IMPROVE=0@PANTHORIUM_GOVERNANCE_MODE=off@PANTHORIUM_SENTINEL_CONTROL_MODE=off@AI_PRIORITY=vertex@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT@SENTINEL_VERTEX_LOCATION=$VERTEX_TUNING_JOB_LOCATION@SENTINEL_VERTEX_TUNING_JOB_LOCATION=$VERTEX_TUNING_JOB_LOCATION@SENTINEL_VERTEX_TUNING_JOB_ID=$VERTEX_TUNING_JOB_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@SENTINEL_VERTEX_AUDIO_MODEL=gemini-2.5-flash-lite@SENTINEL_VERTEX_AUDIO_LOCATION=europe-west4@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex@SENTINEL_MIN_EVALUATORS=1@SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=1@PANTHORIUM_FILES_BUCKET=$PANTHORIUM_FILES_BUCKET@BIOMETRIC_GATE_ENABLED=1@BIOMETRIC_VOICE_THRESHOLD=0.13@BIOMETRIC_DIAGNOSTICS_ENABLED=1" \
+            --update-env-vars="^@^NODE_ENV=production@HOST=0.0.0.0@TRUST_PROXY=1@DATABASE_SSL_MODE=disable@ALLOW_ELECTRON_ORIGIN=1@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_RELEASE_GATE_AUTO_GATE=0@SENTINEL_RELEASE_GATE_AUTO_BENCHMARK=0@SENTINEL_RELEASE_GATE_AUTO_IMPROVE=0@PANTHORIUM_GOVERNANCE_MODE=off@PANTHORIUM_SENTINEL_CONTROL_MODE=off@AI_PRIORITY=vertex@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT@SENTINEL_VERTEX_LOCATION=$VERTEX_TUNING_JOB_LOCATION@SENTINEL_VERTEX_EVALUATOR_LOCATION=$VERTEX_EVALUATOR_LOCATION@SENTINEL_VERTEX_TUNING_JOB_LOCATION=$VERTEX_TUNING_JOB_LOCATION@SENTINEL_VERTEX_TUNING_JOB_ID=$VERTEX_TUNING_JOB_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@SENTINEL_VERTEX_EVALUATOR_MODELS=$VERTEX_EVALUATOR_MODELS@SENTINEL_VERTEX_AUDIO_MODEL=gemini-2.5-flash-lite@SENTINEL_VERTEX_AUDIO_LOCATION=europe-west4@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex_eval_1,vertex_eval_2@SENTINEL_MIN_EVALUATORS=2@SENTINEL_AUTONOMOUS_PROMOTION_ENABLED=1@PANTHORIUM_FILES_BUCKET=$PANTHORIUM_FILES_BUCKET@BIOMETRIC_GATE_ENABLED=1@BIOMETRIC_VOICE_THRESHOLD=0.13@BIOMETRIC_DIAGNOSTICS_ENABLED=1" \
             --update-secrets="DATABASE_URL=panthorium-staging-database-url:latest,JWT_SECRET=panthorium-staging-jwt:latest,ADMIN_PASSWORD=panthorium-staging-admin-password:latest" \
             --remove-secrets=GROQ_API_KEY,OPENAI_API_KEY,GEMINI_API_KEY,ANTHROPIC_API_KEY --quiet
           if [ -n "$RESEND_SECRET" ]; then
@@ -113,7 +115,7 @@ jobs:
           # URL in the exact CORS allowlist. Local origins are limited to the
           # two documented development ports.
           gcloud run services update "$SERVICE" --project="$PROJECT" --region="$REGION" --update-env-vars="ALLOWED_ORIGINS=$URL" --quiet
-          curl --fail --silent --show-error "$URL/api/health" | python3 -c 'import json,sys; assert json.load(sys.stdin)["ok"] is True'
+          curl --fail --silent --show-error "$URL/health" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True, "staging database, Cloud Storage IAM, or Vertex readiness failed"'
           curl --fail --silent --show-error "$URL/admin" -o /dev/null
           # Verify the running revision serves the files that passed the DOM and
           # routing tests, rather than treating a green health check as UI proof.
@@ -124,3 +126,4 @@ jobs:
           STAGING_URL="$URL" node test/voice-deployed.js
           echo "Staging admin: $URL/admin" >> "$GITHUB_STEP_SUMMARY"
           echo "Commit tested: $GITHUB_SHA. Await owner voice acceptance before merging main." >> "$GITHUB_STEP_SUMMARY"
+
