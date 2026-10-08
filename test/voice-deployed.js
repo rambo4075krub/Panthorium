@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
+const WebSocket = require('ws');
 (async () => {
   const base = new URL(process.env.STAGING_URL);
   assert.equal(base.protocol, 'https:');
@@ -49,6 +50,47 @@ const { JSDOM } = require('jsdom');
   assert.equal(sessionResponse.status, 200);
   const session = await sessionResponse.json();
   assert(session.accessToken);
+
+  // A browser shell alone does not prove provider connectivity. Authenticate a
+  // short-lived WebSocket and require the backend to relay Google's setupComplete.
+  const liveURL = new URL('/api/live', base);
+  liveURL.protocol = 'wss:';
+  const liveSocket = new WebSocket(liveURL, {
+    origin: base.origin,
+    handshakeTimeout: 15000,
+    maxPayload: 8 * 1024 * 1024,
+    perMessageDeflate: false
+  });
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) {
+        liveSocket.terminate();
+        reject(error);
+      } else resolve();
+    };
+    const timer = setTimeout(() => finish(new Error('Gemini Live setup handshake timed out')), 20000);
+    liveSocket.once('open', () => liveSocket.send(JSON.stringify({ type: 'auth', token: session.accessToken })));
+    liveSocket.on('message', data => {
+      let frame;
+      try { frame = JSON.parse(String(data)); } catch { return; }
+      if (frame.type === 'ready') finish();
+      else if (frame.error) finish(new Error(`Gemini Live rejected setup: ${String(frame.error).slice(0, 120)}`));
+    });
+    liveSocket.once('error', error => finish(new Error(`Gemini Live WebSocket failed: ${String(error?.message || error).slice(0, 160)}`)));
+    liveSocket.once('close', (code, reason) => finish(new Error(`Gemini Live closed before ready (${code}: ${String(reason).slice(0, 120)})`)));
+  });
+  await new Promise(resolve => {
+    if (liveSocket.readyState === WebSocket.CLOSED) return resolve();
+    const timer = setTimeout(() => { liveSocket.terminate(); resolve(); }, 2000);
+    liveSocket.once('close', () => { clearTimeout(timer); resolve(); });
+    liveSocket.close(1000, 'staging-smoke-complete');
+  });
+  console.log('Gemini Live staging handshake passed: authenticated WebSocket received provider setupComplete.');
+
   const guestVoiceStatus = await fetch(new URL('/api/biometrics/status', base), { headers: { Origin: base.origin, Authorization: `Bearer ${session.accessToken}` } });
   assert.equal(guestVoiceStatus.status, 200, 'guest voice enrollment status API');
   const guestVoiceProfiles = await fetch(new URL('/api/biometrics/voice/profiles', base), { headers: { Origin: base.origin, Authorization: `Bearer ${session.accessToken}` } });
@@ -125,5 +167,5 @@ const { JSDOM } = require('jsdom');
   assert(streamText.trim(), 'guest stream must contain answer deltas');
   assert(firstDeltaMs !== null && firstDeltaMs < 30000, `first Sentinel V4 delta took ${firstDeltaMs}ms; expected under 30000ms`);
   console.log(`Staging stream: provider=vertex model=sentinel-v4 firstDeltaMs=${firstDeltaMs} streaming=native`);
-  console.log('Staging: browser and Electron CORS passed; command assets loaded; guest command and tuned Vertex chat/stream answered. Live microphone/TTS acceptance is still required.');
+  console.log('Staging: browser and Electron CORS passed; guest command, tuned Vertex chat/stream, and Gemini Live provider handshake passed. Browser microphone/TTS and function-action acceptance remain.');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });
