@@ -10,7 +10,7 @@ Panthorium remains a cloud-backed web workspace served through Panthorium Browse
 - Production readiness checks that the configured Cloud Storage bucket is reachable with the runtime identity. The check lists only a reserved health-check prefix and returns no object names.
 - Production readiness verifies that Sentinel V4 is configured through Vertex AI.
 - `/healthz` reports only pass/fail component checks and safe error codes.
-- Staging and production deploy workflows call `/healthz` after deployment, so a green deploy cannot be mistaken for a working database, bucket permission, or Vertex setup.
+- Staging checks `/healthz` after deployment. Production deploys a tagged Cloud Run candidate without traffic, checks `/healthz` and Voice Identity, then routes production traffic; a post-routing health failure restores the prior revision.
 - Regression tests cover missing dependencies and healthy/unhealthy states.
 
 ## Remaining cloud work

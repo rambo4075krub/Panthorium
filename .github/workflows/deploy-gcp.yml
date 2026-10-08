@@ -104,27 +104,71 @@ jobs:
             --region=${{ env.REGION }} \
             --quiet .
 
-      - name: Deploy to Cloud Run
-        run: |
-          IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
-          ENV_VARS="^@^NODE_ENV=production@HOST=0.0.0.0@AI_PRIORITY=vertex@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_ACTIVE_LEARNING_NEVER=0@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex@SENTINEL_MIN_EVALUATORS=1@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@PANTHORIUM_FILES_BUCKET=$PANTHORIUM_PRODUCTION_FILES_BUCKET@BIOMETRIC_GATE_ENABLED=1"
-          gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image "$IMAGE_URI" \
-            --region ${{ env.REGION }} \
-            --platform managed \
-            --allow-unauthenticated \
-            --port 8787 \
-            --min-instances=0 \
-            --cpu-throttling \
-            --update-env-vars="$ENV_VARS" \
-            --remove-secrets=GROQ_API_KEY,OPENAI_API_KEY,GEMINI_API_KEY,ANTHROPIC_API_KEY \
-            --quiet
-
-      - name: Verify production health and Voice Identity gate
+      - name: Deploy candidate without production traffic
+        id: deploy_candidate
         env:
           PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         run: |
           set -euo pipefail
+          IMAGE_URI="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$SERVICE_NAME:$GITHUB_SHA"
+          ENV_VARS="^@^NODE_ENV=production@HOST=0.0.0.0@AI_PRIORITY=vertex@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_ACTIVE_LEARNING_NEVER=0@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex@SENTINEL_MIN_EVALUATORS=1@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@PANTHORIUM_FILES_BUCKET=$PANTHORIUM_PRODUCTION_FILES_BUCKET@BIOMETRIC_GATE_ENABLED=1"
+          SERVICE_JSON="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format=json)"
+          PREVIOUS_TRAFFIC="$(python3 -c 'import json,sys; service=json.load(sys.stdin); entries=["{}={}".format(item["revisionName"],item.get("percent",0)) for item in service.get("status",{}).get("traffic",[]) if item.get("revisionName") and item.get("percent",0)>0]; print(",".join(entries))' <<< "$SERVICE_JSON")"
+          if [ -z "$PREVIOUS_TRAFFIC" ]; then
+            echo "::error::Could not identify the current production revision traffic; refusing to deploy."
+            exit 1
+          fi
+          TAG="prelive-$GITHUB_RUN_ID"
+          gcloud run deploy "$SERVICE_NAME" \
+            --project="$PROJECT_ID" \
+            --image="$IMAGE_URI" \
+            --region="$REGION" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --port=8787 \
+            --min-instances=0 \
+            --cpu-throttling \
+            --no-traffic \
+            --tag="$TAG" \
+            --update-env-vars="$ENV_VARS" \
+            --remove-secrets=GROQ_API_KEY,OPENAI_API_KEY,GEMINI_API_KEY,ANTHROPIC_API_KEY \
+            --quiet
+          SERVICE_JSON="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format=json)"
+          read -r CANDIDATE_URL CANDIDATE_REVISION <<< "$(python3 -c 'import json,sys; service=json.load(sys.stdin); tag=sys.argv[1]; entries=[item for item in service.get("status",{}).get("traffic",[]) if item.get("tag")==tag]; assert len(entries)==1, "candidate tag is not present"; item=entries[0]; print(item.get("url",""), item.get("revisionName",""))' "$TAG" <<< "$SERVICE_JSON")"
+          if [ -z "$CANDIDATE_URL" ] || [ -z "$CANDIDATE_REVISION" ]; then
+            echo "::error::Could not resolve the tagged candidate URL and revision; production traffic remains unchanged."
+            exit 1
+          fi
+          echo "Candidate revision: $CANDIDATE_REVISION" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify candidate before routing production traffic
+        id: verify_candidate
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          SERVICE_JSON="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format=json)"
+          TAG="prelive-$GITHUB_RUN_ID"
+          CANDIDATE_URL="$(python3 -c 'import json,sys; service=json.load(sys.stdin); entries=[item for item in service.get("status",{}).get("traffic",[]) if item.get("tag")==sys.argv[1]]; assert len(entries)==1, "candidate tag is not present"; print(entries[0].get("url",""))' "$TAG" <<< "$SERVICE_JSON")"
+          test -n "$CANDIDATE_URL"
+          curl --retry 12 --retry-connrefused --retry-delay 5 --fail --silent --show-error "$CANDIDATE_URL/healthz" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True, "production database, Cloud Storage IAM, or Vertex readiness failed"'
+          curl --retry 5 --retry-connrefused --retry-delay 3 --fail --silent --show-error "$CANDIDATE_URL/api/health" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True, "production health check failed"; assert health.get("voiceIdentityConfigured") is True, "production Voice Identity provider or encryption key is not configured"; assert health.get("voiceIdentityGateEnabled") is True, "production Voice Identity gate is not enabled"'
+          echo "Candidate health and Voice Identity checks passed before traffic shift." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Route production traffic to verified candidate
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          SERVICE_JSON="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format=json)"
+          TAG="prelive-$GITHUB_RUN_ID"
+          read -r CANDIDATE_REVISION PREVIOUS_TRAFFIC <<< "$(python3 -c 'import json,sys; service=json.load(sys.stdin); tag=sys.argv[1]; traffic=service.get("status",{}).get("traffic",[]); candidate=[item for item in traffic if item.get("tag")==tag]; previous=["{}={}".format(item["revisionName"],item.get("percent",0)) for item in traffic if item.get("revisionName") and item.get("percent",0)>0 and item.get("tag")!=tag]; assert len(candidate)==1, "candidate tag is not present"; print(candidate[0].get("revisionName",""), ",".join(previous))' "$TAG" <<< "$SERVICE_JSON")"
+          test -n "$CANDIDATE_REVISION" && test -n "$PREVIOUS_TRAFFIC"
+          gcloud run services update-traffic "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --to-revisions="$CANDIDATE_REVISION=100" --quiet
           URL="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
-          curl --fail --silent --show-error "$URL/healthz" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True, "production database, Cloud Storage IAM, or Vertex readiness failed"'
-          curl --fail --silent --show-error "$URL/api/health" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True, "production health check failed"; assert health.get("voiceIdentityConfigured") is True, "production Voice Identity provider or encryption key is not configured"; assert health.get("voiceIdentityGateEnabled") is True, "production Voice Identity gate is not enabled"'
+          if ! curl --retry 5 --retry-connrefused --retry-delay 3 --fail --silent --show-error "$URL/healthz" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True'; then
+            echo "::error::Post-routing health check failed; restoring previous production traffic."
+            gcloud run services update-traffic "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --to-revisions="$PREVIOUS_TRAFFIC" --quiet
+            exit 1
+          fi
+          echo "Production traffic routed to $CANDIDATE_REVISION after candidate checks passed." >> "$GITHUB_STEP_SUMMARY"
