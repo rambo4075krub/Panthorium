@@ -134,7 +134,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, help="CSV manifest stored beside local audio files")
     parser.add_argument("--thresholds", default="0.60,0.65,0.70,0.75,0.80,0.85,0.90")
-    parser.add_argument("--threshold", type=float, default=float(os.getenv("BIOMETRIC_VOICE_THRESHOLD", "0.75")))
+    parser.add_argument("--threshold", type=float, default=float(os.getenv("BIOMETRIC_VOICE_THRESHOLD", "0.21")))
     args = parser.parse_args()
     thresholds = sorted({float(value.strip()) for value in args.thresholds.split(",") if value.strip()} | {args.threshold})
     if any(value < -1 or value > 1 for value in thresholds):

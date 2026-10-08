@@ -64,7 +64,7 @@ project and does not alter production.
 
 ## Voice reliability staging work
 
-The speaker endpoint returns an approximate active-speech duration after edge-silence trimming. It is a diagnostic signal; the existing ECAPA embedding and 0.75 staging threshold still decide the match. Short-utterance calibration remains disabled until measured owner and impostor samples support it.
+The speaker endpoint returns an approximate active-speech duration after edge-silence trimming. It is a diagnostic signal; the existing ECAPA embedding and configured 0.21 match threshold decide the match. Short-utterance calibration remains disabled until measured owner and impostor samples support it.
 
 Known audio-input failures are surfaced separately from provider outages: too-short, unclear, unsupported-duration, and undecodable audio return HTTP 422 with a specific error code. Actual speaker-service timeouts and 5xx responses remain service-unavailable errors. The shell now gives retry guidance for short or unclear speech.
 
@@ -74,7 +74,7 @@ For threshold evaluation, prepare a local CSV manifest with columns `path,speake
 
 ```sh
 python3 -m unittest discover -s speaker-service -p 'test_*.py'
-python3 speaker-service/evaluate_speaker_identity.py --manifest /private/path/voice-tests.csv --threshold 0.75
+python3 speaker-service/evaluate_speaker_identity.py --manifest /private/path/voice-tests.csv --threshold 0.21
 ```
 
 The evaluator reports false-accept and false-reject rates at candidate thresholds, broken down by active speech duration and device. It does not choose or change the threshold automatically. Do not promote a threshold from the owner’s samples alone.
