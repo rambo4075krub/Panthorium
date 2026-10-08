@@ -32,10 +32,13 @@ async function main() {
   const fullscreenCss = shell.slice(fullscreenCssStart, fullscreenCssEnd);
   const maximizedRule = /\.window\.maximized\s*\{([\s\S]*?)\n\s*\}/.exec(shell)?.[1] || '';
   assert.match(maximizedRule, /box-sizing:\s*border-box/, 'fullscreen windows keep safe-area padding inside the viewport');
-  assert.match(maximizedRule, /padding:\s*var\(--panthorium-safe-area-top\)\s+0px\s+0px\s+0px/, 'native and web windows keep the top safe area while filling the other edges');
+  assert.match(maximizedRule, /padding:\s*var\(--panthorium-safe-area-top\)/, 'native and web windows keep the top safe area');
   const managedFullscreenRule = /\.panthorium-managed-window\.panthorium-window-fullscreen\s*\{([\s\S]*?)\n\s*\}/.exec(shell)?.[1] || '';
-  assert.match(managedFullscreenRule, /padding:\s*var\(--panthorium-safe-area-top\)\s+0px\s+0px\s+0px/, 'every catalog window keeps the top safe area while filling the other edges');
+  assert.match(managedFullscreenRule, /padding:\s*var\(--panthorium-safe-area-top\)/, 'every catalog window keeps the top safe area');
   assert.match(shell, /--panthorium-safe-area-top:\s*max\(env\(safe-area-inset-top,\s*0px\),\s*var\(--panthorium-native-safe-area-top,\s*0px\)\)/, 'fullscreen content uses browser and native safe-area values');
+  assert.match(shell, /--panthorium-shell-dock-clearance:\s*calc\(var\(--taskbar-h\) \+ env\(safe-area-inset-bottom,\s*0px\) \+ 8px\)/, 'fullscreen windows reserve the persistent shell dock and bottom inset');
+  assert.match(fullscreenCss, /@media \(max-width: 760px\) and \(orientation: portrait\)[\s\S]*\.window\.maximized, \.panthorium-managed-window\.panthorium-window-fullscreen\s*\{\s*padding:\s*var\(--panthorium-safe-area-top\) 0px var\(--panthorium-shell-dock-clearance\) 0px/, 'portrait fullscreen content clears the bottom dock');
+  assert.match(fullscreenCss, /@media \(orientation: landscape\)[\s\S]*padding:\s*var\(--panthorium-safe-area-top\) 0px var\(--panthorium-shell-dock-clearance\) 0px/, 'landscape fullscreen content clears the bottom dock');
   assert.match(fullscreenCss, /@media \(orientation:\s*landscape\)[\s\S]*padding:\s*var\(--panthorium-safe-area-top\)/, 'landscape fullscreen keeps the top safe area');
   assert.match(fullscreenCss, /data-window-landscape-edge-to-edge="false"[\s\S]*padding:\s*var\(--panthorium-safe-area-top\)/, 'landscape preference cannot remove the top safe area');
   assert.doesNotMatch(shell, /html\[data-panthorium-immersive="true"\][^{}]*\.panthorium-window-fullscreen[^{}]*\{[^}]*padding:\s*0\s*!important/i, 'immersive state cannot erase safe-area padding from function windows');
