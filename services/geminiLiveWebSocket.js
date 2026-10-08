@@ -4,6 +4,7 @@ const { ALLOWED_LOCATIONS, DEFAULT_LOCATION, connectGeminiLive } = require("./ge
 
 const AUTH_TIMEOUT_MS = 5000;
 const MAX_SESSIONS_PER_INSTANCE = 50;
+const LIVE_SETUP_TIMEOUT_MS = 30000;
 
 function safeCloseDetail(value, maxLength = 80) {
   return Array.from(String(value || ""), character => {
@@ -100,9 +101,17 @@ function createGeminiLiveWebSocketGateway({
       }
       if (client.readyState !== 1) return release();
       let readySent = false;
+      const setupStartedAt = Date.now();
       const setupTimer = setTimeout(() => {
-        if (!readySent && client.readyState < 2) client.close(1011, "live_setup_timeout");
-      }, 10000);
+        if (!readySent && client.readyState < 2) {
+          console.warn("[Gemini Live] setup timed out", JSON.stringify({
+            elapsedMs: Date.now() - setupStartedAt,
+            upstreamReadyState: upstream?.readyState,
+            upstreamBufferedAmount: upstream?.bufferedAmount
+          }));
+          client.close(1011, "live_setup_timeout");
+        }
+      }, LIVE_SETUP_TIMEOUT_MS);
       setupTimer.unref?.();
       const sendClient = value => { if (client.readyState === 1) client.send(JSON.stringify(value)); };
       const currentUser = () => {

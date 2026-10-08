@@ -72,7 +72,7 @@ const WebSocket = require('ws');
         reject(error);
       } else resolve();
     };
-    const timer = setTimeout(() => finish(new Error('Gemini Live setup handshake timed out')), 20000);
+    const timer = setTimeout(() => finish(new Error('Gemini Live setup handshake timed out')), 45000);
     liveSocket.once('open', () => liveSocket.send(JSON.stringify({ type: 'auth', token: session.accessToken })));
     liveSocket.on('message', data => {
       let frame;
