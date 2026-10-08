@@ -146,6 +146,7 @@ class SentinelTrainingService {
   }
   settings() {
     const available = this.providers.available();
+    const evaluationAvailable = this.providers.evaluationAvailable?.() || available;
     return {
       enabled: this.autoEnabled,
       capture: this.autoCapture,
@@ -157,7 +158,7 @@ class SentinelTrainingService {
         available.includes(name),
       ),
       evaluatorProviders: this.evaluatorProviders.filter((name) =>
-        available.includes(name),
+        evaluationAvailable.includes(name),
       ),
       requiredEvaluators: this.minEvaluators,
       roleSeparation: true,
@@ -288,12 +289,12 @@ class SentinelTrainingService {
       automatic: this.settings(),
     };
   }
-  async autoEvaluateExample(example, { requestId } = {}) {
-    if (!this.autoEnabled)
+  async autoEvaluateExample(example, { requestId, force = false } = {}) {
+    if (!this.autoEnabled && force !== true)
       return { ok: false, error: "auto_training_disabled", example };
     if (example.status !== "pending")
       return { ok: true, skipped: true, example };
-    const available = this.providers.available(),
+    const available = this.providers.evaluationAvailable?.() || this.providers.available(),
       ordered = this.evaluatorProviders
         .filter(
           (name) => available.includes(name) && name !== example.provider,
@@ -346,6 +347,7 @@ class SentinelTrainingService {
           provider,
           systemPrompt,
           [{ role: "user", content: payload }],
+          { purpose: "evaluation" },
         );
         const parsed = parseEvaluation(result?.text);
         if (!parsed) throw new Error("invalid_evaluator_response");
@@ -560,3 +562,4 @@ class SentinelTrainingService {
   }
 }
 module.exports = { SentinelTrainingService, redactSensitive, parseEvaluation };
+

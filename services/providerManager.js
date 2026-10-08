@@ -54,6 +54,17 @@ class ProviderManager {
     };
     this.vertexEndpointPromise = null;
     this.models = { groq: currentGroqModel(process.env.GROQ_MODEL), openai: process.env.OPENAI_MODEL || "gpt-4o-mini", gemini: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite", anthropic: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001", vertex: process.env.SENTINEL_VERTEX_MODEL || process.env.VERTEX_MODEL || "sentinel-v3" };
+    // Evaluators use separate publisher models inside Vertex AI. They are
+    // deliberately excluded from available(), so they can never become a
+    // user-facing fallback for Sentinel V4.
+    this.vertexEvaluatorModels = [...new Set(String(process.env.SENTINEL_VERTEX_EVALUATOR_MODELS || "")
+      .split(",").map((value) => value.trim()).filter((value) => /^[A-Za-z0-9._-]+$/.test(value)))]
+      .filter((model) => model !== this.models.vertex).slice(0, 3);
+    // Evaluators may need a different Vertex location than a tuned model.
+    // Keep this explicit so a deployment cannot silently move evaluation data
+    // to a global or cross-region endpoint.
+    this.vertexEvaluatorLocation = String(process.env.SENTINEL_VERTEX_EVALUATOR_LOCATION || "").trim().toLowerCase();
+    this.vertexEvaluatorMaxOutputTokens = Math.max(128, Math.min(4096, Number(process.env.SENTINEL_VERTEX_EVALUATOR_MAX_OUTPUT_TOKENS) || 1024));
   }
   vertexConfigured() { return Boolean(this.vertex.project && (this.vertex.tuningJobId ? this.vertex.tuningJobLocation : (this.vertex.location && this.vertex.endpointId))); }
   async resolveTunedVertexEndpoint() {
@@ -84,6 +95,14 @@ class ProviderManager {
     return this.vertexEndpointPromise;
   }
   available() { return this.priority.filter((p) => p === "vertex" ? this.vertexConfigured() : Boolean(this.keys[p])); }
+  evaluatorLocation() {
+    const location = this.vertexEvaluatorLocation || this.vertex.location || this.vertex.tuningJobLocation;
+    return /^(global|[a-z0-9]+(?:-[a-z0-9]+)*)$/.test(location || "") ? location : "";
+  }
+  evaluationAvailable() {
+    const evaluatorReady = this.vertexConfigured() && Boolean(this.evaluatorLocation());
+    return [...this.available(), ...(evaluatorReady ? this.vertexEvaluatorModels.map((_, index) => `vertex_eval_${index + 1}`) : [])];
+  }
   catalog() { return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: provider === "vertex" ? this.vertexConfigured() : Boolean(this.keys[provider]), priority, streaming: provider === "vertex" || provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
   resolveModel(provider, requestedModel) {
     const configured = this.models[provider];
@@ -149,6 +168,13 @@ class ProviderManager {
     catch(error){if(error.status===429)this.cooling.set(provider,{until:Date.now()+Math.max(60000,error.retryAfterMs||60000)});throw error;}
   }
   async callAvailable(provider, systemPrompt, history, options = {}) {
+    const evaluatorIndex = /^vertex_eval_(\d+)$/.exec(String(provider || ""));
+    if (evaluatorIndex) {
+      if (options.purpose !== "evaluation") throw new Error("provider_not_available");
+      const model = this.vertexEvaluatorModels[Number(evaluatorIndex[1]) - 1];
+      if (!model || !this.vertexConfigured()) return null;
+      return this.callVertexPublisherModel(model, systemPrompt, history);
+    }
     if (provider === "vertex") {
       if (!this.vertexConfigured()) return null;
       const model = this.resolveModel(provider, options.model);
@@ -205,7 +231,9 @@ class ProviderManager {
     const { project, location, endpointId, maxOutputTokens } = this.vertex;
     const host = process.env.VERTEX_HOST
       ? (process.env.VERTEX_HOST.startsWith("http") ? process.env.VERTEX_HOST : `https://${process.env.VERTEX_HOST}`)
-      : (location === "eu" || location === "us"
+      : location === "global"
+        ? "https://aiplatform.googleapis.com"
+        : (location === "eu" || location === "us"
         ? `https://aiplatform.${location}.rep.googleapis.com`
         : `https://${location}-aiplatform.googleapis.com`);
     const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: String(m.content || "") }] }));
@@ -228,6 +256,52 @@ class ProviderManager {
       text: text || null,
       model: this.models.vertex,
       usage: usage ? { inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 } : null
+    };
+  }
+  async callVertexPublisherModel(model, systemPrompt, history) {
+    const { project } = this.vertex;
+    const location = this.evaluatorLocation();
+    if (!location) throw new Error("invalid_vertex_evaluator_location");
+    const host = process.env.VERTEX_HOST
+      ? (process.env.VERTEX_HOST.startsWith("http") ? process.env.VERTEX_HOST : `https://${process.env.VERTEX_HOST}`)
+      : location === "global"
+        ? "https://aiplatform.googleapis.com"
+        : (location === "eu" || location === "us"
+          ? `https://aiplatform.${location}.rep.googleapis.com`
+          : `https://${location}-aiplatform.googleapis.com`);
+    const resource = `projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}`;
+    const contents = history.map((message) => ({
+      role: message.role === "assistant" ? "model" : "user",
+      parts: [{ text: String(message.content || "") }]
+    }));
+    const response = await fetchProvider(async () => fetch(`${host}/v1/${resource}:generateContent`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${await this.vertexAccessToken()}`,
+        "X-Goog-User-Project": String(project)
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: String(systemPrompt || "") }] },
+        contents,
+        generationConfig: { temperature: 0, maxOutputTokens: this.vertexEvaluatorMaxOutputTokens }
+      }),
+      signal: AbortSignal.timeout(45000)
+    }));
+    const data = await response.json();
+    const text = (data.candidates?.[0]?.content?.parts || [])
+      .filter((part) => part.text && !part.thought)
+      .map((part) => part.text).join("").trim();
+    if (!text) throw new Error("empty_vertex_evaluator_response");
+    const usage = data.usageMetadata;
+    return {
+      text,
+      model: data.modelVersion || model,
+      usage: usage ? {
+        inputTokens: usage.promptTokenCount || 0,
+        outputTokens: usage.candidatesTokenCount || 0,
+        totalTokens: usage.totalTokenCount || 0
+      } : null
     };
   }
   async streamVertexTuned(systemPrompt, history, onDelta = () => {}) {
@@ -351,3 +425,4 @@ class ProviderManager {
   }
 }
 module.exports = { ProviderManager };
+
