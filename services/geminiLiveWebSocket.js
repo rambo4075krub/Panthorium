@@ -6,7 +6,10 @@ const AUTH_TIMEOUT_MS = 5000;
 const MAX_SESSIONS_PER_INSTANCE = 50;
 
 function safeCloseDetail(value, maxLength = 80) {
-  return String(value || "").replace(/[^\\x20-\\x7E]/g, " ").replace(/\\s+/g, " ").trim().slice(0, maxLength);
+  return Array.from(String(value || ""), character => {
+    const code = character.charCodeAt(0);
+    return code >= 32 && code <= 126 ? character : " ";
+  }).join("").replace(/ +/g, " ").trim().slice(0, maxLength);
 }
 
 function isAllowedOrigin(req, allowedOrigins = []) {
