@@ -42,6 +42,11 @@ async function main() {
   assert.equal(client.sent[2], responseFrame);
   client.close(1000, "done");
   assert.equal(gateway.activeSessions(), 0);
+  const deniedClient = new FakeSocket();
+  FakeWebSocketServer.instance.client = deniedClient;
+  server.emit("upgrade", { url: "/api/live", headers: { origin: "https://panthorium.test", host: "panthorium.test" } }, {}, Buffer.alloc(0));
+  deniedClient.emit("message", JSON.stringify({ type: "auth", token: "invalid" }), false);
+  assert.equal(deniedClient.closeInfo.code, 4401);
   gateway.close();
   console.log("Gemini Live WebSocket gateway tests passed");
 }
