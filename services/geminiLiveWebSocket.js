@@ -5,6 +5,10 @@ const { ALLOWED_LOCATIONS, DEFAULT_LOCATION, connectGeminiLive } = require("./ge
 const AUTH_TIMEOUT_MS = 5000;
 const MAX_SESSIONS_PER_INSTANCE = 50;
 
+function safeCloseDetail(value, maxLength = 80) {
+  return String(value || "").replace(/[^\\x20-\\x7E]/g, " ").replace(/\\s+/g, " ").trim().slice(0, maxLength);
+}
+
 function isAllowedOrigin(req, allowedOrigins = []) {
   const origin = req.headers.origin;
   if (!origin) return false;
@@ -87,7 +91,7 @@ function createGeminiLiveWebSocketGateway({
         upstream = await connectLive({ projectId, location, systemInstruction, tools });
       } catch (error) {
         console.warn("[Gemini Live] upstream connection failed", String(error?.message || error).slice(0, 160));
-        client.close(1011, "live_upstream_unavailable");
+        client.close(1011, `live_upstream_unavailable:${safeCloseDetail(error?.message)}`.slice(0, 123));
         release();
         return;
       }
@@ -214,11 +218,11 @@ function createGeminiLiveWebSocketGateway({
       upstream.once("close", (code, reason) => {
         const closeReason = Buffer.isBuffer(reason) ? reason.toString("utf8") : String(reason || "");
         console.warn("[Gemini Live] upstream closed", JSON.stringify({ code, reason: closeReason.slice(0, 240) }));
-        if (client.readyState < 2) client.close(1011, "live_upstream_closed");
+        if (client.readyState < 2) client.close(1011, `live_upstream_closed:${Number(code) || 0}:${safeCloseDetail(closeReason)}`.slice(0, 123));
       });
       upstream.once("error", error => {
         console.warn("[Gemini Live] upstream socket error", String(error?.message || error).slice(0, 240));
-        if (client.readyState < 2) client.close(1011, "live_upstream_error");
+        if (client.readyState < 2) client.close(1011, `live_upstream_error:${safeCloseDetail(error?.message)}`.slice(0, 123));
       });
     });
 
