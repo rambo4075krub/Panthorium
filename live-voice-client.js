@@ -98,6 +98,22 @@
       setStatus("กำลังฟัง Gemini Live · แตะไมค์เพื่อจบ", "listening");
       return;
     }
+    if (frame.type === "uiAction") {
+      const requestId = String(frame.requestId || "");
+      const action = String(frame.action || "");
+      Promise.resolve(window.PanthoriumVoiceCommands?.windowAction?.(action))
+        .then(result => {
+          if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "uiActionResult", requestId, result: { ok: result?.ok === true, error: result?.error || null, text: result?.text || "" } }));
+        })
+        .catch(() => {
+          if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "uiActionResult", requestId, result: { ok: false, error: "ui_action_failed" } }));
+        });
+      return;
+    }
+    if (frame.type === "toolResult") {
+      if (frame.error) console.info("Gemini Live function result", frame.toolId || "unknown", frame.error);
+      return;
+    }
     const content = frame.serverContent || frame.server_content;
     if (!content) return;
     if (content.interrupted) stopPlayback();
