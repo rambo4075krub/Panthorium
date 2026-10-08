@@ -113,7 +113,7 @@ jobs:
           IMAGE_URI="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$SERVICE_NAME:$GITHUB_SHA"
           ENV_VARS="^@^NODE_ENV=production@HOST=0.0.0.0@AI_PRIORITY=vertex@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_ACTIVE_LEARNING_NEVER=0@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex@SENTINEL_MIN_EVALUATORS=1@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@PANTHORIUM_FILES_BUCKET=$PANTHORIUM_PRODUCTION_FILES_BUCKET@BIOMETRIC_GATE_ENABLED=1"
           SERVICE_JSON="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format=json)"
-          PREVIOUS_TRAFFIC="$(python3 -c 'import json,sys; service=json.load(sys.stdin); entries=[f"{item[\"revisionName\"]}={item.get(\"percent\",0)}" for item in service.get("status",{}).get("traffic",[]) if item.get("revisionName") and item.get("percent",0)>0]; print(",".join(entries))' <<< "$SERVICE_JSON")"
+          PREVIOUS_TRAFFIC="$(python3 -c 'import json,sys; service=json.load(sys.stdin); entries=["{}={}".format(item["revisionName"],item.get("percent",0)) for item in service.get("status",{}).get("traffic",[]) if item.get("revisionName") and item.get("percent",0)>0]; print(",".join(entries))' <<< "$SERVICE_JSON")"
           if [ -z "$PREVIOUS_TRAFFIC" ]; then
             echo "::error::Could not identify the current production revision traffic; refusing to deploy."
             exit 1
@@ -162,7 +162,7 @@ jobs:
           set -euo pipefail
           SERVICE_JSON="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format=json)"
           TAG="prelive-$GITHUB_RUN_ID"
-          read -r CANDIDATE_URL CANDIDATE_REVISION PREVIOUS_TRAFFIC <<< "$(python3 -c 'import json,sys; service=json.load(sys.stdin); tag=sys.argv[1]; traffic=service.get("status",{}).get("traffic",[]); candidate=[item for item in traffic if item.get("tag")==tag]; previous=[f"{item[\"revisionName\"]}={item.get(\"percent\",0)}" for item in traffic if item.get("revisionName") and item.get("percent",0)>0 and item.get("tag")!=tag]; assert len(candidate)==1, "candidate tag is not present"; print(candidate[0].get("url",""), candidate[0].get("revisionName",""), ",".join(previous))' "$TAG" <<< "$SERVICE_JSON")"
+          read -r CANDIDATE_URL CANDIDATE_REVISION PREVIOUS_TRAFFIC <<< "$(python3 -c 'import json,sys; service=json.load(sys.stdin); tag=sys.argv[1]; traffic=service.get("status",{}).get("traffic",[]); candidate=[item for item in traffic if item.get("tag")==tag]; previous=["{}={}".format(item["revisionName"],item.get("percent",0)) for item in traffic if item.get("revisionName") and item.get("percent",0)>0 and item.get("tag")!=tag]; assert len(candidate)==1, "candidate tag is not present"; print(candidate[0].get("url",""), candidate[0].get("revisionName",""), ",".join(previous))' "$TAG" <<< "$SERVICE_JSON")"
           test -n "$CANDIDATE_URL" && test -n "$CANDIDATE_REVISION" && test -n "$PREVIOUS_TRAFFIC"
           gcloud run services update-traffic "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --to-revisions="$CANDIDATE_REVISION=100" --quiet
           if ! curl --retry 5 --retry-connrefused --retry-delay 3 --fail --silent --show-error "$CANDIDATE_URL/healthz" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True'; then
