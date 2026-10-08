@@ -210,8 +210,15 @@ function createGeminiLiveWebSocketGateway({
         }
         if (client.readyState === 1) client.send(message, { binary });
       });
-      upstream.once("close", () => { if (client.readyState < 2) client.close(1011, "live_upstream_closed"); });
-      upstream.once("error", () => { if (client.readyState < 2) client.close(1011, "live_upstream_error"); });
+      upstream.once("close", (code, reason) => {
+        const closeReason = Buffer.isBuffer(reason) ? reason.toString("utf8") : String(reason || "");
+        console.warn("[Gemini Live] upstream closed", JSON.stringify({ code, reason: closeReason.slice(0, 240) }));
+        if (client.readyState < 2) client.close(1011, "live_upstream_closed");
+      });
+      upstream.once("error", error => {
+        console.warn("[Gemini Live] upstream socket error", String(error?.message || error).slice(0, 240));
+        if (client.readyState < 2) client.close(1011, "live_upstream_error");
+      });
     });
 
   };
