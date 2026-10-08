@@ -37,6 +37,8 @@ class CloudFilesService {
       scopes: ["https://www.googleapis.com/auth/devstorage.read_write"]
     }).getClient());
     this.clientPromise = null;
+    this.probeAt = 0;
+    this.probeResult = null;
   }
 
   ownerPrefix(userId) {
@@ -87,6 +89,22 @@ class CloudFilesService {
       size: Math.max(0, Number(item.size) || 0),
       updatedAt: item.updated || item.timeCreated || null
     };
+  }
+
+  async probe({ force = false } = {}) {
+    if (!force && this.probeResult && Date.now() - this.probeAt < 30000) return { ...this.probeResult };
+    try {
+      await this.request({
+        url: this.objectsUrl(),
+        method: "GET",
+        params: { prefix: "__panthorium_healthcheck__/", maxResults: 1, fields: "items(name)" }
+      });
+      this.probeResult = { ok: true };
+    } catch (error) {
+      this.probeResult = { ok: false, reason: error.code || "files_storage_unavailable" };
+    }
+    this.probeAt = Date.now();
+    return { ...this.probeResult };
   }
 
   async listAll(userId) {
