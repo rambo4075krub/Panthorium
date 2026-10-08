@@ -31,13 +31,15 @@ async function main() {
   client.emit("message", JSON.stringify({ type: "auth", token: "valid" }), false);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(gateway.activeSessions(), 1);
-  assert.deepEqual(JSON.parse(client.sent[0]), { type: "ready" });
+  upstream.emit("message", JSON.stringify({ setupComplete: {} }), false);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(JSON.parse(client.sent[0]).type, "ready");
   const audioFrame = JSON.stringify({ realtimeInput: { text: "hello" } });
   client.emit("message", audioFrame, false);
   assert.equal(upstream.sent[0], audioFrame);
   const responseFrame = JSON.stringify({ serverContent: { turnComplete: true } });
   upstream.emit("message", responseFrame, false);
-  assert.equal(client.sent[1], responseFrame);
+  assert.equal(client.sent[2], responseFrame);
   client.close(1000, "done");
   assert.equal(gateway.activeSessions(), 0);
   gateway.close();
