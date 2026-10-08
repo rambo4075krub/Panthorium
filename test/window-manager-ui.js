@@ -32,10 +32,13 @@ async function main() {
   const fullscreenCss = shell.slice(fullscreenCssStart, fullscreenCssEnd);
   const maximizedRule = /\.window\.maximized\s*\{([\s\S]*?)\n\s*\}/.exec(shell)?.[1] || '';
   assert.match(maximizedRule, /box-sizing:\s*border-box/, 'fullscreen windows keep safe-area padding inside the viewport');
-  assert.match(maximizedRule, /padding:\s*var\(--panthorium-safe-area-top\)\s+0px\s+0px\s+0px/, 'native and web windows keep the top safe area while filling the other edges');
+  assert.match(maximizedRule, /padding:\s*var\(--panthorium-safe-area-top\)/, 'native and web windows keep the top safe area');
   const managedFullscreenRule = /\.panthorium-managed-window\.panthorium-window-fullscreen\s*\{([\s\S]*?)\n\s*\}/.exec(shell)?.[1] || '';
-  assert.match(managedFullscreenRule, /padding:\s*var\(--panthorium-safe-area-top\)\s+0px\s+0px\s+0px/, 'every catalog window keeps the top safe area while filling the other edges');
+  assert.match(managedFullscreenRule, /padding:\s*var\(--panthorium-safe-area-top\)/, 'every catalog window keeps the top safe area');
   assert.match(shell, /--panthorium-safe-area-top:\s*max\(env\(safe-area-inset-top,\s*0px\),\s*var\(--panthorium-native-safe-area-top,\s*0px\)\)/, 'fullscreen content uses browser and native safe-area values');
+  assert.match(shell, /--panthorium-shell-dock-clearance:\s*calc\(var\(--taskbar-h\) \+ env\(safe-area-inset-bottom,\s*0px\) \+ 8px\)/, 'fullscreen windows reserve the system dock and bottom inset');
+  assert.match(fullscreenCss, /@media \(max-width: 760px\) and \(orientation: portrait\)[\s\S]*\.window\.maximized, \.panthorium-managed-window\.panthorium-window-fullscreen\s*\{\s*padding:\s*var\(--panthorium-safe-area-top\) 0px var\(--panthorium-shell-dock-clearance\) 0px/, 'portrait fullscreen windows clear the bottom dock');
+  assert.match(fullscreenCss, /@media \(orientation: landscape\)[\s\S]*padding:\s*var\(--panthorium-safe-area-top\) 0px var\(--panthorium-shell-dock-clearance\) 0px/, 'landscape fullscreen windows clear the bottom dock');
   assert.match(fullscreenCss, /@media \(orientation:\s*landscape\)[\s\S]*padding:\s*var\(--panthorium-safe-area-top\)/, 'landscape fullscreen keeps the top safe area');
   assert.match(fullscreenCss, /data-window-landscape-edge-to-edge="false"[\s\S]*padding:\s*var\(--panthorium-safe-area-top\)/, 'landscape preference cannot remove the top safe area');
   assert.doesNotMatch(shell, /html\[data-panthorium-immersive="true"\][^{}]*\.panthorium-window-fullscreen[^{}]*\{[^}]*padding:\s*0\s*!important/i, 'immersive state cannot erase safe-area padding from function windows');
@@ -53,7 +56,9 @@ async function main() {
   assert.match(shell, /@media \(max-height: 540px\) and \(orientation: landscape\)/, 'admin login is compact and scrollable on short landscape screens');
   const voiceIdentity = fs.readFileSync(require.resolve('../voice-identity-ui.js'), 'utf8');
   assert.match(voiceIdentity, /box-sizing:border-box;position:fixed;inset:0;max-width:100vw/, 'voice registration can reach the left edge');
-  assert.match(voiceIdentity, /inset:0!important;padding:clamp\(10px,3vw,16px\)/, 'voice registration fills the phone viewport');
+  assert.match(voiceIdentity, /inset:0!important;padding:calc\(var\(--panthorium-safe-area-top,0px\)/, 'voice registration preserves the top device safe area');
+  assert.match(voiceIdentity, /var\(--panthorium-shell-dock-clearance,56px\)/, 'voice registration reserves the bottom system dock');
+  assert.match(voiceIdentity, /overflow-y:auto!important/, 'voice registration remains scrollable after safe-area padding');
   assert.match(voiceIdentity, /@media\(max-width:760px\)/, 'voice registration and login switch to a single column on phones');
 
   window.PanthoriumWindowManager = manager;
