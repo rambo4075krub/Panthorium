@@ -169,7 +169,7 @@
     try { if (await phase2EnsureAuth()) activateDesktop(); else hidePublicLoginScreen(); }
     catch (error) { hidePublicLoginScreen(); console.error('[Phase2 Auth] guest entry failed', error); }
   }
-  window.PanthoriumAuth = { ensureSession: phase2EnsureAuth, login, acceptSession, savePassword, logout, refreshSession, guestSession, fetchIdentity, rememberVoiceDevice, rememberedDeviceKey, hasPermission, isAdministrator, isGuest, isAdminEntry };
+  window.PanthoriumAuth = { ensureSession: phase2EnsureAuth, getAccessToken: () => OS.config.accessToken, getBackendUrl: () => OS.config.backendUrl, login, acceptSession, savePassword, logout, refreshSession, guestSession, fetchIdentity, rememberVoiceDevice, rememberedDeviceKey, hasPermission, isAdministrator, isGuest, isAdminEntry };
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && isGuest() && !rememberedDeviceKey()) {
       try { const entry = JSON.parse(window.sessionStorage.getItem(GUEST_SESSION_KEY)); if (Date.now() - entry.createdAt >= GUEST_LIFETIME_MS) guestSession().catch(error => console.error('[Phase2 Auth] guest expiry', error)); } catch (_) {}
