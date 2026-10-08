@@ -150,7 +150,7 @@
       if (!serverReady || socket?.readyState !== WebSocket.OPEN) return;
       const samples = downsample(event.inputBuffer.getChannelData(0), audioContext.sampleRate);
       if (!samples.length) return;
-      socket.send(JSON.stringify({ realtimeInput: { mediaChunks: [{ mimeType: "audio/pcm;rate=16000", data: pcm16Base64(samples) }] } }));
+      socket.send(JSON.stringify({ realtimeInput: { audio: { mimeType: "audio/pcm;rate=16000", data: pcm16Base64(samples) } } }));
     };
     source.connect(processor);
     processor.connect(mutedOutput);
