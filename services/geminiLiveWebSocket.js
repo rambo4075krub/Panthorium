@@ -188,6 +188,7 @@ function createGeminiLiveWebSocketGateway({
         let frame = null;
         if (!binary) {
           try { frame = JSON.parse(String(message)); } catch (_) {}
+          if (frame?.error) console.warn("[Gemini Live] upstream message error", JSON.stringify(frame.error).slice(0, 500));
           if (!readySent && (frame?.setupComplete || frame?.setup_complete)) {
             readySent = true;
             clearTimeout(setupTimer);
