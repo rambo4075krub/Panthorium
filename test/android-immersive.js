@@ -38,7 +38,9 @@ try {
   assert.match(java, /--panthorium-native-safe-area-top/, 'native system insets are exposed to fullscreen window CSS');
   assert.match(java, /return insets;/, 'unmodified system and display-cutout insets reach the WebView');
   assert.doesNotMatch(java, /setInsets\(types, Insets\.NONE\)/, 'native code no longer clears safe-area insets before WebView');
-  assert.match(java, /SYSTEM_UI_FLAG_IMMERSIVE_STICKY/, 'older Android releases use sticky immersive mode');
+  assert.match(java, /WindowCompat\.setDecorFitsSystemWindows\(window, false\)/, 'Android uses edge-to-edge window compatibility APIs');
+  assert.match(java, /WindowInsetsControllerCompat\.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE/, 'system bars remain temporarily revealable by swipe');
+  assert.match(java, /controller\.hide\(WindowInsetsCompat\.Type\.statusBars\(\) \| WindowInsetsCompat\.Type\.navigationBars\(\)\)/, 'both system bars are hidden through AndroidX compatibility APIs');
   const first = java.match(/PANTHORIUM_IMMERSIVE_MODE/g).length;
   run();
   java = fs.readFileSync(javaPath, 'utf8');

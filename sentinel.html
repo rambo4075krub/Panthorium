@@ -26,6 +26,7 @@
             --taskbar-h: 48px;
             --panthorium-native-safe-area-top: 0px;
             --panthorium-safe-area-top: max(env(safe-area-inset-top, 0px), var(--panthorium-native-safe-area-top, 0px));
+            --panthorium-shell-dock-clearance: calc(var(--taskbar-h) + env(safe-area-inset-bottom, 0px) + 8px);
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -505,19 +506,18 @@
             cursor: pointer; touch-action: manipulation;
         }
         .panthorium-window-control:hover,.panthorium-window-control:focus-visible { border-color: #00d9b7; outline: none; }
-        @media (max-width: 760px) and (orientation: portrait) {
-            .window.maximized { padding: var(--panthorium-safe-area-top) 0px 0px 0px !important; }
-            .panthorium-managed-window.panthorium-window-fullscreen {
-                padding-top: var(--panthorium-safe-area-top) !important;
+        @media (orientation: portrait) {
+            .window.maximized, .panthorium-managed-window.panthorium-window-fullscreen {
+                padding: var(--panthorium-safe-area-top) 0px var(--panthorium-shell-dock-clearance) 0px !important;
             }
         }
         @media (orientation: landscape) {
             .window.maximized, .panthorium-managed-window.panthorium-window-fullscreen {
-                padding: var(--panthorium-safe-area-top) 0px 0px 0px !important;
+                padding: var(--panthorium-safe-area-top) 0px var(--panthorium-shell-dock-clearance) 0px !important;
             }
             html[data-window-landscape-edge-to-edge="false"] .window.maximized,
             html[data-window-landscape-edge-to-edge="false"] .panthorium-managed-window.panthorium-window-fullscreen {
-                padding: var(--panthorium-safe-area-top) 0px 0px 0px !important;
+                padding: var(--panthorium-safe-area-top) 0px var(--panthorium-shell-dock-clearance) 0px !important;
             }
         }
         .window-titlebar {
