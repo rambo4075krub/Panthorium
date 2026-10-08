@@ -1,6 +1,6 @@
 const { URL } = require("node:url");
 const { randomUUID } = require("node:crypto");
-const { ALLOWED_LOCATIONS, connectGeminiLive } = require("./geminiLiveVertex");
+const { ALLOWED_LOCATIONS, DEFAULT_LOCATION, connectGeminiLive } = require("./geminiLiveVertex");
 
 const AUTH_TIMEOUT_MS = 5000;
 const MAX_SESSIONS_PER_INSTANCE = 50;
@@ -26,7 +26,7 @@ function createGeminiLiveWebSocketGateway({
   WebSocketServerImpl,
   connectLive = connectGeminiLive,
   projectId,
-  location = process.env.GEMINI_LIVE_LOCATION || "global",
+  location = process.env.GEMINI_LIVE_LOCATION || DEFAULT_LOCATION,
   maxSessions = MAX_SESSIONS_PER_INSTANCE,
   functionCalling = null,
   systemInstruction = "You are Sentinel, Panthorium's voice assistant. Speak naturally in Thai unless the user asks for another language. Use only the functions supplied for this session. Do not claim that an action succeeded unless its function response confirms success."
