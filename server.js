@@ -78,6 +78,7 @@ const { BiometricIdentityService } = require("./services/biometricIdentityServic
 const { createEmailOtpRepository } = require("./services/emailOtpRepository");
 const { EmailOtpService } = require("./services/emailOtpService");
 const { requestContext } = require("./middleware/requestContext");
+const { createGeminiLiveWebSocketGateway } = require("./services/geminiLiveWebSocket");
 
 const app = express();
 if (config.trustProxy) app.set("trust proxy", 1);
@@ -385,6 +386,9 @@ async function start() {
   await autonomousGovernance.init();
   await sentinelOrchestrator.init();
 
+  const liveGateway = process.env.GEMINI_LIVE_ENABLED === "1"
+    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "eu" })
+    : null;
   const server = app.listen(config.port, config.host, () => {
     console.log("========================================");
     console.log("  Panthorium OS Backend · Phase 15 Single Sentinel");
@@ -399,11 +403,16 @@ async function start() {
     console.log(`  http://localhost:${config.port}`);
     console.log("========================================");
   });
+  if (liveGateway) {
+    liveGateway.attach(server);
+    console.log("  Gemini Live WebSocket enabled · " + (process.env.GEMINI_LIVE_LOCATION || "eu"));
+  }
   agentScheduler.start();
   sentinelTraining.start();
   autonomousGovernance.start();
   sentinelOrchestrator.start();
   server.on('close', stopBackgroundWorkers);
+  if (liveGateway) server.on('close', () => liveGateway.close());
   return server;
 }
 
