@@ -1,8 +1,9 @@
 const MODEL_ID = "gemini-3.8-live";
-const ALLOWED_LOCATIONS = new Set(["eu", "us", "us-central1"]);
+const DEFAULT_LOCATION = "us-central1";
+const ALLOWED_LOCATIONS = new Set([DEFAULT_LOCATION]);
 const CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
 
-function resolveLiveTarget({ projectId, location = "eu" } = {}) {
+function resolveLiveTarget({ projectId, location = DEFAULT_LOCATION } = {}) {
   const resolvedProjectId = String(projectId || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || "").trim();
   const resolvedLocation = String(location || "").trim();
   if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(resolvedProjectId)) {
@@ -17,13 +18,14 @@ function resolveLiveTarget({ projectId, location = "eu" } = {}) {
   };
 }
 
-function createSetupMessage({ model, systemInstruction = "" } = {}) {
+function createSetupMessage({ model, systemInstruction = "", tools = [] } = {}) {
   const setup = {
     model,
     generation_config: {
-      response_modalities: ["audio", "text"]
+      response_modalities: ["audio"]
     }
   };
+  if (Array.isArray(tools) && tools.length) setup.tools = [{ function_declarations: tools }];
   const instruction = String(systemInstruction || "").trim();
   if (instruction) setup.system_instruction = { parts: [{ text: instruction }] };
   return { setup };
@@ -43,8 +45,9 @@ async function getVertexAccessToken(authClient) {
 
 async function connectGeminiLive({
   projectId,
-  location = process.env.GEMINI_LIVE_LOCATION || "eu",
+  location = process.env.GEMINI_LIVE_LOCATION || DEFAULT_LOCATION,
   systemInstruction,
+  tools = [],
   authClient,
   WebSocketImpl,
   handshakeTimeoutMs = 10000
@@ -83,7 +86,7 @@ async function connectGeminiLive({
       // its relay handler yet.
       socket.on("error", () => {});
       cleanup();
-      socket.send(JSON.stringify(createSetupMessage({ model: target.model, systemInstruction })), error => {
+      socket.send(JSON.stringify(createSetupMessage({ model: target.model, systemInstruction, tools })), error => {
         if (error) socket.close(1011, "setup_failed");
       });
       resolve(socket);
@@ -101,9 +104,11 @@ async function connectGeminiLive({
 
 module.exports = {
   MODEL_ID,
+  DEFAULT_LOCATION,
   ALLOWED_LOCATIONS,
   resolveLiveTarget,
   createSetupMessage,
   getVertexAccessToken,
   connectGeminiLive
 };
+

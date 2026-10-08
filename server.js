@@ -387,7 +387,7 @@ async function start() {
   await sentinelOrchestrator.init();
 
   const liveGateway = process.env.GEMINI_LIVE_ENABLED === "1"
-    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "eu" })
+    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "us-central1" })
     : null;
   const server = app.listen(config.port, config.host, () => {
     console.log("========================================");
@@ -405,7 +405,7 @@ async function start() {
   });
   if (liveGateway) {
     liveGateway.attach(server);
-    console.log("  Gemini Live WebSocket enabled · " + (process.env.GEMINI_LIVE_LOCATION || "eu"));
+    console.log("  Gemini Live WebSocket enabled · " + (process.env.GEMINI_LIVE_LOCATION || "us-central1"));
   }
   agentScheduler.start();
   sentinelTraining.start();

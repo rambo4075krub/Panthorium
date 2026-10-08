@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const {
   MODEL_ID,
+  DEFAULT_LOCATION,
   resolveLiveTarget,
   createSetupMessage,
   getVertexAccessToken,
@@ -10,19 +11,23 @@ const {
 
 async function main() {
   assert.equal(MODEL_ID, "gemini-3.8-live");
-  assert.deepEqual(resolveLiveTarget({ projectId: "panthorium-staging", location: "eu" }), {
-    model: "projects/panthorium-staging/locations/eu/publishers/google/models/gemini-3.8-live",
-    url: "wss://eu-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent"
+  assert.equal(DEFAULT_LOCATION, "us-central1");
+  assert.deepEqual(resolveLiveTarget({ projectId: "panthorium-staging" }), {
+    model: "projects/panthorium-staging/locations/us-central1/publishers/google/models/gemini-3.8-live",
+    url: "wss://us-central1-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent"
   });
+  assert.throws(() => resolveLiveTarget({ projectId: "panthorium-staging", location: "eu" }), /location_unsupported/);
   assert.throws(() => resolveLiveTarget({ projectId: "panthorium-staging", location: "asia-southeast1" }), /location_unsupported/);
-  assert.throws(() => resolveLiveTarget({ projectId: "", location: "eu" }), /project_id_required/);
-  assert.deepEqual(createSetupMessage({ model: "projects/demo/locations/eu/publishers/google/models/gemini-3.8-live", systemInstruction: "ตอบภาษาไทย" }), {
+  assert.throws(() => resolveLiveTarget({ projectId: "", location: "us-central1" }), /project_id_required/);
+  assert.deepEqual(createSetupMessage({ model: "projects/demo/locations/us-central1/publishers/google/models/gemini-3.8-live", systemInstruction: "ตอบภาษาไทย" }), {
     setup: {
-      model: "projects/demo/locations/eu/publishers/google/models/gemini-3.8-live",
-      generation_config: { response_modalities: ["audio", "text"] },
+      model: "projects/demo/locations/us-central1/publishers/google/models/gemini-3.8-live",
+      generation_config: { response_modalities: ["audio"] },
       system_instruction: { parts: [{ text: "ตอบภาษาไทย" }] }
     }
   });
+  const tools = [{ name: "panthorium_ai_providers", description: "List providers", parameters: { type: "OBJECT", properties: {} } }];
+  assert.deepEqual(createSetupMessage({ model: "projects/demo/locations/us-central1/publishers/google/models/gemini-3.8-live", tools }).setup.tools, [{ function_declarations: tools }]);
   assert.equal(await getVertexAccessToken({ getAccessToken: async () => ({ token: "adc-token" }) }), "adc-token");
   await assert.rejects(() => getVertexAccessToken({ getAccessToken: async () => ({}) }), /auth_unavailable/);
 
@@ -39,13 +44,16 @@ async function main() {
   }
   const socket = await connectGeminiLive({
     projectId: "panthorium-staging",
-    location: "eu",
+    location: "us-central1",
     systemInstruction: "Sentinel",
+    tools,
     authClient: { getAccessToken: async () => ({ token: "adc-token" }) },
     WebSocketImpl: FakeWebSocket
   });
   assert.equal(socket.options.headers.Authorization, "Bearer adc-token");
-  assert.deepEqual(JSON.parse(socket.sent[0]).setup.generation_config.response_modalities, ["audio", "text"]);
+  assert.equal(socket.url, "wss://us-central1-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent");
+  assert.deepEqual(JSON.parse(socket.sent[0]).setup.generation_config.response_modalities, ["audio"]);
+  assert.deepEqual(JSON.parse(socket.sent[0]).setup.tools, [{ function_declarations: tools }]);
   console.log("Gemini Live Vertex adapter tests passed");
 }
 

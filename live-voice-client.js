@@ -98,6 +98,22 @@
       setStatus("กำลังฟัง Gemini Live · แตะไมค์เพื่อจบ", "listening");
       return;
     }
+    if (frame.type === "uiAction") {
+      const requestId = String(frame.requestId || "");
+      const action = String(frame.action || "");
+      Promise.resolve(window.PanthoriumVoiceCommands?.windowAction?.(action))
+        .then(result => {
+          if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "uiActionResult", requestId, result: { ok: result?.ok === true, error: result?.error || null, text: result?.text || "" } }));
+        })
+        .catch(() => {
+          if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "uiActionResult", requestId, result: { ok: false, error: "ui_action_failed" } }));
+        });
+      return;
+    }
+    if (frame.type === "toolResult") {
+      if (frame.error) console.info("Gemini Live function result", frame.toolId || "unknown", frame.error);
+      return;
+    }
     const content = frame.serverContent || frame.server_content;
     if (!content) return;
     if (content.interrupted) stopPlayback();
@@ -119,10 +135,11 @@
     await audioContext.resume();
     microphone = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     socket = new WebSocket(backendWebSocketUrl());
+    socket.binaryType = "arraybuffer";
     setStatus("กำลังเชื่อม Gemini Live", "processing");
 
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("เชื่อม Gemini Live ไม่สำเร็จ")), 12000);
+      const timeout = setTimeout(() => reject(new Error("เชื่อม Gemini Live ไม่สำเร็จ")), 45000);
       socket.onopen = () => socket.send(JSON.stringify({ type: "auth", token }));
       socket.onerror = () => { clearTimeout(timeout); reject(new Error("เชื่อม Gemini Live ไม่สำเร็จ")); };
       socket.onclose = event => {
@@ -132,7 +149,10 @@
       };
       socket.onmessage = event => {
         let frame;
-        try { frame = JSON.parse(event.data); } catch (_) { return; }
+        try {
+          const json = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data);
+          frame = JSON.parse(json);
+        } catch (_) { return; }
         if (frame.type === "ready") { clearTimeout(timeout); serverReady = true; resolve(); }
         handleModelFrame(frame);
         if (frame.error) {
@@ -169,19 +189,17 @@
     setStatus("กดไมค์เพื่อเริ่มเสียงสด");
   }
 
-  const waitForVoiceButton = () => {
-    if (!button.dataset.ready || typeof button.onclick !== "function") {
-      setTimeout(waitForVoiceButton, 100);
-      return;
-    }
-    button.onclick = async () => {
-      if (starting) return;
-      if (socket && socket.readyState < WebSocket.CLOSING) { cleanup(); return; }
-      starting = true;
-      try { await openLiveSession(); }
-      catch (error) { console.warn("Gemini Live voice session failed", error); cleanup(); setStatus(error.message || "เชื่อมเสียงสดไม่สำเร็จ"); }
-      finally { starting = false; }
-    };
-  };
-  waitForVoiceButton();
+  // Intercept the global voice button during capture so the legacy
+  // Sentinel transcription onclick cannot consume the click first.
+  button.addEventListener("click", async event => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (starting) return;
+    if (socket && socket.readyState < WebSocket.CLOSING) { cleanup(); return; }
+    starting = true;
+    try { await openLiveSession(); }
+    catch (error) { console.warn("Gemini Live voice session failed", error); cleanup(); setStatus(error.message || "เชื่อมเสียงสดไม่สำเร็จ"); }
+    finally { starting = false; }
+  }, true);
 })();
+
