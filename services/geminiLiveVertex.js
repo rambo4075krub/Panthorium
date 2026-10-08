@@ -49,8 +49,18 @@ async function connectGeminiLive({
   WebSocketImpl,
   handshakeTimeoutMs = 10000
 } = {}) {
-  const target = resolveLiveTarget({ projectId, location });
-  const token = await getVertexAccessToken(authClient);
+  let client = authClient;
+  let resolvedProjectId = projectId || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
+  if (!client) {
+    const { GoogleAuth } = require("google-auth-library");
+    const auth = new GoogleAuth({ scopes: [CLOUD_PLATFORM_SCOPE] });
+    client = await auth.getClient();
+    if (!resolvedProjectId) resolvedProjectId = await auth.getProjectId();
+  } else if (!resolvedProjectId && typeof client.getProjectId === "function") {
+    resolvedProjectId = await client.getProjectId();
+  }
+  const target = resolveLiveTarget({ projectId: resolvedProjectId, location });
+  const token = await getVertexAccessToken(client);
   const Socket = WebSocketImpl || require("ws");
   const socket = new Socket(target.url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -68,6 +78,10 @@ async function connectGeminiLive({
     const onOpen = () => {
       if (settled) return;
       settled = true;
+      // Keep an error listener after the handshake so a network error cannot
+      // become an unhandled EventEmitter error if the caller has not attached
+      // its relay handler yet.
+      socket.on("error", () => {});
       cleanup();
       socket.send(JSON.stringify(createSetupMessage({ model: target.model, systemInstruction })), error => {
         if (error) socket.close(1011, "setup_failed");
