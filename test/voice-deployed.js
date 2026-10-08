@@ -78,7 +78,10 @@ const WebSocket = require('ws');
       let frame;
       try { frame = JSON.parse(String(data)); } catch { return; }
       if (frame.type === 'ready') finish();
-      else if (frame.error) finish(new Error(`Gemini Live rejected setup: ${String(frame.error).slice(0, 120)}`));
+      else if (frame.error || frame.type === 'error') {
+        const detail = JSON.stringify(frame.error || frame).slice(0, 400);
+        finish(new Error(`Gemini Live rejected setup: ${detail}`));
+      }
     });
     liveSocket.once('error', error => finish(new Error(`Gemini Live WebSocket failed: ${String(error?.message || error).slice(0, 160)}`)));
     liveSocket.once('close', (code, reason) => finish(new Error(`Gemini Live closed before ready (${code}: ${String(reason).slice(0, 120)})`)));
