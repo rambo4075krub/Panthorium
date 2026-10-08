@@ -113,7 +113,7 @@ def handler_class(encoder):
             self.wfile.write(body)
 
         def do_GET(self):
-            if self.path == "/healthz":
+            if self.path == "/health":
                 self.respond(200, {"ok": True, "modelReady": encoder is not None})
             else:
                 self.respond(404, {"error": "not_found"})
