@@ -71,6 +71,16 @@ async function main() {
   assert.deepEqual(JSON.parse(upstream.sent.at(-1)).tool_response.function_responses[0].response.output, { ok: true, action: 'open_calculator', text: 'เปิดเครื่องคิดเลข' });
   client.close(1000, "done");
   assert.equal(gateway.activeSessions(), 0);
+
+  const failedClient = new FakeSocket();
+  FakeWebSocketServer.instance.client = failedClient;
+  server.emit("upgrade", { url: "/api/live", headers: { origin: "https://panthorium.test", host: "panthorium.test" } }, {}, Buffer.alloc(0));
+  failedClient.emit("message", JSON.stringify({ type: "auth", token: "valid" }), false);
+  await new Promise(resolve => setImmediate(resolve));
+  upstream.emit("close", 1008, Buffer.from("model/location rejected"));
+  assert.equal(failedClient.closeInfo.code, 1011);
+  assert.equal(failedClient.closeInfo.reason, "live_upstream_closed:1008:model/location rejected");
+  assert.equal(gateway.activeSessions(), 0);
   const deniedClient = new FakeSocket();
   FakeWebSocketServer.instance.client = deniedClient;
   server.emit("upgrade", { url: "/api/live", headers: { origin: "https://panthorium.test", host: "panthorium.test" } }, {}, Buffer.alloc(0));
