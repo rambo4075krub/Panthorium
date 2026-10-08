@@ -17,13 +17,14 @@ function resolveLiveTarget({ projectId, location = "eu" } = {}) {
   };
 }
 
-function createSetupMessage({ model, systemInstruction = "" } = {}) {
+function createSetupMessage({ model, systemInstruction = "", tools = [] } = {}) {
   const setup = {
     model,
     generation_config: {
       response_modalities: ["audio", "text"]
     }
   };
+  if (Array.isArray(tools) && tools.length) setup.tools = [{ function_declarations: tools }];
   const instruction = String(systemInstruction || "").trim();
   if (instruction) setup.system_instruction = { parts: [{ text: instruction }] };
   return { setup };
@@ -45,6 +46,7 @@ async function connectGeminiLive({
   projectId,
   location = process.env.GEMINI_LIVE_LOCATION || "eu",
   systemInstruction,
+  tools = [],
   authClient,
   WebSocketImpl,
   handshakeTimeoutMs = 10000
@@ -83,7 +85,7 @@ async function connectGeminiLive({
       // its relay handler yet.
       socket.on("error", () => {});
       cleanup();
-      socket.send(JSON.stringify(createSetupMessage({ model: target.model, systemInstruction })), error => {
+      socket.send(JSON.stringify(createSetupMessage({ model: target.model, systemInstruction, tools })), error => {
         if (error) socket.close(1011, "setup_failed");
       });
       resolve(socket);

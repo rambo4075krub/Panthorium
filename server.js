@@ -46,6 +46,7 @@ const { CloudNotesRepository } = require("./services/cloudNotesRepository");
 const { AgentKnowledgeRepository } = require("./services/agentKnowledgeRepository");
 const { AgentKnowledgeService } = require("./services/agentKnowledgeService");
 const { AgentPolicyService } = require("./services/agentPolicyService");
+const { AgentFunctionCallingService } = require("./services/agentFunctionCallingService");
 const { MultiAgentRunRepository } = require("./services/multiAgentRunRepository");
 const { MultiAgentPlannerService } = require("./services/multiAgentPlannerService");
 const { MultiAgentOrchestrator } = require("./services/multiAgentOrchestrator");
@@ -137,6 +138,7 @@ const sentinelLearning = new SentinelLearningOrchestrator({ repository: sentinel
 const sentinelTraining = new SentinelTrainingService({ repository: sentinelTrainingRepository, providers: sentinel.providers, audit, learning: sentinelLearning, autoEnabled: config.sentinelAutoTraining, autoCapture: config.sentinelAutoCapture, autoScoreThreshold: config.sentinelAutoScoreThreshold, autoIntervalMs: config.sentinelAutoIntervalMs, teacherProviders: config.sentinelTeacherProviders, evaluatorProviders: config.sentinelEvaluatorProviders, minEvaluators: config.sentinelMinEvaluators });
 toolRegistry.register({ id: 'training.status', description: 'Read Sentinel Learning Lab status', permission: 'settings', risk: 'low', mutates: false, argsSchema: {}, run: async () => sentinelTraining.list({ limit: 1 }) });
 toolRegistry.register({ id: 'learning_lab.open', description: 'Open the Learning Lab in the admin interface', permission: 'settings', risk: 'low', mutates: false, argsSchema: {}, run: async () => ({ ok: true, uiAction: 'open_learning_lab' }) });
+const agentFunctionCalling = new AgentFunctionCallingService({ agentService, audit });
 const sentinelRecovery = new SentinelRecoveryService({ learning: sentinelLearning, training: sentinelTraining, trainingRepository: sentinelTrainingRepository, providers: sentinel.providers, audit, maxAttempts: Number(process.env.SENTINEL_AUTONOMOUS_RECOVERY_MAX_ATTEMPTS || 3) });
 const sentinelBenchmark = new SentinelBenchmarkService({ sentinel, providers: sentinel.providers, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const { SentinelShadowEvaluator } = require('./services/sentinelShadowEvaluator');
@@ -194,7 +196,7 @@ app.use("/api/agent/knowledge", createKnowledgeRouter(authService, agentKnowledg
 app.use("/api/agent/orchestration", createOrchestrationRouter(authService, multiAgent));
 app.use("/api/integrations", createIntegrationsRouter(authService, integrations));
 app.use("/api/production", createProductionRouter(authService, productionIntelligence));
-app.use("/api", createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler, biometrics));
+app.use("/api", createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler, biometrics, agentFunctionCalling));
 
 const frontendCandidates = [path.join(__dirname, ".."), __dirname];
 const frontendRoot = frontendCandidates.find((directory) => fs.existsSync(path.join(directory, "sentinel.html"))) || __dirname;
@@ -387,7 +389,7 @@ async function start() {
   await sentinelOrchestrator.init();
 
   const liveGateway = process.env.GEMINI_LIVE_ENABLED === "1"
-    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "eu" })
+    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "eu", functionCalling: agentFunctionCalling })
     : null;
   const server = app.listen(config.port, config.host, () => {
     console.log("========================================");
@@ -449,4 +451,4 @@ if (require.main === module) {
   }).catch((error) => { console.error("[BOOT]", error); process.exit(1); });
 }
 
-module.exports = { app, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
+module.exports = { app, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };

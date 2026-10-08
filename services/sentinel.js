@@ -49,7 +49,7 @@ class Sentinel {
     else this.sessions.append(localId, { role: "assistant", content: result.text });
   }
   captureTraining({message,result,userId,sessionId}) {
-    if(!result?.ok||!result.text||!this.training?.captureConversation)return;
+    if(!result?.ok||!result.text||result.functionCallCount||!this.training?.captureConversation)return;
     setImmediate(()=>this.training.captureConversation({prompt:String(message).trim(),answer:result.text,provider:result.provider,model:result.model,userId,sessionId}).catch(error=>this.audit?.record('sentinel.training_capture_failed',{userId,sessionId,error:error.message})));
   }
   async profilePreferencesFor(userId, sessionId) {
@@ -120,14 +120,57 @@ class Sentinel {
     const systemPrompt=this.prompts.build('default')+currentTimeContext()+(this.prompts.productContext?.()||'')+context+candidate+reflection+this.voiceLanguageGuard();
     return this.normalizeVoiceAnswer(await this.gateway.complete({systemPrompt,history:[{role:'user',content:message}],userId,sessionId}));
   }
-  async chat({ sessionId, userId = "system", message, mode = "default", provider, model, voiceMode = false }) {
+  async completeWithFunctionCalls({ systemPrompt, history, preferredProvider, preferredModel, userId, sessionId, user, functionCalling, requestId }) {
+    const selectedProvider = preferredProvider || this.gateway.orderedProviders?.()[0];
+    const declarations = selectedProvider === 'vertex' ? functionCalling?.declarationsFor(user) || [] : [];
+    if (!declarations.length) return this.gateway.complete({ systemPrompt, history, preferredProvider, preferredModel, userId, sessionId });
+    let currentHistory = history.slice();
+    let toolResults = [];
+    let totalUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    let functionCallCount = 0;
+    let result = null;
+    for (let round = 0; round < 4; round += 1) {
+      result = await this.gateway.complete({ systemPrompt, history: currentHistory, preferredProvider: 'vertex', preferredModel, userId, sessionId, tools: declarations });
+      if (result.usage) {
+        totalUsage.inputTokens += Number(result.usage.inputTokens) || 0;
+        totalUsage.outputTokens += Number(result.usage.outputTokens) || 0;
+        totalUsage.totalTokens += Number(result.usage.totalTokens) || 0;
+      }
+      if (!result.ok || !result.functionCalls?.length) break;
+      if (round === 3) {
+        result = { ...result, ok: false, error: 'function_call_round_limit', text: 'Sentinel: ใช้ขั้นตอนเชื่อมต่อฟังก์ชันครบขีดจำกัด กรุณาลองแยกคำสั่ง' };
+        break;
+      }
+      const functionResponses = [];
+      for (const call of result.functionCalls) {
+        functionCallCount += 1;
+        if (functionCallCount > 5) {
+          functionResponses.push({ functionResponse: { name: String(call.name || 'unknown_function'), ...(call.id ? { id: call.id } : {}), response: { error: 'function_call_limit_reached' } } });
+          continue;
+        }
+        const execution = await functionCalling.execute({ user, call, requestId, source: 'sentinel-chat' });
+        functionResponses.push({ functionResponse: execution.functionResponse });
+        toolResults.push({ toolId: execution.toolId, ok: execution.ok, ...(execution.error ? { error: execution.error } : {}), ...(execution.output?.uiAction ? { output: { uiAction: execution.output.uiAction } } : {}) });
+      }
+      currentHistory.push({ role: 'model', parts: result.modelParts || [] });
+      currentHistory.push({ role: 'user', parts: functionResponses });
+    }
+    if (result) {
+      result.usage = totalUsage;
+      result.functionCallCount = functionCallCount;
+      result.toolResults = toolResults;
+    }
+    return result || { ok: false, error: 'function_call_failed', text: '' };
+  }
+  async chat({ sessionId, userId = "system", message, mode = "default", provider, model, voiceMode = false, user, functionCalling, requestId }) {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message, historyLimit: voiceMode ? 12 : 40 });
     const [trainingContext, memoryContext] = await Promise.all([
       this.training ? this.training.contextFor(message) : Promise.resolve(''),
       this.memoryContextFor(userId, message, prepared.sid)
     ]);
-    const result = this.normalizeVoiceAnswer(await this.gateway.complete({ systemPrompt: this.prompts.build(mode)+currentTimeContext()+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard(), history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid }));
+    const functionGuidance = functionCalling && user ? "\n\nYou may call registered Panthorium functions for account-scoped information or window controls. Use a function when it is needed; use only returned function results as evidence that the action succeeded. Never claim success after an error or denied result." : '';
+    const result = this.normalizeVoiceAnswer(await this.completeWithFunctionCalls({ systemPrompt: this.prompts.build(mode)+currentTimeContext()+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard() + functionGuidance, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, user, functionCalling, requestId }));
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });
     this.captureTraining({message,result,userId,sessionId:prepared.sid});
     return result.ok ? { ...result, sessionId: prepared.sid, sentinel: "Sentinel" } : result;

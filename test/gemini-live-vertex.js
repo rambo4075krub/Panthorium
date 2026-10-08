@@ -23,6 +23,8 @@ async function main() {
       system_instruction: { parts: [{ text: "ตอบภาษาไทย" }] }
     }
   });
+  const tools = [{ name: "panthorium_ai_providers", description: "List providers", parameters: { type: "OBJECT", properties: {} } }];
+  assert.deepEqual(createSetupMessage({ model: "projects/demo/locations/eu/publishers/google/models/gemini-3.8-live", tools }).setup.tools, [{ function_declarations: tools }]);
   assert.equal(await getVertexAccessToken({ getAccessToken: async () => ({ token: "adc-token" }) }), "adc-token");
   await assert.rejects(() => getVertexAccessToken({ getAccessToken: async () => ({}) }), /auth_unavailable/);
 
@@ -41,11 +43,13 @@ async function main() {
     projectId: "panthorium-staging",
     location: "eu",
     systemInstruction: "Sentinel",
+    tools,
     authClient: { getAccessToken: async () => ({ token: "adc-token" }) },
     WebSocketImpl: FakeWebSocket
   });
   assert.equal(socket.options.headers.Authorization, "Bearer adc-token");
   assert.deepEqual(JSON.parse(socket.sent[0]).setup.generation_config.response_modalities, ["audio", "text"]);
+  assert.deepEqual(JSON.parse(socket.sent[0]).setup.tools, [{ function_declarations: tools }]);
   console.log("Gemini Live Vertex adapter tests passed");
 }
 
