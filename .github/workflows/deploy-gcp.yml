@@ -162,10 +162,11 @@ jobs:
           set -euo pipefail
           SERVICE_JSON="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format=json)"
           TAG="prelive-$GITHUB_RUN_ID"
-          read -r CANDIDATE_URL CANDIDATE_REVISION PREVIOUS_TRAFFIC <<< "$(python3 -c 'import json,sys; service=json.load(sys.stdin); tag=sys.argv[1]; traffic=service.get("status",{}).get("traffic",[]); candidate=[item for item in traffic if item.get("tag")==tag]; previous=["{}={}".format(item["revisionName"],item.get("percent",0)) for item in traffic if item.get("revisionName") and item.get("percent",0)>0 and item.get("tag")!=tag]; assert len(candidate)==1, "candidate tag is not present"; print(candidate[0].get("url",""), candidate[0].get("revisionName",""), ",".join(previous))' "$TAG" <<< "$SERVICE_JSON")"
-          test -n "$CANDIDATE_URL" && test -n "$CANDIDATE_REVISION" && test -n "$PREVIOUS_TRAFFIC"
+          read -r CANDIDATE_REVISION PREVIOUS_TRAFFIC <<< "$(python3 -c 'import json,sys; service=json.load(sys.stdin); tag=sys.argv[1]; traffic=service.get("status",{}).get("traffic",[]); candidate=[item for item in traffic if item.get("tag")==tag]; previous=["{}={}".format(item["revisionName"],item.get("percent",0)) for item in traffic if item.get("revisionName") and item.get("percent",0)>0 and item.get("tag")!=tag]; assert len(candidate)==1, "candidate tag is not present"; print(candidate[0].get("revisionName",""), ",".join(previous))' "$TAG" <<< "$SERVICE_JSON")"
+          test -n "$CANDIDATE_REVISION" && test -n "$PREVIOUS_TRAFFIC"
           gcloud run services update-traffic "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --to-revisions="$CANDIDATE_REVISION=100" --quiet
-          if ! curl --retry 5 --retry-connrefused --retry-delay 3 --fail --silent --show-error "$CANDIDATE_URL/healthz" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True'; then
+          URL="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          if ! curl --retry 5 --retry-connrefused --retry-delay 3 --fail --silent --show-error "$URL/healthz" | python3 -c 'import json,sys; health=json.load(sys.stdin); assert health.get("ok") is True'; then
             echo "::error::Post-routing health check failed; restoring previous production traffic."
             gcloud run services update-traffic "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --to-revisions="$PREVIOUS_TRAFFIC" --quiet
             exit 1
