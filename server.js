@@ -46,6 +46,7 @@ const { CloudNotesRepository } = require("./services/cloudNotesRepository");
 const { AgentKnowledgeRepository } = require("./services/agentKnowledgeRepository");
 const { AgentKnowledgeService } = require("./services/agentKnowledgeService");
 const { AgentPolicyService } = require("./services/agentPolicyService");
+const { AgentFunctionCallingService } = require("./services/agentFunctionCallingService");
 const { MultiAgentRunRepository } = require("./services/multiAgentRunRepository");
 const { MultiAgentPlannerService } = require("./services/multiAgentPlannerService");
 const { MultiAgentOrchestrator } = require("./services/multiAgentOrchestrator");
@@ -113,6 +114,7 @@ const productionIntelligence = new ProductionIntelligenceService({ databaseUrl: 
 const toolRegistry = new ToolRegistry({ sentinel, conversations, securityResponse, aiOperations, integrations, mediaStudio });
 const agentPolicy = new AgentPolicyService();
 const agentService = new AgentService({ tools: toolRegistry, audit, policy: agentPolicy });
+const agentFunctionCalling = new AgentFunctionCallingService({ agentService, audit });
 const agentKnowledge = new AgentKnowledgeService({ repository: agentKnowledgeRepository, audit });
 toolRegistry.register({
   id: 'knowledge.search', description: 'Search the current user knowledge base', permission: 'chat', risk: 'low', mutates: false,
@@ -150,7 +152,7 @@ sentinel.training = sentinelTraining;
 sentinel.sentinelControl = sentinelOrchestrator;
 
 app.disable("x-powered-by");
-app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins], frameSrc: ["'self'"], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
+app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins, (req) => `${req.protocol === "https" ? "wss" : "ws"}://${req.get("host")}`], frameSrc: ["'self'"], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
 const allowElectronFileOrigin = process.env.ALLOW_ELECTRON_ORIGIN === "1";
 app.use((req, res, next) => {
   const origin = req.get("origin");
@@ -230,7 +232,7 @@ for (const script of shellScripts) {
 
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
-  html = html.replace('<body>', '<body data-gemini-live-enabled="' + (process.env.GEMINI_LIVE_ENABLED === "1" ? "true" : "false") + '" data-voice-identity-required="' + (config.biometricGateEnabled ? "true" : "false") + '">');
+  html = html.replace('<body>', '<body data-gemini-live-enabled="' + (process.env.GEMINI_LIVE_ENABLED === "1" ? "true" : "false") + '" data-ai-mode="' + (process.env.PANTHORIUM_AI_MODE === "gemini-live-only" ? "gemini-live-only" : "legacy") + '" data-voice-identity-required="' + (config.biometricGateEnabled ? "true" : "false") + '">');
   const version = `${require("./package.json").version}-media-browser-v2`;
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
@@ -387,7 +389,7 @@ async function start() {
   await sentinelOrchestrator.init();
 
   const liveGateway = process.env.GEMINI_LIVE_ENABLED === "1"
-    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "us-central1" })
+    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "us-central1", functionCalling: agentFunctionCalling })
     : null;
   const server = app.listen(config.port, config.host, () => {
     console.log("========================================");
@@ -450,3 +452,4 @@ if (require.main === module) {
 }
 
 module.exports = { app, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
+

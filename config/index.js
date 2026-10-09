@@ -56,3 +56,9 @@ module.exports = {
   biometricVoiceThreshold: Number(process.env.BIOMETRIC_VOICE_THRESHOLD || 0.21),
   biometricEnrollmentThreshold: Number(process.env.BIOMETRIC_ENROLLMENT_THRESHOLD || 0.76)
 };
+
+
+// A Live-only deployment cannot start teachers or capture tuned-model training.
+if (process.env.PANTHORIUM_AI_MODE === "gemini-live-only") {
+  Object.assign(module.exports, { sentinelAutoTraining:false, sentinelAutoCapture:false, sentinelTeacherProviders:[], sentinelEvaluatorProviders:[] });
+}

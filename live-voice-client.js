@@ -13,9 +13,14 @@
   let nextPlaybackTime = 0;
   let serverReady = false;
   let starting = false;
+  let outputTranscript = "";
 
   const setStatus = (label, mode = "idle") => {
     button.title = label;
+    const notice = document.getElementById("orb-system-notice");
+    if (notice) { notice.textContent = label; notice.classList.toggle("show", true); }
+    document.querySelectorAll("[data-voice-status]").forEach(row => { row.classList.toggle("active", row.dataset.voiceStatus === mode); if (row.dataset.voiceStatus === mode) row.textContent = label; });
+    window.dispatchEvent(new CustomEvent("panthorium:live-state", { detail:{mode,label} }));
     button.classList.toggle("listening", mode === "listening");
     button.classList.toggle("processing", mode === "processing");
     button.textContent = mode === "processing" ? "⏳" : mode === "listening" ? "⏹" : "🎤";
@@ -80,7 +85,8 @@
     const startAt = Math.max(audioContext.currentTime + 0.025, nextPlaybackTime);
     nextPlaybackTime = startAt + audio.duration;
     activeSources.add(source);
-    source.onended = () => activeSources.delete(source);
+    window.dispatchEvent(new CustomEvent("panthorium:ai-speaking", { detail:{speaking:true} }));
+    source.onended = () => { activeSources.delete(source); if (!activeSources.size) window.dispatchEvent(new CustomEvent("panthorium:ai-speaking", {detail:{speaking:false}})); };
     source.start(startAt);
   }
 
@@ -90,6 +96,7 @@
       try { source.stop(); } catch (_) {}
     }
     activeSources.clear();
+    window.dispatchEvent(new CustomEvent("panthorium:ai-speaking", {detail:{speaking:false}}));
   }
 
   function handleModelFrame(frame) {
@@ -117,22 +124,30 @@
     const content = frame.serverContent || frame.server_content;
     if (!content) return;
     if (content.interrupted) stopPlayback();
+    const input = content.inputTranscription || content.input_transcription;
+    const output = content.outputTranscription || content.output_transcription;
+    if (input?.text) { outputTranscript = ""; window.PanthoriumOrb?.setTranscript?.(input.text, 0); }
+    if (output?.text) { outputTranscript += output.text; window.PanthoriumOrb?.setTranscript?.(outputTranscript, 0); }
     const parts = content.modelTurn?.parts || content.model_turn?.parts || [];
     for (const part of parts) {
       const audio = part.inlineData?.data || part.inline_data?.data;
-      if (audio) playPcm24k(audio);
+      if (audio) { setStatus("Gemini Live กำลังตอบ", "listening"); playPcm24k(audio); }
     }
     if (content.turnComplete || content.turn_complete) setStatus("Gemini Live พร้อมฟัง", "listening");
   }
 
   async function openLiveSession() {
-    const token = await getAccessToken();
+    window.dispatchEvent(new CustomEvent("panthorium:live-start"));
+    window.PanthoriumVoice?.pause?.();
+    try { window.speechSynthesis?.cancel(); } catch (_) {}
     if (!navigator.mediaDevices?.getUserMedia || !(window.AudioContext || window.webkitAudioContext)) {
       throw new Error("เบราว์เซอร์นี้ไม่รองรับไมโครโฟนเสียงสด");
     }
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-    audioContext = new AudioContextCtor({ sampleRate: 16000 });
+    audioContext = new AudioContextCtor();
     await audioContext.resume();
+    if (audioContext.state !== "running") throw new Error("เปิดเสียงไม่สำเร็จ กรุณาอนุญาตเสียงเว็บไซต์");
+    const token = await getAccessToken();
     microphone = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     socket = new WebSocket(backendWebSocketUrl());
     socket.binaryType = "arraybuffer";
@@ -145,7 +160,7 @@
       socket.onclose = event => {
         clearTimeout(timeout);
         if (!serverReady) reject(new Error(event.reason || "Gemini Live ปฏิเสธการเชื่อมต่อ"));
-        else cleanup(false);
+        else { cleanup(false); setStatus(event.reason || "Gemini Live จบการเชื่อมต่อ · แตะไมค์เพื่อเริ่มใหม่"); }
       };
       socket.onmessage = event => {
         let frame;
@@ -158,6 +173,8 @@
         if (frame.error) {
           clearTimeout(timeout);
           reject(new Error("Gemini Live ใช้งานไม่ได้ในขณะนี้"));
+          cleanup();
+          setStatus("Gemini Live ใช้งานไม่ได้ในขณะนี้ · แตะไมค์เพื่อลองใหม่");
         }
       };
     });
@@ -179,6 +196,8 @@
 
   function cleanup(closeSocket = true) {
     serverReady = false;
+    const closingSocket = socket;
+    if (closingSocket) { closingSocket.onclose = null; closingSocket.onerror = null; closingSocket.onmessage = null; }
     if (processor) { processor.onaudioprocess = null; try { processor.disconnect(); } catch (_) {} processor = null; }
     if (mutedOutput) { try { mutedOutput.disconnect(); } catch (_) {} mutedOutput = null; }
     if (microphone) { for (const track of microphone.getTracks()) track.stop(); microphone = null; }
@@ -191,15 +210,17 @@
 
   // Intercept the global voice button during capture so the legacy
   // Sentinel transcription onclick cannot consume the click first.
-  button.addEventListener("click", async event => {
-    event.preventDefault();
-    event.stopImmediatePropagation();
+  async function toggle() {
     if (starting) return;
     if (socket && socket.readyState < WebSocket.CLOSING) { cleanup(); return; }
     starting = true;
     try { await openLiveSession(); }
     catch (error) { console.warn("Gemini Live voice session failed", error); cleanup(); setStatus(error.message || "เชื่อมเสียงสดไม่สำเร็จ"); }
     finally { starting = false; }
-  }, true);
+  }
+  window.PanthoriumLiveVoice = { toggle, stop:cleanup, isActive:() => serverReady };
+  button.addEventListener("click", event => { event.preventDefault(); event.stopImmediatePropagation(); toggle(); }, true);
+  window.addEventListener("pagehide", () => cleanup());
 })();
+
 

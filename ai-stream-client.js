@@ -28,6 +28,7 @@
     const base = (system?.config?.backendUrl || '').replace(/\/$/, '');
     const timeoutSignal = AbortSignal.timeout(45000);
     const requestSignal = signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeoutSignal]) : signal || timeoutSignal;
+    if (document.body.dataset.aiMode === "gemini-live-only") voiceMode = false;
     const request = async () => fetch(base + '/api/chat/stream', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-session-id': system.config.sessionId, Accept: 'text/event-stream' }, body: JSON.stringify({ message: prompt, sessionId: system.config.sessionId, mode: 'default', voice: voiceMode }), signal: requestSignal });
     let res = await request();
     if (res.status === 401 && window.PanthoriumAuth?.refreshSession) { const ok = await window.PanthoriumAuth.refreshSession().catch(() => false); if (ok) { token = getOS()?.config?.accessToken || ''; res = await request(); } }
@@ -137,3 +138,4 @@
   window.addEventListener('panthorium:auth-changed', () => setTimeout(installCallAI, 50));
   window.PanthoriumAIStream = { call: streamCall, install: installCallAI };
 })();
+

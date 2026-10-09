@@ -45,20 +45,6 @@ jobs:
             exit 1
           fi
 
-      - name: Require production Sentinel V4 on Vertex AI
-        run: |
-          set -euo pipefail
-          for name in VERTEX_PROJECT_ID VERTEX_LOCATION VERTEX_ENDPOINT_ID; do
-            if [ -z "${!name}" ]; then
-              echo "::error::Missing required repository variable: SENTINEL_VERTEX_${name#VERTEX_}. Configure the production Sentinel V4 Vertex endpoint before deployment."
-              exit 1
-            fi
-          done
-          if [ "$VERTEX_MODEL" != "sentinel-v4" ]; then
-            echo "::error::SENTINEL_VERTEX_MODEL must be sentinel-v4 (received: $VERTEX_MODEL)."
-            exit 1
-          fi
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -113,7 +99,7 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE_URI="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$SERVICE_NAME:$GITHUB_SHA"
-          ENV_VARS="^@^NODE_ENV=production@HOST=0.0.0.0@AI_PRIORITY=vertex@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_ACTIVE_LEARNING_NEVER=0@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex_eval_1,vertex_eval_2@SENTINEL_MIN_EVALUATORS=2@SENTINEL_VERTEX_EVALUATOR_MODELS=$VERTEX_EVALUATOR_MODELS@SENTINEL_VERTEX_EVALUATOR_LOCATION=$VERTEX_EVALUATOR_LOCATION@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@PANTHORIUM_FILES_BUCKET=$PANTHORIUM_PRODUCTION_FILES_BUCKET@BIOMETRIC_GATE_ENABLED=1@BIOMETRIC_VOICE_THRESHOLD=0.21@GEMINI_LIVE_ENABLED=1@GEMINI_LIVE_LOCATION=us-central1"
+          ENV_VARS="^@^NODE_ENV=production@HOST=0.0.0.0@TRUST_PROXY=1@PANTHORIUM_AI_MODE=gemini-live-only@AI_PRIORITY=gemini-live@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_ACTIVE_LEARNING_NEVER=0@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex_eval_1,vertex_eval_2@SENTINEL_MIN_EVALUATORS=2@SENTINEL_VERTEX_EVALUATOR_MODELS=$VERTEX_EVALUATOR_MODELS@SENTINEL_VERTEX_EVALUATOR_LOCATION=$VERTEX_EVALUATOR_LOCATION@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@PANTHORIUM_FILES_BUCKET=$PANTHORIUM_PRODUCTION_FILES_BUCKET@BIOMETRIC_GATE_ENABLED=1@BIOMETRIC_VOICE_THRESHOLD=0.21@GEMINI_LIVE_ENABLED=1@GEMINI_LIVE_LOCATION=us-central1@SENTINEL_RELEASE_GATE_AUTO_GATE=0@SENTINEL_RELEASE_GATE_AUTO_BENCHMARK=0@SENTINEL_RELEASE_GATE_AUTO_IMPROVE=0@PANTHORIUM_GOVERNANCE_MODE=off@PANTHORIUM_SENTINEL_CONTROL_MODE=off"
           SERVICE_JSON="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format=json)"
           PREVIOUS_TRAFFIC="$(python3 -c 'import json,sys; service=json.load(sys.stdin); entries=["{}={}".format(item["revisionName"],item.get("percent",0)) for item in service.get("status",{}).get("traffic",[]) if item.get("revisionName") and item.get("percent",0)>0]; print(",".join(entries))' <<< "$SERVICE_JSON")"
           if [ -z "$PREVIOUS_TRAFFIC" ]; then
@@ -175,3 +161,4 @@ jobs:
             exit 1
           fi
           echo "Production traffic routed to $CANDIDATE_REVISION after candidate checks passed." >> "$GITHUB_STEP_SUMMARY"
+

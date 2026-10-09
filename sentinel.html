@@ -1355,6 +1355,7 @@
         const normalized = normalizeVoiceStopText(text);
         return /^(?:พูดต่อ(?:ไป|ได้(?:เลย)?|เลย)?|ต่อ(?:ไป|ได้(?:เลย)?|เลย)?|เล่าต่อ(?:ไป|ได้)?|อ่านต่อ(?:ไป|ได้)?|continue(?:speaking|please)?|pleasecontinue|goon|keepgoing|carryon|goahead)$/u.test(normalized);
     }
+    window.addEventListener("panthorium:live-start", () => { stopSentinelSpeech(); try { window.speechSynthesis?.cancel(); } catch (_) {} });
     function stopSentinelSpeech() {
         speechInterruptedByUser = true;
         if (currentSpeechText) interruptedSpeechText = currentSpeechText;
@@ -1600,6 +1601,7 @@
     }
 
     async function speak(text, { firstPrepared = null, firstPreparedAttempted = false } = {}) {
+        if (document.body.dataset.aiMode === "gemini-live-only") return false;
         if (speechInterruptedByUser) {
             releaseRemoteChunk(firstPrepared);
             return false;
@@ -1769,6 +1771,7 @@
         });
     }
     function pumpStreamingSpeechTts() {
+        if (document.body.dataset.aiMode === "gemini-live-only") return;
         while (streamingSpeechTtsInFlight < 2 && streamingSpeechTtsPending.length) {
             const job = streamingSpeechTtsPending.shift();
             if (job.generation !== streamingSpeechGeneration) { job.resolve(null); continue; }
@@ -1894,6 +1897,7 @@
         for (const job of streamingSpeechTtsPending.splice(0)) job.resolve(null);
     }
     window.addEventListener("panthorium:ai-stream-delta", event => {
+        if (document.body.dataset.aiMode === "gemini-live-only") return;
         if (speechInterruptedByUser) return;
         streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
         clearTimeout(streamingSpeechTimer);
@@ -1909,6 +1913,7 @@
 
     // Global voice path: accepts commands without opening Sentinel chat.
     function initGlobalVoice() {
+        if (document.body.dataset.aiMode === "gemini-live-only") return;
         const button = $("global-voice");
         if (!button || button.dataset.ready) return;
         button.dataset.ready = "1";
@@ -2762,7 +2767,7 @@
     }
 
     function voiceResponseNeedsSpeech(intent, response) {
-        return Boolean(response?.ok && response.text && (intent === "conversation" || response.confirmationRequired));
+        return document.body.dataset.aiMode !== "gemini-live-only" && Boolean(response?.ok && response.text && (intent === "conversation" || response.confirmationRequired));
     }
 
     const voicePlaybackFailure = "ได้รับคำตอบแล้ว แต่เล่นเสียงไม่สำเร็จ ตรวจสอบเสียงเว็บไซต์หรือบริการเสียง แล้วแตะไมโครโฟนเพื่อลองใหม่";
@@ -3733,6 +3738,10 @@
         }
 
         micBtn.onclick = async () => {
+            if (document.body.dataset.aiMode === "gemini-live-only") {
+                await window.PanthoriumLiveVoice?.toggle?.();
+                return;
+            }
             if (aiSpeechActive) stopSentinelSpeech();
             // Electron / recorder path
             if (chatRecorderOk) {
@@ -4724,3 +4733,4 @@
 <script src="/training-ui.js?v=sentinel-auto-training-v1"></script>
 </body>
 </html>
+
