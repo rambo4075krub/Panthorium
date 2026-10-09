@@ -122,7 +122,7 @@ class Sentinel {
   }
   async completeWithFunctionCalls({ systemPrompt, history, preferredProvider, preferredModel, userId, sessionId, user, functionCalling, requestId }) {
     const selectedProvider = preferredProvider || this.gateway.orderedProviders?.()[0];
-    const declarations = selectedProvider === 'vertex' ? functionCalling?.declarationsFor(user) || [] : [];
+    const declarations = ['vertex','gemini-live'].includes(selectedProvider) ? functionCalling?.declarationsFor(user) || [] : [];
     if (!declarations.length) return this.gateway.complete({ systemPrompt, history, preferredProvider, preferredModel, userId, sessionId });
     let currentHistory = history.slice();
     let toolResults = [];
@@ -130,7 +130,7 @@ class Sentinel {
     let functionCallCount = 0;
     let result = null;
     for (let round = 0; round < 4; round += 1) {
-      result = await this.gateway.complete({ systemPrompt, history: currentHistory, preferredProvider: 'vertex', preferredModel, userId, sessionId, tools: declarations });
+      result = await this.gateway.complete({ systemPrompt, history: currentHistory, preferredProvider: selectedProvider, preferredModel, userId, sessionId, tools: declarations });
       if (result.usage) {
         totalUsage.inputTokens += Number(result.usage.inputTokens) || 0;
         totalUsage.outputTokens += Number(result.usage.outputTokens) || 0;
@@ -191,4 +191,5 @@ class Sentinel {
   status() { return { name: "Sentinel", version: "2.3.0-auto-training", providers: this.getAvailableProviders(), sessions: this.sessions.size(), persistence: this.conversations?.pool ? "postgresql" : this.conversations ? "memory" : "legacy", training: Boolean(this.training), autoTraining: this.training?.settings?.()||null, streaming: true, uptime: process.uptime() }; }
 }
 module.exports = { Sentinel, removeThaiPoliteParticles, currentTimeContext };
+
 

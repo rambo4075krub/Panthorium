@@ -92,7 +92,7 @@ function createGeminiLiveWebSocketGateway({
       clearTimeout(authTimer);
       try {
         const tools = functionCalling?.declarationsFor?.(user, { surface: "gemini-live" }) || [];
-        upstream = await connectLive({ projectId, location, systemInstruction, tools });
+        upstream = await connectLive({ projectId, location, systemInstruction, tools, transcription: process.env.PANTHORIUM_AI_MODE === "gemini-live-only" });
       } catch (error) {
         console.warn("[Gemini Live] upstream connection failed", String(error?.message || error).slice(0, 160));
         client.close(1011, `live_upstream_unavailable:${safeCloseDetail(error?.message)}`.slice(0, 123));
@@ -273,4 +273,5 @@ function createGeminiLiveWebSocketGateway({
 }
 
 module.exports = { AUTH_TIMEOUT_MS, MAX_SESSIONS_PER_INSTANCE, isAllowedOrigin, createGeminiLiveWebSocketGateway };
+
 

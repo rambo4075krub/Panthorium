@@ -18,13 +18,14 @@ function resolveLiveTarget({ projectId, location = DEFAULT_LOCATION } = {}) {
   };
 }
 
-function createSetupMessage({ model, systemInstruction = "", tools = [] } = {}) {
+function createSetupMessage({ model, systemInstruction = "", tools = [], transcription = false } = {}) {
   const setup = {
     model,
     generation_config: {
       response_modalities: ["audio"]
     }
   };
+  if (transcription) { setup.input_audio_transcription = {}; setup.output_audio_transcription = {}; }
   if (Array.isArray(tools) && tools.length) setup.tools = [{ function_declarations: tools }];
   const instruction = String(systemInstruction || "").trim();
   if (instruction) setup.system_instruction = { parts: [{ text: instruction }] };
@@ -48,6 +49,7 @@ async function connectGeminiLive({
   location = process.env.GEMINI_LIVE_LOCATION || DEFAULT_LOCATION,
   systemInstruction,
   tools = [],
+  transcription = false,
   authClient,
   WebSocketImpl,
   handshakeTimeoutMs = 10000
@@ -86,7 +88,7 @@ async function connectGeminiLive({
       // its relay handler yet.
       socket.on("error", () => {});
       cleanup();
-      socket.send(JSON.stringify(createSetupMessage({ model: target.model, systemInstruction, tools })), error => {
+      socket.send(JSON.stringify(createSetupMessage({ model: target.model, systemInstruction, tools, transcription })), error => {
         if (error) socket.close(1011, "setup_failed");
       });
       resolve(socket);
@@ -111,3 +113,4 @@ module.exports = {
   getVertexAccessToken,
   connectGeminiLive
 };
+

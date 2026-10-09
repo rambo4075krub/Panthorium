@@ -23,7 +23,11 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
   const speechLimiter = rateLimit({ windowMs: 60 * 1000, limit: 90, standardHeaders: true, legacyHeaders: false });
   const identityNavigationLimiter = rateLimit({ windowMs: 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false });
   const agentLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
-  router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", release: process.env.K_REVISION || process.env.PANTHORIUM_RELEASE || require("../package.json").version, sentinel: sentinel.status(), voiceIdentityConfigured: biometrics?.status?.().configured === true, voiceIdentityGateEnabled: biometrics?.gateEnabled === true, time: new Date().toISOString() }));
+  router.use(["/speech", "/speech/transcribe", "/speech/identity-navigation"], (req, res, next) => {
+    if (process.env.PANTHORIUM_AI_MODE === "gemini-live-only") return res.status(410).json({ ok:false, error:"gemini_live_microphone_required", text:"ใช้ไมโครโฟน Gemini Live เพื่อสนทนาด้วยเสียง" });
+    next();
+  });
+  router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", release: process.env.K_REVISION || process.env.PANTHORIUM_RELEASE || require("../package.json").version, sentinel: sentinel.status(), aiMode: process.env.PANTHORIUM_AI_MODE || "legacy", geminiLiveEnabled: process.env.GEMINI_LIVE_ENABLED === "1", voiceIdentityConfigured: biometrics?.status?.().configured === true, voiceIdentityGateEnabled: biometrics?.gateEnabled === true, time: new Date().toISOString() }));
   router.get("/sentinel/status", auth, requirePermission("system:read"), (req, res) => res.json({ ok: true, ...sentinel.status() }));
   router.get("/ai/providers", auth, requirePermission("chat"), (req, res) => res.json({ ok: true, providers: sentinel.providerCatalog() }));
   router.get("/ai/operations", auth, requirePermission("chat"), async (req, res, next) => { try { res.json({ ok: true, metrics: await aiOperations.overview(req.user.sub, req.query.hours) }); } catch (error) { next(error); } });
@@ -257,4 +261,5 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
   return router;
 }
 module.exports = { createApiRouter };
+
 

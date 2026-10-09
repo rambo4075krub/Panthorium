@@ -12,6 +12,8 @@ const WebSocket = require('ws');
   const healthResponse = await fetch(new URL('/api/health', base), { signal: AbortSignal.timeout(15000) });
   assert.equal(healthResponse.status, 200, 'staging health endpoint');
   const health = await healthResponse.json();
+  assert.equal(health.aiMode, 'gemini-live-only');
+  assert.equal(health.geminiLiveEnabled, true);
   assert.equal(health.voiceIdentityConfigured, true, 'speaker and template encryption must be configured');
   assert.equal(health.voiceIdentityGateEnabled, true, 'staging must enforce enrolled-speaker verification');
   const post = (path, body, token) => fetch(new URL(path, base), {
@@ -151,20 +153,20 @@ const WebSocket = require('ws');
   assert.equal(forbidden.status, 403);
   assert.equal((await forbidden.json()).error, 'voice_action_permission_denied');
   assert.equal((await post('/api/sentinel/command', { command: 'เปิด AI Platform' }, session.accessToken)).status, 403);
-  const chatResponse = await fetch(new URL('/api/chat', base), { method: 'POST', headers: { Origin: base.origin, 'Content-Type': 'application/json', Authorization: `Bearer ${session.accessToken}` }, body: JSON.stringify({ message: 'ตอบสั้น ๆ ว่า Sentinel พร้อมทดสอบ', sessionId: 'staging-guest-smoke', provider: 'vertex' }), signal: AbortSignal.timeout(90000) });
+  const chatResponse = await fetch(new URL('/api/chat', base), { method: 'POST', headers: { Origin: base.origin, 'Content-Type': 'application/json', Authorization: `Bearer ${session.accessToken}` }, body: JSON.stringify({ message: 'ตอบสั้น ๆ ว่า Sentinel พร้อมทดสอบ', sessionId: 'staging-guest-smoke', provider: 'gemini-live' }), signal: AbortSignal.timeout(90000) });
   assert.equal(chatResponse.status, 200, 'guest chat HTTP status');
   const chat = await chatResponse.json();
   if (!chat.ok && Array.isArray(chat.providerFailureCodes)) console.error('Vertex guest chat diagnostics:', JSON.stringify(chat.providerFailureCodes));
   assert.equal(chat.ok, true, `guest AI chat failed: ${chat.error || 'unknown'}${chat.providerFailureCodes ? ` (${JSON.stringify(chat.providerFailureCodes)})` : ''}`);
-  if (chat.provider !== 'vertex') console.error('Vertex fallback diagnostic:', JSON.stringify(chat.providerFailureCodes || []));
-  assert.equal(chat.provider, 'vertex', `tuned Vertex endpoint unavailable (fallback: ${chat.provider || 'none'})`);
+  if (chat.provider !== 'gemini-live') console.error('Vertex fallback diagnostic:', JSON.stringify(chat.providerFailureCodes || []));
+  assert.equal(chat.provider, 'gemini-live', `tuned Vertex endpoint unavailable (fallback: ${chat.provider || 'none'})`);
   assert(chat.text?.trim(), 'guest chat answer must be nonempty');
 
   const streamStartedAt = Date.now();
   const streamResponse = await fetch(new URL('/api/chat/stream', base), {
     method: 'POST',
     headers: { Origin: base.origin, 'Content-Type': 'application/json', Authorization: `Bearer ${session.accessToken}` },
-    body: JSON.stringify({ message: 'ตอบสั้นที่สุดว่า Sentinel พร้อม', sessionId: 'staging-guest-stream-smoke', provider: 'vertex' }),
+    body: JSON.stringify({ message: 'ตอบสั้นที่สุดว่า Sentinel พร้อม', sessionId: 'staging-guest-stream-smoke', provider: 'gemini-live' }),
     signal: AbortSignal.timeout(90000)
   });
   assert.equal(streamResponse.status, 200, 'guest streaming chat HTTP status');
@@ -204,12 +206,13 @@ const WebSocket = require('ws');
   if (buffer.trim()) consumeFrames([buffer]);
   assert.equal(streamError, null, `guest streaming chat failed: ${streamError || ''}`);
   assert(streamDone, 'guest stream must finish with a done event');
-  assert.equal(streamDone.provider, 'vertex');
-  assert.equal(streamDone.model, 'sentinel-v4');
+  assert.equal(streamDone.provider, 'gemini-live');
+  assert.equal(streamDone.model, 'gemini-3.8-live');
   assert.equal(streamDone.streaming, 'native');
   assert(streamText.trim(), 'guest stream must contain answer deltas');
   assert(firstDeltaMs !== null && firstDeltaMs < 30000, `first Sentinel V4 delta took ${firstDeltaMs}ms; expected under 30000ms`);
   console.log(`Staging stream: provider=vertex model=sentinel-v4 firstDeltaMs=${firstDeltaMs} streaming=native`);
   console.log('Staging: browser and Electron CORS passed; guest command, tuned Vertex chat/stream, and Gemini Live provider handshake passed. Browser microphone/TTS and function-action acceptance remain.');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });
+
 
