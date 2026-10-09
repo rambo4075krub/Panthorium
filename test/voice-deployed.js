@@ -14,6 +14,7 @@ const WebSocket = require('ws');
   const health = await healthResponse.json();
   assert.equal(health.aiMode, 'gemini-live-only');
   assert.equal(health.geminiLiveEnabled, true);
+  assert.deepEqual(health.sentinel.providers, ['gemini-live'], 'only Gemini Live may be active');
   assert.equal(health.voiceIdentityConfigured, true, 'speaker and template encryption must be configured');
   assert.equal(health.voiceIdentityGateEnabled, true, 'staging must enforce enrolled-speaker verification');
   const post = (path, body, token) => fetch(new URL(path, base), {
@@ -52,6 +53,8 @@ const WebSocket = require('ws');
   assert.equal(sessionResponse.status, 200);
   const session = await sessionResponse.json();
   assert(session.accessToken);
+  assert.equal((await post('/api/speech', {text:'ห้ามใช้ TTS เดิม',lang:'th-TH'}, session.accessToken)).status, 410, 'legacy TTS disabled');
+  assert.equal((await post('/api/speech/transcribe', {}, session.accessToken)).status, 410, 'legacy transcription disabled');
 
   // A browser shell alone does not prove provider connectivity. Authenticate a
   // short-lived WebSocket and require the backend to relay Google's setupComplete.

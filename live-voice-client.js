@@ -13,6 +13,7 @@
   let nextPlaybackTime = 0;
   let serverReady = false;
   let starting = false;
+  let outputTranscript = "";
 
   const setStatus = (label, mode = "idle") => {
     button.title = label;
@@ -123,8 +124,8 @@
     if (content.interrupted) stopPlayback();
     const input = content.inputTranscription || content.input_transcription;
     const output = content.outputTranscription || content.output_transcription;
-    if (input?.text) window.dispatchEvent(new CustomEvent("panthorium:transcript", {detail:{text:input.text}}));
-    if (output?.text) window.dispatchEvent(new CustomEvent("panthorium:transcript", {detail:{text:output.text}}));
+    if (input?.text) { outputTranscript = ""; window.PanthoriumOrb?.setTranscript?.(input.text, 0); }
+    if (output?.text) { outputTranscript += output.text; window.PanthoriumOrb?.setTranscript?.(outputTranscript, 0); }
     const parts = content.modelTurn?.parts || content.model_turn?.parts || [];
     for (const part of parts) {
       const audio = part.inlineData?.data || part.inline_data?.data;
@@ -157,7 +158,7 @@
       socket.onclose = event => {
         clearTimeout(timeout);
         if (!serverReady) reject(new Error(event.reason || "Gemini Live ปฏิเสธการเชื่อมต่อ"));
-        else cleanup(false);
+        else { cleanup(false); setStatus(event.reason || "Gemini Live จบการเชื่อมต่อ · แตะไมค์เพื่อเริ่มใหม่"); }
       };
       socket.onmessage = event => {
         let frame;
@@ -170,6 +171,8 @@
         if (frame.error) {
           clearTimeout(timeout);
           reject(new Error("Gemini Live ใช้งานไม่ได้ในขณะนี้"));
+          cleanup();
+          setStatus("Gemini Live ใช้งานไม่ได้ในขณะนี้ · แตะไมค์เพื่อลองใหม่");
         }
       };
     });
