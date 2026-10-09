@@ -17,6 +17,8 @@
 
   const setStatus = (label, mode = "idle") => {
     button.title = label;
+    const notice = document.getElementById("orb-system-notice");
+    if (notice) { notice.textContent = label; notice.classList.toggle("show", true); }
     document.querySelectorAll("[data-voice-status]").forEach(row => { row.classList.toggle("active", row.dataset.voiceStatus === mode); if (row.dataset.voiceStatus === mode) row.textContent = label; });
     window.dispatchEvent(new CustomEvent("panthorium:live-state", { detail:{mode,label} }));
     button.classList.toggle("listening", mode === "listening");

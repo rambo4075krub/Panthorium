@@ -214,8 +214,8 @@ const WebSocket = require('ws');
   assert.equal(streamDone.streaming, 'native');
   assert(streamText.trim(), 'guest stream must contain answer deltas');
   assert(firstDeltaMs !== null && firstDeltaMs < 30000, `first Sentinel V4 delta took ${firstDeltaMs}ms; expected under 30000ms`);
-  console.log(`Staging stream: provider=vertex model=sentinel-v4 firstDeltaMs=${firstDeltaMs} streaming=native`);
-  console.log('Staging: browser and Electron CORS passed; guest command, tuned Vertex chat/stream, and Gemini Live provider handshake passed. Browser microphone/TTS and function-action acceptance remain.');
+  console.log(`Staging stream: provider=gemini-live model=gemini-3.8-live firstDeltaMs=${firstDeltaMs} streaming=native`);
+  console.log('Staging: browser and Electron CORS passed; guest command, Gemini Live chat/stream, and Gemini Live provider handshake passed. Physical microphone and speaker acceptance remain.');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });
 
 
