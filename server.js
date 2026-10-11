@@ -109,7 +109,10 @@ const integrationRepository = new IntegrationRepository({ databaseUrl: config.da
 const integrationExecutions = new IntegrationExecutionRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const integrations = new IntegrationService({ repository: integrationRepository, executions: integrationExecutions, audit, allowedHosts: config.integrationAllowedHosts });
 const sentinel = new Sentinel({ conversations, audit });
-const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET });
+const billingService = new (require('./services/omiseBillingService').OmiseBillingService)();
+const liveEntitlements = billingService.live && billingService.liveEnabled ? billingService.entitlements() : null;
+sentinel.providers.entitlements=liveEntitlements;
+const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET, entitlements:liveEntitlements });
 const mediaStudio = new MediaStudioService({ files: cloudFiles, providers: sentinel.providers, gateway: sentinel.gateway, audit, jobSecret: config.jwtSecret });
 const productionIntelligence = new ProductionIntelligenceService({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, audit, gateway: sentinel.gateway });
 const toolRegistry = new ToolRegistry({ sentinel, conversations, securityResponse, aiOperations, integrations, mediaStudio });
@@ -191,7 +194,7 @@ app.use("/api/biometrics", createBiometricsRouter(authService, biometrics));
 app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
 app.use("/api/agent/automation", createAutomationRouter(authService, agentAutomation));
 app.use("/api/agent/memory", createMemoryRouter(authService, agentMemory));
-app.use("/api/billing", require("./routes/billing").createBillingRouter(authService));
+app.use("/api/billing", require("./routes/billing").createBillingRouter(authService,billingService));
 app.use("/api/files", createFilesRouter(authService, cloudFiles));
 app.use("/api/media", createMediaStudioRouter(authService, mediaStudio));
 app.use("/api/reminders", createReminderRouter(authService, reminders));
@@ -392,7 +395,7 @@ async function start() {
   await sentinelOrchestrator.init();
 
   const liveGateway = process.env.GEMINI_LIVE_ENABLED === "1"
-    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "us-central1", functionCalling: agentFunctionCalling })
+    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "us-central1", functionCalling: agentFunctionCalling, entitlements:liveEntitlements })
     : null;
   const server = app.listen(config.port, config.host, () => {
     console.log("========================================");

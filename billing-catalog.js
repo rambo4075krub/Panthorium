@@ -21,16 +21,16 @@
     `ข้อความเข้า ${n(input)} โทเคน`, `ข้อความออก ${n(output)} โทเคน`,
     `พื้นที่ ${storage}`, `ดาวน์โหลด ${download}`,
     ...(id === 'free' ? ['เสียงรวมไม่เกิน 1 นาที/วัน'] : [])
-  ], price ? 'สมาชิกต่ออายุรายเดือน · โควต้าไม่ทบยอด' : 'แพ็กเกจฟรี · โควต้ารายเดือน', { kind: price ? 'subscription' : 'free' }));
+  ], price ? 'สมาชิกต่ออายุรายเดือน · โควต้าไม่ทบยอด' : 'แพ็กเกจฟรี · โควต้ารายเดือน', { kind: price ? 'subscription' : 'free', quotas: {voiceInputSeconds:voice*60,voiceOutputSeconds:voice*60,textInputTokens:input,textOutputTokens:output,storageBytes: id==='free' ? 50*1024**2 : Number(storage.split(' ')[0])*1024**3,downloadBytes: id==='free' ? 0 : Number(download.split(' ')[0])*1024**3} }));
   [['S', 59, 20], ['M', 169, 70], ['L', 399, 175], ['XL', 849, 375]].forEach(([size, price, minutes]) => add('voice-' + size.toLowerCase(), 'Voice ' + size, 'voice', price, [
     `เสียงเข้า ${minutes} / ออก ${minutes} นาที`, `เสียงรวม ${minutes * 2} นาที`, 'ไม่รวมโควต้าข้อความถอดเสียงเพิ่มเติม'
-  ], 'ซื้อครั้งเดียว · อายุ 30 วันนับจากชำระ', { kind: 'one-time', verifiedAccountRequired: true }));
+  ], 'ซื้อครั้งเดียว · อายุ 30 วันนับจากชำระ', { kind: 'one-time', verifiedAccountRequired: true, quotas: {voiceInputSeconds:minutes*60,voiceOutputSeconds:minutes*60} }));
   [['S', 29, 150000, 30000], ['M', 99, 500000, 100000], ['L', 249, 1500000, 300000], ['XL', 499, 3000000, 600000]].forEach(([size, price, input, output]) => add('text-' + size.toLowerCase(), 'Text ' + size, 'text', price, [
     `ข้อความเข้า ${n(input)} โทเคน`, `ข้อความออก ${n(output)} โทเคน`, 'ไม่รวมโควต้าเสียงตอบของ Live'
-  ], 'ซื้อครั้งเดียว · อายุ 30 วันนับจากชำระ', { kind: 'one-time', verifiedAccountRequired: true }));
+  ], 'ซื้อครั้งเดียว · อายุ 30 วันนับจากชำระ', { kind: 'one-time', verifiedAccountRequired: true, quotas: {textInputTokens:input,textOutputTokens:output} }));
   [[5, 49, 1], [20, 129, 4], [50, 279, 10], [100, 499, 20]].forEach(([size, price, download]) => add('storage-' + size, 'Storage ' + size, 'storage', price, [
     `พื้นที่เพิ่ม ${size} GiB`, `ดาวน์โหลดเพิ่ม ${download} GiB/รอบ`, 'ไม่เพิ่มโควต้า AI · เฉพาะสมาชิก Life ขึ้นไป'
-  ], 'ต่ออายุรายเดือน · การซื้อกลางรอบต้องแจ้งยอดก่อนชำระ', { kind: 'subscription', paidMembershipRequired: true }));
-  add('download-10', 'Download 10', 'storage', 99, ['ดาวน์โหลดเพิ่ม 10 GiB', 'ไม่เพิ่มพื้นที่หรือโควต้า AI', 'เฉพาะสมาชิก Life ขึ้นไป'], 'ซื้อครั้งเดียว · อายุ 30 วันนับจากชำระ', { kind: 'one-time', paidMembershipRequired: true });
+  ], 'ต่ออายุรายเดือน · การซื้อกลางรอบต้องแจ้งยอดก่อนชำระ', { kind: 'subscription', paidMembershipRequired: true, quotas:{storageBytes:size*1024**3,downloadBytes:download*1024**3} }));
+  add('download-10', 'Download 10', 'storage', 99, ['ดาวน์โหลดเพิ่ม 10 GiB', 'ไม่เพิ่มพื้นที่หรือโควต้า AI', 'เฉพาะสมาชิก Life ขึ้นไป'], 'ซื้อครั้งเดียว · อายุ 30 วันนับจากชำระ', { kind: 'one-time', paidMembershipRequired: true, quotas:{downloadBytes:10*1024**3} });
   return Object.freeze({ version: '2026-10-11', taxStatus: 'individual-not-vat-registered', products: Object.freeze(products), get: id => products.find(item => item.id === id) || null });
 });

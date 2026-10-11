@@ -31,7 +31,8 @@ function safeContentType(input) {
 }
 
 class CloudFilesService {
-  constructor({ bucket = process.env.PANTHORIUM_FILES_BUCKET, clientFactory } = {}) {
+  constructor({ bucket = process.env.PANTHORIUM_FILES_BUCKET, clientFactory, entitlements = null } = {}) {
+    this.entitlements = entitlements;
     this.bucket = String(bucket || "").trim();
     this.clientFactory = clientFactory || (async () => new GoogleAuth({
       scopes: ["https://www.googleapis.com/auth/devstorage.read_write"]
@@ -129,10 +130,16 @@ class CloudFilesService {
   async list(userId) {
     this.ensureConfigured();
     const files = await this.listAll(userId);
-    return { files, usedBytes: files.reduce((sum, file) => sum + file.size, 0), maxBytes: MAX_USER_BYTES, maxFiles: MAX_USER_FILES };
+    const maxBytes=this.entitlements ? (await this.entitlements.state(userId)).remaining.storageBytes : MAX_USER_BYTES;
+    return { files, usedBytes: files.reduce((sum, file) => sum + file.size, 0), maxBytes, maxFiles: MAX_USER_FILES };
   }
 
   async upload(userId, filename, contentType, body) {
+    // Serialize actual storage mutations across instances; entitlement reads happen before locking.
+    if(this.entitlements){const state=await this.entitlements.state(userId);return this.entitlements.locked(userId,()=>this.uploadWithLimit(userId,filename,contentType,body,state.remaining.storageBytes));}
+    return this.uploadWithLimit(userId,filename,contentType,body,MAX_USER_BYTES);
+  }
+  async uploadWithLimit(userId, filename, contentType, body, maxBytes) {
     const prefix = this.ownerPrefix(userId);
     this.ensureConfigured();
     const bytes = Buffer.isBuffer(body) ? body : Buffer.from(body || []);
@@ -141,7 +148,7 @@ class CloudFilesService {
     const existing = await this.listAll(userId);
     if (existing.length >= MAX_USER_FILES) throw new CloudFilesError(413, "files_count_limit");
     const usedBytes = existing.reduce((sum, file) => sum + file.size, 0);
-    if (usedBytes + bytes.length > MAX_USER_BYTES) throw new CloudFilesError(413, "files_quota_exceeded");
+    if (usedBytes + bytes.length > maxBytes) throw new CloudFilesError(413, "files_quota_exceeded");
     const id = crypto.randomUUID();
     const name = sanitizeFilename(filename);
     const objectName = prefix + id + "/" + name;
@@ -181,7 +188,9 @@ class CloudFilesService {
       params: { alt: "media" },
       responseType: "arraybuffer"
     });
-    return { ...file, body: Buffer.isBuffer(data) ? data : Buffer.from(data || []) };
+    const body=Buffer.isBuffer(data) ? data : Buffer.from(data || []);
+    if(this.entitlements)await this.entitlements.consume(userId,{downloadBytes:body.length});
+    return { ...file, body };
   }
 
   async remove(userId, fileId) {
