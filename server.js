@@ -43,6 +43,7 @@ const { AgentMemoryService } = require("./services/agentMemoryService");
 const { CloudFilesService } = require("./services/cloudFilesService");
 const { MediaStudioService } = require("./services/mediaStudioService");
 const { CloudNotesRepository } = require("./services/cloudNotesRepository");
+const { registerPersonalFunctionTools } = require("./services/personalFunctionTools");
 const { AgentKnowledgeRepository } = require("./services/agentKnowledgeRepository");
 const { AgentKnowledgeService } = require("./services/agentKnowledgeService");
 const { AgentPolicyService } = require("./services/agentPolicyService");
@@ -122,6 +123,7 @@ toolRegistry.register({
   run: async ({ user, args }) => agentKnowledge.search({ user, query: args.query, limit: args.limit == null ? 8 : Number(args.limit) })
 });
 const agentMemory = new AgentMemoryService({ repository: agentMemoryRepository, audit, knowledge: agentKnowledge });
+registerPersonalFunctionTools(toolRegistry, { memory: agentMemory, reminders, files: cloudFiles, knowledge: agentKnowledge });
 sentinel.memory = agentMemory;
 const agentPlanner = new AgentPlannerService({ agentService, gateway: sentinel.gateway, audit, memory: agentMemory });
 const agentWorkflow = new AgentWorkflowService({ agentService, gateway: sentinel.gateway, audit, runs: agentRuns, pendingStore: agentPending, memory: agentMemory });

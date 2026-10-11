@@ -134,6 +134,25 @@ const WebSocket = require('ws');
       if(!settled)liveSocket.send(JSON.stringify({realtimeInput:{audioStreamEnd:true}}));
     })().catch(finish);
   });
+  // Ask the live model to use the safe, read-only provider catalog. This proves
+  // the deployed provider emits a functionCall and the gateway returns its result.
+  await new Promise((resolve,reject) => {
+    let settled=false;
+    const finish=error=>{if(settled)return;settled=true;clearTimeout(timer);liveSocket.removeListener('message',onMessage);liveSocket.removeListener('close',onClose);if(error)reject(error);else resolve();};
+    const onClose=(code,reason)=>finish(new Error(`Gemini Live closed before function calling (${code}: ${String(reason).slice(0,120)})`));
+    const onMessage=data=>{
+      let frame;try{frame=JSON.parse(String(data));}catch{return;}
+      if(frame.type==='toolResult' && frame.toolId==='ai.providers') {
+        return finish(frame.ok===true ? null : new Error('Gemini Live read-only function call failed'));
+      }
+      if(frame.error) return finish(new Error(`Gemini Live function-call request failed: ${JSON.stringify(frame.error).slice(0,240)}`));
+    };
+    const timer=setTimeout(()=>finish(new Error('Gemini Live did not call the requested read-only function')),45000);
+    liveSocket.on('message',onMessage);liveSocket.once('close',onClose);
+    liveSocket.send(JSON.stringify({clientContent:{turns:[{role:'user',parts:[{text:'ใช้ function panthorium_ai_providers เพื่ออ่านรายชื่อผู้ให้บริการ AI ที่ตั้งค่าไว้ แล้วค่อยตอบ ห้ามเดารายชื่อเอง'}]}],turnComplete:true}}));
+  });
+  console.log('Gemini Live function calling passed: backend completed a read-only ai.providers tool call.');
+
   await new Promise(resolve => {
     if (liveSocket.readyState === WebSocket.CLOSED) return resolve();
     const timer = setTimeout(() => { liveSocket.terminate(); resolve(); }, 2000);
@@ -142,3 +161,4 @@ const WebSocket = require('ws');
   });
 
 })().catch(error => { console.error(error.message); process.exitCode = 1; });
+
