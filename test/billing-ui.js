@@ -30,7 +30,7 @@ async function main() {
   root.querySelector('[data-product-id="work-pro"]').click();
   assert.match(root.querySelector('.pb-total').textContent, /1,089 บาท/);
   assert.equal(root.querySelector('.pb-primary').disabled, true, 'no payment before backend verification is integrated');
-  assert.equal(root.querySelectorAll('input').length, 0, 'never collect card data for an unconfigured checkout');
+  assert.equal(root.querySelectorAll('input:not([type=checkbox])').length, 0, 'never collect card data for an unconfigured checkout');
   root.querySelector('.pb-back').click();
   assert.equal(root.querySelectorAll('.pb-card').length, 4);
   root.querySelectorAll('.pb-tab')[1].click();
@@ -42,6 +42,24 @@ async function main() {
   assert.equal(w.PanthoriumBilling.open(), true);
   assert.equal(restored, 'billing');
   assert.equal(w.document.querySelectorAll('[data-billing-root]').length, 1);
+  let paymentCalls=0;
+  w.PanthoriumAuth = {getAccessToken:()=> 'fixture-token'};
+  w.fetch = async (url, options) => {
+    if (url.endsWith('/status')) return {ok:true,json:async()=>({ok:true,checkoutEnabled:true,mode:'test'})};
+    paymentCalls++;
+    assert.equal(options.headers.Authorization,'Bearer fixture-token');
+    const body=JSON.parse(options.body);assert.equal(body.testAcknowledged,true);assert.equal(body.productId,'life');
+    return {ok:true,json:async()=>({ok:true,order:{id:'fixture-order',productId:'life',status:'pending',chargeId:'chrg_test_fixture',mode:'test'}})};
+  };
+  w.dispatchEvent(new w.Event('panthorium:auth-changed'));
+  root.querySelector('.pb-tab').click();
+  root.querySelector('[data-product-id="life"]').click();
+  await new Promise(resolve=>setTimeout(resolve,0));
+  let pay=root.querySelector('.pb-primary');assert.equal(pay.disabled,false);
+  pay.click();await new Promise(resolve=>setTimeout(resolve,0));assert.equal(paymentCalls,0,'must acknowledge test mode');
+  root.querySelector('input[type=checkbox]').checked=true;pay.click();pay.click();
+  await new Promise(resolve=>setTimeout(resolve,0));assert.equal(paymentCalls,1,'disable double submit');
+  assert.match(root.querySelector('[data-payment-result]').textContent,/รอยืนยันจาก Omise/);
   w.Capacitor = { isNativePlatform: () => true };
   w.dispatchEvent(new w.Event('panthorium:auth-changed'));
   assert([...root.querySelectorAll('[data-product-id]')].every(el => el.disabled), 'no web purchase buttons inside the native app');
