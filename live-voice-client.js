@@ -147,8 +147,26 @@
     approve.textContent = "อนุมัติและดำเนินการ";
     approve.style.cssText = "background:#2563eb;color:white;border:0;border-radius:8px;padding:10px 14px;font:inherit;cursor:pointer";
     cancel.style.cssText = "background:#334155;color:white;border:0;border-radius:8px;padding:10px 14px;font:inherit;cursor:pointer";
+    const reminderNeedsEmailConsent = frame.toolId === "reminders.write" && frame.args?.action === "create" && frame.args?.emailConsent === true;
+    let emailConsent = null;
+    if (reminderNeedsEmailConsent) {
+      emailConsent = document.createElement("input");
+      emailConsent.type = "checkbox";
+      emailConsent.id = `panthorium-reminder-email-consent-${approvalDialogs.size}`;
+      const consentLabel = document.createElement("label");
+      consentLabel.htmlFor = emailConsent.id;
+      consentLabel.textContent = "ฉันยินยอมให้ Panthorium ส่งอีเมลแจ้งเตือนนี้ไปยังอีเมลที่ยืนยันในบัญชี";
+      consentLabel.style.cssText = "display:flex;align-items:flex-start;gap:10px;margin:12px 0;cursor:pointer";
+      consentLabel.prepend(emailConsent);
+      approve.textContent = "ยินยอมส่งอีเมลและดำเนินการ";
+      approve.disabled = true;
+      approve.style.opacity = ".55";
+      emailConsent.addEventListener("change", () => { approve.disabled = !emailConsent.checked; approve.style.opacity = approve.disabled ? ".55" : "1"; });
+      dialog.append(heading, description, metadata, detailLabel, details, note, consentLabel, actions);
+    } else {
+      dialog.append(heading, description, metadata, detailLabel, details, note, actions);
+    }
     actions.append(cancel, approve);
-    dialog.append(heading, description, metadata, detailLabel, details, note, actions);
     document.body.append(dialog);
 
     const finish = approved => {
@@ -161,7 +179,7 @@
     };
     approvalDialogs.set(approvalRequestId, { dialog, finish });
     cancel.addEventListener("click", () => finish(false));
-    approve.addEventListener("click", () => finish(true));
+    approve.addEventListener("click", () => finish(!reminderNeedsEmailConsent || emailConsent?.checked === true));
     dialog.addEventListener("cancel", event => { event.preventDefault(); finish(false); });
     dialog.addEventListener("click", event => { if (event.target === dialog) finish(false); });
     setStatus("Gemini Live รอการยืนยันก่อนดำเนินการ", "processing");
