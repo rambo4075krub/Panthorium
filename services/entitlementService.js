@@ -37,9 +37,10 @@ class EntitlementService {
     await c.query(`INSERT INTO panthorium_entitlement_grants(order_id,user_id,product_id,snapshot,starts_at,ends_at)
       VALUES($1,$2,$3,$4,$5::timestamptz,$5::timestamptz+$6::interval) ON CONFLICT(order_id) DO NOTHING`,[row.id,row.user_id,row.product_id,JSON.stringify(product),paidAt,product.kind==='subscription' ? '1 month':'30 days']);
   }
-  async state(userId){return this.locked(userId,async c=>{
+  async state(userId){return this.locked(userId,c=>this.stateIn(c,userId));}
+  async stateIn(c,userId){
     const rows=await this.active(c,userId);const membership=rows.filter(r=>r.snapshot.category==='membership').sort((a,b)=>new Date(b.starts_at)-new Date(a.starts_at))[0];
-    const applicable=rows.filter(r=>r.snapshot.category!=='membership' || r.order_id===membership?.order_id);
+    const applicable=rows.filter(r=>(r.snapshot.category!=='membership' || r.order_id===membership?.order_id) && (!r.snapshot.paidMembershipRequired || !!membership));
     const period=dayKey().slice(0,7);
     const free=membership ? {} : (await c.query('SELECT used FROM panthorium_free_usage WHERE user_id=$1 AND period=$2',[userId,period])).rows[0]?.used || {};
     const remaining={...(!membership ? catalog.get('free').quotas : {})};
@@ -47,12 +48,12 @@ class EntitlementService {
     if(!membership){const daily=free.day===dayKey() ? Math.max(0,60-(free.dailyVoiceSeconds||0)) : 60;remaining.voiceInputSeconds=Math.min(remaining.voiceInputSeconds,daily);remaining.voiceOutputSeconds=Math.min(remaining.voiceOutputSeconds,daily);}
     for(const r of applicable)for(const [k,v] of Object.entries(r.snapshot.quotas || {}))remaining[k]=(remaining[k]||0)+Math.max(0,v-(Number(r.used[k])||0));
     return {plan:membership?.product_id || 'free',startsAt:membership?.starts_at || null,expiresAt:membership?.ends_at || null,remaining,grants:applicable.map(r=>({productId:r.product_id,startsAt:r.starts_at,expiresAt:r.ends_at})),automaticRenewal:false};
-  });}
+  }
   async consume(userId,amounts){
     for(const [k,v] of Object.entries(amounts))if(!KEYS.includes(k)||!Number.isSafeInteger(v)||v<0)throw new EntitlementError('invalid_usage',400);
     return this.locked(userId,async c=>{
       const rows=await this.active(c,userId);const membership=rows.filter(r=>r.snapshot.category==='membership').sort((a,b)=>new Date(b.starts_at)-new Date(a.starts_at))[0];
-      const applicable=rows.filter(r=>r.snapshot.category!=='membership' || r.order_id===membership?.order_id);
+      const applicable=rows.filter(r=>(r.snapshot.category!=='membership' || r.order_id===membership?.order_id) && (!r.snapshot.paidMembershipRequired || !!membership));
       const period=dayKey().slice(0,7);
       let free={};if(!membership){await c.query('INSERT INTO panthorium_free_usage(user_id,period) VALUES($1,$2) ON CONFLICT DO NOTHING',[userId,period]);free=(await c.query('SELECT used FROM panthorium_free_usage WHERE user_id=$1 AND period=$2 FOR UPDATE',[userId,period])).rows[0].used;}
       let dailyAdded=0;

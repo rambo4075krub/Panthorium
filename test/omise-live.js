@@ -47,6 +47,8 @@ async function main(){
   const good=structuredClone(charge);charge.livemode=false;await assert.rejects(service.order(user,order.id),/invalid_charge/);charge=good;
   charge.status='successful';charge.paid=true;charge.paid_at=new Date().toISOString();
   await service.webhook('evnt_fixture');await service.webhook('evnt_fixture');assert.equal(pool.grants.size,1);assert.equal(pool.receipts.size,1);
+  assert.equal(pool.receipts.get(order.id)[5],'1 month','receipt and membership use the same monthly term');
+  const {CloudFilesService}=require('../services/cloudFilesService');assert.equal(new CloudFilesService({entitlements:service.entitlements()}).maxUserFiles,10000,'large storage packs can fit beyond legacy 1000-file cap');
   const rights=service.entitlements();let state=await rights.state(user);assert.equal(state.plan,'life');assert.equal(state.remaining.storageBytes,1024**3);
   await assert.rejects(rights.checkPurchase(user,require('../billing-catalog').get('work')),/membership_already_active/);
   await rights.consume(user,{voiceInputSeconds:10,textInputTokens:20});state=await rights.state(user);assert.equal(state.remaining.voiceInputSeconds,3890);assert.equal(state.remaining.textInputTokens,62480);
