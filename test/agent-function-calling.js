@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { AgentFunctionCallingService } = require('../services/agentFunctionCallingService');
+const { AgentFunctionCallingService, TOOL_DEFINITIONS } = require('../services/agentFunctionCallingService');
 
 async function main() {
   const catalog = [
@@ -47,6 +47,15 @@ async function main() {
     assert(!regularTools.some(tool => tool.name === name), `${name} is not available to unconfirmed chat calls`);
   }
   const liveTools = service.declarationsFor(regularUser, { surface: 'gemini-live' });
+  for (const definition of TOOL_DEFINITIONS) {
+    for (const [parameterName, schema] of Object.entries(definition.properties)) {
+      assert.equal(typeof schema.description, 'string', `${definition.name}.${parameterName} must describe its Gemini Live parameter`);
+      assert(schema.description.trim().length > 0, `${definition.name}.${parameterName} must have a non-empty description`);
+      if (schema.type === 'ARRAY') {
+        assert.equal(typeof schema.items?.description, 'string', `${definition.name}.${parameterName} items must be described`);
+      }
+    }
+  }
   const windowOpen = liveTools.find(tool => tool.name === 'panthorium_window_open');
   assert(windowOpen.parameters.properties.appId.enum.includes('calculator'));
   assert(!windowOpen.parameters.properties.appId.enum.includes('security'));
