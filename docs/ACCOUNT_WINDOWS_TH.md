@@ -11,3 +11,5 @@ Voice Identity แสดงรายการเสียงและการ�
 ทดสอบด้วย `node test/account-ui.js`, `node test/voice-windows.js`, `npm test` และ `npm run check` จากนั้นตรวจหน้า Guest และหน้า admin บน Google staging ก่อนส่ง main
 
 การรับเงิน Omise ยังไม่เปิดใช้ ต้องตั้งค่ากุญแจฝั่งเซิร์ฟเวอร์และทำ durable billing ledger พร้อมตรวจการชำระเงินจริงและบังคับสิทธิ์/โควต้า ก่อนปลดล็อก checkout ตาม `docs/BILLING_UI_TH.md`
+
+Voice Identity อยู่ในหน้าลงทะเบียนเดียวกัน ไม่แสดงไอคอนแยกใน Start Menu ผู้ใช้ที่มีบัญชีแล้วเปิดหน้าเดียวกันเพื่อจัดการเสียงได้ โดยไม่สร้างบัญชีใหม่

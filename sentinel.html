@@ -3282,7 +3282,6 @@
 
     const APP_LIST = [
         { id: "sentinel", name: "Sentinel AI", icon: "🤖", open: openSentinel },
-        { id: "voice-identity", name: "Voice Identity", icon: "🎙️", open: () => window.PanthoriumVoiceIdentity?.open?.() },
         { id: "calculator", name: "เครื่องคิดเลข", icon: "🧮", open: openCalculator },
         { id: "notes", name: "บันทึก", icon: "📝", open: openNotes, visible: () => {
             const user = OS.state.user;
@@ -3300,7 +3299,7 @@
             const user = OS.state.user;
             return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
         } },
-        { id: "account-register", name: "ลงทะเบียน", icon: "📝", startMenuOnly: true, open: () => window.PanthoriumAccounts?.openRegistration?.(), visible: () => !OS.state.user || OS.state.user.roles?.includes("guest") },
+        { id: "account-register", name: "ลงทะเบียน", icon: "📝", startMenuOnly: true, open: () => window.PanthoriumAccounts?.openRegistration?.() },
         { id: "account-login", name: "เข้าสู่ระบบ / ลืมรหัสผ่าน", icon: "🔐", startMenuOnly: true, open: () => window.PanthoriumAccounts?.openLogin?.() },
         { id: "account-logout", name: "ออกจากระบบ", icon: "🚪", startMenuOnly: true, open: () => window.PanthoriumAccounts?.openLogout?.(), visible: () => Boolean(OS.state.user && !OS.state.user.roles?.includes("guest")) },
         { id: "billing", name: "แพ็กเกจและชำระเงิน", icon: "💳", startMenuOnly: true, open: () => window.PanthoriumBilling?.open?.() },

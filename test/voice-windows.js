@@ -420,11 +420,11 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     gw.eval(source('account-ui.js'));
     gw.document.dispatchEvent(new gw.Event('DOMContentLoaded'));
     await tick();
-    assert(gw.document.getElementById('voice-identity-launcher'), 'guest start menu keeps the Voice Identity icon');
-    assert.equal(gw.document.querySelector('#voice-identity-launcher span')?.textContent, 'Voice Identity', 'voice launcher contains no account actions');
+    assert.equal(gw.document.getElementById('voice-identity-launcher'), null, 'Voice Identity has no separate menu launcher');
     await gw.PanthoriumVoiceIdentity.open();
     await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(gw.document.querySelector('#panthorium-voice-identity [data-email]'), null, 'voice window has no account fields');
+    assert(gw.document.querySelector('#panthorium-account-register [data-email]'), 'voice opener goes to the same registration window');
+    assert.equal(gw.document.getElementById('panthorium-voice-identity'), null, 'no separate Voice Identity window');
     await gw.PanthoriumAccounts.openRegistration();
     gw.PanthoriumVoiceIdentity.openLogin();
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -437,7 +437,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert(gw.document.querySelector('[data-login-email]') && gw.document.querySelector('[data-forgot]'), 'guest can sign in or recover password');
     assert(gw.document.querySelector('[data-reset-email][type="email"]') && gw.document.querySelector('[data-reset-password-confirm][type="password"]'), 'password recovery has an email and password confirmation field');
     assert(gw.document.querySelector('[data-remember]') && gw.document.querySelector('[data-login-remember]'), 'remember choice appears on signup and login');
-    assert.match(gw.document.querySelector('#panthorium-voice-identity [data-state]').textContent, /ด่านคัดเสียงเปิดใช้งานแล้ว/, 'guest sees the staged speaker gate enabled');
+    assert.match(gw.document.querySelector('#panthorium-account-register [data-state]').textContent, /ด่านคัดเสียงเปิดใช้งานแล้ว/, 'guest sees the staged speaker gate enabled');
     gw.close();
     const signedDom = new JSDOM('<!doctype html><html><body><div id="sm-apps"></div></body></html>', { url: 'https://panthorium-staging.example.run.app/', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
     const sw = signedDom.window;
