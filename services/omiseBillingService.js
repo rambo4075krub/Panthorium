@@ -52,7 +52,7 @@ class OmiseBillingService {
   }
   view(row) { return {id:row.id,productId:row.product_id,amountSatang:row.amount,currency:row.currency,status:row.status,chargeId:row.charge_id,qrUrl:row.qr_url,expiresAt:row.expires_at,mode:this.mode,grantsRealEntitlements:this.live}; }
   entitlements() { if(!this.entitlementService) {const {EntitlementService}=require('./entitlementService');this.entitlementService=new EntitlementService({pool:this.pool});}return this.entitlementService; }
-  paidAt(charge) { const value=new Date(charge.paid_at || charge.authorized_at || charge.created_at || Date.now());if(!Number.isFinite(value.getTime()) || value.getTime()>Date.now()+60000) fail('invalid_charge',400);return value.toISOString(); }
+  paidAt(charge) { if(this.live && !charge.paid_at)fail('invalid_charge',400);const value=new Date(charge.paid_at || charge.authorized_at || charge.created_at || Date.now());if(!Number.isFinite(value.getTime()) || value.getTime()>Date.now()+60000) fail('invalid_charge',400);return value.toISOString(); }
   async grant(client,row,charge) { await this.entitlements().grant(client,row,this.paidAt(charge)); }
   async checkout(userId,productId,key) {
     const product=catalog.get(productId);
@@ -87,7 +87,7 @@ class OmiseBillingService {
       let qr=charge.source?.scannable_code?.image?.download_uri || null;
       if(qr) { const url=new URL(qr);if(url.protocol!=='https:' || url.hostname!=='api.omise.co' || !url.pathname.startsWith('/charges/'+charge.id+'/documents/')) fail('invalid_qr_url',400); }
       const updated=await client.query(`UPDATE ${this.orders} SET status=$2,charge_id=$3,qr_url=$4,expires_at=$5,updated_at=NOW() WHERE id=$1 RETURNING *`,[id,status,charge.id,qr,charge.expires_at || null]);
-      if(status==='paid') await client.query(`INSERT INTO ${this.receipts}(order_id,user_id,product_id,product_snapshot,valid_until) VALUES($1,$2,$3,$4,$5::timestamptz+INTERVAL '30 days') ON CONFLICT(order_id) DO NOTHING`,[id,row.user_id,row.product_id,JSON.stringify(row.product_snapshot || catalog.get(row.product_id)),this.paidAt(charge)]);
+      if(status==='paid') await client.query(`INSERT INTO ${this.receipts}(order_id,user_id,product_id,product_snapshot,valid_until) VALUES($1,$2,$3,$4,$5::timestamptz+$6::interval) ON CONFLICT(order_id) DO NOTHING`,[id,row.user_id,row.product_id,JSON.stringify(row.product_snapshot || catalog.get(row.product_id)),this.paidAt(charge),this.live && (row.product_snapshot || catalog.get(row.product_id)).kind==='subscription' ? '1 month':'30 days']);
       if (this.live && status==='paid') await this.grant(client, row, charge);
       if (this.live && status==='refunded') {
         await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['billing:'+row.user_id]);

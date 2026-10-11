@@ -33,6 +33,7 @@ function safeContentType(input) {
 class CloudFilesService {
   constructor({ bucket = process.env.PANTHORIUM_FILES_BUCKET, clientFactory, entitlements = null } = {}) {
     this.entitlements = entitlements;
+    this.maxUserFiles=entitlements ? 10000 : MAX_USER_FILES;
     this.bucket = String(bucket || "").trim();
     this.clientFactory = clientFactory || (async () => new GoogleAuth({
       scopes: ["https://www.googleapis.com/auth/devstorage.read_write"]
@@ -120,7 +121,7 @@ class CloudFilesService {
         const file = this.normalizeObject(item, prefix);
         if (file) files.push(file);
       }
-      if (files.length > MAX_USER_FILES) throw new CloudFilesError(413, "files_count_limit");
+      if (files.length > this.maxUserFiles) throw new CloudFilesError(413, "files_count_limit");
       pageToken = data && data.nextPageToken;
       if (!pageToken) return files.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
     }
@@ -131,12 +132,12 @@ class CloudFilesService {
     this.ensureConfigured();
     const files = await this.listAll(userId);
     const maxBytes=this.entitlements ? (await this.entitlements.state(userId)).remaining.storageBytes : MAX_USER_BYTES;
-    return { files, usedBytes: files.reduce((sum, file) => sum + file.size, 0), maxBytes, maxFiles: MAX_USER_FILES };
+    return { files, usedBytes: files.reduce((sum, file) => sum + file.size, 0), maxBytes, maxFiles: this.maxUserFiles };
   }
 
   async upload(userId, filename, contentType, body) {
     // Serialize actual storage mutations across instances; entitlement reads happen before locking.
-    if(this.entitlements){const state=await this.entitlements.state(userId);return this.entitlements.locked(userId,()=>this.uploadWithLimit(userId,filename,contentType,body,state.remaining.storageBytes));}
+    if(this.entitlements)return this.entitlements.locked(userId,async client=>{const state=await this.entitlements.stateIn(client,userId);return this.uploadWithLimit(userId,filename,contentType,body,state.remaining.storageBytes);});
     return this.uploadWithLimit(userId,filename,contentType,body,MAX_USER_BYTES);
   }
   async uploadWithLimit(userId, filename, contentType, body, maxBytes) {
@@ -146,7 +147,7 @@ class CloudFilesService {
     if (!bytes.length) throw new CloudFilesError(400, "empty_file");
     if (bytes.length > MAX_FILE_BYTES) throw new CloudFilesError(413, "file_too_large");
     const existing = await this.listAll(userId);
-    if (existing.length >= MAX_USER_FILES) throw new CloudFilesError(413, "files_count_limit");
+    if (existing.length >= this.maxUserFiles) throw new CloudFilesError(413, "files_count_limit");
     const usedBytes = existing.reduce((sum, file) => sum + file.size, 0);
     if (usedBytes + bytes.length > maxBytes) throw new CloudFilesError(413, "files_quota_exceeded");
     const id = crypto.randomUUID();
