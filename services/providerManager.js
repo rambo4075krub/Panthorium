@@ -177,7 +177,7 @@ class ProviderManager {
   async callAvailable(provider, systemPrompt, history, options = {}) {
     if (this.liveOnly) {
       if (provider !== "gemini-live" || !this.available().length) throw new Error("provider_not_available");
-      return require("./geminiLiveCompletion").completeLive({ systemPrompt, history, tools:options.tools || [] });
+      return require("./geminiLiveCompletion").completeLive({ systemPrompt, history, tools:options.tools || [], entitlements:this.entitlements, userId:options.userId });
     }
     const evaluatorIndex = /^vertex_eval_(\d+)$/.exec(String(provider || ""));
     if (evaluatorIndex) {
@@ -393,7 +393,7 @@ class ProviderManager {
   async streamDetailed(provider, systemPrompt, history, options = {}, onDelta = () => {}) {
     if (this.liveOnly) {
       if (provider !== "gemini-live" || !this.available().length) throw new Error("provider_not_available");
-      return require("./geminiLiveCompletion").completeLive({ systemPrompt, history, onDelta });
+      return require("./geminiLiveCompletion").completeLive({ systemPrompt, history, onDelta, entitlements:this.entitlements, userId:options.userId });
     }
     if (provider === "vertex") {
       if (!this.vertexConfigured()) return null;

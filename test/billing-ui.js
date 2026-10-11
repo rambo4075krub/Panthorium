@@ -60,6 +60,16 @@ async function main() {
   root.querySelector('input[type=checkbox]').checked=true;pay.click();pay.click();
   await new Promise(resolve=>setTimeout(resolve,0));assert.equal(paymentCalls,1,'disable double submit');
   assert.match(root.querySelector('[data-payment-result]').textContent,/รอยืนยันจาก Omise/);
+  w.fetch=async(url,options)=>{
+    if(url.endsWith('/status'))return {ok:true,json:async()=>({ok:true,checkoutEnabled:true,mode:'live'})};
+    if(url.endsWith('/entitlements'))return {ok:true,json:async()=>({ok:true,plan:'life',expiresAt:'2026-11-12T00:00:00Z',grants:[]})};
+    const body=JSON.parse(options.body);assert.equal(body.liveAcknowledged,true);assert.equal(body.testAcknowledged,false);
+    return {ok:true,json:async()=>({ok:true,order:{id:'live-order',status:'paid',chargeId:'chrg_fixture',mode:'live'}})};
+  };
+  w.dispatchEvent(new w.Event('panthorium:auth-changed'));root.querySelector('.pb-tab').click();root.querySelector('[data-product-id="life"]').click();
+  await new Promise(resolve=>setTimeout(resolve,0));pay=root.querySelector('.pb-primary');assert.match(pay.textContent,/189 บาท/);assert.match(root.querySelector('label').textContent,/1 เดือน/);
+  root.querySelector('input[type=checkbox]').checked=true;pay.click();await new Promise(resolve=>setTimeout(resolve,0));
+  assert.match(root.querySelector('[data-payment-result]').textContent,/เปิดสิทธิ์แพ็กเกจแล้ว/);
   w.Capacitor = { isNativePlatform: () => true };
   w.dispatchEvent(new w.Event('panthorium:auth-changed'));
   assert([...root.querySelectorAll('[data-product-id]')].every(el => el.disabled), 'no web purchase buttons inside the native app');

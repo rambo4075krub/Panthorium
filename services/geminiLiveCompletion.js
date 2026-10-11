@@ -1,7 +1,9 @@
 const { connectGeminiLive, MODEL_ID } = require('./geminiLiveVertex');
 
 // HTTP chat is a short Live session, never a fallback to another model.
-async function completeLive({ systemPrompt, history = [], tools = [], onDelta = () => {}, connect = connectGeminiLive, timeoutMs = 60000 } = {}) {
+async function completeLive({ systemPrompt, history = [], tools = [], onDelta = () => {}, connect = connectGeminiLive, timeoutMs = 60000, entitlements = null, userId } = {}) {
+  let quotaMeter=null;
+  if(entitlements && /^[0-9a-f-]{36}$/i.test(userId || '')){const state=await entitlements.state(userId);if(state.remaining.textInputTokens<=0 || state.remaining.textOutputTokens<=0 || state.remaining.voiceOutputSeconds<=0)throw new Error('quota_exceeded');const {LiveQuotaMeter}=require('./liveQuotaMeter');quotaMeter=new LiveQuotaMeter({entitlements,userId});}
   const socket = await connect({ systemInstruction: systemPrompt, tools, transcription: true });
   return new Promise((resolve, reject) => {
     let done = false;
@@ -19,9 +21,14 @@ async function completeLive({ systemPrompt, history = [], tools = [], onDelta = 
     };
     const onClose = (code, reason) => finish(new Error(`gemini_live_closed_${code}:${String(reason).slice(0,120)}`));
     const onError = error => finish(error);
-    const onMessage = data => {
+    let queue=Promise.resolve();
+    const onMessage = data => {queue=queue.then(()=>processMessage(data)).catch(error=>finish(error));};
+    const processMessage = async data => {
+      if(done)return;
       let frame;
       try { frame = JSON.parse(String(data)); } catch { return finish(new Error('gemini_live_invalid_json')); }
+      if(quotaMeter)await quotaMeter.output(frame);
+      usage = frame.usageMetadata || frame.usage_metadata || usage;
       if (frame.error) return finish(new Error(`gemini_live_error:${JSON.stringify(frame.error).slice(0,240)}`));
       if (frame.setupComplete || frame.setup_complete) {
         const turns = history.map(message => ({ role: ['assistant','model'].includes(message.role) ? 'model' : 'user', parts: message.parts || [{text:String(message.content || '')}] }));
