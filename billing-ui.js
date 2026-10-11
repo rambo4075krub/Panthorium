@@ -88,10 +88,66 @@
       else summary.append(node('p', 'อายุ 30 วันนับจากชำระ · ไม่มีต่ออายุหรือเติมอัตโนมัติ'));
       const policy = button('ดู Privacy/Policy', () => window.PanthoriumPrivacyPolicy?.open?.(), 'pb-back');
       summary.appendChild(policy);
-      const pay = button('ชำระเงินผ่าน Omise — ยังไม่เปิดใช้งาน', () => {}, 'pb-primary');
+      const pay = button('ชำระเงินผ่าน Omise — กำลังตรวจระบบ', startPayment, 'pb-primary');
+      let busy = false;
+      const userId = user?.id || user?.sub;
+      const sameAccount = () => root.isConnected && (os()?.state?.user?.id || os()?.state?.user?.sub) === userId && summary.isConnected;
+      const result = node('div'); result.dataset.paymentResult = '1';
+      const acknowledgement = node('label'); acknowledgement.hidden = true;
+      const consent = document.createElement('input'); consent.type = 'checkbox';
+      acknowledgement.append(consent, document.createTextNode(' ฉันเข้าใจว่านี่คือรายการทดสอบ ไม่ตัดเงินจริง ไม่ต่ออายุอัตโนมัติ และไม่เพิ่มสิทธิ์ใช้งานจริง'));
+      summary.append(acknowledgement, result);
+      const backend = String(window.PanthoriumAuth?.getBackendUrl?.() || os()?.config?.backendUrl || '').replace(/\/$/, '');
+      async function api(path, body) {
+        const token = window.PanthoriumAuth?.getAccessToken?.() || os()?.config?.accessToken;
+        const response = await fetch(backend + '/api/billing' + path, {method: body ? 'POST' : 'GET', headers: { ...(token ? {Authorization: 'Bearer ' + token} : {}), ...(body ? {'Content-Type': 'application/json'} : {}) }, ...(body ? {body:JSON.stringify(body)} : {}), signal:AbortSignal.timeout(30000)});
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || 'billing_unavailable');
+        return data;
+      }
+      const cacheKey = 'panthorium-test-order:' + userId + ':' + product.id;
+      function requestKey() {
+        let key; try { key = sessionStorage.getItem(cacheKey); } catch (_) {}
+        if (!key) { key = crypto.randomUUID(); try { sessionStorage.setItem(cacheKey, key); } catch (_) {} }
+        return key;
+      }
+      function display(order) {
+        if (!sameAccount()) return;
+        result.replaceChildren();
+        result.append(node('p', 'โหมด Test · คำสั่งซื้อ ' + order.id));
+        const names = {creating:'กำลังสร้างรายการ',verification_required:'รอตรวจสอบรายการ ห้ามสร้างรายการซ้ำ',pending:'รอยืนยันจาก Omise',paid:'ชำระสำเร็จในโหมดทดสอบ',failed:'รายการทดสอบไม่สำเร็จ',expired:'รายการหมดอายุ',refunded:'คืนเงิน / ยกเลิกรายการทดสอบ'};
+        result.append(node('p', names[order.status] || 'รอตรวจสอบ'));
+        if (order.qrUrl && order.status === 'pending') {
+          const qr = document.createElement('img'); qr.src = order.qrUrl; qr.alt = 'QR PromptPay สำหรับรายการทดสอบ'; qr.style.cssText = 'display:block;width:240px;max-width:100%;margin:16px auto;background:white'; result.append(qr);
+          result.append(node('p', 'ไม่ต้องสแกนด้วยแอปธนาคาร ใน Omise Test Dashboard เปิดรายการนี้ → Actions → Successful หรือ Failed แล้วกดตรวจสถานะ'));
+        }
+        if (order.chargeId) result.append(node('p', 'Omise: ' + order.chargeId, 'pb-muted'));
+        const refresh = button('ตรวจสถานะจาก Omise', async () => {
+          refresh.disabled = true;
+          try { display((await api('/orders/' + encodeURIComponent(order.id))).order); }
+          catch (_) { if (sameAccount()) announce.textContent = 'ตรวจสถานะไม่ได้ กรุณาลองอีกครั้ง'; }
+          finally { refresh.disabled = false; }
+        }, 'pb-back'); result.append(refresh);
+        pay.disabled = true;
+        if (['paid','failed','expired','refunded'].includes(order.status)) {
+          result.append(button('เริ่มรายการทดสอบใหม่', () => {try {sessionStorage.removeItem(cacheKey);} catch (_) {} result.replaceChildren(); consent.checked = false; pay.disabled = false;}, 'pb-back'));
+        }
+      }
+      async function startPayment() {
+        if (busy || !sameAccount()) return;
+        if (!consent.checked) {announce.textContent = 'กรุณายืนยันว่าเป็นรายการทดสอบก่อน';return;}
+        busy = true; pay.disabled = true; announce.textContent = 'กำลังสร้างรายการทดสอบกับ Omise…';
+        try {const data = await api('/checkout', {productId:product.id,requestKey:requestKey(),testAcknowledged:true}); display(data.order);if(sameAccount()) announce.textContent = 'รายการนี้อยู่ในโหมด Test ไม่มีการเพิ่มสิทธิ์ใช้งานจริง';}
+        catch (_) {if(sameAccount()) {announce.textContent = 'ยังสร้างรายการไม่ได้ กดตรวจ/ลองรายการเดิมอีกครั้ง ระบบใช้รหัสเดิมเพื่อป้องกันรายการซ้ำ';pay.disabled = false;}}
+        finally {busy = false;}
+      }
+      (async () => {try { const status = await api('/status');if(!sameAccount())return;
+        if(status.checkoutEnabled && status.mode === 'test' && registered) {acknowledgement.hidden = false;pay.textContent = 'สร้างรายการ PromptPay — โหมด Test';pay.disabled = false;announce.textContent = 'เชื่อม Omise Test พร้อมแล้ว · ไม่ตัดเงินจริงและไม่เพิ่มสิทธิ์จริง';}
+        else {pay.textContent = registered ? 'Omise ยังไม่พร้อม' : 'เข้าสู่ระบบก่อนทดสอบชำระเงิน';}
+      } catch (_) {if(sameAccount())pay.textContent = 'Omise ยังไม่พร้อม';} })();
       pay.disabled = true;
       summary.appendChild(pay);
-      summary.append(node('p', 'จะเปิดรับชำระเมื่อระบบ Omise พร้อม และแสดงนโยบายคืนเงินก่อนยืนยันรายการ ไม่ต้องกรอกข้อมูลบัตรในหน้านี้', 'pb-muted'));
+      summary.append(node('p', 'การทดสอบครั้งนี้ใช้ PromptPay ไม่มีการกรอกข้อมูลบัตร การต่ออายุและสิทธิ์ใช้งานจริงจะเปิดหลังทดสอบครบ', 'pb-muted'));
       main.appendChild(summary);
       announce.textContent = 'นี่คือหน้าสรุปก่อนชำระ ยังไม่มีคำสั่งซื้อและยังไม่มีการตัดเงิน';
       main.scrollTop = 0;
