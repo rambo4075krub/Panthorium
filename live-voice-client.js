@@ -14,6 +14,7 @@
   let serverReady = false;
   let starting = false;
   let outputTranscript = "";
+  const approvalDialogs = new Map();
 
   const setStatus = (label, mode = "idle") => {
     button.title = label;
@@ -99,6 +100,93 @@
     window.dispatchEvent(new CustomEvent("panthorium:ai-speaking", {detail:{speaking:false}}));
   }
 
+  function sendToolApproval(frame, approved) {
+    const approvalRequestId = String(frame.approvalRequestId || "");
+    const callId = String(frame.callId || "");
+    if (socket?.readyState === WebSocket.OPEN && approvalRequestId && callId) {
+      socket.send(JSON.stringify({ type: "toolApprovalResult", approvalRequestId, callId, approved: approved === true }));
+    }
+  }
+
+  function showToolApproval(frame) {
+    const approvalRequestId = String(frame.approvalRequestId || "");
+    if (!approvalRequestId || !String(frame.callId || "")) return;
+    if (approvalDialogs.has(approvalRequestId)) return;
+    const dialog = document.createElement("dialog");
+    if (typeof dialog.showModal !== "function") {
+      sendToolApproval(frame, false);
+      setStatus("เบราว์เซอร์ไม่รองรับการยืนยันคำสั่งนี้ จึงยกเลิกการทำรายการ", "listening");
+      return;
+    }
+
+    dialog.setAttribute("aria-labelledby", `panthorium-approval-title-${approvalDialogs.size}`);
+    dialog.style.cssText = "width:min(92vw,560px);max-height:82vh;overflow:auto;border:1px solid #718096;border-radius:16px;padding:22px;background:#101827;color:#f7fafc;box-shadow:0 18px 70px #000b;font:inherit;z-index:2147483000";
+    const heading = document.createElement("h2");
+    heading.id = dialog.getAttribute("aria-labelledby");
+    heading.textContent = "อนุมัติการดำเนินการ";
+    heading.style.cssText = "margin:0 0 8px;font-size:1.2rem";
+    const description = document.createElement("p");
+    description.textContent = String(frame.description || "Panthorium ต้องการเรียกใช้เครื่องมือ").slice(0, 240);
+    const metadata = document.createElement("p");
+    metadata.textContent = `เครื่องมือ: ${String(frame.toolId || frame.name || "unknown").slice(0, 100)} · ความเสี่ยง: ${String(frame.risk || "medium").slice(0, 24)}${frame.mutates ? " · มีการเปลี่ยนแปลงข้อมูล" : ""}`;
+    const detailLabel = document.createElement("h3");
+    detailLabel.textContent = "รายละเอียดที่จะส่งให้เครื่องมือ";
+    detailLabel.style.cssText = "margin:16px 0 6px;font-size:1rem";
+    const details = document.createElement("pre");
+    details.textContent = JSON.stringify(frame.args ?? {}, null, 2).slice(0, 256000);
+    details.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;max-height:34vh;overflow:auto;padding:12px;border-radius:8px;background:#080d16;color:#e2e8f0;font-size:.85rem";
+    const note = document.createElement("p");
+    note.textContent = "คำสั่งจะทำงานหลังจากคุณกดอนุมัติเท่านั้น หากรายละเอียดไม่ตรง ให้ยกเลิก";
+    const actions = document.createElement("div");
+    actions.style.cssText = "display:flex;justify-content:flex-end;gap:10px;margin-top:18px";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "ยกเลิก";
+    const approve = document.createElement("button");
+    approve.type = "button";
+    approve.textContent = "อนุมัติและดำเนินการ";
+    approve.style.cssText = "background:#2563eb;color:white;border:0;border-radius:8px;padding:10px 14px;font:inherit;cursor:pointer";
+    cancel.style.cssText = "background:#334155;color:white;border:0;border-radius:8px;padding:10px 14px;font:inherit;cursor:pointer";
+    const reminderNeedsEmailConsent = frame.toolId === "reminders.write" && frame.args?.action === "create" && frame.args?.emailConsent === true;
+    let emailConsent = null;
+    if (reminderNeedsEmailConsent) {
+      emailConsent = document.createElement("input");
+      emailConsent.type = "checkbox";
+      emailConsent.id = `panthorium-reminder-email-consent-${approvalDialogs.size}`;
+      const consentLabel = document.createElement("label");
+      consentLabel.htmlFor = emailConsent.id;
+      consentLabel.textContent = "ฉันยินยอมให้ Panthorium ส่งอีเมลแจ้งเตือนนี้ไปยังอีเมลที่ยืนยันในบัญชี";
+      consentLabel.style.cssText = "display:flex;align-items:flex-start;gap:10px;margin:12px 0;cursor:pointer";
+      consentLabel.prepend(emailConsent);
+      approve.textContent = "ยินยอมส่งอีเมลและดำเนินการ";
+      approve.disabled = true;
+      approve.style.opacity = ".55";
+      emailConsent.addEventListener("change", () => { approve.disabled = !emailConsent.checked; approve.style.opacity = approve.disabled ? ".55" : "1"; });
+      dialog.append(heading, description, metadata, detailLabel, details, note, consentLabel, actions);
+    } else {
+      dialog.append(heading, description, metadata, detailLabel, details, note, actions);
+    }
+    actions.append(cancel, approve);
+    document.body.append(dialog);
+
+    const finish = approved => {
+      if (!approvalDialogs.has(approvalRequestId)) return;
+      approvalDialogs.delete(approvalRequestId);
+      sendToolApproval(frame, approved);
+      if (dialog.open) dialog.close();
+      dialog.remove();
+      if (serverReady) setStatus("กำลังฟัง Gemini Live · แตะไมค์เพื่อจบ", "listening");
+    };
+    approvalDialogs.set(approvalRequestId, { dialog, finish });
+    cancel.addEventListener("click", () => finish(false));
+    approve.addEventListener("click", () => finish(!reminderNeedsEmailConsent || emailConsent?.checked === true));
+    dialog.addEventListener("cancel", event => { event.preventDefault(); finish(false); });
+    dialog.addEventListener("click", event => { if (event.target === dialog) finish(false); });
+    setStatus("Gemini Live รอการยืนยันก่อนดำเนินการ", "processing");
+    try { dialog.showModal(); cancel.focus(); }
+    catch (_) { finish(false); }
+  }
+
   function handleModelFrame(frame) {
     if (frame.type === "ready") {
       serverReady = true;
@@ -115,6 +203,10 @@
         .catch(() => {
           if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "uiActionResult", requestId, result: { ok: false, error: "ui_action_failed" } }));
         });
+      return;
+    }
+    if (frame.type === "toolApprovalRequired") {
+      showToolApproval(frame);
       return;
     }
     if (frame.type === "toolResult") {
@@ -196,6 +288,11 @@
 
   function cleanup(closeSocket = true) {
     serverReady = false;
+    for (const pending of approvalDialogs.values()) {
+      if (pending.dialog.open) pending.dialog.close();
+      pending.dialog.remove();
+    }
+    approvalDialogs.clear();
     const closingSocket = socket;
     if (closingSocket) { closingSocket.onclose = null; closingSocket.onerror = null; closingSocket.onmessage = null; }
     if (processor) { processor.onaudioprocess = null; try { processor.disconnect(); } catch (_) {} processor = null; }

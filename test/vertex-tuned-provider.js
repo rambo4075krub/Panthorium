@@ -29,6 +29,15 @@ const assert = require('assert');
   const requests = [];
   global.fetch = async (url, options = {}) => {
     requests.push({ url: String(url), options });
+    let requestBody = {};
+    try { requestBody = JSON.parse(options.body || "{}"); } catch (_) {}
+    if (requestBody.tools?.length) {
+      const hasFunctionResponse = requestBody.contents?.some(content => content.parts?.some(part => part.functionResponse));
+      const parts = hasFunctionResponse
+        ? [{ text: 'Function result summarized' }]
+        : [{ functionCall: { name: 'panthorium_ai_providers', args: {}, id: 'call-1' }, thoughtSignature: 'preserve-this' }];
+      return new Response(JSON.stringify({ candidates: [{ content: { role: 'model', parts } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
     if (String(url).includes('/tuningJobs/job-456')) {
       return new Response(JSON.stringify({
         state: 'JOB_STATE_SUCCEEDED',
@@ -83,6 +92,22 @@ const assert = require('assert');
     assert(requests[3].url.includes(':streamGenerateContent?alt=sse'));
     assert.equal(requests[3].options.headers.Accept, 'text/event-stream');
     assert.equal(streamResult.usage.totalTokens, 18);
+
+    const toolDeclaration = { name: 'panthorium_ai_providers', description: 'List providers', parameters: { type: 'OBJECT', properties: {} } };
+    const toolCall = await manager.callDetailed('vertex', 'System instruction', [{ role: 'user', content: 'List providers' }], { tools: [toolDeclaration] });
+    assert.deepEqual(toolCall.functionCalls, [{ name: 'panthorium_ai_providers', args: {}, id: 'call-1' }]);
+    assert.equal(toolCall.modelParts[0].thoughtSignature, 'preserve-this', 'model parts must be preserved for the function response turn');
+    assert.deepEqual(JSON.parse(requests.at(-1).options.body).tools, [{ functionDeclarations: [toolDeclaration] }]);
+    const followupHistory = [
+      { role: 'user', content: 'List providers' },
+      { role: 'model', parts: toolCall.modelParts },
+      { role: 'user', parts: [{ functionResponse: { name: 'panthorium_ai_providers', id: 'call-1', response: { output: { providers: ['vertex'] } } } }] }
+    ];
+    const toolFollowup = await manager.callDetailed('vertex', 'System instruction', followupHistory, { tools: [toolDeclaration] });
+    assert.equal(toolFollowup.text, 'Function result summarized');
+    const followupPayload = JSON.parse(requests.at(-1).options.body);
+    assert.deepEqual(followupPayload.contents[1].parts, toolCall.modelParts);
+    assert.deepEqual(followupPayload.contents[2].parts[0].functionResponse.response.output.providers, ['vertex']);
     
     // Resolve the serving location and endpoint ID from the succeeded tuning job.
     Object.assign(process.env, {
