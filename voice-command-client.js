@@ -147,7 +147,11 @@
       const action = result.output?.uiAction;
       const outcome = action?.startsWith('function_') ? await functionAction(action) : await windowAction(action);
       outcomes.push(outcome);
-      if (outcome.ok && action === 'open_voice_identity' && /เข้าสู่ระบบ|login/i.test(catalog.normalize(command || '')) && window.PanthoriumAuth?.isGuest?.()) await window.PanthoriumVoiceIdentity?.openLogin?.();
+      if (outcome.ok && action === 'open_voice_identity' && window.PanthoriumAuth?.isGuest?.()) {
+        const phrase = catalog.normalize(command || '');
+        if (/เข้าสู่ระบบ|login/i.test(phrase)) await window.PanthoriumAccounts?.openLogin?.();
+        else if (/ลงทะเบียน|register/i.test(phrase)) await window.PanthoriumAccounts?.openRegistration?.();
+      }
       if (outcome.ok) seen.add(index);
       else break;
     }

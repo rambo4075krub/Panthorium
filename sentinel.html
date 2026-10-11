@@ -932,7 +932,7 @@
             <div id="sm-empty" hidden>ไม่พบแอปที่ตรงกับคำค้นหา</div>
             <div class="sm-footer">
                 <button id="btn-settings-quick">⚙️ ตั้งค่า</button>
-                <button id="btn-logout">🔄 รีสตาร์ท</button>
+                <button id="btn-logout" hidden style="display:none!important">🔄 รีสตาร์ท</button>
             </div>
         </div>
 
@@ -954,6 +954,7 @@
     <script src="/start-menu-ui.js?v=start-menu-controls-v1"></script>
     <script src="/billing-catalog.js?v=billing-20261011"></script>
     <script src="/billing-ui.js?v=billing-20261011"></script>
+    <script src="/account-ui.js?v=account-windows-20261011"></script>
 
     <script>
     // =========================================================
@@ -2384,7 +2385,7 @@
                             if (transcript && typeof transcript === "object" && transcript.identityNavigation) {
                                 const identity = window.PanthoriumVoiceIdentity;
                                 if (transcript.identityNavigation === "login") identity?.openLogin?.();
-                                else identity?.open?.();
+                                else identity?.openRegistration?.();
                                 voiceState = "idle";
                                 status("ready", "เปิดหน้าต่าง Voice Identity แล้ว");
                                 restartListening();
@@ -3299,6 +3300,9 @@
             const user = OS.state.user;
             return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
         } },
+        { id: "account-register", name: "ลงทะเบียน", icon: "📝", startMenuOnly: true, open: () => window.PanthoriumAccounts?.openRegistration?.(), visible: () => !OS.state.user || OS.state.user.roles?.includes("guest") },
+        { id: "account-login", name: "เข้าสู่ระบบ / ลืมรหัสผ่าน", icon: "🔐", startMenuOnly: true, open: () => window.PanthoriumAccounts?.openLogin?.() },
+        { id: "account-logout", name: "ออกจากระบบ", icon: "🚪", startMenuOnly: true, open: () => window.PanthoriumAccounts?.openLogout?.(), visible: () => Boolean(OS.state.user && !OS.state.user.roles?.includes("guest")) },
         { id: "billing", name: "แพ็กเกจและชำระเงิน", icon: "💳", startMenuOnly: true, open: () => window.PanthoriumBilling?.open?.() },
         { id: "privacy-policy", name: "Privacy/Policy", icon: "🔐", startMenuOnly: true, open: () => window.PanthoriumPrivacyPolicy?.open?.() }
     ];
@@ -3620,8 +3624,8 @@
                     if (transcript && typeof transcript === "object" && transcript.identityNavigation) {
                         const identity = window.PanthoriumVoiceIdentity;
                         if (transcript.identityNavigation === "login") identity?.openLogin?.();
-                        else identity?.open?.();
-                        toast("เปิดหน้าต่าง Voice Identity แล้ว");
+                        else identity?.openRegistration?.();
+                        toast("เปิดหน้าต่างบัญชีแล้ว");
                         window.PanthoriumVoice?.resume();
                         return;
                     }

@@ -34,7 +34,7 @@
     if (statusEl) statusEl.textContent = `Online · ${roleLabel(user)}`;
     if (settingsBtn) settingsBtn.style.display = hasPermission('settings') ? '' : 'none';
     if (footerBtn) {
-      if (isGuest()) { footerBtn.textContent = '🔐 เข้าสู่ระบบ'; footerBtn.title = 'เข้าสู่บัญชีด้วยอีเมล'; footerBtn.onclick = () => { window.PanthoriumVoiceIdentity?.openLogin?.(); }; }
+      if (isGuest()) { footerBtn.textContent = '🔐 เข้าสู่ระบบ'; footerBtn.title = 'เข้าสู่บัญชีด้วยอีเมล'; footerBtn.onclick = () => { window.PanthoriumAccounts?.openLogin?.(); }; }
       else { footerBtn.textContent = '🚪 ออกจากระบบ'; footerBtn.title = 'ออกจากระบบ'; footerBtn.onclick = () => logout(); }
     }
     if (isAdministrator()) ensureSecurityScript();
