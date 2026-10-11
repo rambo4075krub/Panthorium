@@ -112,7 +112,6 @@
     return true;
   }
   function openRegistration() {
-    if (signedIn()) return openLogin();
     return window.PanthoriumVoiceIdentity?.openRegistration?.();
   }
   function openLogout() {
