@@ -952,6 +952,8 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
     <script src="/vendor/three.min.js?v=r128-local"></script>
     <script src="/start-menu-ui.js?v=start-menu-controls-v1"></script>
+    <script src="/billing-catalog.js?v=billing-20261011"></script>
+    <script src="/billing-ui.js?v=billing-20261011"></script>
 
     <script>
     // =========================================================
@@ -3297,6 +3299,7 @@
             const user = OS.state.user;
             return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
         } },
+        { id: "billing", name: "แพ็กเกจและชำระเงิน", icon: "💳", startMenuOnly: true, open: () => window.PanthoriumBilling?.open?.() },
         { id: "privacy-policy", name: "Privacy/Policy", icon: "🔐", startMenuOnly: true, open: () => window.PanthoriumPrivacyPolicy?.open?.() }
     ];
 

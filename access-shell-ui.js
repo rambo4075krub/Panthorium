@@ -132,7 +132,7 @@
       const registered = entries.filter(el => {
         const id = el.dataset.appId;
         if (!id || restrictedLaunchers.includes(el.id) || el.dataset.productionIntelligence === '1') return false;
-        if (guest() && id !== 'sentinel' && id !== 'voice-identity') return false;
+        if (guest() && id !== 'sentinel' && id !== 'voice-identity' && id !== 'billing') return false;
         if ((id === 'notes' || id === 'files') && !account?.permissions?.includes('chat')) return false;
         return true;
       });
