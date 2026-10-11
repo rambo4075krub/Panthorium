@@ -32,6 +32,15 @@ const TOOL_DEFINITIONS = [
   { name: 'panthorium_conversation_clear', toolId: 'conversation.clear', description: 'Delete one conversation owned by the current user. Panthorium will ask for on-screen confirmation.', properties: { sessionId: { type: 'STRING', description: 'Conversation session id.' } }, required: ['sessionId'] }
 ];
 
+const ACCOUNT_ONLY_TOOL_IDS = new Set([
+  'knowledge.search', 'knowledge.write',
+  'calendar.read', 'calendar.write', 'goals.read', 'goals.write',
+  'notes.read', 'notes.write', 'memory.read', 'memory.write',
+  'reminders.read', 'reminders.write', 'files.read', 'files.write',
+  'media.video.plan_edit', 'media.video.ai_edit', 'media.video.generate',
+  'media.video.transcribe', 'media.video.render'
+]);
+
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function safeOutput(value, maxChars = 12000) {
   let serialized;
@@ -52,6 +61,7 @@ class AgentFunctionCallingService {
     const catalog = new Map(this.agentService.catalogFor(user).map(tool => [tool.id, tool]));
     const allowedWindows = windowCatalog.apps.filter(app => windowCatalog.allowed(app, user)).map(app => app.id);
     return TOOL_DEFINITIONS.flatMap(definition => {
+      if (ACCOUNT_ONLY_TOOL_IDS.has(definition.toolId) && (!user?.sub || String(user.sub).startsWith('guest:'))) return [];
       const tool = catalog.get(definition.toolId);
       if (!tool) return [];
       const risk = tool.risk || 'low';
