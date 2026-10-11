@@ -31,12 +31,17 @@ async function main() {
   };
   const service = new AgentFunctionCallingService({ agentService });
   const regularUser = { sub: 'user-1', id: 'user-1', roles: [], permissions: ['chat'] };
+  const guestUser = { sub: 'guest:session-1', id: 'guest:session-1', roles: [], permissions: ['chat'] };
   const regularTools = service.declarationsFor(regularUser);
   assert(regularTools.some(tool => tool.name === 'panthorium_ai_providers'));
   assert(!regularTools.some(tool => tool.name === 'panthorium_system_status'));
   assert(!regularTools.some(tool => tool.name === 'panthorium_training_status'));
   assert(!regularTools.some(tool => tool.name === 'panthorium_conversation_clear'));
   assert(!regularTools.some(tool => tool.name === 'panthorium_window_open'), 'chat omits browser actions until the browser can acknowledge them');
+  const guestTools = service.declarationsFor(guestUser, { surface: 'gemini-live' });
+  for (const name of ['panthorium_calendar_read', 'panthorium_calendar_write', 'panthorium_notes_write', 'panthorium_reminders_write', 'panthorium_files_read', 'panthorium_knowledge_search', 'panthorium_video_generate']) {
+    assert(!guestTools.some(tool => tool.name === name), `${name} requires a signed-in user account`);
+  }
   assert(regularTools.some(tool => tool.name === 'panthorium_calendar_read'), 'current-user calendar reads are available in chat');
   for (const name of ['panthorium_calendar_write', 'panthorium_notes_write', 'panthorium_files_write', 'panthorium_video_generate']) {
     assert(!regularTools.some(tool => tool.name === name), `${name} is not available to unconfirmed chat calls`);
