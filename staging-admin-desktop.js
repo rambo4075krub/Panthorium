@@ -2,6 +2,7 @@
 'use strict';
 
 const APPS=[
+  {id:"admin-mailbox",icon:"✉️",label:"กล่องอีเมล",role:"administrator",openers:["PanthoriumMailbox.open"]},
   {id:"user-management",icon:"👥",label:"ผู้ใช้และเงื่อนไข",role:"administrator",openers:["PanthoriumUserManager.open"]},
   {id:"admin-management",icon:"🛡️",label:"ผู้ดูแลระบบ",role:"administrator",openers:["PanthoriumUserManager.openAdmins"]},
   {id:"billing-admin",icon:"🏦",label:"การเงินและชำระเงิน",role:"administrator",openers:["PanthoriumBillingAdmin.open"]},
