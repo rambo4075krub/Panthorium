@@ -145,7 +145,7 @@
     if (hasFile) {
       const ver = document.createElement('div');
       ver.className = 'ver';
-      ver.textContent = 'เวอร์ชันล่าสุด v' + (asset.version || extractVersion(asset.name));
+      ver.textContent = 'พร้อมดาวน์โหลด';
       el.appendChild(ver);
 
       const a = document.createElement('a');
@@ -154,13 +154,13 @@
       a.rel = 'noopener';
       a.setAttribute('download', labeledFileName(platform, asset));
       a.textContent = 'ดาวน์โหลดสำหรับ ' + platform.label;
-      a.title = labeledFileName(platform, asset);
+      a.title = 'ดาวน์โหลด Panthorium Browser สำหรับ ' + platform.label;
       actions.appendChild(a);
 
       const file = document.createElement('div');
       file.className = 'meta';
       file.style.wordBreak = 'break-all';
-      file.textContent = labeledFileName(platform, asset);
+      file.textContent = 'Panthorium Browser · ' + platform.label;
       actions.appendChild(file);
     } else {
       const ver = document.createElement('div');

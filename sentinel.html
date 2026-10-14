@@ -315,30 +315,7 @@
             pointer-events: none;
         }
 
-        /* Version number — top-right, plain digits matching orb cyan */
-        #version-badge {
-            position: fixed;
-            top: max(12px, env(safe-area-inset-top, 0px));
-            right: max(14px, env(safe-area-inset-right, 0px));
-            z-index: 7500;
-            pointer-events: none;
-            user-select: none;
-            margin: 0;
-            padding: 0;
-            border: none;
-            background: none;
-            box-shadow: none;
-            backdrop-filter: none;
-            font-size: 13px;
-            font-weight: 300;
-            font-variant-numeric: tabular-nums;
-            letter-spacing: 0.08em;
-            color: #7adfff;
-            text-shadow: 0 0 12px rgba(0, 170, 255, 0.35);
-            line-height: 1;
-            white-space: nowrap;
-            opacity: 0.85;
-        }
+
 
         /* ========== START MENU ========== */
         #start-menu {
@@ -906,7 +883,6 @@
 
     <!-- DESKTOP -->
     <div id="desktop">
-        <div id="version-badge" aria-label="เวอร์ชัน">15.0.9</div>
         <canvas id="bg-canvas"></canvas>
         <div id="orb-system-notice" class="orb-system-notice" role="status" aria-live="off" aria-atomic="true" aria-label="สถานะระบบ"></div>
         <section id="orb-transcript" tabindex="0" role="region" aria-label="ข้อความประกอบเสียงตอบของ AI">
@@ -977,7 +953,7 @@
     }
     if (window.panthoriumDesktop?.isElectron) document.documentElement.dataset.desktopShell = "true";
     const OS = {
-        // Web OS shell build (shown in About). Browser app version is releaseVersion.
+        // Internal shell and browser release metadata for compatibility.
         version: "1.1.0",
         releaseVersion: "15.0.9",
         state: {
@@ -1087,26 +1063,6 @@
     }
     setInterval(updateClock, 10000);
     updateClock();
-
-    // ---------- Version number (top-right) — digits only, tracks release updates ----------
-    function renderVersionBadge(version) {
-        const badge = $("version-badge");
-        if (!badge) return;
-        const value = String(version || OS.releaseVersion || "").replace(/^v/i, "").trim();
-        if (!value) return;
-        OS.releaseVersion = value;
-        badge.textContent = value;
-        badge.setAttribute("aria-label", "เวอร์ชัน " + value);
-    }
-    renderVersionBadge(OS.releaseVersion);
-    (async () => {
-        try {
-            if (window.panthoriumDesktop?.getAppInfo) {
-                const info = await window.panthoriumDesktop.getAppInfo();
-                if (info?.version) renderVersionBadge(info.version);
-            }
-        } catch (_) {}
-    })();
 
     // ---------- Network Status ----------
     function setNetworkStatus(online) {
@@ -2907,6 +2863,7 @@
     function closeWindow(id) {
         const win = OS.windows.get(id);
         if (!win) return;
+        if (typeof win.onClose === "function") { try { win.onClose(); } catch (error) { console.warn("Window cleanup failed", error); } }
         if (document.fullscreenElement === win.el && document.exitFullscreen) document.exitFullscreen().catch(() => {});
         win.el.remove();
         OS.windows.delete(id);
@@ -3761,7 +3718,7 @@
                 <div class="settings-section">
                     <h3>ℹ️ ระบบ</h3>
                     <p style="font-size:13px;color:var(--text-dim);line-height:1.6;">
-                        Panthorium OS v${OS.version}<br>
+                        Panthorium OS<br>
                         สถาปัตยกรรม: Panthorium Client + Sentinel Cloud API<br>
                         โน้ตและความทรงจำซิงก์ตามบัญชีที่เข้าสู่ระบบ
                     </p>
@@ -4261,7 +4218,7 @@
     function openTerminal() {
         const html = `
             <div class="term" id="term">
-                <div class="term-line">Panthorium OS Terminal v${OS.version}</div>
+                <div class="term-line">Panthorium OS Terminal</div>
                 <div class="term-line">พิมพ์ "help" เพื่อดูคำสั่ง</div>
                 <div class="term-input-line">
                     <span class="term-prompt">guest@panthorium:~$</span>
@@ -4279,7 +4236,7 @@
             clear: () => { term.querySelectorAll(".term-line").forEach(l => l.remove()); return null; },
             date: () => new Date().toLocaleString("th-TH"),
             whoami: () => "guest",
-            version: () => `Panthorium OS ${OS.version}`,
+            version: () => `Panthorium OS`,
             neofetch: () => `
  ██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗ ██████╗ ██████╗ ██╗██╗   ██╗███╗   ███╗
  ██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝██║  ██║██╔═══██╗██╔══██╗██║██║   ██║████╗ ████║
@@ -4287,7 +4244,7 @@
  ██╔═══╝ ██╔══██║██║╚██╗██║   ██║   ██╔══██║██║   ██║██╔══██╗██║██║   ██║██║╚██╔╝██║
  ██║     ██║  ██║██║ ╚████║   ██║   ██║  ██║╚██████╔╝██║  ██║██║╚██████╔╝██║ ╚═╝ ██║
  ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝ ╚═════╝ ╚═╝     ╚═╝
- OS: Panthorium ${OS.version} (Web)
+ OS: Panthorium (Web)
  Host: ${navigator.platform}
  Browser: ${navigator.userAgent.split(" ").pop()}
  Online: ${OS.state.online}
@@ -4341,7 +4298,6 @@
             <div class="about-content">
                 <div class="about-logo"><img src="/panthorium-logo.svg" data-panthorium-logo alt="Panthorium" style="width:72px;height:72px;object-fit:contain;"></div>
                 <h2 style="margin-bottom:8px;">Panthorium OS</h2>
-                <p style="color:var(--text-dim);font-size:13px;margin-bottom:20px;">Version ${OS.version}</p>
                 <p style="font-size:13px;line-height:1.7;color:var(--text-dim);max-width:300px;margin:0 auto;">
                     ระบบปฏิบัติการจำลองที่ทำงานบนเว็บ<br>
                     รองรับทุกอุปกรณ์และทุกระบบปฏิบัติการ<br>

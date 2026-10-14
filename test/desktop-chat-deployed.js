@@ -9,6 +9,7 @@ if (!base) throw new Error('CHAT_SMOKE_URL required');
     const dom = new JSDOM(await response.text());
     const d = dom.window.document;
     assert.equal(d.body.dataset.geminiLiveEnabled, 'true', path + ' enables Live');
+    assert.equal(d.getElementById('version-badge'), null, path + ' removes version numbers');
     assert.equal(d.getElementById('global-voice')?.hidden, true, path + ' has no floating mic');
     const source = Array.from(d.scripts).find(script => script.textContent.includes('const OS =')).textContent;
     assert(!source.includes('id="voice-status-box"'), path + ' removes the three status bars');

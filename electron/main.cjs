@@ -141,7 +141,7 @@ async function checkForUpdates(options={}){
     if(!remote)throw new Error('manifest_missing_version');
     if(!newerVersion(current,remote)){
       if(manual&&!options.checkOnly){
-        await dialog.showMessageBox({type:'info',title:PRODUCT_NAME,message:'คุณใช้รุ่นล่าสุดแล้ว',detail:'เวอร์ชันปัจจุบัน '+current});
+        await dialog.showMessageBox({type:'info',title:PRODUCT_NAME,message:'คุณใช้รุ่นล่าสุดแล้ว',detail:'Panthorium Browser อัปเดตล่าสุดแล้ว'});
       }
       return {ok:true,upToDate:true,available:false,current,remote};
     }
@@ -164,8 +164,6 @@ async function checkForUpdates(options={}){
     fs.writeFileSync(target,binary,{mode:0o700});
     const platformLabel=platform==='windows'?'Windows':platform==='macos'?'macOS':'Linux';
     const detail=[
-      'เวอร์ชันปัจจุบัน: '+current,
-      'เวอร์ชันใหม่: '+remote,
       'แพลตฟอร์ม: '+platformLabel,
       '',
       platform==='macos'
