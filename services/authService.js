@@ -85,6 +85,7 @@ class AuthService {
 
     const nextRoles = normalizeList(roles, ALLOWED_ROLES);
     const nextPermissions = normalizeList(permissions, ALLOWED_PERMISSIONS);
+    if(nextRoles.includes("administrator") && this.accountPolicy){const policy=await this.accountPolicy(id);if(policy.suspended || policy.expiresAt || policy.weekdays.length!==7)throw new Error("administrator_restriction_forbidden");}
 
     if (id === actorId) {
       if (!nextRoles.includes("administrator")) throw new Error("cannot_demote_self");
@@ -110,6 +111,7 @@ class AuthService {
     const passwordHash = await bcrypt.hash(password, 12);
     const updated = await this.repository.updateUserPassword(id, passwordHash);
     const revokedSessions = await this.repository.revokeUserSessions(id);
+    if(this.invalidateAccountSessions) await this.invalidateAccountSessions(id,actorId);
     this.audit.record("auth.user_password_reset", { actorId, userId: id, revokedSessions });
     return this.publicUser(updated);
   }
@@ -130,7 +132,8 @@ class AuthService {
       sub: principal.id,
       username: principal.username,
       roles: principal.roles || [],
-      permissions: normalizeSentinelPermissions(principal.permissions)
+      permissions: normalizeSentinelPermissions(principal.permissions),
+      ...(principal.accountVersion!=null?{accountVersion:principal.accountVersion}:{})
     }, this.config.jwtSecret, {
       expiresIn: this.config.accessTokenTtl,
       issuer: "panthorium",
@@ -213,13 +216,15 @@ class AuthService {
     return { principal, accessToken: this.signAccessToken(principal), refreshToken: null };
   }
 
-  async issueSession(user) {
+  async issueSession(user, expectedVersion=null) {
     const principal = {
       id: user.id,
       username: user.email || user.username,
       roles: user.roles || [],
       permissions: normalizeSentinelPermissions(user.permissions)
     };
+    if(this.accountPolicy){principal.accountVersion=(await this.accountPolicy(user.id)).credentialVersion||0;if(expectedVersion!=null&&principal.accountVersion!==expectedVersion)throw new Error("account_session_revoked");}
+    if(this.validateAccountPrincipal) Object.assign(principal,await this.validateAccountPrincipal(principal));
     return {
       principal,
       accessToken: this.signAccessToken(principal),
@@ -233,8 +238,10 @@ class AuthService {
     if (!stored) return null;
     const user = await this.repository.findUserById(stored.userId);
     if (!user) return null;
+    let expectedVersion=null;
+    if(this.accountPolicy){const policy=await this.accountPolicy(user.id);expectedVersion=policy.credentialVersion||0;if(policy.sessionsRevokedAt&&(!stored.createdAt||new Date(stored.createdAt).getTime()<=new Date(policy.sessionsRevokedAt).getTime()))throw new Error("account_session_revoked");}
     this.audit.record("auth.refresh", { userId: user.id });
-    return this.issueSession(user);
+    return this.issueSession(user,expectedVersion);
   }
 
   async revoke(rawToken) {
