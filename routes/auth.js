@@ -185,6 +185,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
       const user = await authService.updateManagedUserAccess(req.params.id, req.body || {}, req.user.sub);
       res.json({ ok: true, user });
     } catch (error) {
+      if(["founder_account_protected","founder_access_required"].includes(error.message))return res.status(403).json({ok:false,error:error.message});
       if (error.message === "user_not_found") return res.status(404).json({ ok: false, error: error.message });
       if (["cannot_demote_self", "cannot_remove_own_settings", "last_administrator_required", "administrator_restriction_forbidden"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
       next(error);
@@ -196,6 +197,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
       const user = await authService.resetManagedUserPassword(req.params.id, req.body?.password, req.user.sub);
       res.json({ ok: true, user });
     } catch (error) {
+      if(["founder_account_protected","founder_access_required"].includes(error.message))return res.status(403).json({ok:false,error:error.message});
       if (error.message === "user_not_found") return res.status(404).json({ ok: false, error: error.message });
       if (error.message === "invalid_password") return res.status(400).json({ ok: false, error: error.message });
       next(error);

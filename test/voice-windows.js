@@ -13,7 +13,9 @@ const catalog = require('../voice-window-catalog');
 const source = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
 assert.equal((source('sentinel.html').match(/authorizeAudio\(audio\)/g) || []).length, 0, 'both voice input paths rely on the single server-side speaker check');
 const tick = () => new Promise(resolve => setImmediate(resolve));
-const admin = { id: 'voice-admin', username: 'admin', permissions: ['chat', 'system:read', 'settings', 'sentinel:command'], roles: ['administrator'] };
+// The full-window fixture represents the system owner; real owner binding has separate server tests.
+require('../services/founderAccount').isFounderAccount = id => id === 'voice-admin';
+const admin = { systemOwner:true, id: 'voice-admin', username: 'admin', permissions: ['chat', 'system:read', 'settings', 'sentinel:command'], roles: ['administrator'] };
 const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'system:read'], roles: ['guest'] };
 
 (async () => {
@@ -128,6 +130,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       }
       const memoryDeleteId = pathname.startsWith('/api/agent/memory/') ? pathname.slice('/api/agent/memory/'.length) : '';
       if (memoryDeleteId && /^[0-9a-f-]+$/i.test(memoryDeleteId) && httpMethod === 'DELETE') { cloudEvents.delete(memoryDeleteId); return Response.json({ ok: true }); }
+      if (pathname === '/api/admin/developer/status') return Response.json({githubConnected:false,databaseConfigured:true});
       if (pathname === '/api/admin/accounts') return Response.json({ok:true,users:[]});
       if (pathname === '/api/admin/billing/overview') return Response.json({ok:true,report:{totals:{},rows:[],profile:{},range:{},completeIdentity:false},orders:[],grants:[],gateway:{mode:'live',connected:false,checkoutEnabled:false}});
       if (pathname === '/api/auth/logout') return Response.json({ ok: true });
@@ -152,7 +155,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="files"]'), 'Files appears in Start menu after account authentication');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="goals"]'), 'Goals appears in Start menu for signed-in chat accounts');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="assistant-preferences"]'), 'Sentinel Preferences appears in Start menu for signed-in chat accounts');
-    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'window-manager-ui.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'privacy-policy-ui.js', 'billing-admin-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    for (const file of ['user-manager.js', 'developer-studio-ui.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'window-manager-ui.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'privacy-policy-ui.js', 'billing-admin-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumStagingAdminDesktop.render();
     await new Promise(resolve => setTimeout(resolve, 40));
     for (const appId of ['media-studio', 'browser']) {

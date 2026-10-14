@@ -18,7 +18,7 @@ const catalog = require('../voice-window-catalog');
   const guest = auth.guest().principal;
   const user = { id: 'user-test', roles: [], permissions: ['chat', 'system:read', 'settings', 'sentinel:command'] };
   const admin = { id: 'admin-test', roles: ['administrator'], permissions: ['chat', 'settings', 'system:read', 'sentinel:command'] };
-  const excluded = ['user-management', 'admin-management', 'billing-admin', 'settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control'];
+  const excluded = ['developer-studio', 'user-management', 'admin-management', 'billing-admin', 'settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control'];
   const guestSessionId = '123e4567-e89b-42d3-a456-426614174000';
   assert.equal(auth.guest({ guestSessionId }).principal.id, auth.guest({ guestSessionId }).principal.id, 'same tab session id maps to stable guest profile owner');
   assert.notEqual(auth.guest().principal.id, auth.guest().principal.id, 'missing guest session id remains random');
@@ -78,7 +78,8 @@ const catalog = require('../voice-window-catalog');
     for (const [index, entry] of catalog.apps.entries()) {
       const guestAllowed = !entry.accountRequired && !excluded.includes(entry.id);
       assert.equal(catalog.allowed(entry, guest), guestAllowed, entry.id);
-      assert.equal(catalog.allowed(entry, admin), true, entry.id);
+      assert.equal(catalog.allowed(entry, admin), !entry.ownerOnly, entry.id);
+      assert.equal(catalog.allowed(entry, {...admin,systemOwner:true}), true, 'owner access: '+entry.id);
       assert.equal(catalog.allowed(entry, user), !excluded.includes(entry.id), 'standard user access: ' + entry.id);
       // Give each app command a separate test-only rate-limit key so this
       // enumeration continues to test RBAC when the catalog grows.
