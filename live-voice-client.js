@@ -4,16 +4,18 @@
 
   let currentStatus = { label: "กดไมค์เพื่อเริ่มเสียงสด", mode: "idle" };
   function syncChatButton() {
-    const button = document.getElementById("chat-mic");
-    if (!button) return;
     const { label, mode } = currentStatus;
     const active = mode === "listening" || mode === "processing";
-    button.title = label;
-    button.setAttribute("aria-label", label);
-    button.setAttribute("aria-pressed", String(active));
-    button.classList.toggle("listening", active);
-    button.classList.toggle("processing", mode === "processing");
-    button.textContent = active ? "⏹" : "🎤";
+    for (const id of ["chat-mic", "desktop-voice"]) {
+      const button = document.getElementById(id);
+      if (!button) continue;
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      button.setAttribute("aria-pressed", String(active));
+      button.classList.toggle("listening", active);
+      button.classList.toggle("processing", mode === "processing");
+      button.textContent = active ? "⏹" : "🎤";
+    }
   }
   let socket = null;
   let audioContext = null;
@@ -24,6 +26,7 @@
   let nextPlaybackTime = 0;
   let serverReady = false;
   let starting = false;
+  let sessionOwner = "chat";
   let outputTranscript = "";
   let inputTranscript = "";
   let chatUserRow = null;
@@ -349,18 +352,26 @@
     setStatus("กดไมค์เพื่อเริ่มเสียงสด");
   }
 
-  // The chat microphone owns the single Live session.
-  async function toggle() {
+  // Desktop and chat controls share one microphone and one Live connection.
+  async function toggle(owner = "chat") {
     if (starting) { cleanup(); return; }
     if (socket && socket.readyState < WebSocket.CLOSING) { cleanup(); return; }
     starting = true;
+    sessionOwner = owner;
     try { await openLiveSession(sessionGeneration); }
     catch (error) { if (error.code === "voice_session_cancelled") return; console.warn("Gemini Live voice session failed", error); cleanup(); setStatus(error.name === "NotAllowedError" || error.name === "SecurityError"
       ? "กรุณาอนุญาตไมโครโฟนให้ Panthorium Browser แล้วลองใหม่"
       : error.message || "เชื่อมเสียงสดไม่สำเร็จ", "error"); }
     finally { starting = false; }
   }
-  window.PanthoriumLiveVoice = { toggle, stop:cleanup, isActive:() => serverReady, syncChatButton };
+  window.PanthoriumLiveVoice = {
+    toggle, stop:cleanup, isActive:() => serverReady, syncChatButton,
+    stopChatSession:() => { if (sessionOwner === "chat") cleanup(); }
+  };
+  document.getElementById("desktop-voice")?.addEventListener("click", () => toggle("desktop"));
+  window.addEventListener("panthorium:auth-changed", () => {
+    if (!window.PanthoriumAuth?.getAccessToken?.()) cleanup();
+  });
   syncChatButton();
   window.addEventListener("pagehide", () => cleanup());
 })();
