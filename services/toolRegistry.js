@@ -11,7 +11,7 @@ function validateNoArgs(args) { return plainObject(args) && Object.keys(args).le
 class ToolRegistry {
   constructor({ sentinel, conversations, securityResponse, aiOperations, integrations, knowledge, training, mediaStudio } = {}) {
     this.tools = new Map();
-    for (const operation of ['open', 'close', 'refresh']) {
+    for (const operation of ['open', 'close', 'refresh', 'minimize', 'maximize', 'fullscreen', 'restore']) {
       this.register({
         id: `window.${operation}`, description: `${operation} one Panthorium function window in the user's browser`,
         permission: 'chat', risk: 'low', mutates: false,

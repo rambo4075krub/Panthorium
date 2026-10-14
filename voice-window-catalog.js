@@ -34,7 +34,7 @@
     { id: 'governance', key: 'governance', label: 'Governance', permission: 'settings', aliases: ['Governance', 'กัฟเวอร์แนนซ์', 'ธรรมาภิบาล'], selector: '#panthorium-governance-dashboard', opener: 'PanthoriumGovernance.open', closeButton: '#gov-close', refresher: 'PanthoriumGovernance.refresh' },
     { id: 'sentinel-control', key: 'sentinel_control', label: 'Sentinel Control', permission: 'settings', aliases: ['Sentinel Control', 'เซนทิเนลคอนโทรล', 'ควบคุมเซนทิเนล'], selector: '#panthorium-sentinel-control-dashboard', opener: 'PanthoriumSentinelControl.open', closeButton: '#dai-close', refresher: 'PanthoriumSentinelControl.refresh' },
     { id: 'media-studio', key: 'media_studio', label: 'Media Studio', permission: 'chat', accountRequired: true, aliases: ['Media Studio', 'Video Studio', 'ตัดต่อวิดีโอ', 'สตูดิโอวิดีโอ'], selector: '#media-studio-dashboard', opener: 'PanthoriumMediaStudio.open', closeButton: '[data-close]' },
-    { id: 'browser', key: 'browser', label: 'Panthorium Browser', permission: 'chat', accountRequired: true, aliases: ['Panthorium Browser', 'Browser', 'เบราว์เซอร์', 'เปิดเว็บไซต์'], selector: '#panthorium-browser-dashboard', opener: 'PanthoriumBrowser.open', closeButton: '[data-browser-close]' },
+    { id: 'browser', key: 'browser', label: 'Panthorium Browser', permission: 'chat', accountRequired: true, aliases: ['Web Browser', 'Browser window', 'หน้าต่างเบราว์เซอร์', 'เว็บเบราว์เซอร์', 'Browser', 'เบราว์เซอร์', 'เปิดเว็บไซต์'], selector: '#panthorium-browser-dashboard', opener: 'PanthoriumBrowser.open', closeButton: '[data-browser-close]' },
     { id: 'external-youtube', key: 'external_youtube', label: 'YouTube', permission: 'chat', aliases: ['YouTube', 'ยูทูบ', 'ยูทูป'], selector: '.window[data-id="external-youtube"]', opener: 'PanthoriumExternalApps.openYoutube', windowId: 'external-youtube', external: true, externalUrl: 'https://www.youtube.com/' },
     { id: 'external-facebook', key: 'external_facebook', label: 'Facebook', permission: 'chat', aliases: ['Facebook', 'เฟซบุ๊ก', 'เฟสบุ๊ค', 'เฟซบุ๊ค'], selector: '.window[data-id="external-facebook"]', opener: 'PanthoriumExternalApps.openFacebook', windowId: 'external-facebook', external: true, externalUrl: 'https://www.facebook.com/' },
     { id: 'external-line', key: 'external_line', label: 'LINE', permission: 'chat', aliases: ['LINE', 'ไลน์'], selector: '.window[data-id="external-line"]', opener: 'PanthoriumExternalApps.openLine', windowId: 'external-line', external: true, externalUrl: 'https://line.me/' },
@@ -43,6 +43,10 @@
     { id: 'external-x', key: 'external_x', label: 'X', permission: 'chat', aliases: ['X', 'Twitter', 'ทวิตเตอร์'], selector: '.window[data-id="external-x"]', opener: 'PanthoriumExternalApps.openX', windowId: 'external-x', external: true, externalUrl: 'https://x.com/' },
     { id: 'privacy-policy', key: 'privacy_policy', label: 'Privacy/Policy', permission: 'chat', aliases: ['Privacy Policy', 'Privacy/Policy', 'นโยบายความเป็นส่วนตัว', 'นโยบายความเป็นส่วนตัวและข้อกำหนด'], selector: '#panthorium-privacy-policy', opener: 'PanthoriumPrivacyPolicy.open', closeButton: '[data-close]' }
   ];
+  apps.push(
+    { id: 'desktop-browser', key: 'desktop_browser', label: 'Panthorium Browser Desktop', permission: 'chat', native: true, aliases: ['Panthorium Browser Desktop', 'Panthorium Browser', 'Panthorium OS', 'Panthorium', 'this application', 'this app', 'แพนโทเรียมบราวเซอร์', 'แพนโทเรียม', 'ตัวแอป Panthorium', 'แอป Panthorium', 'ตัวบราวเซอร์', 'desktop app'], selector: null },
+    { id: 'active-window', key: 'active_window', label: 'หน้าต่างปัจจุบัน', permission: 'chat', virtual: true, aliases: ['หน้าต่างนี้', 'หน้าต่างปัจจุบัน', 'หน้าต่างที่ใช้อยู่', 'อันนี้', 'this window', 'current window', 'active window'], selector: null }
+  );
   const userRestrictedIds = new Set(['user-management', 'admin-management', 'admin-mailbox', 'billing-admin', 'settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control']);
   function allowed(app, user) {
     const roles = user?.roles || [];
@@ -53,7 +57,7 @@
   const normalize = text => String(text || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
   const aliases = apps.flatMap(app => app.aliases.map(alias => ({ app, alias: normalize(alias) }))).sort((a, b) => b.alias.length - a.alias.length);
   function actionFor(action) {
-    const match = /^(open|close|refresh)_(.+)$/.exec(String(action || ''));
+    const match = /^(open|close|refresh|minimize|maximize|fullscreen|restore)_(.+)$/.exec(String(action || ''));
     const app = match && apps.find(item => item.key === match[2]);
     return app ? { app, operation: match[1], action: match[0] } : null;
   }
@@ -80,30 +84,33 @@
     const match = commandAliases.find(item => value === item.alias);
     return match ? { ...match.command } : null;
   }
+  const verbs = {
+    open: ['เปิด', 'แสดง', 'เรียก', 'เข้า', 'open', 'launch', 'show', 'bringup'],
+    close: ['ปิด', 'close', 'shut', 'quit', 'exit'],
+    refresh: ['รีเฟรช', 'อัปเดต', 'อัพเดต', 'refresh', 'reload'],
+    minimize: ['ย่อ', 'พับ', 'ลดหน้าต่าง', 'ซ่อน', 'minimize', 'minimise', 'hide', 'มินิไมซ์'],
+    maximize: ['ขยาย', 'ทำให้ใหญ่', 'maximize', 'maximise', 'enlarge', 'expand', 'makebigger', 'makelarger', 'แม็กซิไมซ์'],
+    fullscreen: ['เต็มหน้าจอ', 'เต็มจอ', 'fullscreen', 'gofullscreen', 'ฟูลสกรีน'],
+    restore: ['ออกจากเต็มหน้าจอ', 'ออกจากเต็มจอ', 'คืนขนาด', 'คืนหน้าต่าง', 'กลับขนาดเดิม', 'กลับขนาดปกติ', 'restore', 'unmaximize', 'unmaximise', 'unminimize', 'unminimise', 'exitfullscreen', 'leavefullscreen', 'windowedmode']
+  };
+  const verbEntries = Object.entries(verbs).flatMap(([operation, words]) => words.map(word => ({ operation, word })));
+  const verbPattern = new RegExp(verbEntries.map(item => item.word).sort((a,b) => b.length-a.length).join('|'), 'g');
   function parse(command) {
     const text = normalize(command);
     const target = aliases.find(item => text.includes(item.alias));
-    if (!target) return null;
-    if (/อย่า|ห้าม|ไม่ต้อง|ไม่อยาก|ไม่ให้|dont|donot|never/.test(text)) return { error: 'voice_command_negated' };
-    if (target.app.id === 'voice-identity' && ['ลงทะเบียน', 'เข้าสู่ระบบ'].includes(text)) return { app: target.app, operation: 'open', action: 'open_voice_identity', focusLogin: text === 'เข้าสู่ระบบ' };
-    // Mobile STT can repeat one short command or vary the final vowel on the retry.
-    // Remove aliases only for the selected app; a second app name remains unparsed.
+    if (/อย่า|ห้าม|ไม่ต้อง|ไม่อยาก|ไม่ให้|ไม่(?:ปิด|เปิด|ย่อ|ขยาย|เต็ม|คืน|ซ่อน)|dont|donot|never/.test(text)) return target ? { error: 'voice_command_negated' } : null;
+    if (target?.app.id === 'voice-identity' && ['ลงทะเบียน', 'เข้าสู่ระบบ'].includes(text)) return { app: target.app, operation: 'open', action: 'open_voice_identity', focusLogin: text === 'เข้าสู่ระบบ' };
     let rest = text;
-    for (const item of aliases) {
-      if (item.app.id === target.app.id) rest = rest.split(item.alias).join('');
-    }
-    // Ignore polite framing, but not arbitrary text such as delete/train/change.
-    rest = rest.replace(/ช่วย|กรุณา|ขอ|หน้าต่าง|หน้าจอ|ฟังก์ชั่น|ฟังก์ชัน|ฟังชั่น|ฟังชัน|ฟังชั่น|โปรแกรม|ของ|ให้หน่อย|ให้ด้วย|ให้ฉัน|ให้ผม|ให้|หน่อยสิ|หน่อย|ด้วย|ได้ไหม|ได้มั้ย|ได้หรือไม่|นะ|ครับ|ค่ะ|คะ|ที|please|can you|canyou|the|window|app/g, '');
-    // Thai "เปิด" contains "ปิด". Tokenize longest verbs first instead of
-    // independent substring checks, which interpret every open as a close.
-    const verbPattern = /รีเฟรช|อัปเดต|อัพเดต|refresh|reload|เปิด|แสดง|เรียก|เข้า|open|launch|show|ปิด|ซ่อน|close|hide/g;
-    const operations = [...new Set((rest.match(verbPattern) || []).map(verb => /^(ปิด|ซ่อน|close|hide)$/.test(verb) ? 'close' : /^(รีเฟรช|อัปเดต|อัพเดต|refresh|reload)$/.test(verb) ? 'refresh' : 'open'))];
-    if (operations.length > 1) return { error: 'ambiguous_voice_command' };
+    if (target) for (const item of aliases) if (item.app.id === target.app.id) rest = rest.split(item.alias).join('');
+    const matches = rest.match(verbPattern) || [];
+    const operations = [...new Set(matches.map(word => verbEntries.find(item => item.word === word).operation))];
+    if (operations.length > 1) return target ? { error: 'ambiguous_voice_command' } : null;
     if (!operations.length) return null;
     const operation = operations[0];
-    rest = rest.replace(verbPattern, '').replace(/ขึ้นมา|ขึ้น|มา|ลง|ดู|อีกครั้ง|อีกที|อีก|ตอนนี้|now/g, '');
+    rest = rest.replace(verbPattern, '').replace(/ช่วย|กรุณา|ขอ|หน้าต่าง|หน้าจอ|ฟังก์ชั่น|ฟังก์ชัน|ฟังชั่น|ฟังชัน|โปรแกรม|ของ|ให้หน่อย|ให้ด้วย|ให้ฉัน|ให้ผม|ให้|หน่อยสิ|หน่อย|ด้วย|ได้ไหม|ได้มั้ย|ได้หรือไม่|นะ|ครับ|ค่ะ|คะ|ที|please|couldyou|wouldyou|canyou|the|window|app|make|into|put|mode|ขึ้นมา|ขึ้น|มา|ลง|ดู|อีกครั้ง|อีกที|อีก|ตอนนี้|now/g, '');
     if (rest) return null;
-    return { app: target.app, operation, action: `${operation}_${target.app.key}` };
+    const app = target?.app || (['close','minimize','maximize','fullscreen','restore'].includes(operation) ? apps.find(app => app.virtual) : null);
+    return app ? { app, operation, action: `${operation}_${app.key}` } : null;
   }
   function classifyVoiceInput(input) {
     const text = String(input || '').trim();
@@ -111,7 +118,7 @@
     if (/(?:คืออะไร|หมายความว่า|อย่างไร|ยังไง)/u.test(text) || /^(?:อะไร|ทำไม|เพราะอะไร|how\b|what\b|why\b|when\b|where\b|explain\b)/i.test(text)) return { kind: 'conversation', text };
     const command = text.replace(/^(?:sentinel|เซนทิเนล)[\s,，:：]+/iu, '').replace(/^(?:ช่วย|กรุณา|please\s+)/iu, '').trim();
     const known = parse(command) || parseFunction(command);
-    const imperative = /^(?:เปิด|ปิด|รีเฟรช|แสดงสถานะ|ตรวจสอบสถานะ|ค้นความรู้|เริ่ม|หยุด|รัน|ยืนยัน|ยกเลิก|ลบ|เปลี่ยน|อนุญาต|open\b|close\b|refresh\b|start\b|stop\b|run\b|delete\b|confirm\b|cancel\b)/i.test(command);
+    const imperative = /^(?:ย่อ|ขยาย|เต็มจอ|เต็มหน้าจอ|คืนขนาด|เปิด|ปิด|รีเฟรช|แสดงสถานะ|ตรวจสอบสถานะ|ค้นความรู้|เริ่ม|หยุด|รัน|ยืนยัน|ยกเลิก|ลบ|เปลี่ยน|อนุญาต|open\b|close\b|refresh\b|start\b|stop\b|run\b|delete\b|confirm\b|cancel\b)/i.test(command);
     return known || imperative ? { kind: 'command', text: command } : { kind: 'conversation', text };
   }
   return { apps, functionCommands, allowed, parse, parseFunction, functionFor, actionFor, normalize, classifyVoiceInput };

@@ -48,6 +48,25 @@ function postTranscription(payload){
   });
 }
 function installVoiceBridge(){
+  ipcMain.handle('panthorium:window-control', async (event, action) => {
+    if (!trustedOrigin(event.senderFrame?.url || event.sender.getURL())) return {ok:false,error:'untrusted_origin'};
+    if (!['open','close','minimize','maximize','fullscreen','restore'].includes(action)) return {ok:false,error:'invalid_window_action'};
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return {ok:false,error:'desktop_window_unavailable'};
+    if (action === 'close') { setTimeout(() => { if (!win.isDestroyed()) win.close(); }, 500); return {ok:true,action,closing:true}; }
+    if (['minimize','maximize','restore'].includes(action) && win.isFullScreen()) {
+      win.setFullScreen(false);
+      for(let attempt=0; win.isFullScreen() && attempt<30; attempt++) await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    if (action === 'open') { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
+    if (action === 'restore') { win.unmaximize(); if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
+    if (action === 'minimize') win.minimize();
+    if (action === 'maximize') { win.setFullScreen(false); if (win.isMinimized()) win.restore(); win.maximize(); }
+    if (action === 'fullscreen') { if (win.isMinimized()) win.restore(); win.setFullScreen(true); }
+    const matches = () => action === 'minimize' ? win.isMinimized() : action === 'maximize' ? win.isMaximized() && !win.isFullScreen() : action === 'fullscreen' ? win.isFullScreen() : action === 'open' ? !win.isMinimized() : !win.isMinimized() && !win.isMaximized() && !win.isFullScreen();
+    for (let attempt=0; !matches() && attempt<30; attempt++) await new Promise(resolve => setTimeout(resolve,100));
+    return {ok:matches(),action,error:matches()?null:'desktop_window_transition_failed'};
+  });
   ipcMain.handle('panthorium:transcribe',async(event,input={})=>{
     if(!trustedOrigin(event.senderFrame?.url||event.sender.getURL())) return {status:403,data:{ok:false,error:'untrusted_origin'}};
     const token=typeof input.token==='string'?input.token:'';
@@ -197,7 +216,7 @@ async function checkForUpdates(options={}){
     return {ok:false,error:String(error.message||error)};
   }
 }
-function create(){const win=new BrowserWindow({width:1440,height:900,minWidth:960,minHeight:640,backgroundColor:'#050811',frame:false,title:PRODUCT_NAME,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,spellcheck:false}});win.removeMenu();win.loadURL(START_URL);return win;}
+function create(){const win=new BrowserWindow({width:1440,height:900,minWidth:960,minHeight:640,backgroundColor:'#050811',frame:false,title:PRODUCT_NAME,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,spellcheck:false,backgroundThrottling:false}});win.removeMenu();win.loadURL(START_URL);return win;}
 app.whenReady().then(()=>{
   installVoiceBridge();
   app.on('web-contents-created',(_event,contents)=>{

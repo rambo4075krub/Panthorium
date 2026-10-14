@@ -44,11 +44,21 @@
     }
     return true;
   }
+  function recordFor(app, root) {
+    const record = window.PanthoriumWindowManager?.findByAppId?.(app.id);
+    if (record?.el && (record.el === root || record.el.contains(root))) return record;
+    for (const [id, candidate] of system()?.windows || []) {
+      if (root && (candidate.el === root || candidate.el?.contains(root))) return {id,...candidate};
+    }
+    return null;
+  }
   function focus(app, root) {
     const os = system();
     const highest = Math.max(10050, os?.zCounter || 0, ...catalog.apps.map(item => Number.parseInt(getComputedStyle(document.querySelector(item.selector) || document.body).zIndex, 10) || 0));
     if (os) os.zCounter = highest + 1;
-    if (app.windowId && typeof focusWindow === 'function') focusWindow(app.windowId);
+    const record = recordFor(app, root);
+    if (record && window.PanthoriumWindowManager?.focus) window.PanthoriumWindowManager.focus(record.id || app.windowId || app.id);
+    else if (app.windowId && typeof focusWindow === 'function') focusWindow(app.windowId);
     else root.style.zIndex = String(highest + 2);
     if (!root.hasAttribute('tabindex')) root.tabIndex = -1;
     root.focus({ preventScroll: true });
@@ -70,16 +80,39 @@
     if (!target) return failure('unknown_ui_action');
     const { app, operation } = target;
     if (!catalog.allowed(app, system()?.state?.user)) return failure('voice_action_permission_denied');
+    if (app.virtual) {
+      const current = catalog.apps.filter(item => !item.virtual && !item.native && catalog.allowed(item, system()?.state?.user) && visible(rootFor(item)))
+        .sort((a,b) => (parseInt(getComputedStyle(recordFor(b,rootFor(b))?.el || rootFor(b)).zIndex,10)||0) - (parseInt(getComputedStyle(recordFor(a,rootFor(a))?.el || rootFor(a)).zIndex,10)||0))[0];
+      if (current) return windowAction(`${operation}_${current.key}`);
+      if (window.panthoriumDesktop?.isElectron) return windowAction(`${operation}_desktop_browser`);
+      return failure('window_not_created');
+    }
+    if (app.native) {
+      if (!window.panthoriumDesktop?.controlWindow) return {ok:false,error:'desktop_control_unavailable',text:'คำสั่งนี้ต้องใช้ Panthorium Browser Desktop รุ่นที่รองรับ โปรดอัปเดตแอป'};
+      if (operation === 'refresh') { window.location.reload(); return {ok:true,action,text:'กำลังรีเฟรช Panthorium Browser'}; }
+      const result = await window.panthoriumDesktop.controlWindow(operation);
+      return result?.ok ? {ok:true,action,text:`${operation === 'close' ? 'กำลังปิด' : ({open:'เปิด',minimize:'ย่อ',maximize:'ขยาย',fullscreen:'เต็มหน้าจอ',restore:'คืนขนาด'}[operation])} ${app.label}`} : failure(result?.error || 'desktop_control_unavailable');
+    }
     let root = rootFor(app);
     try {
       if (operation === 'close') {
         if (app.external && typeof window.PanthoriumExternalApps?.close === 'function') window.PanthoriumExternalApps.close(app.id);
-        if (!visible(root)) return { ok: true, action, text: `ปิด ${app.label}`, alreadyClosed: true };
+        if (!root?.isConnected) return { ok: true, action, text: `ปิด ${app.label}`, alreadyClosed: true };
         dismiss(app);
+        const record = recordFor(app, root);
+        if (record?.el?.isConnected) window.PanthoriumWindowManager.close(record.id || app.windowId || app.id);
         if (visible(rootFor(app))) return failure('window_not_closed');
         return { ok: true, action, text: `ปิด ${app.label}` };
       }
-      if (!visible(root) || app.external) {
+      const manager = window.PanthoriumWindowManager;
+      let record = recordFor(app, root);
+      if (operation === 'minimize') {
+        if (!root?.isConnected || !record) return failure('window_not_created');
+        manager.minimize(record.id || app.windowId || app.id);
+        return !visible(root) ? {ok:true,action,text:`ย่อ ${app.label}`} : failure('window_not_minimized');
+      }
+      if (!visible(root) && record) manager.restore?.(record.id || app.windowId || app.id);
+      if (!visible(root) || app.external && operation === 'open') {
         // A minimized desktop window needs its own restore lifecycle.
         if (root && app.windowId && typeof focusWindow === 'function' && !app.external) focusWindow(app.windowId);
         else {
@@ -96,6 +129,11 @@
       if (!visible(root)) return failure('window_not_created');
       if (!catalog.allowed(app, system()?.state?.user)) return failure('voice_action_permission_denied');
       focus(app, root);
+      if (['maximize','fullscreen','restore'].includes(operation)) {
+        record = recordFor(app, root);
+        if (!record || !manager.setMode?.(record.id || app.windowId || app.id, {maximize:'maximized',fullscreen:'fullscreen',restore:'normal'}[operation])) return failure('window_mode_unavailable');
+        return {ok:true,action,text:`${{maximize:'ขยาย',fullscreen:'เต็มหน้าจอ',restore:'คืนขนาด'}[operation]} ${app.label}`};
+      }
       if (operation === 'refresh') {
         const refresh = resolve(app.refresher);
         const button = app.refreshButton && root.querySelector(app.refreshButton);
@@ -148,7 +186,7 @@
       if (!result.ok || result.output?.ok === false || seen.has(index)) continue;
       // Only trusted navigation tool outputs may invoke the client. A search
       // document, integration payload or planner answer is never executable.
-      if (!['window.open', 'window.close', 'window.refresh', 'window.function', 'learning_lab.open'].includes(result.toolId)) continue;
+      if (!['window.open', 'window.close', 'window.refresh', 'window.minimize', 'window.maximize', 'window.fullscreen', 'window.restore', 'window.function', 'learning_lab.open'].includes(result.toolId)) continue;
       const action = result.output?.uiAction;
       const outcome = action?.startsWith('function_') ? await functionAction(action) : await windowAction(action);
       outcomes.push(outcome);

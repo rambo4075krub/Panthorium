@@ -268,6 +268,7 @@
             z-index: 8000;
             pointer-events: none;
         }
+        #system-controls:has(#desktop-voice.listening), #system-controls:has(#desktop-voice.processing) { z-index: 2147483000; }
         #system-controls-left {
             display: flex;
             align-items: center;
@@ -878,7 +879,7 @@
             pointer-events: none;
         }
     </style>
-    <link rel="stylesheet" href="/panthorium-window-base.css?v=3">
+    <link rel="stylesheet" href="/panthorium-window-base.css?v=4">
 </head>
 <body>
     <video id="faceVideo" autoplay muted playsinline></video>
@@ -955,7 +956,7 @@
     <script src="/billing-ui.js?v=billing-20261011"></script>
     <script src="/account-ui.js?v=account-windows-20261011"></script>
 
-    <script src="/panthorium-window-base.js?v=3"></script>
+    <script src="/panthorium-window-base.js?v=4"></script>
     <script>
     // =========================================================
     // Panthorium OS - Sentinel Runtime
@@ -971,7 +972,7 @@
     const OS = {
         // Internal shell and browser release metadata for compatibility.
         version: "1.1.0",
-        releaseVersion: "15.0.9",
+        releaseVersion: "15.0.10",
         state: {
             booted: false,
             loggedIn: false,

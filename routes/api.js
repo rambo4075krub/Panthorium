@@ -230,7 +230,7 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
       }
       if (/^(ปิดทุกหน้าต่าง|ปิดหน้าต่างทั้งหมด|ปิดทั้งหมด|closeallwindows)$/.test(windowCatalog.normalize(command))) {
         if (!hasVoicePermission(req.user, 'chat')) return res.status(403).json({ ok: false, error: 'voice_command_permission_denied' });
-        const results = windowCatalog.apps.filter(app => windowCatalog.allowed(app, req.user)).map(app => ({ toolId: 'window.close', ok: true, output: { ok: true, uiAction: `close_${app.key}` } }));
+        const results = windowCatalog.apps.filter(app => !app.native && !app.virtual && windowCatalog.allowed(app, req.user)).map(app => ({ toolId: 'window.close', ok: true, output: { ok: true, uiAction: `close_${app.key}` } }));
         audit.record('sentinel.close_all_windows', { userId: req.user.sub, requestId: req.requestId });
         return res.json({ ok: true, executed: false, completed: false, uiPending: true, action: 'close_all_windows', results });
       }
