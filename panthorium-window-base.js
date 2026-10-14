@@ -95,7 +95,7 @@
 
     titlebar.addEventListener('pointerdown', (e) => {
       if (e.target.closest('.win-btn')) return;
-      if (winEl.classList.contains('maximized')) return;
+      if (['maximized', 'panthorium-window-fullscreen', 'pw-maximized-workspace'].some(name => winEl.classList.contains(name))) return;
       dragging = true;
       ox = e.clientX - winEl.offsetLeft;
       oy = e.clientY - winEl.offsetTop;
@@ -122,7 +122,7 @@
     let startX, startY, startW, startH;
 
     handle.addEventListener('pointerdown', (e) => {
-      if (winEl.classList.contains('maximized')) return;
+      if (['maximized', 'panthorium-window-fullscreen', 'pw-maximized-workspace'].some(name => winEl.classList.contains(name))) return;
       e.preventDefault();
       resizing = true;
       startX = e.clientX;
@@ -176,33 +176,27 @@
     }
   }
 
-  function toggleMaximize(id) {
-    const store = getStore();
-    const rec = store.get(id);
-    if (!rec || !rec.el) return;
-
+  function setMode(id, mode) {
+    const rec = getStore().get(id);
+    if (!rec?.el || !['normal', 'maximized', 'fullscreen'].includes(mode)) return false;
     const el = rec.el;
-    if (el.classList.contains('maximized') || el.classList.contains('panthorium-window-fullscreen')) {
-      el.classList.remove('maximized', 'panthorium-window-fullscreen');
-      // restore previous geometry if saved
-      if (rec._restore) {
-        el.style.width = rec._restore.width;
-        el.style.height = rec._restore.height;
-        el.style.left = rec._restore.left;
-        el.style.top = rec._restore.top;
-      }
-      rec.fullscreen = false;
-    } else {
-      rec._restore = {
-        width: el.style.width,
-        height: el.style.height,
-        left: el.style.left,
-        top: el.style.top
-      };
-      el.classList.add('maximized');
-      rec.fullscreen = true;
-    }
+    if (rec._normalStyle === undefined) rec._normalStyle = el.dataset.panthoriumWindowedStyle ?? el.getAttribute('style') ?? '';
+    el.classList.remove('maximized', 'panthorium-window-fullscreen', 'pw-maximized-workspace');
+    if (mode === 'normal') el.setAttribute('style', rec._normalStyle);
+    if (mode === 'maximized') el.classList.add('pw-maximized-workspace');
+    if (mode === 'fullscreen') el.classList.add(rec.external ? 'panthorium-window-fullscreen' : 'maximized');
+    rec.windowMode = mode;
+    rec.fullscreen = mode === 'fullscreen';
+    rec.maximized = mode === 'maximized';
     focus(id);
+    return true;
+  }
+
+  function toggleMaximize(id) {
+    const rec = getStore().get(id);
+    if (!rec?.el) return;
+    const expanded = ['maximized', 'panthorium-window-fullscreen', 'pw-maximized-workspace'].some(name => rec.el.classList.contains(name));
+    return setMode(id, expanded ? 'normal' : 'maximized');
   }
 
   function close(id) {
@@ -435,6 +429,7 @@
     focus,
     minimize,
     toggleMaximize,
+    setMode,
     close,
     get: (id) => getStore().get(id),
     has: (id) => getStore().has(id),
@@ -445,6 +440,7 @@
     shell = state;
     const register = manager.registerExternalWindow;
     manager.create = create;
+    manager.setMode = setMode;
     manager.registerExternalWindow = function (id, title, element, options = {}) {
       const record = register(id, title, element, options);
       const app = global.PanthoriumWindowCatalog?.apps?.find(app => app.id === id);

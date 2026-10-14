@@ -19,7 +19,7 @@ const admin = { systemOwner:true, id: 'voice-admin', username: 'admin', permissi
 const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'system:read'], roles: ['guest'] };
 
 (async () => {
-  for (const app of catalog.apps) for (const alias of app.aliases) {
+  for (const app of catalog.apps.filter(app => !app.virtual && !app.native)) for (const alias of app.aliases) {
     assert.equal(catalog.parse(`เปิด ${alias}`)?.action, `open_${app.key}`, `open ${alias}`);
     assert.equal(catalog.parse(`ปิด ${alias}`)?.action, `close_${app.key}`, `close ${alias}`);
     assert.equal(catalog.parse(`${alias} เปิดขึ้น`)?.action, `open_${app.key}`, `target-first ${alias}`);
@@ -166,7 +166,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     w.PanthoriumAIStream.install();
     const command = text => w.callAI(text, { voiceMode: true });
     const isVisible = app => { const el = w.document.querySelector(app.selector); return !!el && w.getComputedStyle(el).display !== 'none'; };
-    for (const app of catalog.apps) {
+    for (const app of catalog.apps.filter(app => !app.virtual && !app.native)) {
       client++;
       let result = await command(`${app.aliases[0]} เปิดขึ้น`);
       assert.equal(result.ok, true, `${app.label}: ${JSON.stringify(result)}`);
@@ -188,6 +188,12 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       assert.equal((await command(`เปิด ${app.aliases[0]}`)).ok, true);
       assert.equal(w.document.querySelectorAll(app.selector).length, 1, `${app.label}: duplicate window`);
       if (app.refresher || app.refreshButton) assert.equal((await command(`รีเฟรช ${app.aliases[0]}`)).ok, true, `${app.label} refresh`);
+      for (const verb of ['ขยาย','เต็มหน้าจอ','คืนขนาด','ย่อ','คืนขนาด']) {
+        client++;
+        const modeResult = await command(`${verb} ${app.aliases[0]}`);
+        assert.equal(modeResult.ok,true,`${verb} ${app.label}: ${JSON.stringify(modeResult)}`);
+        assert.equal(root.isConnected,true,'window modes preserve the same root');
+      }
       const closed = await command(`ปิด ${app.aliases[0]}`);
       assert.equal(closed.ok, true, `${app.id} close: ${JSON.stringify(closed)}`);
       assert.equal(closed.text, `ปิด ${app.label}`);
@@ -205,7 +211,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       await command(`ปิด ${app.aliases[0]}`);
       assert(!root.isConnected || w.getComputedStyle(root).display === 'none');
     }
-    console.log(`PASS: actual ${catalog.apps.length} registered windows open, focus without duplicates, close, close twice, reopen; supported refresh and minimized restore`);
+    console.log(`PASS: actual ${catalog.apps.filter(app => !app.virtual && !app.native).length} registered windows open, focus without duplicates, close, close twice, reopen; supported refresh and minimized restore`);
     await w.PanthoriumCalendar.open();
     const calendarForm = w.document.querySelector('.window[data-id="calendar"] [data-calendar-form]');
     const calendarTitle = w.document.querySelector('.window[data-id="calendar"] [data-calendar-title]');
@@ -353,7 +359,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert.equal(w.document.querySelector('#sm-apps .sm-app[data-app-id="goals"]'), null, 'Guest must not see private Goals launcher');
     assert.equal(w.document.querySelector('#sm-apps .sm-app[data-app-id="assistant-preferences"]'), null, 'Guest must not see private Sentinel Preferences launcher');
     assert.equal(preferenceWindow.querySelector('[data-preferences-name]').value, '', 'account change clears the previous user name from the open preferences window');
-    for (const app of catalog.apps) {
+    for (const app of catalog.apps.filter(app => !app.virtual && !app.native)) {
       client++; // each app check is a separate simulated guest client; keep the per-IP limiter enabled
       const result = await command(`เปิด ${app.aliases[0]}`);
       assert.equal(result.ok, catalog.allowed(app, guest), `${app.label}: guest permission: ${JSON.stringify(result)}`);

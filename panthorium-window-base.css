@@ -373,3 +373,16 @@
 @media (prefers-reduced-motion: reduce) {
   .panthorium-window.pw-animate-in { animation: none; }
 }
+
+/* Maximizing fills the workspace; fullscreen uses the full app viewport. */
+.panthorium-window.pw-maximized-workspace {
+  position: fixed !important;
+  inset: var(--panthorium-safe-area-top, 0px) 0 var(--panthorium-shell-dock-clearance, 68px) 0 !important;
+  width: 100vw !important;
+  height: calc(100dvh - var(--panthorium-safe-area-top, 0px) - var(--panthorium-shell-dock-clearance, 68px)) !important;
+  min-width: 0 !important; min-height: 0 !important;
+  max-width: none !important; max-height: none !important;
+  margin: 0 !important; padding: 0 !important;
+  box-sizing: border-box !important;
+}
+.pw-maximized-workspace .window-resize { display: none !important; }
