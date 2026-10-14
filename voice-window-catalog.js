@@ -7,6 +7,11 @@
   // One allowlist for the server, desktop and voice client. Never execute a
   // function name or selector supplied by an AI response or a transcript.
   const apps = [
+    {id:"developer-studio",key:"developer_studio",label:"Developer Studio",permission:"settings",role:"administrator",ownerOnly:true,aliases:["Developer Studio","พัฒนาระบบ","แก้โค้ด"],selector:'.window[data-id="developer-studio"]',opener:"PanthoriumDeveloperStudio.open",windowId:"developer-studio"},
+    {id:"user-management",key:"user_management",label:"ผู้ใช้และเงื่อนไข",permission:"settings",role:"administrator",aliases:["จัดการผู้ใช้","ผู้ใช้และเงื่อนไข"],selector:'.window[data-id="account-manager"]',opener:"PanthoriumUserManager.open",windowId:"account-manager"},
+    {id:"admin-management",key:"admin_management",label:"ผู้ดูแลระบบ",permission:"settings",role:"administrator",aliases:["จัดการแอดมิน","ผู้ดูแลระบบ"],selector:'.window[data-id="account-manager"]',opener:"PanthoriumUserManager.openAdmins",windowId:"account-manager"},
+    {id:"admin-mailbox",key:"admin_mailbox",label:"กล่องอีเมล",permission:"settings",role:"administrator",aliases:["กล่องอีเมล","กล่องจดหมาย","อีเมลระบบ"],selector:'.window[data-id="admin-mailbox"]',opener:"PanthoriumMailbox.open",windowId:"admin-mailbox"},
+    {id:"billing-admin",key:"billing_admin",label:"การเงินและการชำระเงิน",permission:"settings",role:"administrator",aliases:["การเงิน","รายรับรายจ่าย","จัดการชำระเงิน"],selector:'.window[data-id="billing-admin"]',opener:"PanthoriumBillingAdmin.open",windowId:"billing-admin"},
     { id: 'sentinel', key: 'sentinel', label: 'Sentinel AI', permission: 'chat', aliases: ['Sentinel AI', 'เซนทิเนลเอไอ', 'แชต', 'แชท'], selector: '.window[data-id="sentinel"]', opener: 'openSentinel', windowId: 'sentinel' },
     { id: 'notes', key: 'notes', label: 'Notes', permission: 'chat', aliases: ['Notes', 'Note', 'โน้ต', 'โน๊ต', 'บันทึก', 'แอปบันทึก'], selector: '.window[data-id="notes"]', opener: 'openNotes', windowId: 'notes' },
     { id: 'files', key: 'files', label: 'Files', permission: 'chat', accountRequired: true, aliases: ['Files', 'File', 'ไฟล์', 'จัดการไฟล์', 'ไฟล์ของฉัน'], selector: '.window[data-id="files"]', opener: 'openFiles', windowId: 'files' },
@@ -38,12 +43,12 @@
     { id: 'external-x', key: 'external_x', label: 'X', permission: 'chat', aliases: ['X', 'Twitter', 'ทวิตเตอร์'], selector: '.window[data-id="external-x"]', opener: 'PanthoriumExternalApps.openX', windowId: 'external-x', external: true, externalUrl: 'https://x.com/' },
     { id: 'privacy-policy', key: 'privacy_policy', label: 'Privacy/Policy', permission: 'chat', aliases: ['Privacy Policy', 'Privacy/Policy', 'นโยบายความเป็นส่วนตัว', 'นโยบายความเป็นส่วนตัวและข้อกำหนด'], selector: '#panthorium-privacy-policy', opener: 'PanthoriumPrivacyPolicy.open', closeButton: '[data-close]' }
   ];
-  const userRestrictedIds = new Set(['settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control']);
+  const userRestrictedIds = new Set(['user-management', 'admin-management', 'admin-mailbox', 'billing-admin', 'settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control']);
   function allowed(app, user) {
     const roles = user?.roles || [];
     const id = String(user?.sub || user?.id || '');
     const hasAccount = !!id && !id.startsWith('guest:') && !roles.includes('guest');
-    return !!app && (!app.accountRequired || hasAccount) && !(!roles.some(role => ['administrator', 'operator'].includes(role)) && userRestrictedIds.has(app.id)) && (user?.permissions || []).includes(app.permission) && (!app.role || roles.includes(app.role));
+    return !!app && (!app.ownerOnly || user?.systemOwner === true) && (!app.accountRequired || hasAccount) && !(!roles.some(role => ['administrator', 'operator'].includes(role)) && userRestrictedIds.has(app.id)) && (user?.permissions || []).includes(app.permission) && (!app.role || roles.includes(app.role));
   }
   const normalize = text => String(text || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
   const aliases = apps.flatMap(app => app.aliases.map(alias => ({ app, alias: normalize(alias) }))).sort((a, b) => b.alias.length - a.alias.length);

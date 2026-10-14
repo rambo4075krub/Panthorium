@@ -65,6 +65,7 @@ function createFilesRouter(authService, files) {
     if (error instanceof CloudFilesError) {
       return res.status(error.status).json({ ok: false, error: error.code });
     }
+    if(error instanceof require('../services/entitlementService').EntitlementError)return res.status(error.status).json({ok:false,error:error.message});
     next(error);
   });
 

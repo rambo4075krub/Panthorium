@@ -13,7 +13,9 @@ const catalog = require('../voice-window-catalog');
 const source = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
 assert.equal((source('sentinel.html').match(/authorizeAudio\(audio\)/g) || []).length, 0, 'both voice input paths rely on the single server-side speaker check');
 const tick = () => new Promise(resolve => setImmediate(resolve));
-const admin = { id: 'voice-admin', username: 'admin', permissions: ['chat', 'system:read', 'settings', 'sentinel:command'], roles: ['administrator'] };
+// The full-window fixture represents the system owner; real owner binding has separate server tests.
+require('../services/founderAccount').isFounderAccount = id => id === 'voice-admin';
+const admin = { systemOwner:true, id: 'voice-admin', username: 'admin', permissions: ['chat', 'system:read', 'settings', 'sentinel:command'], roles: ['administrator'] };
 const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'system:read'], roles: ['guest'] };
 
 (async () => {
@@ -128,6 +130,9 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       }
       const memoryDeleteId = pathname.startsWith('/api/agent/memory/') ? pathname.slice('/api/agent/memory/'.length) : '';
       if (memoryDeleteId && /^[0-9a-f-]+$/i.test(memoryDeleteId) && httpMethod === 'DELETE') { cloudEvents.delete(memoryDeleteId); return Response.json({ ok: true }); }
+      if (pathname === '/api/admin/developer/status') return Response.json({githubConnected:false,databaseConfigured:true});
+      if (pathname === '/api/admin/accounts') return Response.json({ok:true,users:[]});
+      if (pathname === '/api/admin/billing/overview') return Response.json({ok:true,report:{totals:{},rows:[],profile:{},range:{},completeIdentity:false},orders:[],grants:[],gateway:{mode:'live',connected:false,checkoutEnabled:false}});
       if (pathname === '/api/auth/logout') return Response.json({ ok: true });
       if (pathname === '/api/auth/login') return Response.json({ ok: true, user: admin, accessToken: auth.signAccessToken(admin) });
       if (pathname === '/api/sentinel/command' || pathname.startsWith('/api/agent/workflow/')) {
@@ -150,7 +155,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="files"]'), 'Files appears in Start menu after account authentication');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="goals"]'), 'Goals appears in Start menu for signed-in chat accounts');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="assistant-preferences"]'), 'Sentinel Preferences appears in Start menu for signed-in chat accounts');
-    for (const file of ['user-manager.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'window-manager-ui.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'privacy-policy-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    for (const file of ['user-manager.js', 'developer-studio-ui.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'window-manager-ui.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'privacy-policy-ui.js', 'billing-admin-ui.js', 'admin-mailbox-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumStagingAdminDesktop.render();
     await new Promise(resolve => setTimeout(resolve, 40));
     for (const appId of ['media-studio', 'browser']) {
@@ -417,16 +422,19 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     gw.PanthoriumAuth = { isGuest: () => true, isAdministrator: () => false, isAdminEntry: () => false, hasPermission: permission => permission === 'chat' };
     gw.fetch = async url => ({ ok: true, status: 200, json: async () => String(url).includes('/status') ? { configured: true, gateEnabled: true } : { profiles: [] } });
     gw.eval(source('voice-identity-ui.js'));
+    gw.eval(source('account-ui.js'));
     gw.document.dispatchEvent(new gw.Event('DOMContentLoaded'));
     await tick();
-    assert(gw.document.getElementById('voice-identity-launcher'), 'guest start menu keeps the Voice Identity icon');
-    assert.equal(gw.document.querySelector('#voice-identity-launcher span')?.textContent, 'ลงทะเบียน/เข้าสู่ระบบ/Voice Identity', 'launcher label describes registration and login');
+    assert.equal(gw.document.getElementById('voice-identity-launcher'), null, 'Voice Identity has no separate menu launcher');
     await gw.PanthoriumVoiceIdentity.open();
     await new Promise(resolve => setTimeout(resolve, 0));
+    assert(gw.document.querySelector('#panthorium-account-register [data-email]'), 'voice opener goes to the same registration window');
+    assert.equal(gw.document.getElementById('panthorium-voice-identity'), null, 'no separate Voice Identity window');
+    await gw.PanthoriumAccounts.openRegistration();
     gw.PanthoriumVoiceIdentity.openLogin();
     await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(gw.document.activeElement, gw.document.querySelector('[data-login-email]'), 'voice login phrase focuses the login email without leaving Voice Identity');
-    assert.deepEqual([...gw.document.querySelectorAll('[data-type] option')].map(option => option.value), ['user', 'family'], 'guest registration offers user and family only');
+    assert.equal(gw.document.activeElement, gw.document.querySelector('[data-login-email]'), 'voice login phrase focuses the separate account login window');
+    assert.deepEqual([...gw.document.querySelectorAll('#panthorium-account-register [data-type] option')].map(option => option.value), ['user', 'family'], 'guest registration offers user and family only');
     assert(gw.document.querySelector('[data-email][type="email"]'), 'guest voice signup asks for email');
     assert(gw.document.querySelector('[data-password][type="password"]'), 'guest voice signup asks for a password');
     assert(gw.document.querySelector('[data-password-confirm][type="password"]'), 'guest voice signup confirms the password');
@@ -434,7 +442,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert(gw.document.querySelector('[data-login-email]') && gw.document.querySelector('[data-forgot]'), 'guest can sign in or recover password');
     assert(gw.document.querySelector('[data-reset-email][type="email"]') && gw.document.querySelector('[data-reset-password-confirm][type="password"]'), 'password recovery has an email and password confirmation field');
     assert(gw.document.querySelector('[data-remember]') && gw.document.querySelector('[data-login-remember]'), 'remember choice appears on signup and login');
-    assert.match(gw.document.querySelector('#panthorium-voice-identity [data-state]').textContent, /ด่านคัดเสียงเปิดใช้งานแล้ว/, 'guest sees the staged speaker gate enabled');
+    assert.match(gw.document.querySelector('#panthorium-account-register [data-state]').textContent, /ด่านคัดเสียงเปิดใช้งานแล้ว/, 'guest sees the staged speaker gate enabled');
     gw.close();
     const signedDom = new JSDOM('<!doctype html><html><body><div id="sm-apps"></div></body></html>', { url: 'https://panthorium-staging.example.run.app/', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
     const sw = signedDom.window;
@@ -448,23 +456,26 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       return { ok: true, status: 200, json: async () => ({ ok: true }) };
     };
     sw.eval(source('voice-identity-ui.js'));
+    sw.eval(source('account-ui.js'));
     sw.document.dispatchEvent(new sw.Event('DOMContentLoaded'));
     await tick();
     await sw.PanthoriumVoiceIdentity.open();
     await tick();
-    assert.equal(sw.document.querySelector('[data-security-email]')?.value, 'owner@example.com', 'signed-in account email is used in security panel');
-    assert(sw.document.querySelector('[data-security-otp]') && sw.document.querySelector('[data-security-password]') && sw.document.querySelector('[data-security-password-confirm]'), 'password change requires email OTP and confirmation fields');
-    sw.document.querySelector('[data-security-request-otp]').click(); await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(sw.document.querySelector('#panthorium-voice-identity [data-account-security]'), null, 'account security is removed from Voice Identity');
+    sw.PanthoriumAccounts.openForgot();
+    assert.equal(sw.document.querySelector('[data-reset-email]')?.value, 'owner@example.com', 'signed-in account email is used in security panel');
+    assert(sw.document.querySelector('[data-reset-code]') && sw.document.querySelector('[data-reset-password]') && sw.document.querySelector('[data-reset-password-confirm]'), 'password change requires email OTP and confirmation fields');
+    sw.document.querySelector('[data-reset-request]').click(); await new Promise(resolve => setTimeout(resolve, 0));
     assert(securityRequests.some(request => request.path === '/api/auth/password/forgot'), 'password change requests an email OTP');
-    sw.document.querySelector('[data-security-otp]').value = '123456';
-    sw.document.querySelector('[data-security-password]').value = 'new-password-123';
-    sw.document.querySelector('[data-security-password-confirm]').value = 'new-password-123';
-    sw.document.querySelector('[data-security-password-submit]').click(); await new Promise(resolve => setTimeout(resolve, 0));
+    sw.document.querySelector('[data-reset-code]').value = '123456';
+    sw.document.querySelector('[data-reset-password]').value = 'new-password-123';
+    sw.document.querySelector('[data-reset-password-confirm]').value = 'new-password-123';
+    sw.document.querySelector('[data-reset-confirm]').click(); await new Promise(resolve => setTimeout(resolve, 0));
     const resetRequest = securityRequests.find(request => request.path === '/api/auth/password/reset');
     assert.equal(resetRequest?.body?.confirmPassword, 'new-password-123', 'confirmed password is sent with OTP');
-    assert.equal(sw.document.querySelector('[data-security-state]').textContent, 'เปลี่ยนรหัสผ่านสำเร็จ');
+    assert.equal(sw.document.querySelector('[data-account-state]').textContent, 'ตั้งรหัสผ่านใหม่สำเร็จ กรุณาเข้าสู่ระบบด้วยรหัสผ่านใหม่');
     sw.close();
-    console.log('PASS: signed-in Voice Identity can change password with email OTP and confirmation');
+    console.log('PASS: separate account window can change password with email OTP and confirmation');
     console.log('PASS: guest and signed-in Voice Identity security flows are separated');
   } finally { w.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

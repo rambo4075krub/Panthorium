@@ -109,7 +109,13 @@ const integrationRepository = new IntegrationRepository({ databaseUrl: config.da
 const integrationExecutions = new IntegrationExecutionRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const integrations = new IntegrationService({ repository: integrationRepository, executions: integrationExecutions, audit, allowedHosts: config.integrationAllowedHosts });
 const sentinel = new Sentinel({ conversations, audit });
-const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET });
+const billingService = new (require('./services/omiseBillingService').OmiseBillingService)();
+const accountAdminService = new (require("./services/accountAdminService").AccountAdminService)(authService,billingService.pool);
+if (billingService.pool) { authService.validateAccountPrincipal = principal => accountAdminService.validate(principal); authService.accountPolicy = id => accountAdminService.policy(id); authService.invalidateAccountSessions = (id,actor) => accountAdminService.invalidate(id,actor); }
+const developerStudioService = new (require("./services/developerStudioService").DeveloperStudioService)({pool:billingService.pool,providers:sentinel.providers});
+const liveEntitlements = billingService.live && billingService.liveEnabled ? billingService.entitlements() : null;
+sentinel.providers.entitlements=liveEntitlements;
+const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET, entitlements:liveEntitlements });
 const mediaStudio = new MediaStudioService({ files: cloudFiles, providers: sentinel.providers, gateway: sentinel.gateway, audit, jobSecret: config.jwtSecret });
 const productionIntelligence = new ProductionIntelligenceService({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, audit, gateway: sentinel.gateway });
 const toolRegistry = new ToolRegistry({ sentinel, conversations, securityResponse, aiOperations, integrations, mediaStudio });
@@ -154,7 +160,7 @@ sentinel.training = sentinelTraining;
 sentinel.sentinelControl = sentinelOrchestrator;
 
 app.disable("x-powered-by");
-app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins, (req) => `${req.protocol === "https" ? "wss" : "ws"}://${req.get("host")}`], frameSrc: ["'self'"], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
+app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:", "https://api.omise.co"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins, (req) => `${req.protocol === "https" ? "wss" : "ws"}://${req.get("host")}`], frameSrc: ["'self'"], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
 const allowElectronFileOrigin = process.env.ALLOW_ELECTRON_ORIGIN === "1";
 app.use((req, res, next) => {
   const origin = req.get("origin");
@@ -168,6 +174,8 @@ app.use((req, res, next) => {
   }
   return cors({ origin: origin || false, credentials: true })(req, res, next);
 });
+const adminMailbox = new (require('./services/adminMailboxService').AdminMailboxService)({pool:billingService.pool,config});
+app.post('/api/webhooks/resend', express.raw({type:'application/json',limit:'2mb'}), require('./routes/adminMailbox').mailboxWebhook(adminMailbox));
 app.use(express.json({ limit: "2mb", type: "application/json" }));
 app.use(cookieParser());
 app.use(requestContext(audit));
@@ -191,6 +199,12 @@ app.use("/api/biometrics", createBiometricsRouter(authService, biometrics));
 app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
 app.use("/api/agent/automation", createAutomationRouter(authService, agentAutomation));
 app.use("/api/agent/memory", createMemoryRouter(authService, agentMemory));
+app.use("/api/admin/developer",require("./routes/developerStudio").createDeveloperStudioRouter(authService,developerStudioService));
+app.use("/api/admin/accounts",require("./routes/accountAdmin").createAccountAdminRouter(authService,accountAdminService));
+app.use("/api/admin/mailbox", require("./routes/adminMailbox").createAdminMailboxRouter(authService,adminMailbox));
+app.use("/api/admin/billing", require("./routes/billingAdmin").createBillingAdminRouter(authService,billingService));
+app.get("/api/policies/operator", async(req,res)=>{ try { const p=await new (require("./services/billingAdminService").BillingAdminService)(billingService).profile(); res.json({ok:true,name:p.name,brand:p.brand,address:p.address||null,email:p.email||null}); } catch { res.status(503).json({ok:false,error:"operator_unavailable"}); } });
+app.use("/api/billing", require("./routes/billing").createBillingRouter(authService,billingService));
 app.use("/api/files", createFilesRouter(authService, cloudFiles));
 app.use("/api/media", createMediaStudioRouter(authService, mediaStudio));
 app.use("/api/reminders", createReminderRouter(authService, reminders));
@@ -220,7 +234,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "privacy-policy-ui.js", "live-voice-client.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "account-ui.js", "privacy-policy-ui.js", "live-voice-client.js"];
 for (const script of shellScripts) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -391,7 +405,7 @@ async function start() {
   await sentinelOrchestrator.init();
 
   const liveGateway = process.env.GEMINI_LIVE_ENABLED === "1"
-    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "us-central1", functionCalling: agentFunctionCalling })
+    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "us-central1", functionCalling: agentFunctionCalling, entitlements:liveEntitlements })
     : null;
   const server = app.listen(config.port, config.host, () => {
     console.log("========================================");

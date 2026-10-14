@@ -50,13 +50,14 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
       const lateLauncher = w.document.createElement('button'); lateLauncher.id = 'phase6-automation-launcher'; lateLauncher.textContent = 'Agent Automation';
       w.document.getElementById('sm-apps').appendChild(lateLauncher);
       await new Promise(resolve => w.setTimeout(resolve, 40));
-      const expectedMenu = role === 'user' ? ['Sentinel AI', 'Voice Identity', 'เครื่องคิดเลข', 'บันทึก', 'ไฟล์'] : ['Sentinel AI', 'Voice Identity'];
+      const expectedMenu = role === 'user' ? ['Sentinel AI', 'ลงทะเบียน', 'เครื่องคิดเลข', 'บันทึก', 'ไฟล์'] : ['Sentinel AI', 'ลงทะเบียน'];
       assert.deepEqual([...w.document.querySelectorAll('#sm-apps > *')].map(el => el.querySelector('span')?.textContent.trim() || el.textContent.trim()), expectedMenu, 'non-staff Start Menu keeps authorized apps and removes late privileged injection');
     }
     if (role === 'admin') {
       const icons = [...w.document.querySelectorAll('#desktop-icons [data-app-id]')];
-      assert.equal(icons.length, 14, 'every admin icon is on the desktop on production hosts too');
-      assert.equal(new Set(icons.map(icon => icon.dataset.appId)).size, 14);
+      assert(icons.some(icon=>icon.dataset.appId==='admin-mailbox'),'mailbox icon must appear on the admin desktop');
+      assert.equal(icons.length, 18, 'every admin icon is on the desktop on production hosts too');
+      assert.equal(new Set(icons.map(icon => icon.dataset.appId)).size, 18);
       assert.notEqual(w.getComputedStyle(w.document.getElementById('desktop-icons')).display, 'none');
       assert.notEqual(w.getComputedStyle(w.document.getElementById('sm-apps')).display, 'none', 'administrator Start Menu exposes searchable launchers');
       assert(w.document.getElementById('start-search'));
@@ -83,7 +84,7 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
         assert.notEqual(w.getComputedStyle(w.document.getElementById('sm-apps')).display, 'none', 'Guest Start Menu remains available');
         assert.equal(w.document.getElementById('btn-login'), null);
         assert.equal(w.document.getElementById('btn-logout').textContent, '🚪 ออกจากระบบ');
-        assert.deepEqual([...w.document.querySelectorAll('#sm-apps > *')].map(el => el.querySelector('span')?.textContent.trim() || el.textContent.trim()), ['Sentinel AI', 'Voice Identity']);
+        assert.deepEqual([...w.document.querySelectorAll('#sm-apps > *')].map(el => el.querySelector('span')?.textContent.trim() || el.textContent.trim()), ['Sentinel AI', 'ลงทะเบียน']);
         assert.equal(w.document.getElementById('panthorium-browser-download').textContent, 'ดาวน์โหลด Panthorium Browser');
         w.document.getElementById('btn-logout').onclick();
         assert.equal(logouts, 1);
@@ -118,5 +119,5 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
   await scenario('admin', true, true);
   await scenario('guest', true, false, true);
   await scenario('guest', false, false, true);
-  console.log('Access shell: Guest/Admin role checks at / and /admin; 14 admin icons; Guest Voice Identity Start Menu; current/new/offline update status; installed 15.0.3 compatibility');
+  console.log('Access shell: Guest/Admin role checks at / and /admin; 18 admin icons; Guest Voice Identity Start Menu; current/new/offline update status; installed 15.0.3 compatibility');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -125,14 +125,15 @@
     if (apps && !isStaff) {
       const entries = [...apps.children];
       let sentinel = entries.find(el => /Sentinel AI/i.test(el.textContent || ''));
-      let voice = entries.find(el => /Voice Identity/i.test(el.textContent || ''));
+      let voice = entries.find(el => el.dataset.appId === 'account-register');
       if (!sentinel) { sentinel = document.createElement('button'); sentinel.type = 'button'; sentinel.className = 'sm-app'; sentinel.innerHTML = '<div class="ico">🤖</div><span>Sentinel AI</span>'; sentinel.onclick = () => window.PanthoriumVoiceCommands?.windowAction?.('open_sentinel'); }
-      if (!voice) { voice = document.createElement('button'); voice.type = 'button'; voice.className = 'sm-app'; voice.innerHTML = '<div class="ico">🎙️</div><span>Voice Identity</span>'; voice.onclick = () => window.PanthoriumVoiceIdentity?.open?.(); }
+      if (!voice) { voice = document.createElement('button'); voice.type = 'button'; voice.className = 'sm-app'; voice.dataset.appId = 'account-register'; voice.innerHTML = '<div class="ico">📝</div><span>ลงทะเบียน</span>'; voice.onclick = () => window.PanthoriumAccounts?.openRegistration?.(); }
       const account = typeof OS !== 'undefined' ? OS?.state?.user : null;
       const registered = entries.filter(el => {
         const id = el.dataset.appId;
+        if (id === 'voice-identity' || el.id === 'voice-identity-launcher') return false;
         if (!id || restrictedLaunchers.includes(el.id) || el.dataset.productionIntelligence === '1') return false;
-        if (guest() && id !== 'sentinel' && id !== 'voice-identity') return false;
+        if (guest() && id !== 'sentinel' && id !== 'voice-identity' && id !== 'billing' && id !== 'account-register' && id !== 'account-login') return false;
         if ((id === 'notes' || id === 'files') && !account?.permissions?.includes('chat')) return false;
         return true;
       });

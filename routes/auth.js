@@ -1,6 +1,7 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 const crypto = require("crypto");
+const founderAccount = require("../services/founderAccount");
 const { requireAuth } = require("../middleware/auth");
 
 function createAuthRouter(authService, config, securityResponse, biometricRepository, biometrics, emailOtp) {
@@ -150,6 +151,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
       setSessionCookies(res, session, req.body?.rememberMe !== false);
       res.json({ ok: true, accessToken: session.accessToken, user: session.principal });
     } catch (error) {
+      if(["account_suspended","account_access_expired","account_day_restricted"].includes(error.message))return res.status(403).json({ok:false,error:error.message});
       console.error("[AUTH] login failed (" + req.requestId + "): " + error.message);
       res.status(503).json({ ok: false, error: "auth_unavailable", requestId: req.requestId });
     }
@@ -157,7 +159,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
 
   router.get("/me", auth, async (req, res, next) => {
     try {
-      const user = { id: req.user.sub, username: req.user.username, roles: req.user.roles || [], permissions: req.user.permissions || [] };
+      const user = { id: req.user.sub, systemOwner: founderAccount.isFounderAccount(req.user.sub), founderProtected: founderAccount.isFounderAccount(req.user.sub), username: req.user.username, roles: req.user.roles || [], permissions: req.user.permissions || [] };
       const identity = { ...user, sub: user.id };
       await attachDisplayName(identity);
       delete identity.sub;
@@ -184,8 +186,9 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
       const user = await authService.updateManagedUserAccess(req.params.id, req.body || {}, req.user.sub);
       res.json({ ok: true, user });
     } catch (error) {
+      if(["founder_account_protected","founder_access_required"].includes(error.message))return res.status(403).json({ok:false,error:error.message});
       if (error.message === "user_not_found") return res.status(404).json({ ok: false, error: error.message });
-      if (["cannot_demote_self", "cannot_remove_own_settings", "last_administrator_required"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
+      if (["cannot_demote_self", "cannot_remove_own_settings", "last_administrator_required", "administrator_restriction_forbidden"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
       next(error);
     }
   });
@@ -195,6 +198,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
       const user = await authService.resetManagedUserPassword(req.params.id, req.body?.password, req.user.sub);
       res.json({ ok: true, user });
     } catch (error) {
+      if(["founder_account_protected","founder_access_required"].includes(error.message))return res.status(403).json({ok:false,error:error.message});
       if (error.message === "user_not_found") return res.status(404).json({ ok: false, error: error.message });
       if (error.message === "invalid_password") return res.status(400).json({ ok: false, error: error.message });
       next(error);
@@ -206,6 +210,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
       await authService.deleteManagedUser(req.params.id, req.user.sub);
       res.json({ ok: true });
     } catch (error) {
+      if(error.message==="founder_account_protected")return res.status(403).json({ok:false,error:error.message});
       if (error.message === "user_not_found") return res.status(404).json({ ok: false, error: error.message });
       if (["cannot_delete_self", "cannot_delete_administrator"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
       next(error);
@@ -219,7 +224,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
       await attachDisplayName(session.principal);
       setSessionCookies(res, session, req.cookies?.pt_session !== "1");
       res.json({ ok: true, accessToken: session.accessToken, user: session.principal });
-    } catch (error) { next(error); }
+    } catch (error) { if(error.message==="account_session_revoked")return res.status(401).json({ok:false,error:error.message}); if(["account_suspended","account_access_expired","account_day_restricted"].includes(error.message))return res.status(403).json({ok:false,error:error.message}); next(error); }
   });
 
   router.post("/logout", async (req, res, next) => {

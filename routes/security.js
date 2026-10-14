@@ -1,3 +1,4 @@
+const founderAccount=require("../services/founderAccount");
 const express = require("express");
 const { requireAuth } = require("../middleware/auth");
 
@@ -102,19 +103,22 @@ function createSecurityRouter(authService, repository, audit, securityResponse) 
 
   router.delete("/sessions/:id", async (req, res, next) => {
     try {
+      const target=(await repository.listActiveSessions()).find(s=>s.id===req.params.id);
+      if(target)founderAccount.assertFounderMutationAllowed(target.userId,req.user.sub);
       const revoked = await repository.revokeSession(req.params.id);
       audit.record("security.session_revoked", { actorUserId: req.user.sub, sessionId: req.params.id, requestId: req.requestId, ip: req.ip || null, userAgent: req.headers["user-agent"] || null });
       if (!revoked) return res.status(404).json({ ok: false, error: "session_not_found" });
       res.json({ ok: true });
-    } catch (error) { next(error); }
+    } catch (error) { if(error.message==="founder_account_protected")return res.status(403).json({ok:false,error:error.message});next(error); }
   });
 
   router.delete("/users/:id/sessions", async (req, res, next) => {
     try {
+      founderAccount.assertFounderMutationAllowed(req.params.id,req.user.sub);
       const count = await repository.revokeUserSessions(req.params.id);
       audit.record("security.user_sessions_revoked", { actorUserId: req.user.sub, targetUserId: req.params.id, count, requestId: req.requestId, ip: req.ip || null, userAgent: req.headers["user-agent"] || null });
       res.json({ ok: true, revoked: count });
-    } catch (error) { next(error); }
+    } catch (error) { if(error.message==="founder_account_protected")return res.status(403).json({ok:false,error:error.message});next(error); }
   });
 
   return router;

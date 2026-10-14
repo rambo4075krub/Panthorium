@@ -53,8 +53,13 @@
     if (!root.hasAttribute('tabindex')) root.tabIndex = -1;
     root.focus({ preventScroll: true });
   }
+  function rootFor(app) {
+    return app.id === 'voice-identity'
+      ? document.getElementById('panthorium-account-register') || document.querySelector(app.selector)
+      : document.querySelector(app.selector);
+  }
   function dismiss(app) {
-    const root = document.querySelector(app.selector);
+    const root = rootFor(app);
     if (app.external && typeof window.PanthoriumExternalApps?.close === 'function') window.PanthoriumExternalApps.close(app.id);
     if (!root) return;
     if (app.windowId && typeof closeWindow === 'function') closeWindow(app.windowId);
@@ -65,13 +70,13 @@
     if (!target) return failure('unknown_ui_action');
     const { app, operation } = target;
     if (!catalog.allowed(app, system()?.state?.user)) return failure('voice_action_permission_denied');
-    let root = document.querySelector(app.selector);
+    let root = rootFor(app);
     try {
       if (operation === 'close') {
         if (app.external && typeof window.PanthoriumExternalApps?.close === 'function') window.PanthoriumExternalApps.close(app.id);
         if (!visible(root)) return { ok: true, action, text: `ปิด ${app.label}`, alreadyClosed: true };
         dismiss(app);
-        if (visible(document.querySelector(app.selector))) return failure('window_not_closed');
+        if (visible(rootFor(app))) return failure('window_not_closed');
         return { ok: true, action, text: `ปิด ${app.label}` };
       }
       if (!visible(root) || app.external) {
@@ -84,10 +89,10 @@
           if (!catalog.allowed(app, system()?.state?.user)) return failure('voice_action_permission_denied');
           const opened = await opener();
           if (opened === false) throw new Error('external_popup_blocked');
-          for (let attempt = 0; !visible(document.querySelector(app.selector)) && attempt < 40; attempt++) await wait(50);
+          for (let attempt = 0; !visible(rootFor(app)) && attempt < 40; attempt++) await wait(50);
         }
       }
-      root = document.querySelector(app.selector);
+      root = rootFor(app);
       if (!visible(root)) return failure('window_not_created');
       if (!catalog.allowed(app, system()?.state?.user)) return failure('voice_action_permission_denied');
       focus(app, root);
@@ -112,10 +117,10 @@
     if (!catalog.allowed(app, system()?.state?.user)) return failure('voice_action_permission_denied');
     const opened = await windowAction(`open_${app.key}`);
     if (!opened.ok) return opened;
-    let button = document.querySelector(app.selector)?.querySelector(command.button);
+    let button = rootFor(app)?.querySelector(command.button);
     for (let attempt = 0; !button && attempt < 40; attempt++) {
       await wait(50);
-      button = document.querySelector(app.selector)?.querySelector(command.button);
+      button = rootFor(app)?.querySelector(command.button);
     }
     if (!button) return failure('function_not_available');
     button.click();
@@ -147,7 +152,11 @@
       const action = result.output?.uiAction;
       const outcome = action?.startsWith('function_') ? await functionAction(action) : await windowAction(action);
       outcomes.push(outcome);
-      if (outcome.ok && action === 'open_voice_identity' && /เข้าสู่ระบบ|login/i.test(catalog.normalize(command || '')) && window.PanthoriumAuth?.isGuest?.()) await window.PanthoriumVoiceIdentity?.openLogin?.();
+      if (outcome.ok && action === 'open_voice_identity' && window.PanthoriumAuth?.isGuest?.()) {
+        const phrase = catalog.normalize(command || '');
+        if (/เข้าสู่ระบบ|login/i.test(phrase)) await window.PanthoriumAccounts?.openLogin?.();
+        else if (/ลงทะเบียน|register/i.test(phrase)) await window.PanthoriumAccounts?.openRegistration?.();
+      }
       if (outcome.ok) seen.add(index);
       else break;
     }
@@ -189,7 +198,7 @@
       const userId = system()?.state?.user?.id;
       if (!userId) return failure('authentication_required');
       if (/^(ปิด|ปิดหน้าต่าง|ปิดหน้าต่างนี้|ปิดอันนี้|closethiswindow)$/.test(normalized)) {
-        const active = catalog.apps.filter(app => visible(document.querySelector(app.selector)) && catalog.allowed(app, system()?.state?.user))
+        const active = catalog.apps.filter(app => visible(rootFor(app)) && catalog.allowed(app, system()?.state?.user))
           .sort((a, b) => (Number.parseInt(getComputedStyle(document.querySelector(b.selector)).zIndex, 10) || 0) - (Number.parseInt(getComputedStyle(document.querySelector(a.selector)).zIndex, 10) || 0))[0];
         if (!active) return { ok: true, text: 'ไม่มีหน้าต่างที่เปิดอยู่' };
         command = `ปิด ${active.aliases[0]}`;

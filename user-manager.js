@@ -1,141 +1,27 @@
-(() => {
-  const allowedRoles = ['administrator', 'operator', 'guest'];
-  const allowedPermissions = ['chat', 'sentinel:command', 'settings', 'system:read'];
-
-  function isAdmin() {
-    return !!OS?.state?.user?.roles?.includes('administrator');
-  }
-
-  async function api(path, options = {}) {
-    const token = OS?.config?.accessToken;
-    const headers = { ...(options.headers || {}) };
-    if (token) headers.Authorization = `Bearer ${token}`;
-    if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-    const response = await fetch(path, { ...options, headers, credentials: 'include' });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `HTTP_${response.status}`);
-    return data;
-  }
-
-  function esc(value) {
-    return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
-  }
-
-  function parseList(raw, allowed) {
-    return [...new Set(String(raw || '').split(',').map((v) => v.trim()).filter((v) => allowed.includes(v)))];
-  }
-
-  async function renderUsers(container) {
-    container.innerHTML = '<div style="color:var(--text-dim);font-size:12px;">กำลังโหลดบัญชี...</div>';
-    try {
-      const data = await api('/api/auth/users');
-      if (!data.users?.length) {
-        container.innerHTML = '<div style="color:var(--text-dim);font-size:12px;">ยังไม่มีบัญชี</div>';
-        return;
-      }
-      container.innerHTML = data.users.map((user) => `
-        <div data-user-id="${esc(user.id)}" style="padding:10px;border:1px solid rgba(255,255,255,.08);border-radius:10px;margin-top:8px;background:rgba(0,0,0,.12);">
-          <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
-            <div><strong>${esc(user.username)}</strong><div style="font-size:11px;color:var(--text-dim);">${esc((user.roles || []).join(', ') || 'no role')}</div></div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
-              <button class="um-access" style="padding:6px 9px;border:0;border-radius:7px;cursor:pointer;">สิทธิ์</button>
-              <button class="um-password" style="padding:6px 9px;border:0;border-radius:7px;cursor:pointer;">รหัสผ่าน</button>
-              <button class="um-delete" style="padding:6px 9px;border:0;border-radius:7px;cursor:pointer;">ลบ</button>
-            </div>
-          </div>
-          <div style="font-size:11px;color:var(--text-dim);margin-top:6px;">permissions: ${esc((user.permissions || []).join(', ') || '-')}</div>
-        </div>`).join('');
-
-      container.querySelectorAll('[data-user-id]').forEach((row) => {
-        const id = row.dataset.userId;
-        const user = data.users.find((item) => item.id === id);
-        row.querySelector('.um-access').onclick = async () => {
-          const rolesRaw = prompt(`Roles ที่อนุญาต: ${allowedRoles.join(', ')}`, (user.roles || []).join(','));
-          if (rolesRaw === null) return;
-          const permsRaw = prompt(`Permissions ที่อนุญาต: ${allowedPermissions.join(', ')}`, (user.permissions || []).join(','));
-          if (permsRaw === null) return;
-          try {
-            await api(`/api/auth/users/${encodeURIComponent(id)}/access`, {
-              method: 'PATCH',
-              body: JSON.stringify({ roles: parseList(rolesRaw, allowedRoles), permissions: parseList(permsRaw, allowedPermissions) })
-            });
-            toast('อัปเดตสิทธิ์แล้ว');
-            await renderUsers(container);
-          } catch (error) { toast(`อัปเดตไม่สำเร็จ: ${error.message}`); }
-        };
-
-        row.querySelector('.um-password').onclick = async () => {
-          const password = prompt(`ตั้งรหัสผ่านใหม่สำหรับ ${user.username} (อย่างน้อย 10 ตัวอักษร)`);
-          if (!password) return;
-          try {
-            await api(`/api/auth/users/${encodeURIComponent(id)}/password`, { method: 'PATCH', body: JSON.stringify({ password }) });
-            toast('เปลี่ยนรหัสผ่านแล้ว');
-          } catch (error) { toast(`เปลี่ยนรหัสผ่านไม่สำเร็จ: ${error.message}`); }
-        };
-
-        row.querySelector('.um-delete').onclick = async () => {
-          if (!confirm(`ลบบัญชี ${user.username} หรือไม่?`)) return;
-          try {
-            await api(`/api/auth/users/${encodeURIComponent(id)}`, { method: 'DELETE' });
-            toast('ลบบัญชีแล้ว');
-            await renderUsers(container);
-          } catch (error) { toast(`ลบไม่สำเร็จ: ${error.message}`); }
-        };
-      });
-    } catch (error) {
-      container.innerHTML = `<div style="color:#ff8c8c;font-size:12px;">โหลดบัญชีไม่สำเร็จ: ${esc(error.message)}</div>`;
-    }
-  }
-
-  function injectManager(settingsWindow) {
-    if (!isAdmin() || settingsWindow.querySelector('[data-phase2-user-manager]')) return;
-    const host = settingsWindow.querySelector('.window-body .app-content') || settingsWindow.querySelector('.window-body');
-    if (!host) return;
-
-    const section = document.createElement('div');
-    section.dataset.phase2UserManager = '1';
-    section.className = 'settings-section';
-    section.style.marginTop = '18px';
-    section.innerHTML = `
-      <h3>👥 User & Permission Manager</h3>
-      <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">จัดการบัญชี Roles และ Permissions จาก PostgreSQL</p>
-      <div style="display:flex;gap:8px;margin-bottom:10px;">
-        <button id="um-create" style="padding:8px 12px;border:0;border-radius:8px;cursor:pointer;">+ สร้างผู้ใช้</button>
-        <button id="um-refresh" style="padding:8px 12px;border:0;border-radius:8px;cursor:pointer;">รีเฟรช</button>
-      </div>
-      <div id="um-users"></div>`;
-    host.appendChild(section);
-
-    const usersEl = section.querySelector('#um-users');
-    section.querySelector('#um-refresh').onclick = () => renderUsers(usersEl);
-    section.querySelector('#um-create').onclick = async () => {
-      const username = prompt('ชื่อผู้ใช้ใหม่ (3-40 ตัว: a-z, 0-9, . _ -)');
-      if (!username) return;
-      const password = prompt('รหัสผ่าน (อย่างน้อย 10 ตัวอักษร)');
-      if (!password) return;
-      const rolesRaw = prompt(`Roles: ${allowedRoles.join(', ')}`, 'operator');
-      if (rolesRaw === null) return;
-      const permsRaw = prompt(`Permissions: ${allowedPermissions.join(', ')}`, 'chat,system:read');
-      if (permsRaw === null) return;
-      try {
-        await api('/api/auth/users', {
-          method: 'POST',
-          body: JSON.stringify({ username, password, roles: parseList(rolesRaw, allowedRoles), permissions: parseList(permsRaw, allowedPermissions) })
-        });
-        toast('สร้างบัญชีแล้ว');
-        await renderUsers(usersEl);
-      } catch (error) { toast(`สร้างบัญชีไม่สำเร็จ: ${error.message}`); }
-    };
-
-    renderUsers(usersEl);
-  }
-
-  const observer = new MutationObserver(() => {
-    document.querySelectorAll('.window[data-id="settings"]').forEach(injectManager);
-  });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-
-  window.PanthoriumUserManager = { refresh() {
-    document.querySelectorAll('.window[data-id="settings"]').forEach(injectManager);
-  }};
+(function(){
+'use strict';
+const ID='account-manager',os=()=>typeof OS==='undefined'?null:OS,admin=()=>window.PanthoriumAuth?.isAdministrator?.()===true;
+const n=(tag,text)=>{const e=document.createElement(tag);if(text!=null)e.textContent=text;return e;};
+const roles=[['administrator','ผู้ดูแลระบบ'],['operator','เจ้าหน้าที่']],perms=[['chat','ใช้งาน AI และเครื่องมือ'],['sentinel:command','สั่งงาน Sentinel'],['settings','ตั้งค่าระบบ'],['system:read','อ่านสถานะระบบ']];
+const messages={founder_account_protected:'บัญชีผู้สร้างได้รับการป้องกัน บัญชีอื่นเปลี่ยนข้อมูลความปลอดภัยไม่ได้',founder_access_required:'บัญชีเจ้าของระบบต้องมีสิทธิ์ครบทุกฟังก์ชัน',invalid_username:'ชื่อเข้าสู่ระบบใช้ตัวอักษรอังกฤษ ตัวเลข . _ - จำนวน 3–40 ตัวอักษร',cannot_demote_self:'ไม่สามารถลดบทบาทแอดมินของตนเอง',cannot_remove_own_settings:'ไม่สามารถถอดสิทธิ์ตั้งค่าของตนเอง',last_administrator_required:'ต้องเหลือผู้ดูแลระบบอย่างน้อยหนึ่งบัญชี',administrator_restriction_forbidden:'ต้องถอดบทบาทแอดมินก่อนตั้งเงื่อนไขจำกัดบัญชี',account_policy_conflict:'ข้อมูลถูกแก้ไขโดยผู้อื่นแล้ว กรุณาโหลดข้อมูลล่าสุด',invalid_account_policy:'โปรดตรวจเงื่อนไขและเลือกวันใช้งานอย่างน้อยหนึ่งวัน',account_management_unavailable:'ยังโหลดศูนย์บัญชีไม่ได้ กรุณาลองใหม่',session_expired:'เซสชันหมดอายุ กรุณาเข้าสู่ระบบแอดมินใหม่',account_changed:'บัญชีเข้าสู่ระบบเปลี่ยนแล้ว',invalid_password:'รหัสผ่านต้องมี 10–256 ตัวอักษร',username_exists:'ชื่อบัญชีนี้มีอยู่แล้ว'};
+async function api(path,method='GET',body){const owner=os()?.state?.user?.id||os()?.state?.user?.sub;const base=(os()?.config?.backendUrl||'').replace(/\/$/,'');const send=()=>fetch(base+path,{method,credentials:'include',headers:{Authorization:'Bearer '+os().config.accessToken,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});let r=await send();if(r.status===401&&window.PanthoriumAuth?.refreshSession){if(!await window.PanthoriumAuth.refreshSession())throw new Error('session_expired');if(!admin()||owner!==(os()?.state?.user?.id||os()?.state?.user?.sub))throw new Error('account_changed');r=await send();}if(!admin()||owner!==(os()?.state?.user?.id||os()?.state?.user?.sub))throw new Error('account_changed');const d=await r.json();if(!r.ok)throw new Error(r.status===401?'session_expired':d.error||'account_management_unavailable');return d;}
+function open(section='users'){if(!admin())return false;if(os().windows.has(ID)){window.PanthoriumWindowManager?.restore?.(ID);document.querySelector(`.window[data-id="${ID}"] [data-section="${section}"]`)?.click();return true;}createWindow(ID,'👥 ศูนย์บัญชีและสิทธิ์',`<div data-account-center><style>[data-account-center]{height:100%;overflow:auto;background:#0c1423;color:#e3ecfb;padding:24px;font:14px system-ui}[data-account-center] h1{font-size:28px;margin:6px 0}[data-account-center] small{color:#9db0cf}[data-account-center] nav,[data-account-center] .toolbar{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0}[data-account-center] input,[data-account-center] button,[data-account-center] select,[data-account-center] textarea{font:inherit;color:inherit;background:#18273d;border:1px solid #344965;border-radius:10px;padding:10px}[data-account-center] button{cursor:pointer}[data-account-center] button[aria-pressed=true]{border-color:#73e5cf;color:#9affdf}[data-account-center] button:disabled{opacity:.5}[data-account-center] .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}[data-account-center] article{background:#17243a;border:1px solid #2b405e;padding:18px;border-radius:16px}[data-account-center] article strong{display:block;font-size:25px;color:#8cebd4}[data-account-center] .workspace{display:grid;grid-template-columns:minmax(250px,1fr) minmax(320px,1.6fr);gap:16px}[data-account-center] .directory{display:grid;align-content:start;gap:8px;max-height:65vh;overflow:auto}[data-account-center] .directory button{text-align:left;padding:16px}[data-account-center] .directory small{display:block;overflow-wrap:anywhere}[data-account-center] .detail{border:1px solid #2b405e;border-radius:16px;padding:20px;min-width:0}[data-account-center] form{display:grid;gap:13px}[data-account-center] label{display:grid;gap:6px}[data-account-center] .checks{display:flex;flex-wrap:wrap;gap:12px}[data-account-center] .checks label{display:flex;align-items:center}[data-account-center] [role=status]{color:#ffe1a0;white-space:pre-wrap}[data-account-center] pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px system-ui}[data-account-center] textarea{min-height:90px}[data-account-center] .meta{overflow-wrap:anywhere;color:#afc0d9;line-height:1.8}@media(max-width:760px){[data-account-center]{padding:14px}[data-account-center] .workspace{grid-template-columns:1fr}[data-account-center] .directory{max-height:30vh}}</style><small>PANTHORIUM / IDENTITY & ACCESS</small><h1>ศูนย์บัญชี</h1><p>จัดการผู้ใช้ ผู้ดูแล และเงื่อนไขการเข้าถึงในที่เดียว</p><div class="cards" data-cards></div><nav data-nav></nav><div class="toolbar"><input data-search type="search" placeholder="ค้นหาชื่อ อีเมล แท็ก หรือเลขบัญชี" aria-label="ค้นหาบัญชี"><select data-filter aria-label="กรองสถานะ"><option value="all">ทุกสถานะ</option><option value="active">บัญชีเปิดอยู่</option><option value="suspended">ระงับ</option><option value="expired">หมดอายุ</option></select><button data-refresh>โหลดข้อมูลล่าสุด</button></div><p role="status" data-status></p><div class="workspace"><div class="directory" data-list></div><div class="detail" data-detail></div></div></div>`,{width:1180,height:800});const root=document.querySelector('.window[data-id="account-manager"] [data-account-center]');let users=[],selected=null,tab=section,busy=false;const status=root.querySelector('[data-status]'),detail=root.querySelector('[data-detail]');const state=u=>u.policy.suspended?'suspended':u.policy.expiresAt&&new Date(u.policy.expiresAt)<=new Date()?'expired':'active';
+async function run(fn){if(busy)return;busy=true;root.querySelectorAll('button').forEach(e=>e.disabled=true);try{await fn();}catch(e){status.textContent=messages[e.message]||'ดำเนินการไม่สำเร็จ: '+e.message;}finally{busy=false;root.querySelectorAll('button').forEach(e=>e.disabled=e.dataset.ownerLocked==='1');}}
+function input(form,key,title,value,type='text'){const l=n('label',title),i=n('input');i.name=key;i.type=type;i.value=value||'';l.append(i);form.append(l);return i;}
+function checks(form,key,title,values,active){const group=n('fieldset'),legend=n('legend',title),wrap=n('div');wrap.className='checks';group.append(legend);values.forEach(([v,t])=>{const l=n('label'),i=n('input');i.type='checkbox';i.name=key;i.value=v;i.checked=active.includes(v);l.append(i,n('span',t));wrap.append(l);});group.append(wrap);form.append(group);}
+const values=(form,key)=>[...form.querySelectorAll(`input[name="${key}"]:checked`)].map(i=>i.value);
+function drawList(){const q=root.querySelector('[data-search]').value.toLowerCase(),filter=root.querySelector('[data-filter]').value,list=root.querySelector('[data-list]');list.replaceChildren();const filtered=users.filter(u=>{const staff=(u.roles||[]).some(r=>['administrator','operator'].includes(r));return (tab==='staff'?staff:tab==='users'?!staff:tab!=='create')&&(filter==='all'||state(u)===filter)&&[u.username,u.email,u.id,u.policy.displayName,...u.policy.tags].join(' ').toLowerCase().includes(q);});filtered.forEach(u=>{const b=n('button',u.policy.displayName||u.username);b.setAttribute('aria-pressed',String(selected===u.id));if(u.founderProtected)b.append(n('small','👑 เจ้าของระบบ · สิทธิ์ครบทุกฟังก์ชัน'));b.append(n('small',(u.email||u.username)+' · '+({active:'เปิดอยู่',suspended:'ระงับ',expired:'หมดอายุ'})[state(u)]));b.onclick=()=>{selected=u.id;drawList();drawDetail();};list.append(b);});if(!filtered.length)list.append(n('p',tab==='create'?'สร้างบัญชีเจ้าหน้าที่ในฟอร์มด้านขวา':'ไม่พบบัญชีตามเงื่อนไขค้นหา'));}
+function drawDetail(){detail.replaceChildren();if(tab==='create'){createForm();return;}const u=users.find(u=>u.id===selected);if(!u){detail.append(n('h2','เลือกบัญชีเพื่อจัดการ'),n('p','บัญชีผู้ใช้ทั่วไปสมัครผ่านหน้าลงทะเบียนพร้อมยืนยันอีเมลและ Voice Identity; บัญชีเจ้าหน้าที่สร้างผ่านศูนย์บัญชีได้'));return;}detail.append(n('h2',u.policy.displayName||u.username));if(u.founderProtected){const badge=n('p','👑 ผู้สร้างระบบ Panthorium · เจ้าของระบบ · สิทธิ์ครบทุกฟังก์ชัน · ป้องกันการลบ');badge.style.color='#a0f0d3';detail.append(badge);}if(u.systemOwner&&u.id===(os()?.state?.user?.id||os()?.state?.user?.sub)){const studio=n('button','🛠️ เปิด Developer Studio');studio.type='button';studio.dataset.openDeveloperStudio='1';studio.onclick=()=>run(async()=>{if(!window.PanthoriumDeveloperStudio?.openVerified){status.textContent='หน้านี้ยังไม่ได้โหลด Developer Studio กรุณาเปิดหน้าแอดมิน staging ล่าสุด';return;}try{await window.PanthoriumDeveloperStudio.openVerified();}catch(e){status.textContent=e.message==='studio_not_installed_on_backend'?'backend ที่หน้านี้เชื่อมอยู่ยังไม่มี Developer Studio กรุณาเปิดหน้าแอดมิน staging':e.message==='system_owner_required'?'เซสชันนี้ยังไม่ได้รับสิทธิ์เจ้าของจากเซิร์ฟเวอร์ กรุณาเข้าสู่บัญชีเจ้าของ':'ยังตรวจสิทธิ์ Studio ไม่สำเร็จ กรุณาลองใหม่';}});detail.append(studio);}const meta=n('p',`บัญชี: ${u.id}\nชื่อเข้าสู่ระบบ: ${u.username}\nอีเมล: ${u.email||'ไม่มี'}\nยืนยันอีเมล: ${u.emailVerifiedAt?'แล้ว':'ยังไม่มีหลักฐาน'}\nสร้าง: ${u.createdAt?new Date(u.createdAt).toLocaleString('th-TH'):'—'}`);meta.className='meta';meta.style.whiteSpace='pre-wrap';detail.append(meta);
+const form=n('form');input(form,'displayName','ชื่อที่แสดงในหน้าจัดการ',u.policy.displayName);input(form,'tags','แท็ก (คั่นด้วยจุลภาค)',u.policy.tags.join(', '));const l=n('label','บันทึกภายในสำหรับแอดมิน'),notes=n('textarea');notes.name='notes';notes.value=u.policy.notes;l.append(notes);form.append(l);checks(form,'suspended','สถานะบัญชี',[['yes','ระงับบัญชี']],u.policy.suspended?['yes']:[]);const expiry=input(form,'expiresAt','วันและเวลาหมดสิทธิ์ (เวลาไทย)',u.policy.expiresAt?new Date(new Date(u.policy.expiresAt).getTime()+7*3600000).toISOString().slice(0,16):'','datetime-local');checks(form,'weekdays','วันที่อนุญาตใช้งาน (เวลาไทย)',['อา','จ','อ','พ','พฤ','ศ','ส'].map((t,i)=>[String(i),t]),u.policy.weekdays.map(String));if(u.roles.includes('administrator')){form.querySelectorAll('[name=suspended],[name=expiresAt],[name=weekdays]').forEach(e=>e.disabled=true);form.append(n('small','บัญชีแอดมินไม่รับเงื่อนไขระงับ/หมดอายุ/วันใช้งาน เพื่อป้องกันการปิดกั้นผู้ดูแลระบบ'))}
+const save=n('button','บันทึกข้อมูลและเงื่อนไข');save.type='submit';form.append(save);form.onsubmit=e=>{e.preventDefault();run(async()=>{const p={displayName:form.elements.displayName.value,notes:notes.value,tags:form.elements.tags.value.split(',').map(s=>s.trim()).filter(Boolean),suspended:values(form,'suspended').includes('yes'),expiresAt:expiry.value?new Date(expiry.value+':00+07:00').toISOString():null,weekdays:values(form,'weekdays').map(Number),revision:u.policy.revision};await api('/api/admin/accounts/'+u.id+'/policy','PUT',p);await load();status.textContent='บันทึกข้อมูลและเงื่อนไขแล้ว';});};detail.append(form);
+const access=n('form');access.append(n('h3','บทบาทและสิทธิ์'));checks(access,'roles','บทบาท',roles,u.roles);checks(access,'permissions','สิทธิ์',perms,u.permissions);if(u.systemOwner){access.querySelectorAll('input[type=checkbox]').forEach(e=>e.disabled=true);access.append(n('small','สิทธิ์เจ้าของระบบถูกกำหนดให้ครบทุกฟังก์ชัน และไม่สามารถลดสิทธิ์ได้'));}
+const confirmName=input(access,'confirmName','ยืนยันชื่อเข้าสู่ระบบก่อนเปลี่ยนสิทธิ์','');const b=n('button','บันทึกบทบาทและสิทธิ์');b.type='submit';if(u.systemOwner){b.dataset.ownerLocked='1';b.disabled=true;}access.append(b);access.onsubmit=e=>{e.preventDefault();if(confirmName.value!==u.username){status.textContent='กรอกชื่อเข้าสู่ระบบให้ตรงก่อนเปลี่ยนสิทธิ์';return;}run(async()=>{await api('/api/admin/accounts/'+u.id+'/access','PATCH',{roles:values(access,'roles'),permissions:values(access,'permissions')});await load();status.textContent='อัปเดตสิทธิ์แล้ว เซสชันต่ออายุเดิมถูกเพิกถอน';});};detail.append(access,n('p','สิทธิ์แพ็กเกจและโควตาจัดการในศูนย์การเงิน การแก้เงื่อนไขนี้ไม่เปิดแพ็กเกจโดยไม่มีการชำระ'));
+const credentials=n('form');credentials.append(n('h3','ความปลอดภัยบัญชี'));const password=input(credentials,'newPassword','รหัสผ่านใหม่ (10–256 ตัวอักษร)','','password');password.minLength=10;password.maxLength=256;password.required=true;const confirmPassword=input(credentials,'confirmPassword','ยืนยันรหัสผ่านใหม่','','password');confirmPassword.required=true;const confirmUser=input(credentials,'confirmUser','ยืนยันชื่อเข้าสู่ระบบก่อนเปลี่ยนรหัสผ่าน','');const reset=n('button','เปลี่ยนรหัสผ่านและเพิกถอนเซสชันเดิม');reset.type='submit';if(u.systemOwner&&u.id!==(os()?.state?.user?.id||os()?.state?.user?.sub)){reset.dataset.ownerLocked='1';reset.disabled=true;credentials.querySelectorAll('input').forEach(e=>e.disabled=true);credentials.append(n('small','ข้อมูลความปลอดภัยของเจ้าของระบบแก้ไขได้เฉพาะเจ้าของบัญชี'));}credentials.append(reset);credentials.onsubmit=e=>{e.preventDefault();if(confirmUser.value!==u.username||password.value!==confirmPassword.value){status.textContent='ตรวจชื่อบัญชีและรหัสผ่านยืนยันให้ตรงกัน';return;}run(async()=>{try{await api('/api/admin/accounts/'+u.id+'/password','PATCH',{password:password.value});status.textContent='เปลี่ยนรหัสผ่านแล้ว เซสชันเดิมถูกเพิกถอน';}finally{password.value='';confirmPassword.value='';}});};detail.append(credentials);const revoke=n('button','เพิกถอนเซสชันทุกอุปกรณ์');revoke.type='button';revoke.onclick=()=>{if(confirmUser.value!==u.username){status.textContent='ยืนยันชื่อบัญชีในช่องความปลอดภัยก่อนเพิกถอนเซสชัน';return;}run(async()=>{await api('/api/admin/accounts/'+u.id+'/revoke-sessions','POST',{});status.textContent='เพิกถอนเซสชันเดิมแล้ว ต้องเข้าสู่ระบบใหม่';});};if(u.systemOwner&&u.id!==(os()?.state?.user?.id||os()?.state?.user?.sub)){revoke.dataset.ownerLocked='1';revoke.disabled=true;}detail.append(revoke);
+const security=n('button','เปิดศูนย์ความปลอดภัยและเซสชัน');security.onclick=()=>window.PanthoriumSecurityDashboard?.open?.();detail.append(security);
+const history=n('button','ดูประวัติการแก้ไข');history.onclick=()=>run(async()=>{const d=await api('/api/admin/accounts/'+u.id+'/history');const section=n('section');section.append(n('h3','ประวัติ'));d.history.forEach(h=>{section.append(n('p',new Date(h.created_at).toLocaleString('th-TH')+' · '+h.actor),n('pre',JSON.stringify(h.data,null,2)));});if(!d.history.length)section.append(n('p','ยังไม่มีประวัติแก้ไขเงื่อนไข'));detail.append(section);});detail.append(history);}
+function createForm(){const form=n('form');form.append(n('h2','สร้างบัญชีเจ้าหน้าที่'));input(form,'username','ชื่อเข้าสู่ระบบ (3–40 ตัวอักษร: อังกฤษ ตัวเลข . _ -)');const pwd=input(form,'password','รหัสผ่านเริ่มต้น (อย่างน้อย 10 ตัวอักษร)','','password');pwd.minLength=10;pwd.required=true;const role=n('select');role.name='role';roles.forEach(([v,t])=>{const o=n('option',t);o.value=v;role.append(o);});role.value='operator';const l=n('label','บทบาท');l.append(role);form.append(l);const b=n('button','สร้างบัญชีเจ้าหน้าที่');form.append(b);form.onsubmit=e=>{e.preventDefault();run(async()=>{try{await api('/api/auth/users','POST',{username:form.elements.username.value,password:pwd.value,roles:[role.value],permissions:role.value==='administrator'?perms.map(x=>x[0]):['chat','system:read']});pwd.value='';tab='staff';await load();status.textContent='สร้างบัญชีเจ้าหน้าที่แล้ว';}finally{pwd.value='';}});};detail.append(form,n('p','ไม่มีการส่งรหัสผ่านทางอีเมลอัตโนมัติ ผู้ใช้ทั่วไปใช้หน้าลงทะเบียนและขั้นตอนยืนยันตัวตนตามปกติ'));}
+async function load(){const d=await api('/api/admin/accounts');users=d.users;const c=root.querySelector('[data-cards]');c.replaceChildren();[['บัญชีทั้งหมด',users.length],['ผู้ดูแลระบบ',users.filter(u=>u.roles.includes('administrator')).length],['ระงับบัญชี',users.filter(u=>state(u)==='suspended').length],['หมดอายุ',users.filter(u=>state(u)==='expired').length]].forEach(([t,v])=>{const a=n('article',t);a.append(n('strong',v));c.append(a);});drawList();drawDetail();status.textContent='เงื่อนไขมีผลกับคำขอใหม่ฝั่งเซิร์ฟเวอร์ • Gemini Live ตรวจซ้ำทุก 30 วินาที • ไม่แสดงรหัสผ่านหรือแม่แบบเสียง';}
+[['users','ผู้ใช้ทั่วไป'],['staff','แอดมินและเจ้าหน้าที่'],['all','ทุกบัญชี'],['create','เพิ่มเจ้าหน้าที่']].forEach(([k,t])=>{const b=n('button',t);b.dataset.section=k;b.onclick=()=>{tab=k;selected=null;drawList();drawDetail();};root.querySelector('nav').append(b);});root.querySelector('[data-search]').oninput=drawList;root.querySelector('[data-filter]').onchange=drawList;root.querySelector('[data-refresh]').onclick=()=>run(load);run(load);return true;}
+function sync(){const menu=document.getElementById('sm-apps');if(!admin()){menu?.querySelectorAll('[data-app-id="user-management"],[data-app-id="admin-management"]').forEach(e=>e.remove());document.querySelector('.window[data-id="account-manager"]')?.querySelectorAll('[type=password]').forEach(e=>e.value='');if(os()?.windows?.has(ID)&&typeof closeWindow==='function')closeWindow(ID);return;}if(menu)for(const [id,icon,label,section]of [['user-management','👥','ผู้ใช้และเงื่อนไข','users'],['admin-management','🛡️','ผู้ดูแลระบบ','staff']]){if(menu.querySelector(`[data-app-id="${id}"]`))continue;const b=n('button');b.className='sm-app';b.dataset.appId=id;const i=n('div',icon);i.className='ico';b.append(i,n('span',label));b.onclick=()=>open(section);menu.append(b);}}
+window.PanthoriumUserManager={open:()=>open('users'),openAdmins:()=>open('staff'),refresh:sync};window.addEventListener('panthorium:auth-changed',sync);window.addEventListener('panthorium:boot-complete',sync);if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',sync);else sync();
 })();

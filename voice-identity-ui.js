@@ -82,7 +82,7 @@
     return blobToDataUrl(new Blob(chunks, { type: recorder.mimeType || type || 'audio/webm' }));
   }
   function label(type) { return ({ user: 'ผู้ใช้', family: 'คนในครอบครัว', administrator: 'แอดมิน' })[type] || type; }
-  async function refresh(root = document.getElementById('panthorium-voice-identity')) {
+  async function refresh(root = document.getElementById('panthorium-account-register') || document.getElementById('panthorium-voice-identity')) {
     if (!root) return;
     const state = root.querySelector('[data-state]');
     try {
@@ -97,23 +97,35 @@
       root.querySelectorAll('[data-remove]').forEach(button => { button.onclick = async () => { if (!confirm('ลบเสียงที่ลงทะเบียนนี้?')) return; await api(`/api/biometrics/voice/profiles/${encodeURIComponent(button.dataset.remove)}`, { method: 'DELETE' }); profileCache = null; await refresh(root); }; });
     } catch (error) { state.textContent = `โหลดข้อมูลไม่สำเร็จ: ${error.message}`; state.style.color = '#fda4af'; }
   }
-  async function open() {
+  async function open(options = {}) {
     if (!canManageVoiceProfiles()) { notify('กรุณาเข้าสู่ระบบบัญชีที่มีสิทธิ์จัดการเสียงก่อน'); return false; }
-    if (document.getElementById('panthorium-voice-identity')) return;
+    const guest = window.PanthoriumAuth?.isGuest?.() === true;
+    const registration = options.registration === true || !window.PanthoriumAuth?.isAdminEntry?.();
+    const appId = registration ? 'account-register' : 'voice-identity';
+    const rootId = registration ? 'panthorium-account-register' : 'panthorium-voice-identity';
+    if (document.getElementById(rootId)) { window.PanthoriumWindowManager?.restore?.(appId); return true; }
     const root = document.createElement('div');
-    root.id = 'panthorium-voice-identity';
+    root.id = rootId;
     root.style.cssText = 'box-sizing:border-box;position:fixed;inset:0;max-width:100vw;max-height:100dvh;z-index:10050;background:rgba(7,15,26,.99);border:1px solid #2b5268;border-radius:16px;color:#e6f5ff;padding:16px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;box-shadow:0 24px 80px #000;font-family:system-ui';
     const adminOption = isAdminEnrollmentContext() ? '<option value="administrator">แอดมิน</option>' : '';
-    const guestRegistration = window.PanthoriumAuth?.isGuest?.() === true;
+    const guestRegistration = registration && guest;
     const emailField = guestRegistration ? '<label style="display:block;margin-top:10px;font-size:12px">อีเมลสำหรับบัญชีถาวร<input data-email type="email" autocomplete="email" required maxlength="254" placeholder="you@example.com" style="display:block;width:100%;box-sizing:border-box;padding:9px;margin-top:5px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"></label><button data-request-otp type="button" style="margin-top:8px">ส่งรหัสยืนยันอีเมล</button><input data-email-otp inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="รหัส OTP 6 หลัก" style="width:130px;padding:9px;margin:8px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><button data-verify-otp type="button">ยืนยันอีเมล</button><div data-email-otp-state style="font-size:12px"></div><label style="display:block;margin-top:8px;font-size:12px">ตั้งรหัสผ่าน (อย่างน้อย 10 ตัวอักษร)<input data-password type="password" autocomplete="new-password" required minlength="10" maxlength="256" style="display:block;width:100%;box-sizing:border-box;padding:9px;margin-top:5px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"></label><label style="display:block;margin-top:8px;font-size:12px">ยืนยันรหัสผ่าน<input data-password-confirm type="password" autocomplete="new-password" required minlength="10" maxlength="256" style="display:block;width:100%;box-sizing:border-box;padding:9px;margin-top:5px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"></label><div data-password-state style="font-size:12px"></div><label style="display:block;margin-top:8px;font-size:12px"><input data-remember type="checkbox"> ให้เบราว์เซอร์จดจำรหัสผ่านและการเข้าสู่ระบบบนอุปกรณ์นี้</label><p style="font-size:12px;color:#9fb4c7">ยืนยันอีเมลด้วยรหัส OTP ก่อนลงทะเบียนเสียง เมื่อสำเร็จระบบจะสร้างบัญชีถาวร ใช้เข้าสู่ระบบจากอุปกรณ์อื่นได้ หากไม่ลงทะเบียนเสียง guest จะหมดอายุภายใน 24 ชั่วโมง</p>' : '';
-    const loginPanel = guestRegistration ? '<div style="margin-top:22px;border-top:1px solid #294154;padding-top:14px"><h3>เข้าสู่บัญชีถาวร</h3><input data-login-email type="email" autocomplete="username" placeholder="อีเมล" style="width:100%;box-sizing:border-box;padding:9px;margin-bottom:8px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><input data-login-password type="password" autocomplete="current-password" placeholder="รหัสผ่าน" style="width:100%;box-sizing:border-box;padding:9px;margin-bottom:8px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><label style="display:block;font-size:12px"><input data-login-remember type="checkbox"> จดจำรหัสผ่านและการเข้าสู่ระบบบนอุปกรณ์นี้</label><button data-login style="margin-top:8px">เข้าสู่ระบบ</button> <button data-forgot type="button">ลืมรหัสผ่าน</button><div data-reset style="display:none;margin-top:12px"><label style="display:block;font-size:12px">อีเมลสำหรับรีเซ็ตรหัสผ่าน<input data-reset-email type="email" autocomplete="email" placeholder="you@example.com" style="display:block;width:100%;box-sizing:border-box;padding:9px;margin-top:5px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"></label><button data-reset-request type="button">ส่ง OTP ไปยังอีเมลนี้</button><input data-reset-code inputmode="numeric" maxlength="6" placeholder="OTP 6 หลัก" style="width:100%;box-sizing:border-box;padding:9px;margin-top:8px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><input data-reset-password type="password" autocomplete="new-password" minlength="10" placeholder="รหัสผ่านใหม่อย่างน้อย 10 ตัวอักษร" style="width:100%;box-sizing:border-box;padding:9px;margin-top:8px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><input data-reset-password-confirm type="password" autocomplete="new-password" minlength="10" placeholder="ยืนยันรหัสผ่านใหม่" style="width:100%;box-sizing:border-box;padding:9px;margin-top:8px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><button data-reset-confirm type="button" style="margin-top:8px">ตั้งรหัสผ่านใหม่</button><div data-reset-state style="font-size:12px;margin-top:6px"></div></div><div data-login-state style="font-size:12px;margin-top:6px"></div></div>' : '';
-    const securityPanel = guestRegistration ? '' : `<div data-account-security style="margin-top:22px;border-top:1px solid #294154;padding-top:14px"><h3>บัญชีและความปลอดภัย</h3><p style="font-size:12px;color:#9fb4c7">ยืนยันอีเมลด้วย OTP ก่อนเปลี่ยนรหัสผ่าน</p><label style="display:block;font-size:12px">อีเมลรับ OTP<input data-security-email type="email" autocomplete="email" maxlength="254" required value="${esc(getOS()?.state?.user?.email || '')}" placeholder="you@example.com" style="display:block;width:100%;box-sizing:border-box;padding:9px;margin-top:5px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"></label><button data-security-request-otp type="button" style="margin-top:8px">ส่ง OTP ยืนยันตัวตน</button><input data-security-otp inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="OTP 6 หลัก" style="width:100%;box-sizing:border-box;padding:9px;margin-top:8px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><input data-security-password type="password" autocomplete="new-password" minlength="10" maxlength="256" placeholder="รหัสผ่านใหม่อย่างน้อย 10 ตัวอักษร" style="width:100%;box-sizing:border-box;padding:9px;margin-top:8px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><input data-security-password-confirm type="password" autocomplete="new-password" minlength="10" maxlength="256" placeholder="ยืนยันรหัสผ่านใหม่" style="width:100%;box-sizing:border-box;padding:9px;margin-top:8px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><button data-security-password-submit type="button" style="margin-top:8px">เปลี่ยนรหัสผ่าน</button><div data-security-state style="font-size:12px;margin-top:6px" aria-live="polite"></div></div>`;
     const deviceKey = guestRegistration ? (window.PanthoriumAuth?.rememberedDeviceKey?.() || Array.from(window.crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, '0')).join('')) : null;
-    root.innerHTML = `<div style="display:flex;justify-content:space-between;gap:12px"><div><h2 style="margin:0">🎙️ Voice Identity</h2><div data-state style="font-size:12px;color:#8ea3b8">กำลังตรวจสอบ…</div></div><div><button data-refresh>รีเฟรช</button> <button data-close>✕</button></div></div><div class="voice-identity-grid" style="display:grid;grid-template-columns:minmax(280px,1fr) minmax(280px,1fr);gap:14px;margin-top:14px"><section style="border:1px solid #294154;border-radius:12px;padding:14px;background:#0a1725"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><h3 data-enroll-title style="margin-top:0">ลงทะเบียนเสียงที่อนุญาต</h3><button type="button" data-mode-cancel style="display:none">ยกเลิก</button></div><input data-name maxlength="80" placeholder="ชื่อบุคคล" style="width:100%;box-sizing:border-box;padding:9px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px">${emailField}<select data-type style="width:100%;margin-top:8px;padding:9px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><option value="user">ผู้ใช้</option><option value="family">คนในครอบครัว</option>${adminOption}</select><input data-relationship maxlength="80" placeholder="ความสัมพันธ์ (ถ้ามี)" style="width:100%;box-sizing:border-box;margin-top:8px;padding:9px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><p style="font-size:12px;color:#9fb4c7">อ่านข้อความที่แสดงแล้วบันทึก 3–5 ช่วง ช่วงละ 12 วินาที รวมประมาณ 36–60 วินาที พูดด้วยเสียงธรรมชาติ</p><div data-prompt style="margin:10px 0;padding:12px;border-radius:8px;background:#11263a;line-height:1.6" aria-live="polite"></div><button data-record>บันทึกตัวอย่างเสียง</button><div data-count style="margin:9px 0;color:#67e8f9">0 / 5 ช่วง</div><label style="font-size:12px"><input data-consent type="checkbox"> บุคคลนี้ยินยอมให้สร้างและเก็บแม่แบบเสียงแบบเข้ารหัส</label><br><button data-enroll disabled style="margin-top:12px">บันทึก Voice Identity</button><div data-form-state style="margin-top:8px;font-size:12px"></div></section><section style="border:1px solid #294154;border-radius:12px;padding:14px;background:#0a1725"><h3 style="margin-top:0">เสียงที่ระบบยอมรับ</h3><div data-list></div><div data-voice-test-panel style="display:none;margin-top:12px;padding:10px;border:1px solid #146e68;border-radius:10px;background:rgba(0,217,185,.06)"><button type="button" data-voice-test style="border:1px solid #16b8a6;background:#0b3334;color:#d9fffa;border-radius:8px;padding:9px 12px">ทดสอบเสียงบัญชีนี้</button><div data-voice-test-result role="status" aria-live="polite" style="margin-top:8px;font-size:12px;color:#a9c3d2"></div><div style="margin-top:6px;font-size:11px;color:#8ea3b8">บันทึกเสียง 12 วินาทีเพื่อเทียบกับโปรไฟล์ในบัญชีนี้เท่านั้น ส่งไปตรวจการจับคู่เสียง ไม่ถอดคำพูด ไม่บันทึกเสียง และไม่แก้โปรไฟล์</div></div><p style="font-size:11px;color:#8ea3b8">เมื่อมีอย่างน้อยหนึ่งรายการ ระบบจะตรวจลายนิ้วมือเสียงก่อนถอดคำพูด เสียงอื่นจะไม่ถูกส่งไป STT หรือ Sentinel</p${loginPanel}${securityPanel}</section></div>`;
+    root.innerHTML = `<div style="display:flex;justify-content:space-between;gap:12px"><div><h2 style="margin:0">${registration ? "📝 ลงทะเบียน / Voice Identity" : "🎙️ Voice Identity"}</h2><div data-state style="font-size:12px;color:#8ea3b8">กำลังตรวจสอบ…</div></div><div><button data-refresh>รีเฟรช</button> <button data-minimize aria-label="ย่อหน้าต่าง">─</button> <button data-close>✕</button></div></div><div class="voice-identity-grid" style="display:grid;grid-template-columns:minmax(280px,1fr) minmax(280px,1fr);gap:14px;margin-top:14px"><section data-voice-enrollment style="border:1px solid #294154;border-radius:12px;padding:14px;background:#0a1725"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><h3 data-enroll-title style="margin-top:0">ลงทะเบียนเสียงที่อนุญาต</h3><button type="button" data-mode-cancel style="display:none">ยกเลิก</button></div><input data-name maxlength="80" placeholder="ชื่อบุคคล" style="width:100%;box-sizing:border-box;padding:9px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px">${emailField}<select data-type style="width:100%;margin-top:8px;padding:9px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><option value="user">ผู้ใช้</option><option value="family">คนในครอบครัว</option>${adminOption}</select><input data-relationship maxlength="80" placeholder="ความสัมพันธ์ (ถ้ามี)" style="width:100%;box-sizing:border-box;margin-top:8px;padding:9px;background:#07111d;color:#fff;border:1px solid #36566c;border-radius:8px"><p style="font-size:12px;color:#9fb4c7">อ่านข้อความที่แสดงแล้วบันทึก 3–5 ช่วง ช่วงละ 12 วินาที รวมประมาณ 36–60 วินาที พูดด้วยเสียงธรรมชาติ</p><div data-prompt style="margin:10px 0;padding:12px;border-radius:8px;background:#11263a;line-height:1.6" aria-live="polite"></div><button data-record>บันทึกตัวอย่างเสียง</button><div data-count style="margin:9px 0;color:#67e8f9">0 / 5 ช่วง</div><label style="font-size:12px"><input data-consent type="checkbox"> บุคคลนี้ยินยอมให้สร้างและเก็บแม่แบบเสียงแบบเข้ารหัส</label><br><button data-enroll disabled style="margin-top:12px">บันทึก Voice Identity</button><div data-form-state style="margin-top:8px;font-size:12px"></div></section><section style="border:1px solid #294154;border-radius:12px;padding:14px;background:#0a1725"><h3 style="margin-top:0">เสียงที่ระบบยอมรับ</h3><div data-list></div><div data-voice-test-panel style="display:none;margin-top:12px;padding:10px;border:1px solid #146e68;border-radius:10px;background:rgba(0,217,185,.06)"><button type="button" data-voice-test style="border:1px solid #16b8a6;background:#0b3334;color:#d9fffa;border-radius:8px;padding:9px 12px">ทดสอบเสียงบัญชีนี้</button><div data-voice-test-result role="status" aria-live="polite" style="margin-top:8px;font-size:12px;color:#a9c3d2"></div><div style="margin-top:6px;font-size:11px;color:#8ea3b8">บันทึกเสียง 12 วินาทีเพื่อเทียบกับโปรไฟล์ในบัญชีนี้เท่านั้น ส่งไปตรวจการจับคู่เสียง ไม่ถอดคำพูด ไม่บันทึกเสียง และไม่แก้โปรไฟล์</div></div><p style="font-size:11px;color:#8ea3b8">เมื่อมีอย่างน้อยหนึ่งรายการ ระบบจะตรวจลายนิ้วมือเสียงก่อนถอดคำพูด เสียงอื่นจะไม่ถูกส่งไป STT หรือ Sentinel</p></section></div>`;
     const responsiveStyle = document.createElement('style');
     responsiveStyle.textContent = '#panthorium-voice-identity{box-sizing:border-box!important;max-width:100vw;max-height:100dvh;overflow-x:hidden!important;overflow-y:auto!important}#panthorium-voice-identity *{box-sizing:border-box;min-width:0}#panthorium-voice-identity input,#panthorium-voice-identity select,#panthorium-voice-identity textarea,#panthorium-voice-identity button{max-width:100%;min-width:0}#panthorium-voice-identity .voice-identity-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}#panthorium-voice-identity.panthorium-managed-window.panthorium-window-fullscreen{padding:calc(var(--panthorium-safe-area-top,0px) + clamp(10px,3vw,16px)) max(12px,env(safe-area-inset-right,0px)) calc(var(--panthorium-shell-dock-clearance,56px) + clamp(10px,3vw,16px)) max(12px,env(safe-area-inset-left,0px))!important;overflow-y:auto!important}@media(max-width:760px){#panthorium-voice-identity .voice-identity-grid{grid-template-columns:minmax(0,1fr)!important}}';
+    responsiveStyle.textContent = responsiveStyle.textContent.replaceAll('#panthorium-voice-identity', '#' + rootId);
     root.appendChild(responsiveStyle);
     document.body.appendChild(root);
+    window.PanthoriumWindowManager?.registerExternalWindow?.(appId, registration ? 'ลงทะเบียน / Voice Identity' : 'Voice Identity', root, { menuAppId: appId });
+    if (guest && !registration) {
+      root.querySelector('[data-voice-enrollment]').hidden = true;
+      root.querySelector('.voice-identity-grid').style.setProperty('grid-template-columns', 'minmax(0,1fr)', 'important');
+      const notice = document.createElement('div');
+      notice.style.cssText = 'padding:12px;color:#b9d9ec';
+      notice.textContent = 'สมัครบัญชีถาวรจากเมนู ลงทะเบียน เพื่อยืนยันอีเมลและบันทึกเสียง หรือเข้าสู่ระบบเพื่อจัดการเสียงในบัญชี';
+      root.querySelector('.voice-identity-grid').before(notice);
+    }
     const voiceTestButton = root.querySelector('[data-voice-test]');
     const voiceTestResult = root.querySelector('[data-voice-test-result]');
     voiceTestButton.onclick = async () => {
@@ -159,6 +171,7 @@
     const updateEnrollAvailability = () => { const password = guestRegistration && !selectedProfileId ? root.querySelector('[data-password]') : null; const confirm = guestRegistration && !selectedProfileId ? root.querySelector('[data-password-confirm]') : null; const needsAccountFields = guestRegistration && !selectedProfileId; const matches = !needsAccountFields || password.value === confirm.value; if (needsAccountFields) root.querySelector('[data-password-state]').textContent = confirm.value && !matches ? 'รหัสผ่านทั้งสองช่องไม่ตรงกัน' : ''; enroll.disabled = samples.length < 3 || samples.length > 5 || !root.querySelector('[data-consent]').checked || !nameField.value.trim() || (needsAccountFields && (!root.querySelector('[data-email]').checkValidity() || !password.checkValidity() || !confirm.checkValidity() || !matches || !registrationToken)); };
     const resetNewProfileMode = () => {
       selectedProfileId = null;
+      if (guest && !registration) root.querySelector('[data-voice-enrollment]').hidden = true;
       enrollTitle.textContent = 'ลงทะเบียนเสียงที่อนุญาต';
       modeCancel.style.display = 'none';
       [nameField, typeField, relationshipField].forEach(field => { field.disabled = false; });
@@ -171,6 +184,8 @@
       showPrompt(); updateEnrollAvailability();
     };
     const selectExistingProfile = profile => {
+      root.querySelector('[data-voice-enrollment]').hidden = false;
+      root.querySelector('.voice-identity-grid').style.removeProperty('grid-template-columns');
       selectedProfileId = profile.profileId;
       enrollTitle.textContent = `เพิ่มตัวอย่างให้โปรไฟล์เดิม: ${profile.displayName}`;
       modeCancel.style.display = '';
@@ -222,7 +237,7 @@
       window.PanthoriumAuth.acceptSession(result);
       await window.PanthoriumAuth.savePassword(email, password, rememberMe);
       root.querySelector('[data-password]').value = '';
-      root.remove(); notify('สร้างบัญชีถาวรสำเร็จ เข้าสู่ระบบจากอุปกรณ์อื่นด้วยอีเมลและรหัสผ่านนี้ได้');
+      if (!window.PanthoriumWindowManager?.close?.(appId)) root.remove(); notify('สร้างบัญชีถาวรสำเร็จ เข้าสู่ระบบจากอุปกรณ์อื่นด้วยอีเมลและรหัสผ่านนี้ได้');
     };
     enroll.onclick = async () => {
       enroll.disabled = true;
@@ -251,64 +266,19 @@
       updateEnrollAvailability();
     };
     if (guestRegistration) {
-      const login = root.querySelector('[data-login]');
-      login.onclick = async () => {
-        const state = root.querySelector('[data-login-state]'); login.disabled = true; state.textContent = 'กำลังเข้าสู่ระบบ…';
-        const email = root.querySelector('[data-login-email]').value.trim();
-        const password = root.querySelector('[data-login-password]').value;
-        const rememberMe = root.querySelector('[data-login-remember]').checked;
-        try { await window.PanthoriumAuth.login(email, password, rememberMe); await window.PanthoriumAuth.savePassword(email, password, rememberMe); root.querySelector('[data-login-password]').value = ''; root.remove(); notify('เข้าสู่บัญชีถาวรสำเร็จ'); }
-        catch (error) { state.textContent = `เข้าสู่ระบบไม่สำเร็จ: ${error.message}`; login.disabled = false; }
-      };
-      const resetPanel = root.querySelector('[data-reset]');
-      root.querySelector('[data-forgot]').onclick = () => { resetPanel.style.display = ''; root.querySelector('[data-reset-email]').value = root.querySelector('[data-login-email]').value.trim(); root.querySelector('[data-reset-state]').textContent = ''; };
-      root.querySelector('[data-reset-request]').onclick = async () => {
-        const state = root.querySelector('[data-reset-state]');
-        try { await api('/api/auth/password/forgot', { method: 'POST', body: JSON.stringify({ email: root.querySelector('[data-reset-email]').value.trim() }) }); state.textContent = 'หากอีเมลนี้มีบัญชี ระบบจะส่ง OTP ให้ (รหัสใช้ได้ 10 นาที)'; }
-        catch (error) { state.textContent = `ส่ง OTP ไม่สำเร็จ: ${error.message}`; }
-      };
-      root.querySelector('[data-reset-confirm]').onclick = async () => {
-        const state = root.querySelector('[data-reset-state]');
-        try { const password = root.querySelector('[data-reset-password]').value; const confirmPassword = root.querySelector('[data-reset-password-confirm]').value; if (password !== confirmPassword) throw new Error('password_mismatch'); await api('/api/auth/password/reset', { method: 'POST', body: JSON.stringify({ email: root.querySelector('[data-reset-email]').value.trim(), code: root.querySelector('[data-reset-code]').value.trim(), password, confirmPassword }) }); root.querySelector('[data-reset-code]').value = ''; root.querySelector('[data-reset-password]').value = ''; root.querySelector('[data-reset-password-confirm]').value = ''; resetPanel.style.display = 'none'; root.querySelector('[data-login-state]').textContent = 'ตั้งรหัสผ่านใหม่สำเร็จ กรุณาเข้าสู่ระบบ'; }
-        catch (error) { state.textContent = `เปลี่ยนรหัสผ่านไม่สำเร็จ: ${errorText(error)}`; }
-      };
       const upgrade = document.createElement('button'); upgrade.dataset.upgrade = '1'; upgrade.textContent = 'สร้างบัญชีถาวรจากเสียงที่ลงทะเบียนไว้'; upgrade.style.cssText = 'display:none;margin-top:8px'; enroll.after(upgrade);
       upgrade.onclick = async () => { upgrade.disabled = true; formState.textContent = 'กำลังสร้างบัญชีจากเสียงเดิม…'; try { const existing = (await profiles(true))[0]; if (!existing) throw new Error('voice_profile_not_found'); await register(existing.profileId); } catch (error) { formState.textContent = `สร้างบัญชีไม่สำเร็จ: ${error.message}`; upgrade.disabled = false; } };
     }
-    if (!guestRegistration) {
-      const email = root.querySelector('[data-security-email]');
-      const state = root.querySelector('[data-security-state]');
-      root.querySelector('[data-security-request-otp]').onclick = async () => {
-        if (!email.checkValidity()) { state.textContent = 'กรอกอีเมลให้ถูกต้องก่อนขอ OTP'; email.focus(); return; }
-        const button = root.querySelector('[data-security-request-otp]'); button.disabled = true; state.textContent = 'กำลังส่ง OTP…';
-        try { await api('/api/auth/password/forgot', { method: 'POST', body: JSON.stringify({ email: email.value.trim() }) }); state.textContent = 'หากอีเมลนี้เป็นบัญชีของคุณ ระบบส่ง OTP แล้ว (ใช้ได้ 10 นาที)'; }
-        catch (error) { state.textContent = `ส่ง OTP ไม่สำเร็จ: ${error.message}`; }
-        finally { button.disabled = false; }
-      };
-      root.querySelector('[data-security-password-submit]').onclick = async () => {
-        const code = root.querySelector('[data-security-otp]').value.trim();
-        const password = root.querySelector('[data-security-password]').value;
-        const confirmPassword = root.querySelector('[data-security-password-confirm]').value;
-        if (!email.checkValidity()) { state.textContent = 'กรอกอีเมลให้ถูกต้อง'; email.focus(); return; }
-        if (!/^[0-9]{6}$/.test(code)) { state.textContent = 'กรอกรหัส OTP 6 หลัก'; return; }
-        if (password.length < 10 || password.length > 256) { state.textContent = 'รหัสผ่านใหม่ต้องมี 10–256 ตัวอักษร'; return; }
-        if (password !== confirmPassword) { state.textContent = 'รหัสผ่านทั้งสองช่องไม่ตรงกัน'; return; }
-        const button = root.querySelector('[data-security-password-submit]'); button.disabled = true;
-        try { await api('/api/auth/password/reset', { method: 'POST', body: JSON.stringify({ email: email.value.trim(), code, password, confirmPassword }) }); root.querySelector('[data-security-otp]').value = ''; root.querySelector('[data-security-password]').value = ''; root.querySelector('[data-security-password-confirm]').value = ''; state.textContent = 'เปลี่ยนรหัสผ่านสำเร็จ'; }
-        catch (error) { state.textContent = `เปลี่ยนรหัสผ่านไม่สำเร็จ: ${errorText(error)}`; }
-        finally { button.disabled = false; }
-      };
-    }
-    root.querySelector('[data-close]').onclick = () => root.remove(); root.querySelector('[data-refresh]').onclick = () => refresh(root); refresh(root); return true;
+    root.querySelector('[data-minimize]').onclick = () => window.PanthoriumWindowManager?.minimize?.(appId); root.querySelector('[data-close]').onclick = () => { if (!window.PanthoriumWindowManager?.close?.(appId)) root.remove(); }; root.querySelector('[data-refresh]').onclick = () => refresh(root); refresh(root); return true;
   }
   function install() {
-    const menu = document.getElementById('sm-apps') || document.querySelector('.start-menu, #start-menu');
-    if (!canManageVoiceProfiles() || window.PanthoriumAuth?.isAdminEntry?.()) { document.getElementById('voice-identity-launcher')?.remove(); return !!menu; }
-    if (!menu || document.getElementById('voice-identity-launcher')) return !!menu;
-    const button = document.createElement('button'); button.id = 'voice-identity-launcher'; button.className = 'sm-app'; button.style.cssText = 'border:0;background:transparent;color:inherit;font:inherit'; button.innerHTML = '<div class="ico">🎙️</div><span>ลงทะเบียน/เข้าสู่ระบบ/Voice Identity</span>'; button.onclick = () => { open(); try { closeStartMenu(); } catch (_) {} }; menu.appendChild(button); window.dispatchEvent(new CustomEvent('panthorium:apps-changed',{detail:{app:'voice-identity'}})); return true;
+    // Voice Identity is part of registration, never a separate menu launcher.
+    document.getElementById('voice-identity-launcher')?.remove();
+    return true;
   }
-  function openLogin() { open(); setTimeout(() => document.querySelector('#panthorium-voice-identity [data-login-email]')?.focus(), 0); }
-  window.PanthoriumVoiceIdentity = { open, openLogin, refresh, authorizeAudio, profiles };
+  function openLogin() { return window.PanthoriumAccounts?.openLogin?.(); }
+  function openRegistration() { return open({ registration: true }); }
+  window.PanthoriumVoiceIdentity = { open, openLogin, openRegistration, refresh, authorizeAudio, profiles };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install); else install();
-  window.addEventListener('panthorium:auth-changed', () => { profileCache = null; install(); }); setInterval(install, 1500);
+  window.addEventListener('panthorium:auth-changed', () => { profileCache = null; for (const [id, rootId] of [['account-register', 'panthorium-account-register'], ['voice-identity', 'panthorium-voice-identity']]) { if (!window.PanthoriumWindowManager?.close?.(id)) document.getElementById(rootId)?.remove(); } install(); }); setInterval(install, 1500);
 })();
