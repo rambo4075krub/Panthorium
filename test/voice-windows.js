@@ -148,6 +148,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert(inline);
     // Hardware/WebGL boot is outside this DOM regression; the actual runtime
     // functions below and both SpeechRecognition event paths remain unchanged.
+    load('panthorium-window-base.js');
     evaluate(inline.replace(/\n    boot\(\);/, '\n    OS.state.booted = true;'));
     load('phase2-auth.js'); await tick();
     await w.PanthoriumAuth.login('admin', 'fixture');
