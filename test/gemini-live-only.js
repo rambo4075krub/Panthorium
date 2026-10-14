@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const { JSDOM } = require('jsdom');
 const { completeLive } = require('../services/geminiLiveCompletion');
 const { ProviderManager } = require('../services/providerManager');
 
@@ -44,7 +45,10 @@ async function main() {
   // Browser and Electron share this client. Exercise a real mic-processing
   // callback and provider audio while proving no REST STT/TTS request occurs.
   const events = []; let processAudio; let sent=[]; let outputPlayed=0; let trackStopped=false;
-  const button = { title:'', classList:{toggle(){}}, addEventListener(){} };
+  const dom = new JSDOM('<body data-gemini-live-enabled="true" data-ai-mode="gemini-live-only"><div id="chat-messages"></div><button id="chat-mic"></button></body>');
+  const document = dom.window.document;
+  const button = document.getElementById('chat-mic');
+  let getMicrophone = async () => ({getTracks:()=>[{stop(){trackStopped=true;}}]});
   class AudioContext {
     constructor(){ this.sampleRate=48000;this.state='running';this.currentTime=0; }
     async resume(){} async close(){}
@@ -59,14 +63,36 @@ async function main() {
     send(data){sent.push(JSON.parse(data));} close(){this.readyState=3;}
   }
   const window={AudioContext,location:{origin:'https://panthorium.test'},PanthoriumAuth:{ensureSession:async()=>{},getAccessToken:()=> 'test-token'},speechSynthesis:{cancel(){events.push('cancel-tts');}},dispatchEvent(e){events.push(e.type);},addEventListener(){}};
-  vm.runInNewContext(fs.readFileSync(require.resolve('../live-voice-client.js'),'utf8'), {window,document:{body:{dataset:{geminiLiveEnabled:'true',aiMode:'gemini-live-only'}},getElementById:()=>button,querySelectorAll:()=>[]},navigator:{mediaDevices:{getUserMedia:async()=>({getTracks:()=>[{stop(){trackStopped=true;}}]})}},WebSocket:Socket,CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},TextDecoder,Uint8Array,DataView,Float32Array,Set,Math,Promise,setTimeout,clearTimeout,console,btoa:s=>Buffer.from(s,'binary').toString('base64'),atob:s=>Buffer.from(s,'base64').toString('binary')});
+  vm.runInNewContext(fs.readFileSync(require.resolve('../live-voice-client.js'),'utf8'), {window,document,navigator:{mediaDevices:{getUserMedia:()=>getMicrophone()}},WebSocket:Socket,CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},TextDecoder,Uint8Array,DataView,Float32Array,Set,Math,Promise,setTimeout,clearTimeout,console,btoa:s=>Buffer.from(s,'binary').toString('base64'),atob:s=>Buffer.from(s,'base64').toString('binary')});
   await window.PanthoriumLiveVoice.toggle();
+  assert.equal(button.getAttribute("aria-pressed"), "true");
+  assert.equal(button.textContent, "⏹");
   processAudio.onaudioprocess({inputBuffer:{getChannelData:()=>new Float32Array(1024).fill(0.2)}});
   assert.equal(sent[0].type,'auth');
   assert.equal(sent[1].realtimeInput.audio.mimeType,'audio/pcm;rate=16000');
   Socket.latest.onmessage({data:JSON.stringify({serverContent:{modelTurn:{parts:[{inlineData:{data:Buffer.alloc(100).toString('base64')}}]}}})});
+  Socket.latest.onmessage({data:JSON.stringify({serverContent:{inputTranscription:{text:'สวัสดี'}}})});
+  Socket.latest.onmessage({data:JSON.stringify({serverContent:{outputTranscription:{text:'ยินดี'}}})});
+  Socket.latest.onmessage({data:JSON.stringify({serverContent:{outputTranscription:{text:'ช่วยครับ'},turnComplete:true}})});
+  assert.equal(document.querySelector('.msg.user').textContent,'สวัสดี');
+  assert.equal(document.querySelector('.msg.ai').textContent,'ยินดีช่วยครับ');
   assert.equal(outputPlayed,1);assert(events.includes('cancel-tts'));assert(events.includes('panthorium:live-start'));
-  await window.PanthoriumLiveVoice.toggle();assert.equal(trackStopped,true);assert.equal(window.PanthoriumLiveVoice.isActive(),false);
+  await window.PanthoriumLiveVoice.toggle();assert.equal(trackStopped,true);assert.equal(window.PanthoriumLiveVoice.isActive(),false);assert.equal(button.getAttribute('aria-pressed'),'false');assert.equal(button.textContent,'🎤');
+  let resolvePermission;
+  getMicrophone = () => new Promise(resolve => { resolvePermission = resolve; });
+  const opening = window.PanthoriumLiveVoice.toggle();
+  await new Promise(resolve => setImmediate(resolve));
+  window.PanthoriumLiveVoice.stop();
+  let lateStreamStopped = false;
+  resolvePermission({getTracks:()=>[{stop(){lateStreamStopped=true;}}]});
+  await opening;
+  assert(lateStreamStopped, 'closing chat during permission acquisition releases the arriving stream');
+  assert.equal(window.PanthoriumLiveVoice.isActive(),false);
+  getMicrophone = async () => { throw Object.assign(new Error('Microphone permission denied'),{name:'NotAllowedError'}); };
+  await window.PanthoriumLiveVoice.toggle();
+  assert.equal(button.getAttribute('aria-pressed'),'false');
+  assert.match(button.title,/อนุญาตไมโครโฟน/);
+  dom.window.close();
   console.log('Gemini Live only: isolated provider, text transcript, browser/Electron PCM input/output and cleanup passed');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

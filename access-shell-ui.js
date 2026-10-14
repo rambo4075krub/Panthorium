@@ -63,7 +63,7 @@
     button.disabled = installing || !!checking;
     button.textContent = installing ? 'กำลังเตรียมอัปเดตบราวเซอร์' : checking && !updateStatus ? 'กำลังตรวจสอบเวอร์ชั่น' : !updateStatus?.ok ? 'ตรวจสอบอัปเดตอีกครั้ง' : updateStatus.available ? 'โปรดอัพเดทบราวเซอร์' : 'บราวเซอร์เป็นเวอร์ชั่นปัจจุบัน';
     button.dataset.state = installing ? 'installing' : !updateStatus?.ok ? 'unknown' : updateStatus.available ? 'available' : 'current';
-    button.title = updateStatus?.current ? 'เวอร์ชั่นที่ติดตั้ง ' + updateStatus.current + (updateStatus.remote ? ' · รุ่นที่เผยแพร่ ' + updateStatus.remote : '') : '';
+    button.title = button.textContent;
   }
   async function refreshUpdateStatus(force = false) {
     if (!electron()) return;
