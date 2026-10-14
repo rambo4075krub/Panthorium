@@ -29,7 +29,7 @@ assert(doc.getElementById('system-controls-left').contains(doc.getElementById('s
 assert(doc.getElementById('system-controls-left').contains(doc.getElementById('status-dot')));
 assert.equal(doc.querySelector('#start-btn img').getAttribute('src'), '/panthorium-logo.svg');
 assert.match(css, /\.sm-apps\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*overflow-y:\s*auto/);
-assert.match(css, /#system-controls\s*\{[^}]*position:\s*fixed[^}]*bottom:\s*env\(safe-area-inset-bottom/);
+assert.match(css, /#system-controls\s*\{[^}]*position:\s*fixed[^}]*bottom:\s*calc\(env\(safe-area-inset-bottom,\s*0px\) \+ 12px\)/);
 assert.match(css, /#global-voice\s*\{[^}]*right:\s*max\([^}]*bottom:\s*calc\(env\(safe-area-inset-bottom/);
 
 const searchDom = new JSDOM(
