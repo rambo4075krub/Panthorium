@@ -128,6 +128,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       }
       const memoryDeleteId = pathname.startsWith('/api/agent/memory/') ? pathname.slice('/api/agent/memory/'.length) : '';
       if (memoryDeleteId && /^[0-9a-f-]+$/i.test(memoryDeleteId) && httpMethod === 'DELETE') { cloudEvents.delete(memoryDeleteId); return Response.json({ ok: true }); }
+      if (pathname === '/api/admin/accounts') return Response.json({ok:true,users:[]});
       if (pathname === '/api/admin/billing/overview') return Response.json({ok:true,report:{totals:{},rows:[],profile:{},range:{},completeIdentity:false},orders:[],grants:[],gateway:{mode:'live',connected:false,checkoutEnabled:false}});
       if (pathname === '/api/auth/logout') return Response.json({ ok: true });
       if (pathname === '/api/auth/login') return Response.json({ ok: true, user: admin, accessToken: auth.signAccessToken(admin) });

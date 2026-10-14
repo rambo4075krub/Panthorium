@@ -48,6 +48,8 @@ function createGeminiLiveWebSocketGateway({
   const sessions = new Map();
 
   const onConnection = client => {
+    let accountTimer = null;
+    let accountCheckRunning = false;
     let upstream = null;
     let user = null;
     let accessToken = "";
@@ -68,6 +70,7 @@ function createGeminiLiveWebSocketGateway({
     authTimer.unref?.();
 
     const release = () => {
+      clearInterval(accountTimer);
       clearTimeout(authTimer);
       if (userId && sessions.get(userId) === client) sessions.delete(userId);
       for (const pending of pendingUiActions.values()) {
@@ -98,11 +101,14 @@ function createGeminiLiveWebSocketGateway({
       const token = frame?.type === "auth" && typeof frame.token === "string" ? frame.token : "";
       if (!token || token.length > 4096) return rejectAuth(4401, "authentication_required");
       try { user = authService.verifyAccessToken(token); } catch { return rejectAuth(4401, "invalid_or_expired_token"); }
+      if(authService.validateAccountPrincipal){try{user=await authService.validateAccountPrincipal(user);}catch{return rejectAuth(4403,"account_access_denied");}}
+      if(client.readyState!==1 || settled)return;
       if (!(user?.permissions || []).includes("chat")) return rejectAuth(4403, "permission_denied");
       if (sessions.size >= maxSessions) return rejectAuth(4429, "live_capacity_reached");
       userId = String(user.sub || user.id || "");
       if (!userId || sessions.has(userId)) return rejectAuth(4429, "live_session_already_active");
       sessions.set(userId, client);
+      if(authService.validateAccountPrincipal){accountTimer=setInterval(async()=>{if(accountCheckRunning)return;accountCheckRunning=true;try{const fresh=await authService.validateAccountPrincipal(authService.verifyAccessToken(accessToken));if(!(fresh.permissions||[]).includes("chat")||JSON.stringify([...(fresh.roles||[])].sort())!==JSON.stringify([...(user.roles||[])].sort())||JSON.stringify([...(fresh.permissions||[])].sort())!==JSON.stringify([...(user.permissions||[])].sort()))throw new Error("permission_denied");}catch{if(client.readyState<2)client.close(4403,"account_access_denied");release();}finally{accountCheckRunning=false;}},30000);accountTimer.unref?.();}
       accessToken = token;
       settled = true;
       clearTimeout(authTimer);
@@ -138,8 +144,8 @@ function createGeminiLiveWebSocketGateway({
       const currentUser = () => {
         const fresh = authService.verifyAccessToken(accessToken);
         const freshId = String(fresh?.sub || fresh?.id || "");
-        if (!freshId || freshId !== userId || !(fresh.permissions || []).includes("chat")) throw new Error("live_auth_expired");
-        return fresh;
+        if (!freshId || freshId !== userId || !((authService.validateAccountPrincipal?user:fresh).permissions || []).includes("chat")) throw new Error("live_auth_expired");
+        return authService.validateAccountPrincipal ? {...fresh,roles:user.roles,permissions:user.permissions} : fresh;
       };
       const dispatchUiAction = (action, callId) => new Promise(resolve => {
         if (client.readyState !== 1) return resolve({ ok: false, error: "live_client_disconnected" });

@@ -7,6 +7,8 @@
   // One allowlist for the server, desktop and voice client. Never execute a
   // function name or selector supplied by an AI response or a transcript.
   const apps = [
+    {id:"user-management",key:"user_management",label:"ผู้ใช้และเงื่อนไข",permission:"settings",role:"administrator",aliases:["จัดการผู้ใช้","ผู้ใช้และเงื่อนไข"],selector:'.window[data-id="account-manager"]',opener:"PanthoriumUserManager.open",windowId:"account-manager"},
+    {id:"admin-management",key:"admin_management",label:"ผู้ดูแลระบบ",permission:"settings",role:"administrator",aliases:["จัดการแอดมิน","ผู้ดูแลระบบ"],selector:'.window[data-id="account-manager"]',opener:"PanthoriumUserManager.openAdmins",windowId:"account-manager"},
     {id:"billing-admin",key:"billing_admin",label:"การเงินและการชำระเงิน",permission:"settings",role:"administrator",aliases:["การเงิน","รายรับรายจ่าย","จัดการชำระเงิน"],selector:'.window[data-id="billing-admin"]',opener:"PanthoriumBillingAdmin.open",windowId:"billing-admin"},
     { id: 'sentinel', key: 'sentinel', label: 'Sentinel AI', permission: 'chat', aliases: ['Sentinel AI', 'เซนทิเนลเอไอ', 'แชต', 'แชท'], selector: '.window[data-id="sentinel"]', opener: 'openSentinel', windowId: 'sentinel' },
     { id: 'notes', key: 'notes', label: 'Notes', permission: 'chat', aliases: ['Notes', 'Note', 'โน้ต', 'โน๊ต', 'บันทึก', 'แอปบันทึก'], selector: '.window[data-id="notes"]', opener: 'openNotes', windowId: 'notes' },
@@ -39,7 +41,7 @@
     { id: 'external-x', key: 'external_x', label: 'X', permission: 'chat', aliases: ['X', 'Twitter', 'ทวิตเตอร์'], selector: '.window[data-id="external-x"]', opener: 'PanthoriumExternalApps.openX', windowId: 'external-x', external: true, externalUrl: 'https://x.com/' },
     { id: 'privacy-policy', key: 'privacy_policy', label: 'Privacy/Policy', permission: 'chat', aliases: ['Privacy Policy', 'Privacy/Policy', 'นโยบายความเป็นส่วนตัว', 'นโยบายความเป็นส่วนตัวและข้อกำหนด'], selector: '#panthorium-privacy-policy', opener: 'PanthoriumPrivacyPolicy.open', closeButton: '[data-close]' }
   ];
-  const userRestrictedIds = new Set(['billing-admin', 'settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control']);
+  const userRestrictedIds = new Set(['user-management', 'admin-management', 'billing-admin', 'settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control']);
   function allowed(app, user) {
     const roles = user?.roles || [];
     const id = String(user?.sub || user?.id || '');

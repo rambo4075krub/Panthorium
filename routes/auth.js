@@ -150,6 +150,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
       setSessionCookies(res, session, req.body?.rememberMe !== false);
       res.json({ ok: true, accessToken: session.accessToken, user: session.principal });
     } catch (error) {
+      if(["account_suspended","account_access_expired","account_day_restricted"].includes(error.message))return res.status(403).json({ok:false,error:error.message});
       console.error("[AUTH] login failed (" + req.requestId + "): " + error.message);
       res.status(503).json({ ok: false, error: "auth_unavailable", requestId: req.requestId });
     }
@@ -185,7 +186,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
       res.json({ ok: true, user });
     } catch (error) {
       if (error.message === "user_not_found") return res.status(404).json({ ok: false, error: error.message });
-      if (["cannot_demote_self", "cannot_remove_own_settings", "last_administrator_required"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
+      if (["cannot_demote_self", "cannot_remove_own_settings", "last_administrator_required", "administrator_restriction_forbidden"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
       next(error);
     }
   });
@@ -219,7 +220,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
       await attachDisplayName(session.principal);
       setSessionCookies(res, session, req.cookies?.pt_session !== "1");
       res.json({ ok: true, accessToken: session.accessToken, user: session.principal });
-    } catch (error) { next(error); }
+    } catch (error) { if(error.message==="account_session_revoked")return res.status(401).json({ok:false,error:error.message}); if(["account_suspended","account_access_expired","account_day_restricted"].includes(error.message))return res.status(403).json({ok:false,error:error.message}); next(error); }
   });
 
   router.post("/logout", async (req, res, next) => {

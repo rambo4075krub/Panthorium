@@ -110,6 +110,8 @@ const integrationExecutions = new IntegrationExecutionRepository({ databaseUrl: 
 const integrations = new IntegrationService({ repository: integrationRepository, executions: integrationExecutions, audit, allowedHosts: config.integrationAllowedHosts });
 const sentinel = new Sentinel({ conversations, audit });
 const billingService = new (require('./services/omiseBillingService').OmiseBillingService)();
+const accountAdminService = new (require("./services/accountAdminService").AccountAdminService)(authService,billingService.pool);
+if (billingService.pool) { authService.validateAccountPrincipal = principal => accountAdminService.validate(principal); authService.accountPolicy = id => accountAdminService.policy(id); authService.invalidateAccountSessions = (id,actor) => accountAdminService.invalidate(id,actor); }
 const liveEntitlements = billingService.live && billingService.liveEnabled ? billingService.entitlements() : null;
 sentinel.providers.entitlements=liveEntitlements;
 const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET, entitlements:liveEntitlements });
@@ -194,6 +196,7 @@ app.use("/api/biometrics", createBiometricsRouter(authService, biometrics));
 app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
 app.use("/api/agent/automation", createAutomationRouter(authService, agentAutomation));
 app.use("/api/agent/memory", createMemoryRouter(authService, agentMemory));
+app.use("/api/admin/accounts",require("./routes/accountAdmin").createAccountAdminRouter(authService,accountAdminService));
 app.use("/api/admin/billing", require("./routes/billingAdmin").createBillingAdminRouter(authService,billingService));
 app.get("/api/policies/operator", async(req,res)=>{ try { const p=await new (require("./services/billingAdminService").BillingAdminService)(billingService).profile(); res.json({ok:true,name:p.name,brand:p.brand,address:p.address||null,email:p.email||null}); } catch { res.status(503).json({ok:false,error:"operator_unavailable"}); } });
 app.use("/api/billing", require("./routes/billing").createBillingRouter(authService,billingService));

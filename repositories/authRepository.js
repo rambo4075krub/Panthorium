@@ -70,7 +70,20 @@ class PostgresAuthRepository {
   async findUserById(id) { const { rows } = await this.pool.query("SELECT * FROM panthorium_users WHERE id = $1 LIMIT 1", [id]); return this.mapUser(rows[0]); }
   async listUsers() { const { rows } = await this.pool.query("SELECT * FROM panthorium_users ORDER BY username ASC"); return rows.map((row) => this.mapUser(row)); }
   async createUser(user) { const { rows } = await this.pool.query(`INSERT INTO panthorium_users (id, username, email, email_verified_at, password_hash, roles, permissions, created_at) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8) ON CONFLICT (username) DO NOTHING RETURNING *`, [user.id || crypto.randomUUID(), user.username, user.email || null, user.emailVerifiedAt || null, user.passwordHash, JSON.stringify(user.roles || []), JSON.stringify(normalizeSentinelPermissions(user.permissions)), user.createdAt || new Date().toISOString()]); return rows[0] ? this.mapUser(rows[0]) : this.findUserByUsername(user.username); }
-  async updateUserAccess(id, { roles, permissions }) { const { rows } = await this.pool.query(`UPDATE panthorium_users SET roles = $2::jsonb, permissions = $3::jsonb WHERE id = $1 RETURNING *`, [id, JSON.stringify(roles || []), JSON.stringify(normalizeSentinelPermissions(permissions))]); return this.mapUser(rows[0]); }
+  async updateUserAccess(id, { roles, permissions }) {
+    const client=await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('account-admin-roles',0))");
+      const current=(await client.query('SELECT roles FROM panthorium_users WHERE id=$1 FOR UPDATE',[id])).rows[0];
+      if((current?.roles||[]).includes('administrator')&&!(roles||[]).includes('administrator')){
+        const other=(await client.query("SELECT COUNT(*)::integer AS count FROM panthorium_users WHERE id<>$1 AND roles ? 'administrator'",[id])).rows[0];
+        if(!other?.count)throw new Error('last_administrator_required');
+      }
+      const {rows}=await client.query("UPDATE panthorium_users SET roles = $2::jsonb, permissions = $3::jsonb WHERE id = $1 RETURNING *",[id,JSON.stringify(roles||[]),JSON.stringify(normalizeSentinelPermissions(permissions))]);
+      await client.query('COMMIT');return this.mapUser(rows[0]);
+    }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+  }
   async updateUserPassword(id, passwordHash) { const { rows } = await this.pool.query("UPDATE panthorium_users SET password_hash = $2 WHERE id = $1 RETURNING *", [id, passwordHash]); return this.mapUser(rows[0]); }
   async deleteUser(id) { const { rowCount } = await this.pool.query("DELETE FROM panthorium_users WHERE id = $1", [id]); return rowCount > 0; }
   async storeRefreshToken(token) { await this.pool.query("DELETE FROM panthorium_refresh_tokens WHERE expires_at <= NOW()"); await this.pool.query(`INSERT INTO panthorium_refresh_tokens (id, user_id, token_hash, expires_at, created_at) VALUES ($1,$2,$3,$4,$5)`, [token.id, token.userId, token.tokenHash, new Date(token.expiresAt), token.createdAt]); }
