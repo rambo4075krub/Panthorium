@@ -19,7 +19,7 @@
     el.textContent = `
       #start-menu .browser-action{display:block;width:calc(100% - 24px);margin:0 12px 12px;padding:12px 10px;border:1px solid rgba(0,255,204,.22);border-radius:10px;background:rgba(0,255,204,.06);color:inherit;font:inherit;text-align:center;cursor:pointer;text-decoration:none;box-sizing:border-box;}
       #start-menu .browser-action:disabled{cursor:default;opacity:.7;}
-      body[data-panthorium-role="user"] #btn-settings-quick,body[data-panthorium-role="guest"] #btn-settings-quick,body[data-panthorium-role="user"] #btn-restart,body[data-panthorium-role="guest"] #btn-restart{display:none!important;}
+      body[data-panthorium-role="user"] #btn-settings-quick,body[data-panthorium-role="guest"] #btn-settings-quick{display:none!important;}
       body[data-panthorium-role="guest"][data-panthorium-browser="desktop"] #sm-apps{display:block!important;}
       #start-menu .sm-footer{display:flex;gap:8px;}
       #start-menu .sm-footer button{flex:1;min-height:38px;}
@@ -61,7 +61,7 @@
     const button = document.getElementById('panthorium-browser-update');
     if (!button) return;
     button.disabled = installing || !!checking;
-    button.textContent = installing ? 'กำลังเตรียมอัปเดตบราวเซอร์' : checking && !updateStatus ? 'กำลังตรวจสอบเวอร์ชั่น' : !updateStatus?.ok ? 'ตรวจสอบอัปเดตอีกครั้ง' : updateStatus.available ? 'โปรดอัพเดทบราวเซอร์' : 'บราวเซอร์เป็นเวอร์ชั่นปัจจุบัน';
+    button.textContent = installing ? 'กำลังเตรียมอัปเดตบราวเซอร์' : checking && !updateStatus ? 'กำลังตรวจสอบเวอร์ชั่น' : !updateStatus?.ok ? 'ตรวจสอบอัปเดตอีกครั้ง' : updateStatus.available ? 'อัปเดต Panthorium Browser' : 'ปัจจุบันเป็นเวอร์ชันล่าสุดแล้ว';
     button.dataset.state = installing ? 'installing' : !updateStatus?.ok ? 'unknown' : updateStatus.available ? 'available' : 'current';
     button.title = button.textContent;
   }
@@ -145,6 +145,26 @@
     const settings = document.getElementById('btn-settings-quick');
     if (settings) settings.style.display = isStaff ? '' : 'none';
     const footer = menu.querySelector('.sm-footer');
+    let restart = document.getElementById('btn-restart');
+    if (footer && !restart) {
+      restart = document.createElement('button');
+      restart.id = 'btn-restart';
+      restart.type = 'button';
+      footer.insertBefore(restart, footer.firstChild);
+    }
+    if (restart) {
+      restart.hidden = false;
+      restart.style.display = '';
+      restart.textContent = '🔄 รีสตาร์ท';
+      restart.title = 'รีสตาร์ท Panthorium';
+      restart.onclick = () => {
+        window.PanthoriumLiveVoice?.stop?.();
+        window.PanthoriumVoice?.pause?.();
+        menu.classList.remove('open');
+        document.getElementById('start-btn')?.setAttribute('aria-expanded', 'false');
+        window.location.reload();
+      };
+    }
     const logout = document.getElementById('btn-logout');
     document.getElementById('btn-login')?.remove();
     if (logout) {
@@ -153,8 +173,8 @@
       logout.title = 'ออกจากระบบ';
       logout.onclick = () => auth()?.logout?.();
     }
-    if (isDesktop && isStaff) {
-      // Admin retains in-app update controls.
+    if (isDesktop) {
+      // Every installed edition uses the same update controls.
       document.getElementById('panthorium-browser-download')?.remove();
       let update = document.getElementById('panthorium-browser-update');
       if (!update) { update = document.createElement('button'); update.id = 'panthorium-browser-update'; update.type = 'button'; update.className = 'browser-action'; update.onclick = updateBrowser; menu.appendChild(update); }
@@ -163,7 +183,7 @@
     } else if (!isDesktop) {
       document.getElementById('panthorium-browser-update')?.remove();
     }
-    if (!isStaff || (!isDesktop && admin())) {
+    if (!isDesktop) {
       document.getElementById('panthorium-browser-update')?.remove();
       let download = document.getElementById('panthorium-browser-download');
       if (!download) {
