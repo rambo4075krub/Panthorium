@@ -7,6 +7,7 @@
   // One allowlist for the server, desktop and voice client. Never execute a
   // function name or selector supplied by an AI response or a transcript.
   const apps = [
+    {id:"admin-mailbox",key:"admin_mailbox",label:"กล่องอีเมล",permission:"settings",role:"administrator",aliases:["กล่องอีเมล","กล่องจดหมาย","อีเมลระบบ"],selector:'.window[data-id="admin-mailbox"]',opener:"PanthoriumMailbox.open",windowId:"admin-mailbox"},
     { id: 'sentinel', key: 'sentinel', label: 'Sentinel AI', permission: 'chat', aliases: ['Sentinel AI', 'เซนทิเนลเอไอ', 'แชต', 'แชท'], selector: '.window[data-id="sentinel"]', opener: 'openSentinel', windowId: 'sentinel' },
     { id: 'notes', key: 'notes', label: 'Notes', permission: 'chat', aliases: ['Notes', 'Note', 'โน้ต', 'โน๊ต', 'บันทึก', 'แอปบันทึก'], selector: '.window[data-id="notes"]', opener: 'openNotes', windowId: 'notes' },
     { id: 'files', key: 'files', label: 'Files', permission: 'chat', accountRequired: true, aliases: ['Files', 'File', 'ไฟล์', 'จัดการไฟล์', 'ไฟล์ของฉัน'], selector: '.window[data-id="files"]', opener: 'openFiles', windowId: 'files' },
@@ -38,7 +39,7 @@
     { id: 'external-x', key: 'external_x', label: 'X', permission: 'chat', aliases: ['X', 'Twitter', 'ทวิตเตอร์'], selector: '.window[data-id="external-x"]', opener: 'PanthoriumExternalApps.openX', windowId: 'external-x', external: true, externalUrl: 'https://x.com/' },
     { id: 'privacy-policy', key: 'privacy_policy', label: 'Privacy/Policy', permission: 'chat', aliases: ['Privacy Policy', 'Privacy/Policy', 'นโยบายความเป็นส่วนตัว', 'นโยบายความเป็นส่วนตัวและข้อกำหนด'], selector: '#panthorium-privacy-policy', opener: 'PanthoriumPrivacyPolicy.open', closeButton: '[data-close]' }
   ];
-  const userRestrictedIds = new Set(['settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control']);
+  const userRestrictedIds = new Set(['admin-mailbox', 'settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control']);
   function allowed(app, user) {
     const roles = user?.roles || [];
     const id = String(user?.sub || user?.id || '');

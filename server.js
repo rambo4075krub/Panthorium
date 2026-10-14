@@ -8,7 +8,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
 const config = require("./config");
-const { closeDatabasePools } = require("./services/databasePool");
+const { getDatabasePool, closeDatabasePools } = require("./services/databasePool");
 const { createAuthRepository } = require("./repositories/authRepository");
 const { SentinelTrainingRepository } = require("./services/sentinelTrainingRepository");
 const { SentinelTrainingService } = require("./services/sentinelTrainingService");
@@ -168,6 +168,9 @@ app.use((req, res, next) => {
   }
   return cors({ origin: origin || false, credentials: true })(req, res, next);
 });
+const adminMailboxPool = getDatabasePool({connectionString:config.databaseUrl,ssl:config.databaseSslMode==='disable'?false:{rejectUnauthorized:false}});
+const adminMailbox = new (require('./services/adminMailboxService').AdminMailboxService)({pool:adminMailboxPool,config});
+app.post('/api/webhooks/resend', express.raw({type:'application/json',limit:'2mb'}), require('./routes/adminMailbox').mailboxWebhook(adminMailbox));
 app.use(express.json({ limit: "2mb", type: "application/json" }));
 app.use(cookieParser());
 app.use(requestContext(audit));
@@ -188,6 +191,7 @@ app.use("/api/governance", createGovernanceRouter(authService, autonomousGoverna
 app.use("/api/sentinel-control", createSentinelControlRouter(authService, sentinelOrchestrator));
 app.use("/api/auth", createAuthRouter(authService, config, securityResponse, biometricIdentityRepository, biometrics, emailOtp));
 app.use("/api/biometrics", createBiometricsRouter(authService, biometrics));
+app.use("/api/admin/mailbox", require("./routes/adminMailbox").createAdminMailboxRouter(authService,adminMailbox));
 app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
 app.use("/api/agent/automation", createAutomationRouter(authService, agentAutomation));
 app.use("/api/agent/memory", createMemoryRouter(authService, agentMemory));
@@ -220,7 +224,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "privacy-policy-ui.js", "live-voice-client.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "privacy-policy-ui.js", "admin-mailbox-ui.js", "live-voice-client.js"];
 for (const script of shellScripts) {
   app.get(`/${script}`, (req, res, next) => {
     try {
