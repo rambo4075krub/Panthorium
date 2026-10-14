@@ -18,7 +18,7 @@ const catalog = require('../voice-window-catalog');
   const guest = auth.guest().principal;
   const user = { id: 'user-test', roles: [], permissions: ['chat', 'system:read', 'settings', 'sentinel:command'] };
   const admin = { id: 'admin-test', roles: ['administrator'], permissions: ['chat', 'settings', 'system:read', 'sentinel:command'] };
-  const excluded = ['settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control'];
+  const excluded = ['billing-admin', 'settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control'];
   const guestSessionId = '123e4567-e89b-42d3-a456-426614174000';
   assert.equal(auth.guest({ guestSessionId }).principal.id, auth.guest({ guestSessionId }).principal.id, 'same tab session id maps to stable guest profile owner');
   assert.notEqual(auth.guest().principal.id, auth.guest().principal.id, 'missing guest session id remains random');

@@ -2,6 +2,7 @@
 'use strict';
 
 const APPS=[
+  {id:"billing-admin",icon:"🏦",label:"การเงินและชำระเงิน",role:"administrator",openers:["PanthoriumBillingAdmin.open"]},
   {id:'sentinel',icon:'🤖',label:'Sentinel AI',openers:['openSentinel']},
   {id:'voice-identity',icon:'🎙️',label:'Voice Identity',role:'administrator',openers:['PanthoriumVoiceIdentity.open']},
   {id:'settings',icon:'⚙️',label:'ตั้งค่า',openers:['openSettings']},
