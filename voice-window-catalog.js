@@ -7,6 +7,7 @@
   // One allowlist for the server, desktop and voice client. Never execute a
   // function name or selector supplied by an AI response or a transcript.
   const apps = [
+    {id:"developer-studio",key:"developer_studio",label:"Developer Studio",permission:"settings",role:"administrator",ownerOnly:true,aliases:["Developer Studio","พัฒนาระบบ","แก้โค้ด"],selector:'.window[data-id="developer-studio"]',opener:"PanthoriumDeveloperStudio.open",windowId:"developer-studio"},
     {id:"user-management",key:"user_management",label:"ผู้ใช้และเงื่อนไข",permission:"settings",role:"administrator",aliases:["จัดการผู้ใช้","ผู้ใช้และเงื่อนไข"],selector:'.window[data-id="account-manager"]',opener:"PanthoriumUserManager.open",windowId:"account-manager"},
     {id:"admin-management",key:"admin_management",label:"ผู้ดูแลระบบ",permission:"settings",role:"administrator",aliases:["จัดการแอดมิน","ผู้ดูแลระบบ"],selector:'.window[data-id="account-manager"]',opener:"PanthoriumUserManager.openAdmins",windowId:"account-manager"},
     {id:"billing-admin",key:"billing_admin",label:"การเงินและการชำระเงิน",permission:"settings",role:"administrator",aliases:["การเงิน","รายรับรายจ่าย","จัดการชำระเงิน"],selector:'.window[data-id="billing-admin"]',opener:"PanthoriumBillingAdmin.open",windowId:"billing-admin"},
@@ -46,7 +47,7 @@
     const roles = user?.roles || [];
     const id = String(user?.sub || user?.id || '');
     const hasAccount = !!id && !id.startsWith('guest:') && !roles.includes('guest');
-    return !!app && (!app.accountRequired || hasAccount) && !(!roles.some(role => ['administrator', 'operator'].includes(role)) && userRestrictedIds.has(app.id)) && (user?.permissions || []).includes(app.permission) && (!app.role || roles.includes(app.role));
+    return !!app && (!app.ownerOnly || user?.systemOwner === true) && (!app.accountRequired || hasAccount) && !(!roles.some(role => ['administrator', 'operator'].includes(role)) && userRestrictedIds.has(app.id)) && (user?.permissions || []).includes(app.permission) && (!app.role || roles.includes(app.role));
   }
   const normalize = text => String(text || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
   const aliases = apps.flatMap(app => app.aliases.map(alias => ({ app, alias: normalize(alias) }))).sort((a, b) => b.alias.length - a.alias.length);

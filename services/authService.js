@@ -5,7 +5,7 @@ const jwt = require("jsonwebtoken");
 const { normalizeSentinelPermissions } = require("../repositories/authRepository");
 
 const ALLOWED_ROLES = new Set(["administrator", "operator", "guest"]);
-const ALLOWED_PERMISSIONS = new Set(["chat", "sentinel:command", "settings", "system:read"]);
+const ALLOWED_PERMISSIONS = new Set(founderAccount.FULL_PERMISSIONS);
 
 function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
@@ -26,6 +26,7 @@ class AuthService {
   async init() {
     await this.repository.init();
     await this.ensureAdmin();
+    const users=await this.repository.listUsers();for(const user of users){if(founderAccount.isFounderAccount(user.id)&&((user.roles||[]).length!==1||!user.roles.includes("administrator")||founderAccount.FULL_PERMISSIONS.some(p=>!(user.permissions||[]).includes(p))))await this.repository.updateUserAccess(user.id,{roles:["administrator"],permissions:[...founderAccount.FULL_PERMISSIONS]});}
   }
 
   async ensureAdmin() {
@@ -45,9 +46,11 @@ class AuthService {
 
   publicUser(user) {
     if (!user) return null;
+    user=founderAccount.fullAccess(user);
     return {
       id: user.id,
       founderProtected: founderAccount.isFounderAccount(user.id),
+      systemOwner: founderAccount.isFounderAccount(user.id),
       username: user.username,
       email: user.email || null,
       emailVerifiedAt: user.emailVerifiedAt || null,
@@ -87,6 +90,8 @@ class AuthService {
 
     const nextRoles = normalizeList(roles, ALLOWED_ROLES);
     const nextPermissions = normalizeList(permissions, ALLOWED_PERMISSIONS);
+    founderAccount.assertFounderMutationAllowed(id,actorId);
+    founderAccount.assertFounderAccess(id,nextRoles,nextPermissions);
     if(nextRoles.includes("administrator") && this.accountPolicy){const policy=await this.accountPolicy(id);if(policy.suspended || policy.expiresAt || policy.weekdays.length!==7)throw new Error("administrator_restriction_forbidden");}
 
     if (id === actorId) {
@@ -107,6 +112,7 @@ class AuthService {
   }
 
   async resetManagedUserPassword(id, password, actorId) {
+    founderAccount.assertFounderMutationAllowed(id,actorId);
     if (typeof password !== "string" || password.length < 10 || password.length > 256) throw new Error("invalid_password");
     const existing = await this.repository.findUserById(id);
     if (!existing) throw new Error("user_not_found");
@@ -133,6 +139,7 @@ class AuthService {
   signAccessToken(principal) {
     return jwt.sign({
       sub: principal.id,
+      systemOwner: founderAccount.isFounderAccount(principal.id),
       username: principal.username,
       roles: principal.roles || [],
       permissions: normalizeSentinelPermissions(principal.permissions),
@@ -220,6 +227,7 @@ class AuthService {
   }
 
   async issueSession(user, expectedVersion=null) {
+    user=founderAccount.fullAccess(user);
     const principal = {
       id: user.id,
       username: user.email || user.username,

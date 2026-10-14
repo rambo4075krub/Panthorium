@@ -112,6 +112,7 @@ const sentinel = new Sentinel({ conversations, audit });
 const billingService = new (require('./services/omiseBillingService').OmiseBillingService)();
 const accountAdminService = new (require("./services/accountAdminService").AccountAdminService)(authService,billingService.pool);
 if (billingService.pool) { authService.validateAccountPrincipal = principal => accountAdminService.validate(principal); authService.accountPolicy = id => accountAdminService.policy(id); authService.invalidateAccountSessions = (id,actor) => accountAdminService.invalidate(id,actor); }
+const developerStudioService = new (require("./services/developerStudioService").DeveloperStudioService)({pool:billingService.pool,providers:sentinel.providers});
 const liveEntitlements = billingService.live && billingService.liveEnabled ? billingService.entitlements() : null;
 sentinel.providers.entitlements=liveEntitlements;
 const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET, entitlements:liveEntitlements });
@@ -196,6 +197,7 @@ app.use("/api/biometrics", createBiometricsRouter(authService, biometrics));
 app.use("/api/security", createSecurityRouter(authService, authRepository, audit, securityResponse));
 app.use("/api/agent/automation", createAutomationRouter(authService, agentAutomation));
 app.use("/api/agent/memory", createMemoryRouter(authService, agentMemory));
+app.use("/api/admin/developer",require("./routes/developerStudio").createDeveloperStudioRouter(authService,developerStudioService));
 app.use("/api/admin/accounts",require("./routes/accountAdmin").createAccountAdminRouter(authService,accountAdminService));
 app.use("/api/admin/billing", require("./routes/billingAdmin").createBillingAdminRouter(authService,billingService));
 app.get("/api/policies/operator", async(req,res)=>{ try { const p=await new (require("./services/billingAdminService").BillingAdminService)(billingService).profile(); res.json({ok:true,name:p.name,brand:p.brand,address:p.address||null,email:p.email||null}); } catch { res.status(503).json({ok:false,error:"operator_unavailable"}); } });
@@ -229,7 +231,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "account-ui.js", "privacy-policy-ui.js", "live-voice-client.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "account-ui.js", "privacy-policy-ui.js", "live-voice-client.js"];
 for (const script of shellScripts) {
   app.get(`/${script}`, (req, res, next) => {
     try {
