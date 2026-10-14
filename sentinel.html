@@ -299,6 +299,21 @@
             box-shadow: 0 0 8px var(--success);
             pointer-events: auto;
         }
+        #desktop-voice {
+            position: absolute;
+            right: max(12px, env(safe-area-inset-right, 0px));
+            width: 44px; height: 44px;
+            border: 1px solid rgba(0,230,195,.32);
+            border-radius: 12px;
+            background: rgba(10,18,32,.82);
+            color: var(--accent);
+            font-size: 21px;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        #desktop-voice:hover, #desktop-voice:focus-visible { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
+        #desktop-voice.listening { background: var(--danger); color: #fff; }
+        #desktop-voice.processing { border-color: #ffd166; color: #ffd166; }
         #clock {
             position: absolute;
             left: 50%;
@@ -927,6 +942,7 @@
                 <span id="status-dot" role="status" aria-label="ออนไลน์" title="Online"></span>
             </div>
             <time id="clock" lang="th" aria-label="วันที่และเวลา"></time>
+            <button id="desktop-voice" type="button" aria-label="เริ่มรับคำสั่งเสียงจาก Desktop" aria-pressed="false" title="เริ่มรับคำสั่งเสียงจาก Desktop">🎤</button>
         </div>
     </div>
 
@@ -3340,7 +3356,7 @@
             </div>
         `;
         createWindow("sentinel", "Sentinel AI", html, { width: 440, height: 520,
-            onClose: () => window.PanthoriumLiveVoice?.stop?.()
+            onClose: () => window.PanthoriumLiveVoice?.stopChatSession?.()
         });
         window.PanthoriumLiveVoice?.syncChatButton?.();
 

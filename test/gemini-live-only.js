@@ -44,8 +44,8 @@ async function main() {
 
   // Browser and Electron share this client. Exercise a real mic-processing
   // callback and provider audio while proving no REST STT/TTS request occurs.
-  const events = []; let processAudio; let sent=[]; let outputPlayed=0; let trackStopped=false;
-  const dom = new JSDOM('<body data-gemini-live-enabled="true" data-ai-mode="gemini-live-only"><div id="chat-messages"></div><button id="chat-mic"></button></body>');
+  const events = []; let processAudio; let sent=[]; let outputPlayed=0; let trackStopped=false; let connections=0; let microphoneRequests=0;
+  const dom = new JSDOM('<body data-gemini-live-enabled="true" data-ai-mode="gemini-live-only"><button id="desktop-voice"></button><div id="chat-messages"></div><button id="chat-mic"></button></body>');
   const document = dom.window.document;
   const button = document.getElementById('chat-mic');
   let getMicrophone = async () => ({getTracks:()=>[{stop(){trackStopped=true;}}]});
@@ -59,12 +59,26 @@ async function main() {
     createBufferSource(){return {connect(){},start(){outputPlayed++;},stop(){}};}
   }
   class Socket {
-    static OPEN=1;static CLOSING=2;constructor(url){assert(url.endsWith('/api/live'));this.readyState=1;Socket.latest=this;setImmediate(()=>{this.onopen();this.onmessage({data:'{"type":"ready"}'});});}
+    static OPEN=1;static CLOSING=2;constructor(url){connections++;assert(url.endsWith('/api/live'));this.readyState=1;Socket.latest=this;setImmediate(()=>{this.onopen();this.onmessage({data:'{"type":"ready"}'});});}
     send(data){sent.push(JSON.parse(data));} close(){this.readyState=3;}
   }
   const window={AudioContext,location:{origin:'https://panthorium.test'},PanthoriumAuth:{ensureSession:async()=>{},getAccessToken:()=> 'test-token'},speechSynthesis:{cancel(){events.push('cancel-tts');}},dispatchEvent(e){events.push(e.type);},addEventListener(){}};
-  vm.runInNewContext(fs.readFileSync(require.resolve('../live-voice-client.js'),'utf8'), {window,document,navigator:{mediaDevices:{getUserMedia:()=>getMicrophone()}},WebSocket:Socket,CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},TextDecoder,Uint8Array,DataView,Float32Array,Set,Math,Promise,setTimeout,clearTimeout,console,btoa:s=>Buffer.from(s,'binary').toString('base64'),atob:s=>Buffer.from(s,'base64').toString('binary')});
-  await window.PanthoriumLiveVoice.toggle();
+  vm.runInNewContext(fs.readFileSync(require.resolve('../live-voice-client.js'),'utf8'), {window,document,navigator:{mediaDevices:{getUserMedia:()=>{microphoneRequests++;return getMicrophone();}}},WebSocket:Socket,CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},TextDecoder,Uint8Array,DataView,Float32Array,Set,Math,Promise,setTimeout,clearTimeout,console,btoa:s=>Buffer.from(s,'binary').toString('base64'),atob:s=>Buffer.from(s,'base64').toString('binary')});
+  const desktopButton = document.getElementById('desktop-voice');
+  const messages = document.getElementById('chat-messages');
+  button.remove(); messages.remove();
+  desktopButton.click();
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(window.PanthoriumLiveVoice.isActive(),true, 'desktop microphone starts without chat');
+  assert.equal(desktopButton.getAttribute('aria-pressed'),'true');
+  assert.equal(connections,1); assert.equal(microphoneRequests,1);
+  document.body.append(messages,button);
+  window.PanthoriumLiveVoice.syncChatButton();
+  assert.equal(button.getAttribute('aria-pressed'),'true', 'chat joins the existing desktop session');
+  window.PanthoriumLiveVoice.stopChatSession();
+  assert.equal(window.PanthoriumLiveVoice.isActive(),true, 'closing chat preserves desktop-owned voice');
+  assert.equal(connections,1); assert.equal(microphoneRequests,1);
   assert.equal(button.getAttribute("aria-pressed"), "true");
   assert.equal(button.textContent, "⏹");
   processAudio.onaudioprocess({inputBuffer:{getChannelData:()=>new Float32Array(1024).fill(0.2)}});
@@ -77,7 +91,7 @@ async function main() {
   assert.equal(document.querySelector('.msg.user').textContent,'สวัสดี');
   assert.equal(document.querySelector('.msg.ai').textContent,'ยินดีช่วยครับ');
   assert.equal(outputPlayed,1);assert(events.includes('cancel-tts'));assert(events.includes('panthorium:live-start'));
-  await window.PanthoriumLiveVoice.toggle();assert.equal(trackStopped,true);assert.equal(window.PanthoriumLiveVoice.isActive(),false);assert.equal(button.getAttribute('aria-pressed'),'false');assert.equal(button.textContent,'🎤');
+  await window.PanthoriumLiveVoice.toggle();assert.equal(trackStopped,true);assert.equal(window.PanthoriumLiveVoice.isActive(),false);assert.equal(button.getAttribute('aria-pressed'),'false');assert.equal(button.textContent,'🎤');assert.equal(desktopButton.getAttribute('aria-pressed'),'false');
   let resolvePermission;
   getMicrophone = () => new Promise(resolve => { resolvePermission = resolve; });
   const opening = window.PanthoriumLiveVoice.toggle();
