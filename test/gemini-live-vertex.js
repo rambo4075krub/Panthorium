@@ -9,6 +9,19 @@ const {
   connectGeminiLive
 } = require("../services/geminiLiveVertex");
 
+// Vertex's protobuf Schema.enum is repeated string, even for INTEGER fields.
+// Test every signed-in Live declaration: the guest deployment smoke omits
+// account-only tools, including the video tool that previously closed with 1007.
+function assertVertexSchema(schema, path) {
+  if (schema.enum) {
+    assert(schema.enum.every(value => typeof value === "string"), `${path}.enum must contain strings for Vertex`);
+  }
+  for (const [name, child] of Object.entries(schema.properties || {})) {
+    assertVertexSchema(child, `${path}.properties.${name}`);
+  }
+  if (schema.items) assertVertexSchema(schema.items, `${path}.items`);
+}
+
 async function main() {
   assert.equal(MODEL_ID, "gemini-3.8-live");
   assert.equal(DEFAULT_LOCATION, "us-central1");
@@ -28,6 +41,22 @@ async function main() {
   });
   const tools = [{ name: "panthorium_ai_providers", description: "List providers", parameters: { type: "OBJECT", properties: {} } }];
   assert.deepEqual(createSetupMessage({ model: "projects/demo/locations/us-central1/publishers/google/models/gemini-3.8-live", tools }).setup.tools, [{ function_declarations: tools }]);
+  const { AgentFunctionCallingService, TOOL_DEFINITIONS } = require("../services/agentFunctionCallingService");
+  const functionCalling = new AgentFunctionCallingService({
+    agentService: {
+      catalogFor: () => TOOL_DEFINITIONS.map(tool => ({ id: tool.toolId, risk: "low" })),
+      execute: async () => ({ ok: true })
+    }
+  });
+  const accountTools = functionCalling.declarationsFor({ sub: "schema-test-account", roles: [], permissions: ["chat"] }, { surface: "gemini-live" });
+  const accountSetup = createSetupMessage({ model: "test-model", tools: accountTools });
+  for (const declaration of accountSetup.setup.tools[0].function_declarations) {
+    assertVertexSchema(declaration.parameters, declaration.name);
+  }
+  const duration = accountSetup.setup.tools[0].function_declarations.find(tool => tool.name === "panthorium_video_generate").parameters.properties.durationSeconds;
+  assert.equal(duration.type, "INTEGER", "video duration remains numeric in function-call arguments");
+  assert.equal(duration.format, "enum");
+  assert.deepEqual(duration.enum, ["4", "6", "8"]);
   assert.equal(await getVertexAccessToken({ getAccessToken: async () => ({ token: "adc-token" }) }), "adc-token");
   await assert.rejects(() => getVertexAccessToken({ getAccessToken: async () => ({}) }), /auth_unavailable/);
 
