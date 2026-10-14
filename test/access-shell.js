@@ -55,8 +55,8 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
     }
     if (role === 'admin') {
       const icons = [...w.document.querySelectorAll('#desktop-icons [data-app-id]')];
-      assert.equal(icons.length, 14, 'every admin icon is on the desktop on production hosts too');
-      assert.equal(new Set(icons.map(icon => icon.dataset.appId)).size, 14);
+      assert.equal(icons.length, 15, 'every admin icon is on the desktop on production hosts too');
+      assert.equal(new Set(icons.map(icon => icon.dataset.appId)).size, 15);
       assert.notEqual(w.getComputedStyle(w.document.getElementById('desktop-icons')).display, 'none');
       assert.notEqual(w.getComputedStyle(w.document.getElementById('sm-apps')).display, 'none', 'administrator Start Menu exposes searchable launchers');
       assert(w.document.getElementById('start-search'));
@@ -118,5 +118,5 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
   await scenario('admin', true, true);
   await scenario('guest', true, false, true);
   await scenario('guest', false, false, true);
-  console.log('Access shell: Guest/Admin role checks at / and /admin; 14 admin icons; Guest Voice Identity Start Menu; current/new/offline update status; installed 15.0.3 compatibility');
+  console.log('Access shell: Guest/Admin role checks at / and /admin; 15 admin icons; Guest Voice Identity Start Menu; current/new/offline update status; installed 15.0.3 compatibility');
 })().catch(error => { console.error(error); process.exitCode = 1; });
