@@ -880,6 +880,7 @@
             pointer-events: none;
         }
     </style>
+    <link rel="stylesheet" href="/panthorium-window-base.css?v=3">
 </head>
 <body>
     <video id="faceVideo" autoplay muted playsinline></video>
@@ -956,6 +957,7 @@
     <script src="/billing-ui.js?v=billing-20261011"></script>
     <script src="/account-ui.js?v=account-windows-20261011"></script>
 
+    <script src="/panthorium-window-base.js?v=3"></script>
     <script>
     // =========================================================
     // Panthorium OS - Sentinel Runtime
@@ -2863,91 +2865,14 @@
 
     // ---------- Window Manager ----------
     function createWindow(id, title, contentHTML, opts = {}) {
-        if (OS.windows.has(id)) {
-            focusWindow(id);
-            return OS.windows.get(id);
-        }
-
-        const w = document.createElement("div");
-        w.className = "window";
-        w.dataset.id = id;
-        const fullscreenOnOpen = id !== "calculator" && opts.fullscreenOnOpen !== false;
-        if (fullscreenOnOpen) w.classList.add("maximized");
-        const width = opts.width || Math.min(520, window.innerWidth - 40);
-        const height = opts.height || Math.min(420, window.innerHeight - 80);
-        const left = opts.left ?? Math.max(20, (window.innerWidth - width) / 2 + (OS.windows.size * 24) % 80);
-        const top = opts.top ?? Math.max(20, 60 + (OS.windows.size * 24) % 60);
-
-        w.style.width = width + "px";
-        w.style.height = height + "px";
-        w.style.left = left + "px";
-        w.style.top = top + "px";
-        w.style.zIndex = ++OS.zCounter;
-
-        w.innerHTML = `
-            <div class="window-titlebar">
-                <div class="window-title">${title}</div>
-                <div class="window-controls">
-                    <button class="win-btn min" title="ย่อ">─</button>
-                    <button class="win-btn close" title="ปิด">✕</button>
-                </div>
-            </div>
-            <div class="window-body">${contentHTML}</div>
-            <div class="window-resize"></div>
-        `;
-
-        $("windows").appendChild(w);
-
-        // Events
-        const titlebar = w.querySelector(".window-titlebar");
-        let dragging = false, ox, oy;
-
-        titlebar.addEventListener("pointerdown", (e) => {
-            if (e.target.closest(".win-btn")) return;
-            if (w.classList.contains("maximized")) return;
-            dragging = true;
-            ox = e.clientX - w.offsetLeft;
-            oy = e.clientY - w.offsetTop;
-            focusWindow(id);
-            titlebar.setPointerCapture(e.pointerId);
-        });
-        titlebar.addEventListener("pointermove", (e) => {
-            if (!dragging) return;
-            w.style.left = (e.clientX - ox) + "px";
-            w.style.top = Math.max(0, e.clientY - oy) + "px";
-        });
-        titlebar.addEventListener("pointerup", () => { dragging = false; });
-
-        // Resize
-        const resizeHandle = w.querySelector(".window-resize");
-        let resizing = false, rw, rh, rx, ry;
-        resizeHandle.addEventListener("pointerdown", (e) => {
-            resizing = true;
-            rw = w.offsetWidth; rh = w.offsetHeight;
-            rx = e.clientX; ry = e.clientY;
-            resizeHandle.setPointerCapture(e.pointerId);
-            e.stopPropagation();
-        });
-        resizeHandle.addEventListener("pointermove", (e) => {
-            if (!resizing) return;
-            w.style.width = Math.max(280, rw + (e.clientX - rx)) + "px";
-            w.style.height = Math.max(200, rh + (e.clientY - ry)) + "px";
-        });
-        resizeHandle.addEventListener("pointerup", () => { resizing = false; });
-
-        w.querySelector(".close").onclick = () => closeWindow(id);
-        w.querySelector(".min").onclick = () => minimizeWindow(id);
-
-        w.addEventListener("pointerdown", () => focusWindow(id));
-
-        OS.windows.set(id, { el: w, title, menuAppId: opts.menuAppId || id, minimized: false, external: false, fullscreen: fullscreenOnOpen });
-        updateTaskbar();
+        window.PanthoriumWindow.create({ ...opts, id, title, content: contentHTML, legacyContent: true });
         return OS.windows.get(id);
     }
 
     function focusWindow(id) {
         const win = OS.windows.get(id);
         if (!win) return;
+        win.el.classList.remove("is-minimized");
         win.el.style.display = win.displayMode || "flex";
         win.el.style.zIndex = ++OS.zCounter;
         win.minimized = false;
@@ -3149,6 +3074,7 @@
             return setWindowFullscreen(id, true);
         }
     };
+    window.PanthoriumWindow.connectShell(OS, window.PanthoriumWindowManager);
     // ---------- Apps Definition ----------
     const BROWSER_RELEASE_URL = "/browser-download.html";
     function browserDownloadUrl() {

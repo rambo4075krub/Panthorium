@@ -1,0 +1,46 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { JSDOM } = require('jsdom');
+const dom = new JSDOM('<body><div id="windows"></div></body>', { runScripts: 'outside-only', pretendToBeVisual: true });
+const w = dom.window;
+w.eval(fs.readFileSync('panthorium-window-base.js', 'utf8'));
+const state = { windows: new w.Map(), zCounter: 10030 };
+const manager = {
+  registerExternalWindow(id, title, el, options) {
+    const record = { el, title, fullscreen: options.fullscreenOnOpen, displayMode: 'flex' };
+    state.windows.set(id, record);
+    return record;
+  }
+};
+w.PanthoriumWindow.connectShell(state, manager);
+const api = w.PanthoriumWindow;
+const native = api.create({ id: 'notes', title: 'Notes', content: '<input value="draft">' });
+assert.equal(state.windows.get('notes').el, native);
+api.minimize('notes'); api.focus('notes');
+assert.equal(native.querySelector('input').value, 'draft');
+assert(!native.classList.contains('is-minimized'));
+api.toggleMaximize('notes'); assert(!native.classList.contains('maximized'));
+api.toggleMaximize('notes'); assert(native.classList.contains('maximized'));
+const external = w.document.createElement('section');
+external.innerHTML = '<header><button data-close>Close</button></header><input value="unsaved">';
+w.document.body.append(external);
+let closed = 0;
+external.querySelector('[data-close]').onclick = () => { closed++; api.close('legacy'); };
+w.PanthoriumWindowCatalog = { apps: [{ id: 'legacy', closeButton: '[data-close]' }] };
+manager.registerExternalWindow('legacy', 'Legacy', external, { fullscreenOnOpen: true });
+manager.registerExternalWindow('legacy', 'Legacy', external, { fullscreenOnOpen: true });
+assert.equal(external.querySelectorAll(':scope > .window-titlebar').length, 1);
+external.querySelector('.win-btn.max').click();
+assert(!external.classList.contains('panthorium-window-fullscreen'));
+external.querySelector('.win-btn.min').click(); api.focus('legacy');
+assert.equal(external.querySelector('input').value, 'unsaved');
+external.querySelector('.win-btn.close').click();
+assert.equal(closed, 1); assert(!state.windows.has('legacy'));
+const css = fs.readFileSync('panthorium-window-base.css', 'utf8');
+const style = w.document.createElement('style'); style.textContent = css; w.document.head.append(style);
+assert.equal(w.getComputedStyle(native.querySelector('.win-btn.close')).borderRadius, '50%');
+const shell = fs.readFileSync('sentinel.html', 'utf8');
+assert(shell.indexOf('/panthorium-window-base.css?v=3') < shell.indexOf('</head>'));
+assert(shell.indexOf('/panthorium-window-base.js?v=3') < shell.indexOf('const OS ='));
+dom.window.close();
+console.log('Base Window: shared state, native/external controls, restore and draft preservation passed');

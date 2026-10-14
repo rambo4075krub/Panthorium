@@ -54,6 +54,7 @@
   }
 
   function bindControls(app, root) {
+    if (root.querySelector(":scope > .window-titlebar .win-btn")) return;
     const closeButton = app.closeButton ? root.querySelector(app.closeButton) : null;
     const parent = closeButton?.parentElement || root.firstElementChild;
     if (!parent) return;
@@ -76,8 +77,8 @@
         menuAppId: app.id,
         fullscreenOnOpen
       });
+      if (fullscreenOnOpen) manager.setFullscreen?.(app.id, true);
     }
-    if (fullscreenOnOpen) manager.setFullscreen?.(app.id, true);
     root.dataset.panthoriumManagedWindow = app.id;
     bindControls(app, root);
     bindClose(app, root);
