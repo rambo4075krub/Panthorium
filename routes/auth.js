@@ -1,6 +1,7 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 const crypto = require("crypto");
+const founderAccount = require("../services/founderAccount");
 const { requireAuth } = require("../middleware/auth");
 
 function createAuthRouter(authService, config, securityResponse, biometricRepository, biometrics, emailOtp) {
@@ -158,7 +159,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
 
   router.get("/me", auth, async (req, res, next) => {
     try {
-      const user = { id: req.user.sub, username: req.user.username, roles: req.user.roles || [], permissions: req.user.permissions || [] };
+      const user = { id: req.user.sub, systemOwner: founderAccount.isFounderAccount(req.user.sub), founderProtected: founderAccount.isFounderAccount(req.user.sub), username: req.user.username, roles: req.user.roles || [], permissions: req.user.permissions || [] };
       const identity = { ...user, sub: user.id };
       await attachDisplayName(identity);
       delete identity.sub;

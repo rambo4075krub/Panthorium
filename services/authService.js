@@ -230,6 +230,8 @@ class AuthService {
     user=founderAccount.fullAccess(user);
     const principal = {
       id: user.id,
+      systemOwner: founderAccount.isFounderAccount(user.id),
+      founderProtected: founderAccount.isFounderAccount(user.id),
       username: user.email || user.username,
       roles: user.roles || [],
       permissions: normalizeSentinelPermissions(user.permissions)
