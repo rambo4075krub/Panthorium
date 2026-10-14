@@ -199,7 +199,7 @@ async function checkForUpdates(options={}){
     return {ok:false,error:String(error.message||error)};
   }
 }
-function create(){const win=new BrowserWindow({width:1440,height:900,minWidth:960,minHeight:640,backgroundColor:'#050811',title:PRODUCT_NAME,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,spellcheck:false}});win.loadURL(START_URL);return win;}
+function create(){const win=new BrowserWindow({width:1440,height:900,minWidth:960,minHeight:640,backgroundColor:'#050811',frame:false,title:PRODUCT_NAME,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,spellcheck:false}});win.removeMenu();win.loadURL(START_URL);return win;}
 app.whenReady().then(()=>{
   installVoiceBridge();
   app.on('web-contents-created',(_event,contents)=>{

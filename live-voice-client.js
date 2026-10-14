@@ -2,8 +2,19 @@
   "use strict";
   if (document.body?.dataset.geminiLiveEnabled !== "true") return;
 
-  const button = document.getElementById("global-voice");
-  if (!button) return;
+  let currentStatus = { label: "กดไมค์เพื่อเริ่มเสียงสด", mode: "idle" };
+  function syncChatButton() {
+    const button = document.getElementById("chat-mic");
+    if (!button) return;
+    const { label, mode } = currentStatus;
+    const active = mode === "listening" || mode === "processing";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.setAttribute("aria-pressed", String(active));
+    button.classList.toggle("listening", active);
+    button.classList.toggle("processing", mode === "processing");
+    button.textContent = active ? "⏹" : "🎤";
+  }
   let socket = null;
   let audioContext = null;
   let microphone = null;
@@ -14,17 +25,36 @@
   let serverReady = false;
   let starting = false;
   let outputTranscript = "";
+  let inputTranscript = "";
+  let chatUserRow = null;
+  let chatAssistantRow = null;
+  let sessionGeneration = 0;
+  let cancelConnection = null;
+  const cancelled = () => Object.assign(new Error("voice_session_cancelled"), { code: "voice_session_cancelled" });
+
+  function updateChatTranscript(kind, text) {
+    const messages = document.getElementById("chat-messages");
+    if (!messages || !text) return;
+    let row = kind === "user" ? chatUserRow : chatAssistantRow;
+    if (!row?.isConnected) {
+      row = document.createElement("div");
+      row.className = "msg " + (kind === "user" ? "user" : "ai");
+      messages.appendChild(row);
+      if (kind === "user") chatUserRow = row; else chatAssistantRow = row;
+    }
+    row.textContent = text;
+    messages.scrollTop = messages.scrollHeight;
+  }
   const approvalDialogs = new Map();
 
   const setStatus = (label, mode = "idle") => {
-    button.title = label;
-    const notice = document.getElementById("orb-system-notice");
-    if (notice) { notice.textContent = label; notice.classList.toggle("show", true); }
-    document.querySelectorAll("[data-voice-status]").forEach(row => { row.classList.toggle("active", row.dataset.voiceStatus === mode); if (row.dataset.voiceStatus === mode) row.textContent = label; });
+    currentStatus = { label, mode };
+    syncChatButton();
     window.dispatchEvent(new CustomEvent("panthorium:live-state", { detail:{mode,label} }));
-    button.classList.toggle("listening", mode === "listening");
-    button.classList.toggle("processing", mode === "processing");
-    button.textContent = mode === "processing" ? "⏳" : mode === "listening" ? "⏹" : "🎤";
+    if (mode === "error") {
+      const notice = document.getElementById("orb-system-notice");
+      if (notice) { notice.textContent = label; notice.classList.add("show"); }
+    }
   };
 
   function backendWebSocketUrl() {
@@ -218,17 +248,23 @@
     if (content.interrupted) stopPlayback();
     const input = content.inputTranscription || content.input_transcription;
     const output = content.outputTranscription || content.output_transcription;
-    if (input?.text) { outputTranscript = ""; window.PanthoriumOrb?.setTranscript?.(input.text, 0); }
-    if (output?.text) { outputTranscript += output.text; window.PanthoriumOrb?.setTranscript?.(outputTranscript, 0); }
+    if (input?.text) { inputTranscript += input.text; updateChatTranscript("user", inputTranscript); window.PanthoriumOrb?.setTranscript?.(inputTranscript, 0); }
+    if (output?.text) { outputTranscript += output.text; updateChatTranscript("ai", outputTranscript); window.PanthoriumOrb?.setTranscript?.(outputTranscript, 0); }
     const parts = content.modelTurn?.parts || content.model_turn?.parts || [];
     for (const part of parts) {
       const audio = part.inlineData?.data || part.inline_data?.data;
       if (audio) { setStatus("Gemini Live กำลังตอบ", "listening"); playPcm24k(audio); }
     }
-    if (content.turnComplete || content.turn_complete) setStatus("Gemini Live พร้อมฟัง", "listening");
+    if (content.turnComplete || content.turn_complete) {
+      inputTranscript = ""; outputTranscript = ""; chatUserRow = null; chatAssistantRow = null;
+      setStatus("Gemini Live พร้อมฟัง", "listening");
+    }
   }
 
-  async function openLiveSession() {
+  async function openLiveSession(generation) {
+    const ensureCurrent = () => { if (generation !== sessionGeneration) throw cancelled(); };
+    inputTranscript = ""; outputTranscript = ""; chatUserRow = null; chatAssistantRow = null;
+    setStatus("กำลังเปิดไมโครโฟน", "processing");
     window.dispatchEvent(new CustomEvent("panthorium:live-start"));
     window.PanthoriumVoice?.pause?.();
     try { window.speechSynthesis?.cancel(); } catch (_) {}
@@ -238,15 +274,20 @@
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
     audioContext = new AudioContextCtor();
     await audioContext.resume();
+    ensureCurrent();
     if (audioContext.state !== "running") throw new Error("เปิดเสียงไม่สำเร็จ กรุณาอนุญาตเสียงเว็บไซต์");
     const token = await getAccessToken();
-    microphone = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    ensureCurrent();
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    if (generation !== sessionGeneration) { stream.getTracks().forEach(track => track.stop()); throw cancelled(); }
+    microphone = stream;
     socket = new WebSocket(backendWebSocketUrl());
     socket.binaryType = "arraybuffer";
     setStatus("กำลังเชื่อม Gemini Live", "processing");
 
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error("เชื่อม Gemini Live ไม่สำเร็จ")), 45000);
+      cancelConnection = () => { clearTimeout(timeout); reject(cancelled()); };
       socket.onopen = () => socket.send(JSON.stringify({ type: "auth", token }));
       socket.onerror = () => { clearTimeout(timeout); reject(new Error("เชื่อม Gemini Live ไม่สำเร็จ")); };
       socket.onclose = event => {
@@ -260,17 +301,18 @@
           const json = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data);
           frame = JSON.parse(json);
         } catch (_) { return; }
-        if (frame.type === "ready") { clearTimeout(timeout); serverReady = true; resolve(); }
+        if (frame.type === "ready") { clearTimeout(timeout); cancelConnection = null; serverReady = true; resolve(); }
         handleModelFrame(frame);
         if (frame.error) {
           clearTimeout(timeout);
           reject(new Error("Gemini Live ใช้งานไม่ได้ในขณะนี้"));
           cleanup();
-          setStatus("Gemini Live ใช้งานไม่ได้ในขณะนี้ · แตะไมค์เพื่อลองใหม่");
+          setStatus("Gemini Live ใช้งานไม่ได้ในขณะนี้ · แตะไมค์เพื่อลองใหม่", "error");
         }
       };
     });
 
+    ensureCurrent();
     const source = audioContext.createMediaStreamSource(microphone);
     processor = audioContext.createScriptProcessor(1024, 1, 1);
     mutedOutput = audioContext.createGain();
@@ -287,6 +329,8 @@
   }
 
   function cleanup(closeSocket = true) {
+    sessionGeneration++;
+    cancelConnection?.(); cancelConnection = null;
     serverReady = false;
     for (const pending of approvalDialogs.values()) {
       if (pending.dialog.open) pending.dialog.close();
@@ -305,18 +349,19 @@
     setStatus("กดไมค์เพื่อเริ่มเสียงสด");
   }
 
-  // Intercept the global voice button during capture so the legacy
-  // Sentinel transcription onclick cannot consume the click first.
+  // The chat microphone owns the single Live session.
   async function toggle() {
-    if (starting) return;
+    if (starting) { cleanup(); return; }
     if (socket && socket.readyState < WebSocket.CLOSING) { cleanup(); return; }
     starting = true;
-    try { await openLiveSession(); }
-    catch (error) { console.warn("Gemini Live voice session failed", error); cleanup(); setStatus(error.message || "เชื่อมเสียงสดไม่สำเร็จ"); }
+    try { await openLiveSession(sessionGeneration); }
+    catch (error) { if (error.code === "voice_session_cancelled") return; console.warn("Gemini Live voice session failed", error); cleanup(); setStatus(error.name === "NotAllowedError" || error.name === "SecurityError"
+      ? "กรุณาอนุญาตไมโครโฟนให้ Panthorium Browser แล้วลองใหม่"
+      : error.message || "เชื่อมเสียงสดไม่สำเร็จ", "error"); }
     finally { starting = false; }
   }
-  window.PanthoriumLiveVoice = { toggle, stop:cleanup, isActive:() => serverReady };
-  button.addEventListener("click", event => { event.preventDefault(); event.stopImmediatePropagation(); toggle(); }, true);
+  window.PanthoriumLiveVoice = { toggle, stop:cleanup, isActive:() => serverReady, syncChatButton };
+  syncChatButton();
   window.addEventListener("pagehide", () => cleanup());
 })();
 

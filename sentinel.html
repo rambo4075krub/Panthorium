@@ -81,12 +81,18 @@
             transition: width 0.3s ease;
         }
         .boot-status { margin-top: 16px; font-size: 12px; color: var(--text-dim); }
+        #global-voice[hidden] { display: none !important; }
         #global-voice { position: fixed; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(env(safe-area-inset-bottom, 0px) + max(2px, calc((var(--taskbar-h) - 48px) / 2))); z-index: 10020; width: 48px; height: 48px; border: 1px solid var(--accent); border-radius: 50%; background: rgba(5,18,24,.9); color: var(--accent); font-size: 22px; cursor: pointer; box-shadow: 0 0 18px rgba(0,255,204,.25); }
         #global-voice.listening { background: var(--danger); border-color: #ff9aaa; color: #fff; animation: pulse-mic 1s infinite; }
         #global-voice.processing { border-color: #ffd166; color: #ffd166; }
-        #voice-status-box { display: grid; gap: 4px; padding: 8px 12px 0; pointer-events: none; }
-        .voice-status-row { min-height: 22px; padding: 3px 10px; border: 1px solid rgba(120,220,255,.18); border-radius: 6px; background: rgba(2,10,18,.72); color: #9fb5c8; font: 12px/1.3 Consolas, monospace; text-align: center; opacity: .72; }
-        .voice-status-row.active { color: var(--accent); border-color: rgba(0,255,204,.48); opacity: 1; }
+
+
+        html[data-desktop-shell="true"] .window.maximized > .window-titlebar {
+            -webkit-app-region: drag;
+        }
+        html[data-desktop-shell="true"] .window-controls {
+            -webkit-app-region: no-drag;
+        }
 
         /* ========== LOGIN ========== */
         #login-screen {
@@ -884,7 +890,7 @@
 </head>
 <body>
     <video id="faceVideo" autoplay muted playsinline></video>
-    <button id="global-voice" type="button" aria-label="สั่งงานด้วยเสียง" title="กดเพื่อพูด">🎤</button>
+    <button id="global-voice" type="button" hidden aria-hidden="true" tabindex="-1"></button>
 
     <!-- BOOT -->
     <div id="boot-screen">
@@ -900,7 +906,7 @@
 
     <!-- DESKTOP -->
     <div id="desktop">
-        <div id="version-badge" aria-label="เวอร์ชัน">15.0.8</div>
+        <div id="version-badge" aria-label="เวอร์ชัน">15.0.9</div>
         <canvas id="bg-canvas"></canvas>
         <div id="orb-system-notice" class="orb-system-notice" role="status" aria-live="off" aria-atomic="true" aria-label="สถานะระบบ"></div>
         <section id="orb-transcript" tabindex="0" role="region" aria-label="ข้อความประกอบเสียงตอบของ AI">
@@ -969,10 +975,11 @@
         if (/^https?:$/.test(window.location.protocol)) return window.location.origin;
         return "https://panthorium-backend-staging-124818950958.asia-southeast1.run.app";
     }
+    if (window.panthoriumDesktop?.isElectron) document.documentElement.dataset.desktopShell = "true";
     const OS = {
         // Web OS shell build (shown in About). Browser app version is releaseVersion.
         version: "1.1.0",
-        releaseVersion: "15.0.8",
+        releaseVersion: "15.0.9",
         state: {
             booted: false,
             loggedIn: false,
@@ -3368,19 +3375,17 @@
                 <div class="chat-messages" id="chat-messages">
                     <div class="msg ai">สวัสดี ฉันคือ Sentinel AI ผู้ช่วยของ Panthorium OS<br>มีอะไรให้ช่วยไหม?</div>
                 </div>
-                <div id="voice-status-box" aria-live="polite" aria-label="สถานะคำสั่งเสียง">
-                    <div class="voice-status-row" data-voice-status="listening">กำลังฟัง</div>
-                    <div class="voice-status-row" data-voice-status="processing">กำลังประมวลผล</div>
-                    <div class="voice-status-row" data-voice-status="error">ไม่รองรับคำสั่ง / ไม่ตอบสนอง</div>
-                </div>
                 <div class="chat-input-area">
-                    <button class="chat-mic" id="chat-mic" title="พูด">🎤</button>
+                    <button class="chat-mic" id="chat-mic" type="button" aria-label="เริ่มพูดกับ Sentinel AI" aria-pressed="false" title="พูด">🎤</button>
                     <input class="chat-input" id="chat-input" placeholder="พิมพ์ข้อความหรือใช้เสียง..." />
                     <button class="chat-send" id="chat-send">➤</button>
                 </div>
             </div>
         `;
-        createWindow("sentinel", "Sentinel AI", html, { width: 440, height: 520 });
+        createWindow("sentinel", "Sentinel AI", html, { width: 440, height: 520,
+            onClose: () => window.PanthoriumLiveVoice?.stop?.()
+        });
+        window.PanthoriumLiveVoice?.syncChatButton?.();
 
         const input = $("chat-input");
         const sendBtn = $("chat-send");
@@ -3394,6 +3399,7 @@
             speechInterruptedByUser = false;
             sendBusy = true;
             window.PanthoriumVoice?.pause();
+            if (window.PanthoriumLiveVoice?.isActive?.()) window.PanthoriumLiveVoice.stop();
             unlockVoiceAudio();
             try { window.speechSynthesis?.resume(); } catch (_) {}
             input.value = "";
@@ -3672,7 +3678,8 @@
 
         micBtn.onclick = async () => {
             if (document.body.dataset.aiMode === "gemini-live-only") {
-                await window.PanthoriumLiveVoice?.toggle?.();
+                if (!window.PanthoriumLiveVoice) { toast("ระบบเสียงกำลังโหลด กรุณาลองอีกครั้ง"); return; }
+                await window.PanthoriumLiveVoice.toggle();
                 return;
             }
             if (aiSpeechActive) stopSentinelSpeech();
