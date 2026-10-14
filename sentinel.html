@@ -2865,7 +2865,8 @@
 
     // ---------- Window Manager ----------
     function createWindow(id, title, contentHTML, opts = {}) {
-        window.PanthoriumWindow.create({ ...opts, id, title, content: contentHTML, legacyContent: true });
+        const fullscreenOnOpen = id !== "calculator" && opts.fullscreenOnOpen !== false;
+        window.PanthoriumWindow.create({ ...opts, id, title, content: contentHTML, legacyContent: true, fullscreenOnOpen });
         return OS.windows.get(id);
     }
 
