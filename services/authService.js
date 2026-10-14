@@ -1,3 +1,4 @@
+const founderAccount = require("./founderAccount");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
@@ -46,6 +47,7 @@ class AuthService {
     if (!user) return null;
     return {
       id: user.id,
+      founderProtected: founderAccount.isFounderAccount(user.id),
       username: user.username,
       email: user.email || null,
       emailVerifiedAt: user.emailVerifiedAt || null,
@@ -117,6 +119,7 @@ class AuthService {
   }
 
   async deleteManagedUser(id, actorId) {
+    founderAccount.assertDeletable(id);
     if (id === actorId) throw new Error("cannot_delete_self");
     const existing = await this.repository.findUserById(id);
     if (!existing) throw new Error("user_not_found");

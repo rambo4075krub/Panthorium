@@ -207,6 +207,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
       await authService.deleteManagedUser(req.params.id, req.user.sub);
       res.json({ ok: true });
     } catch (error) {
+      if(error.message==="founder_account_protected")return res.status(403).json({ok:false,error:error.message});
       if (error.message === "user_not_found") return res.status(404).json({ ok: false, error: error.message });
       if (["cannot_delete_self", "cannot_delete_administrator"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
       next(error);
