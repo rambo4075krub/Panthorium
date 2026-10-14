@@ -129,7 +129,7 @@ jobs:
           grep -q 'data-gemini-live-enabled="true"' "$RUNNER_TEMP/staging-home.html"
           # Verify the running revision serves the files that passed the DOM and
           # routing tests, rather than treating a green health check as UI proof.
-          for asset in panthorium-window-base.css panthorium-window-base.js admin-mailbox-ui.js voice-window-catalog.js external-apps-ui.js voice-command-client.js live-voice-client.js voice-identity-ui.js phase2-auth.js ai-stream-client.js; do
+          for asset in access-shell-ui.js panthorium-window-base.css panthorium-window-base.js admin-mailbox-ui.js voice-window-catalog.js external-apps-ui.js voice-command-client.js live-voice-client.js voice-identity-ui.js phase2-auth.js ai-stream-client.js; do
             curl --fail --silent --show-error "$URL/$asset" -o "$RUNNER_TEMP/deployed-$asset"
             cmp "$asset" "$RUNNER_TEMP/deployed-$asset"
           done

@@ -1,14 +1,17 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { JSDOM } = require('jsdom');
+const { JSDOM, VirtualConsole } = require('jsdom');
 const source = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const admin = { roles: ['administrator'], permissions: ['chat', 'settings', 'system:read', 'sentinel:command'] };
 const guest = { roles: ['guest'], permissions: ['chat', 'system:read'] };
 const regularUser = { roles: [], permissions: ['chat', 'system:read', 'settings', 'sentinel:command'] };
 
 async function scenario(role, desktop, legacy = false, adminEntry = role === 'admin') {
-  const dom = new JSDOM(source('sentinel.html'), { url: 'https://panthorium.net' + (adminEntry ? '/admin' : '/'), runScripts: 'outside-only', pretendToBeVisual: true });
+  let restarts = 0;
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on('jsdomError', error => { if (error.message.includes('navigation')) restarts++; else throw error; });
+  const dom = new JSDOM(source('sentinel.html'), { url: 'https://panthorium.net' + (adminEntry ? '/admin' : '/'), runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole });
   const w = dom.window;
   let manual = 0, logouts = 0, available = false, fail = false;
   w.OS = { state: { user: role === 'admin' ? admin : role === 'user' ? regularUser : guest }, windows: new Map() };
@@ -64,17 +67,17 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
       assert(w.document.getElementById('btn-restart'));
     }
     if (desktop) {
-      if (role === 'admin') {
-        assert.equal(w.document.getElementById('panthorium-browser-download'), null, 'no installer hyperlink inside admin browser');
+      {
+        assert.equal(w.document.getElementById('panthorium-browser-download'), null, 'no installer hyperlink inside any installed browser');
         const update = w.document.getElementById('panthorium-browser-update');
-        assert.equal(update.textContent, 'บราวเซอร์เป็นเวอร์ชั่นปัจจุบัน');
+        assert.equal(update.textContent, 'ปัจจุบันเป็นเวอร์ชันล่าสุดแล้ว');
         assert.equal(manual, 0, 'checking status must not invoke an installer');
         available = true;
         await w.PanthoriumAccessShell.refreshUpdateStatus(true);
-        assert.equal(update.textContent, 'โปรดอัพเดทบราวเซอร์');
+        assert.equal(update.textContent, 'อัปเดต Panthorium Browser');
         await update.onclick();
         assert.equal(manual, 1);
-        assert.equal(update.textContent, 'โปรดอัพเดทบราวเซอร์', 'deferring an update must not claim it is installed');
+        assert.equal(update.textContent, 'อัปเดต Panthorium Browser', 'deferring an update must not claim it is installed');
         fail = true;
         await w.PanthoriumAccessShell.refreshUpdateStatus(true);
         assert.equal(update.dataset.state, 'unknown', 'offline does not mean current');
@@ -85,10 +88,10 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
         assert.equal(w.document.getElementById('btn-login'), null);
         assert.equal(w.document.getElementById('btn-logout').textContent, '🚪 ออกจากระบบ');
         assert.deepEqual([...w.document.querySelectorAll('#sm-apps > *')].map(el => el.querySelector('span')?.textContent.trim() || el.textContent.trim()), ['Sentinel AI', 'ลงทะเบียน']);
-        assert.equal(w.document.getElementById('panthorium-browser-download').textContent, 'ดาวน์โหลด Panthorium Browser');
+        assert.equal(w.document.getElementById('panthorium-browser-download'), null);
         w.document.getElementById('btn-logout').onclick();
         assert.equal(logouts, 1);
-        assert.equal(w.document.getElementById('panthorium-browser-update'), null);
+        assert(w.document.getElementById('panthorium-browser-update'));
       }
     } else {
       assert.equal(w.document.getElementById('panthorium-browser-update'), null);
@@ -101,6 +104,19 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
         assert.equal(w.document.getElementById('panthorium-browser-download').textContent, 'ดาวน์โหลด Panthorium Browser');
       }
     }
+    const restart = w.document.getElementById('btn-restart');
+    assert(restart, 'every role has a restart button');
+    assert.notEqual(w.getComputedStyle(restart).display, 'none', 'restart is visible for every role');
+    assert.equal(w.document.querySelectorAll('#btn-restart').length, 1);
+    let stoppedVoice = 0;
+    w.PanthoriumLiveVoice = { stop: () => { stoppedVoice++; } };
+    w.document.getElementById('start-menu').classList.add('open');
+    const previousLogouts = logouts;
+    restart.click();
+    assert.equal(stoppedVoice, 1, 'restart stops the active voice session');
+    assert.equal(restarts, 1, 'restart reloads the shell once');
+    assert.equal(logouts, previousLogouts, 'restart preserves the signed-in session');
+    assert(!w.document.getElementById('start-menu').classList.contains('open'));
     const forbidden = w.document.createElement('div'); forbidden.id = 'phase4-ai-dashboard'; w.document.body.appendChild(forbidden);
     w.OS.state.user = guest;
     w.PanthoriumAccessShell.sync();
@@ -117,6 +133,7 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
   for (const role of ['admin', 'guest', 'user']) for (const desktop of [true, false]) await scenario(role, desktop);
   await scenario('guest', true, true);
   await scenario('admin', true, true);
+  await scenario('user', true, true);
   await scenario('guest', true, false, true);
   await scenario('guest', false, false, true);
   console.log('Access shell: Guest/Admin role checks at / and /admin; 18 admin icons; Guest Voice Identity Start Menu; current/new/offline update status; installed 15.0.3 compatibility');
