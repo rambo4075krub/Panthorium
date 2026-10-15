@@ -33,6 +33,8 @@ const read = name => fs.readFileSync(name, 'utf8');
   root.querySelector('#agent-close').onclick=()=>{closed++;api.close('sentinel-agent');};
   w.document.body.append(root); manager.registerExternalWindow('sentinel-agent','Sentinel Agent',root,{fullscreenOnOpen:false});
   assert.equal(root.querySelector('.pt-app-content textarea'),input);
+  assert.equal(root.getAttribute('role'),'dialog');
+  root.focus();assert.equal(w.document.activeElement,root,'external windows accept keyboard focus');
   root.querySelector('#agent-history').click(); assert.equal(history,1);
   assert(root.querySelector('#agent-close').hidden);
   assert.equal(root.querySelectorAll('.pt-sidebar').length,1);

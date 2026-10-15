@@ -372,6 +372,9 @@
 
     element.classList.add('panthorium-window', 'panthorium-managed-window');
     element.dataset.id = id;
+    element.setAttribute('role', 'dialog');
+    element.setAttribute('aria-label', title || 'Workspace');
+    element.tabIndex = -1;
 
     if (store.get(id)?.el === element && element.querySelector(':scope > .window-titlebar')) return store.get(id);
     const previous = store.get(id);
