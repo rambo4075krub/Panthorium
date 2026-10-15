@@ -89,6 +89,7 @@
   function apply(root) {
     if (!root || root.nodeType !== 1) return;
     root.dataset.panthoriumTheme = 'reference-glass';
+    window.PanthoriumWorkspace?.apply(root);
     if (root.classList.contains('window')) return;
     // External apps put their heading/toolbar first. Only mark a verified header,
     // never the entire content wrapper, so business layouts remain intact.

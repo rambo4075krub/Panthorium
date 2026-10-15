@@ -14,7 +14,8 @@
       button.setAttribute("aria-pressed", String(active));
       button.classList.toggle("listening", active);
       button.classList.toggle("processing", mode === "processing");
-      button.textContent = active ? "⏹" : "🎤";
+      if (id === 'chat-mic' && window.PanthoriumWorkspace) button.innerHTML = window.PanthoriumWorkspace.icon(active ? 'stop' : 'mic');
+      else button.textContent = active ? "⏹" : "🎤";
     }
   }
   let socket = null;

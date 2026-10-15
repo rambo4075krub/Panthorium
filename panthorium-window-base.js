@@ -12,7 +12,7 @@
  *     sidebar: htmlString,         // optional
  *     width: 960,
  *     height: 640,
- *     fullscreenOnOpen: true,
+ *     fullscreenOnOpen: false,
  *     onClose: () => {}
  *   });
  */
@@ -24,7 +24,7 @@
     height: 620,
     minWidth: 300,
     minHeight: 220,
-    fullscreenOnOpen: true,
+    fullscreenOnOpen: false,
     animate: true,
     className: ''
   };
@@ -79,9 +79,9 @@
     const controls = document.createElement('div');
     controls.className = 'window-controls';
     controls.innerHTML = `
-      <button type="button" class="win-btn close" title="ปิด" aria-label="ปิด"></button>
-      <button type="button" class="win-btn min" title="ย่อ" aria-label="ย่อ"></button>
-      <button type="button" class="win-btn max" title="ขยาย / คืนขนาด" aria-label="ขยาย"></button>
+      <button type="button" class="win-btn min" aria-keyshortcuts="Alt+Shift+M" title="ย่อ · Alt+Shift+M" aria-label="ย่อหน้าต่าง"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+      <button type="button" class="win-btn max" aria-keyshortcuts="Alt+Shift+X" title="ขยาย / คืนขนาด · Alt+Shift+X" aria-label="ขยายหรือคืนขนาดหน้าต่าง"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="1"/></svg></button>
+      <button type="button" class="win-btn close" aria-keyshortcuts="Alt+Shift+W" title="ปิด · Alt+Shift+W" aria-label="ปิดหน้าต่าง"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
     `;
 
     bar.appendChild(titleEl);
@@ -94,8 +94,8 @@
     let ox = 0, oy = 0;
 
     titlebar.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('.win-btn')) return;
-      if (['maximized', 'panthorium-window-fullscreen', 'pw-maximized-workspace'].some(name => winEl.classList.contains(name))) return;
+      if (e.target.closest('button, input, a')) return;
+      if (['maximized', 'panthorium-window-fullscreen', 'pw-maximized-workspace', 'pt-snapped'].some(name => winEl.classList.contains(name))) return;
       dragging = true;
       ox = e.clientX - winEl.offsetLeft;
       oy = e.clientY - winEl.offsetTop;
@@ -122,7 +122,7 @@
     let startX, startY, startW, startH;
 
     handle.addEventListener('pointerdown', (e) => {
-      if (['maximized', 'panthorium-window-fullscreen', 'pw-maximized-workspace'].some(name => winEl.classList.contains(name))) return;
+      if (['maximized', 'panthorium-window-fullscreen', 'pw-maximized-workspace', 'pt-snapped'].some(name => winEl.classList.contains(name))) return;
       e.preventDefault();
       resizing = true;
       startX = e.clientX;
@@ -178,10 +178,13 @@
 
   function setMode(id, mode) {
     const rec = getStore().get(id);
-    if (!rec?.el || !['normal', 'maximized', 'fullscreen'].includes(mode)) return false;
+    if (!rec?.el || !['normal', 'maximized', 'fullscreen', 'left', 'right'].includes(mode)) return false;
     const el = rec.el;
-    if (rec._normalStyle === undefined) rec._normalStyle = el.dataset.panthoriumWindowedStyle ?? el.getAttribute('style') ?? '';
-    el.classList.remove('maximized', 'panthorium-window-fullscreen', 'pw-maximized-workspace');
+    const expanded = ['maximized', 'panthorium-window-fullscreen', 'pw-maximized-workspace', 'pt-snapped'].some(name => el.classList.contains(name));
+    if (rec._normalStyle === undefined || (!expanded && mode !== 'normal')) rec._normalStyle = el.getAttribute('style') || '';
+    el.classList.remove('maximized', 'panthorium-window-fullscreen', 'pw-maximized-workspace', 'pt-snapped');
+    delete el.dataset.ptSnap;
+    if (mode === 'left' || mode === 'right') { el.classList.add('pt-snapped'); el.dataset.ptSnap = mode; }
     if (mode === 'normal') el.setAttribute('style', rec._normalStyle);
     if (mode === 'maximized') el.classList.add('pw-maximized-workspace');
     if (mode === 'fullscreen') el.classList.add(rec.external ? 'panthorium-window-fullscreen' : 'maximized');
@@ -195,7 +198,7 @@
   function toggleMaximize(id) {
     const rec = getStore().get(id);
     if (!rec?.el) return;
-    const expanded = ['maximized', 'panthorium-window-fullscreen', 'pw-maximized-workspace'].some(name => rec.el.classList.contains(name));
+    const expanded = ['maximized', 'panthorium-window-fullscreen', 'pw-maximized-workspace', 'pt-snapped'].some(name => rec.el.classList.contains(name));
     return setMode(id, expanded ? 'normal' : 'maximized');
   }
 
@@ -239,10 +242,11 @@
       ? opts.fullscreenOnOpen
       : (id !== 'calculator' && DEFAULTS.fullscreenOnOpen);
 
-    const width = opts.width || Math.min(DEFAULTS.width, window.innerWidth - 40);
-    const height = opts.height || Math.min(DEFAULTS.height, window.innerHeight - 80);
-    const left = opts.left ?? Math.max(20, (window.innerWidth - width) / 2 + (store.size * 22) % 80);
-    const top = opts.top ?? Math.max(20, 48 + (store.size * 22) % 60);
+    const compact = id === 'calculator' || opts.compact === true;
+    const width = compact ? Math.min(opts.width || 440, window.innerWidth - 24) : Math.min(1580, window.innerWidth - 76);
+    const height = compact ? Math.min(opts.height || 560, window.innerHeight - 104) : window.innerHeight - 104;
+    const left = opts.left ?? Math.max(0, (window.innerWidth - width) / 2);
+    const top = opts.top ?? 34;
 
     const win = document.createElement('div');
     win.className = 'panthorium-window window' + (opts.className ? ' ' + opts.className : '');
@@ -315,7 +319,7 @@
 
     // Double-click titlebar to toggle maximize
     titlebar.addEventListener('dblclick', (e) => {
-      if (e.target.closest('.win-btn')) return;
+      if (e.target.closest('button, input, a')) return;
       toggleMaximize(id);
     });
 
@@ -341,6 +345,8 @@
     if (typeof global.updateTaskbar === 'function') {
       try { global.updateTaskbar(); } catch (_) {}
     }
+
+    global.PanthoriumWindowTheme?.apply?.(win);
 
     // Focus after paint
     requestAnimationFrame(() => {
@@ -369,7 +375,7 @@
 
     if (store.get(id)?.el === element && element.querySelector(':scope > .window-titlebar')) return store.get(id);
     const previous = store.get(id);
-    const fullscreen = opts.fullscreenOnOpen !== false && id !== 'calculator';
+    const fullscreen = opts.fullscreenOnOpen === true && id !== 'calculator';
     if (fullscreen) {
       element.classList.add('panthorium-window-fullscreen');
     }
@@ -399,8 +405,17 @@
       });
     }
 
+    if (!fullscreen) {
+      const width = Math.min(1580, window.innerWidth - 76);
+      element.style.inset = 'auto';
+      element.style.width = width + 'px';
+      element.style.height = (window.innerHeight - 104) + 'px';
+      element.style.left = Math.max(0, (window.innerWidth - width) / 2) + 'px';
+      element.style.top = '34px';
+    }
+    element.dataset.panthoriumWindowedStyle = element.getAttribute('style') || '';
     element.style.zIndex = String(getZ());
-    element.style.display = opts.displayMode || previous?.displayMode || 'flex';
+    element.style.display = 'flex';
 
     const record = {
       el: element,
@@ -409,7 +424,7 @@
       minimized: false,
       external: true,
       fullscreen,
-      displayMode: opts.displayMode || previous?.displayMode || 'flex',
+      displayMode: 'flex',
       onClose: opts.onClose || null
     };
     store.set(id, record);
@@ -419,6 +434,7 @@
     if (typeof global.updateTaskbar === 'function') {
       try { global.updateTaskbar(); } catch (_) {}
     }
+    global.PanthoriumWindowTheme?.apply?.(element);
     return record;
   }
 

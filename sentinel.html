@@ -880,6 +880,7 @@
         }
     </style>
     <link rel="stylesheet" href="/panthorium-window-base.css?v=4">
+    <link rel="stylesheet" href="/workspace-ui.css?v=1">
 </head>
 <body>
     <video id="faceVideo" autoplay muted playsinline></video>
@@ -995,9 +996,9 @@
         sentinelOnline: false
     };
 
-    const WINDOW_PREFERENCES_KEY = "panthorium.window.preferences.v1";
+    const WINDOW_PREFERENCES_KEY = "panthorium.window.preferences.v2";
     const DEFAULT_WINDOW_PREFERENCES = Object.freeze({
-        fullscreenOnOpen: true,
+        fullscreenOnOpen: false,
         minimizeToStartMenu: true,
         preserveStateUntilClose: true,
         landscapeEdgeToEdge: true
@@ -1006,7 +1007,7 @@
         try {
             const saved = JSON.parse(localStorage.getItem(WINDOW_PREFERENCES_KEY) || "{}");
             return Object.fromEntries(Object.keys(DEFAULT_WINDOW_PREFERENCES).map(key => [
-                key, key === "fullscreenOnOpen" ? true : typeof saved[key] === "boolean" ? saved[key] : DEFAULT_WINDOW_PREFERENCES[key]
+                key, typeof saved[key] === "boolean" ? saved[key] : DEFAULT_WINDOW_PREFERENCES[key]
             ]));
         } catch (_) { return { ...DEFAULT_WINDOW_PREFERENCES }; }
     }
@@ -1029,7 +1030,7 @@
     window.matchMedia?.("(display-mode: fullscreen)").addEventListener?.("change", syncImmersiveMarker);
     document.addEventListener("click", event => {
         const launcher = event.target?.closest?.(".sm-app[data-app-id], #desktop-icons [data-app-id]");
-        if (!launcher) return;
+        if (!launcher || !windowPreferences.fullscreenOnOpen) return;
         if (isNativeAndroidShell() || isFullscreenDisplayMode()) { syncImmersiveMarker(); return; }
         if (document.fullscreenElement || !document.documentElement.requestFullscreen) return;
         try {
@@ -1039,7 +1040,7 @@
     }, true);
     function saveWindowPreferences(next = {}) {
         windowPreferences = Object.fromEntries(Object.keys(DEFAULT_WINDOW_PREFERENCES).map(key => [
-            key, key === "fullscreenOnOpen" ? true : typeof next[key] === "boolean" ? next[key] : windowPreferences[key]
+            key, typeof next[key] === "boolean" ? next[key] : windowPreferences[key]
         ]));
         document.documentElement.dataset.windowLandscapeEdgeToEdge = String(windowPreferences.landscapeEdgeToEdge);
         try { localStorage.setItem(WINDOW_PREFERENCES_KEY, JSON.stringify(windowPreferences)); } catch (_) {}
@@ -2845,7 +2846,7 @@
 
     // ---------- Window Manager ----------
     function createWindow(id, title, contentHTML, opts = {}) {
-        const fullscreenOnOpen = id !== "calculator" && opts.fullscreenOnOpen !== false;
+        const fullscreenOnOpen = id !== "calculator" && (opts.fullscreenOnOpen ?? windowPreferences.fullscreenOnOpen);
         window.PanthoriumWindow.create({ ...opts, id, title, content: contentHTML, legacyContent: true, fullscreenOnOpen });
         return OS.windows.get(id);
     }
@@ -3344,7 +3345,7 @@
 
     // ---------- App: Sentinel AI ----------
     function openSentinel() {
-        const html = `
+        const html = window.PanthoriumWorkspace?.chatMarkup?.() || `
             <div class="chat-container">
                 <div class="chat-messages" id="chat-messages">
                     <div class="msg ai">สวัสดี ฉันคือ Sentinel AI ผู้ช่วยของ Panthorium OS<br>มีอะไรให้ช่วยไหม?</div>
@@ -3377,6 +3378,8 @@
             unlockVoiceAudio();
             try { window.speechSynthesis?.resume(); } catch (_) {}
             input.value = "";
+            input.style.height = "";
+            sendBtn.disabled = true;
             appendMsg(text, "user");
             appendMsg("กำลังคิด...", "ai", true);
             try {
@@ -3400,6 +3403,7 @@
                 console.warn("send() failed:", err);
             } finally {
                 sendBusy = false;
+                sendBtn.disabled = false;
                 if (resumeGlobalVoice) window.PanthoriumVoice?.resume();
             }
         }
@@ -3414,7 +3418,13 @@
         }
 
         sendBtn.onclick = send;
-        input.onkeydown = (e) => { if (e.key === "Enter") send(); };
+        input.onkeydown = (e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); send(); }
+        };
+        input.oninput = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 120) + 'px'; };
+        document.querySelectorAll('[data-pt-prompt]').forEach(button => {
+            button.onclick = () => { input.value = button.dataset.ptPrompt; input.dispatchEvent(new Event('input')); input.focus(); };
+        });
 
         // Voice — Electron uses MediaRecorder + server STT; browsers use Web Speech API
         let recognition = null;
