@@ -1,10 +1,15 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { randomUUID } = require("crypto");
+const { statusFor: actionStatus } = require("./actions");
 const { requireAuth, requirePermission } = require("../middleware/auth");
 const { denyGuest } = require("../middleware/guestAccess");
 const { synthesizeSentinelMaleVoice } = require("../services/sentinelSpeechAudio");
 function validText(value, max) { return typeof value === "string" && value.trim().length > 0 && value.length <= max; }
+function stableActionRequestId(req) {
+  const value = req.body?.requestId || req.headers["idempotency-key"] || req.headers["x-request-id"];
+  return validText(value, 256) && !/[\x00-\x1f\x7f]/.test(value) ? value : null;
+}
 function validChatBody(body = {}) {
   if (!validText(body.message, 8000)) return "invalid_message";
   if (body.sessionId != null && (typeof body.sessionId !== "string" || body.sessionId.length > 120)) return "invalid_session_id";
@@ -174,12 +179,47 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
   router.get("/agent/jobs/:jobId", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { if (!validText(req.params.jobId, 80)) return res.status(400).json({ ok: false, error: "invalid_job_id" }); const job = await agentScheduler.get(req.user.sub, req.params.jobId); if (!job) return res.status(404).json({ ok: false, error: "agent_job_not_found" }); res.json({ ok: true, job }); } catch (error) { next(error); } });
   router.post("/agent/jobs", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { const { request, message, provider, runAt } = req.body || {}; const input = request || message; if (!validText(input, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" }); const result = await agentScheduler.schedule({ user: req.user, request: input, provider, runAt, requestId: req.requestId }); if (!result.ok) return res.status(400).json(result); res.status(201).json(result); } catch (error) { next(error); } });
   router.delete("/agent/jobs/:jobId", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { if (!validText(req.params.jobId, 80)) return res.status(400).json({ ok: false, error: "invalid_job_id" }); const result = await agentScheduler.cancel({ user: req.user, jobId: req.params.jobId, requestId: req.requestId }); if (result.error === "agent_job_not_found") return res.status(404).json(result); if (!result.ok) return res.status(409).json(result); res.json(result); } catch (error) { next(error); } });
-  router.post("/agent/execute", auth, agentLimiter, async (req, res, next) => { try { const { toolId, args, confirmed } = req.body || {}; if (!validText(toolId, 100)) return res.status(400).json({ ok: false, error: "invalid_tool_id" }); if (args != null && (typeof args !== "object" || Array.isArray(args))) return res.status(400).json({ ok: false, error: "invalid_tool_args" }); const result = await agentService.execute({ user: req.user, toolId, args: args || {}, confirmed: confirmed === true, requestId: req.requestId }); if (result.error === "tool_not_found") return res.status(404).json(result); if (result.error === "tool_permission_denied") return res.status(403).json(result); if (result.error === "confirmation_required") return res.status(409).json(result); res.status(result.ok ? 200 : 400).json(result); } catch (error) { next(error); } });
+  router.post("/agent/execute", auth, agentLimiter, async (req, res, next) => {
+    try {
+      const { toolId, args, confirmed, actionId, approvalHash } = req.body || {};
+      if (agentService.ledger && actionId) {
+        if (Object.keys(req.body || {}).some(key => !['actionId','approvalHash'].includes(key))) return res.status(400).json({ ok: false, error: 'invalid_action_confirmation' });
+        const result = await agentService.confirmAction({ user: req.user, actionId, approvalHash });
+        return res.status(actionStatus(result)).json(result);
+      }
+      if (!validText(toolId, 100)) return res.status(400).json({ ok: false, error: "invalid_tool_id" });
+      if (args != null && (typeof args !== "object" || Array.isArray(args))) return res.status(400).json({ ok: false, error: "invalid_tool_args" });
+      if (agentService.ledger && confirmed === true) return res.status(400).json({ ok: false, error: 'immutable_action_confirmation_required' });
+      const tool = agentService.tools?.get(toolId);
+      const requestId = stableActionRequestId(req);
+      if (agentService.ledger && tool && (tool.mutates || agentService.policy.requiresConfirmation(tool)) && !requestId) return res.status(400).json({ ok: false, error: 'action_request_id_required' });
+      const result = await agentService.execute({ user: req.user, toolId, args: args || {}, confirmed: !agentService.ledger && confirmed === true, requestId: requestId || req.requestId });
+      if (result.error === "tool_not_found") return res.status(404).json(result);
+      res.status(actionStatus(result)).json(result);
+    } catch (error) { next(error); }
+  });
   router.post("/agent/plan", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { const { request, message, provider } = req.body || {}; const input = request || message; if (!validText(input, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" }); if (provider != null && !validText(provider, 40)) return res.status(400).json({ ok: false, error: "invalid_provider" }); const result = await agentPlanner.plan({ user: req.user, request: input, preferredProvider: provider?.toLowerCase(), requestId: req.requestId }); res.status(result.ok ? 200 : 422).json(result); } catch (error) { next(error); } });
   router.post("/agent/evaluate", auth, requirePermission("settings"), agentLimiter, async (req, res, next) => { try { const { cases, provider } = req.body || {}; if (!Array.isArray(cases) || !cases.length || cases.length > 20) return res.status(400).json({ ok: false, error: "invalid_planner_evaluation_cases" }); if (provider != null && !validText(provider, 40)) return res.status(400).json({ ok: false, error: "invalid_provider" }); const result = await agentPlanner.evaluateCases({ user: req.user, cases, preferredProvider: provider?.toLowerCase(), requestId: req.requestId }); res.status(result.ok ? 200 : 422).json(result); } catch (error) { next(error); } });
-  router.post("/agent/run", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { const { request, message, provider, confirmed } = req.body || {}; const input = request || message; if (!validText(input, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" }); if (provider != null && !validText(provider, 40)) return res.status(400).json({ ok: false, error: "invalid_provider" }); const result = await agentPlanner.run({ user: req.user, request: input, preferredProvider: provider?.toLowerCase(), confirmed: confirmed === true, requestId: req.requestId }); if (result.confirmationRequired) return res.status(409).json(result); res.status(result.ok ? 200 : 422).json(result); } catch (error) { next(error); } });
-  router.post("/agent/workflow/run", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { const { request, message, provider } = req.body || {}; const input = request || message; if (!validText(input, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" }); if (provider != null && !validText(provider, 40)) return res.status(400).json({ ok: false, error: "invalid_provider" }); const result = await agentWorkflow.run({ user: req.user, request: input, preferredProvider: provider?.toLowerCase(), requestId: req.requestId }); if (result.confirmationRequired) return res.status(409).json(result); res.status(result.ok ? 200 : 422).json(result); } catch (error) { next(error); } });
-  router.post("/agent/workflow/:workflowId/confirm", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { if (!validText(req.params.workflowId, 80)) return res.status(400).json({ ok: false, error: "invalid_workflow_id" }); const result = await agentWorkflow.confirm({ user: req.user, workflowId: req.params.workflowId, requestId: req.requestId }); if (result.error === "workflow_not_found") return res.status(404).json(result); if (result.error === "workflow_permission_denied") return res.status(403).json(result); if (result.confirmationRequired) return res.status(409).json(result); res.status(result.ok ? 200 : 422).json(result); } catch (error) { next(error); } });
+  router.post("/agent/run", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => {
+    try {
+      const { request, message, provider, confirmed, actionId, approvalHash } = req.body || {};
+      if (agentService.ledger && actionId) {
+        if (Object.keys(req.body || {}).some(key => !['actionId','approvalHash'].includes(key))) return res.status(400).json({ ok: false, error: 'invalid_action_confirmation' });
+        const result = await agentPlanner.run({ user: req.user, actionId, approvalHash });
+        return res.status(actionStatus(result.execution || result)).json(result);
+      }
+      const input = request || message;
+      if (!validText(input, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" });
+      if (provider != null && !validText(provider, 40)) return res.status(400).json({ ok: false, error: "invalid_provider" });
+      const requestId = stableActionRequestId(req);
+      if (agentService.ledger && (!requestId || confirmed === true)) return res.status(400).json({ ok: false, error: confirmed === true ? 'immutable_action_confirmation_required' : 'action_request_id_required' });
+      const result = await agentPlanner.run({ user: req.user, request: input, preferredProvider: provider?.toLowerCase(), confirmed: !agentService.ledger && confirmed === true, requestId: requestId || req.requestId });
+      if (result.confirmationRequired) return res.status(409).json(result);
+      res.status(result.ok ? 200 : actionStatus(result.execution || result)).json(result);
+    } catch (error) { next(error); }
+  });
+  router.post("/agent/workflow/run", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { const { request, message, provider } = req.body || {}; const input = request || message; if (!validText(input, 8000)) return res.status(400).json({ ok: false, error: "invalid_agent_request" }); if (provider != null && !validText(provider, 40)) return res.status(400).json({ ok: false, error: "invalid_provider" }); const requestId = stableActionRequestId(req); if (agentService.ledger && !requestId) return res.status(400).json({ ok: false, error: 'action_request_id_required' }); const result = await agentWorkflow.run({ user: req.user, request: input, preferredProvider: provider?.toLowerCase(), requestId: requestId || req.requestId }); if (result.confirmationRequired) return res.status(409).json(result); res.status(result.ok ? 200 : 422).json(result); } catch (error) { next(error); } });
+  router.post("/agent/workflow/:workflowId/confirm", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { if (!validText(req.params.workflowId, 80)) return res.status(400).json({ ok: false, error: "invalid_workflow_id" }); if (agentService.ledger && Object.keys(req.body || {}).some(key => !['actionId','approvalHash'].includes(key))) return res.status(400).json({ ok: false, error: 'invalid_action_confirmation' }); const result = await agentWorkflow.confirm({ user: req.user, workflowId: req.params.workflowId, requestId: req.requestId, actionId: req.body?.actionId, approvalHash: req.body?.approvalHash }); if (result.error === "workflow_not_found") return res.status(404).json(result); if (result.error === "workflow_permission_denied") return res.status(403).json(result); if (result.confirmationRequired) return res.status(409).json(result); res.status(result.ok ? 200 : 422).json(result); } catch (error) { next(error); } });
   router.post("/agent/workflow/:workflowId/cancel", auth, requirePermission("chat"), agentLimiter, async (req, res, next) => { try { if (!validText(req.params.workflowId, 80)) return res.status(400).json({ ok: false, error: "invalid_workflow_id" }); const result = await agentWorkflow.cancel({ user: req.user, workflowId: req.params.workflowId, requestId: req.requestId }); if (result.error === "workflow_not_found") return res.status(404).json(result); if (result.error === "workflow_permission_denied") return res.status(403).json(result); res.json(result); } catch (error) { next(error); } });
   router.get("/conversations", auth, requirePermission("chat"), async (req, res) => res.json({ ok: true, sessions: await sentinel.conversationSessions(req.user.sub, Number(req.query.limit) || 30) }));
   router.get("/conversations/:sessionId", auth, requirePermission("chat"), async (req, res) => { if (!validText(req.params.sessionId, 120)) return res.status(400).json({ ok: false, error: "invalid_session_id" }); res.json({ ok: true, sessionId: req.params.sessionId, messages: await sentinel.conversationHistory(req.user.sub, req.params.sessionId, Number(req.query.limit) || 40) }); });

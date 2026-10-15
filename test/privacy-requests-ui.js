@@ -1,0 +1,81 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { JSDOM } = require('jsdom');
+const pause = () => new Promise(resolve => setTimeout(resolve, 5));
+async function until(fn, message) { for (let n = 0; n < 100; n++) { if (fn()) return; await pause(); } throw Error(message); }
+
+async function main() {
+  const dom = new JSDOM('<div id="desktop-icons">unchanged</div><div id="orb">unchanged</div>', { url: 'https://panthorium.test/account-deletion', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w = dom.window, d = w.document;
+  w.OS = { config: { backendUrl: '', accessToken: 'token' }, state: { user: { id: 'guest:1', roles: ['guest'] } } };
+  let logins = 0, request = null, fail = false, release = null;
+  const requests = [];
+  w.PanthoriumAccounts = { openLogin() { logins++; } };
+  w.PanthoriumAuth = { refreshSession: async () => true };
+  const result = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
+  w.fetch = async (url, options = {}) => {
+    if (url.endsWith('/api/policies/operator')) return result({ ok: true, name: 'Panthorium' });
+    assert.equal(options.headers.Authorization, 'Bearer token');
+    const body = options.body ? JSON.parse(options.body) : null; requests.push({ url, method: options.method, body });
+    if (fail) return result({ ok: false, error: 'temporarily_unavailable' }, 503);
+    if (url.endsWith('/account-deletion')) {
+      if (options.method === 'POST') request = { id: 'delete-1', status: 'requested', createdAt: new Date().toISOString() };
+      return result({ ok: true, request, automaticErasure: false, manualProcessing: true });
+    }
+    if (body.details === 'hold report') return new Promise(resolve => { release = () => resolve(result({ ok: true, request: { id: 'previous-account-report', status: 'requested' } })); });
+    return result({ ok: true, request: { id: 'report-1', status: 'requested' } });
+  };
+  w.eval(fs.readFileSync(path.join(__dirname, '..', 'privacy-policy-ui.js'), 'utf8'));
+  d.dispatchEvent(new w.Event('DOMContentLoaded'));
+  const q = s => d.querySelector('#panthorium-privacy-policy ' + s);
+  assert.equal(d.getElementById('panthorium-privacy-policy').dataset.selectedPolicy, 'account-deletion', 'public deletion route opens existing policy window');
+  assert.equal(requests.length, 0, 'public visitor is not given private request status');
+  q('[data-deletion-login]').click(); assert.equal(logins, 1);
+  w.OS.state.user = { id: 'user-1', roles: ['user'] }; w.dispatchEvent(new w.Event('panthorium:auth-changed'));
+  await until(() => q('.pp-request-status').textContent.includes('ยังไม่มี'), 'signed-in request status missing');
+  q('[data-deletion-reason]').value = 'ขอยุติการใช้บริการ';
+  w.dispatchEvent(new w.Event('panthorium:auth-changed'));
+  assert.equal(q('[data-deletion-reason]').value, 'ขอยุติการใช้บริการ', 'same-account refresh preserves request form');
+  const before = requests.length;
+  q('[data-deletion-form]').dispatchEvent(new w.Event('submit', { cancelable: true }));
+  assert.equal(requests.length, before, 'explicit acknowledgement required');
+  fail = true; q('[data-deletion-acknowledge]').checked = true;
+  q('[data-deletion-form]').dispatchEvent(new w.Event('submit', { cancelable: true }));
+  await until(() => q('.pp-request-status').textContent.includes('ยังไม่ได้รับ'), 'failure state missing');
+  assert.equal(q('[data-deletion-reason]').value, 'ขอยุติการใช้บริการ');
+  fail = false; q('[data-deletion-form]').dispatchEvent(new w.Event('submit', { cancelable: true }));
+  await until(() => q('.pp-request-status').textContent.includes('รับคำขอแล้ว'), 'request receipt missing');
+  assert.deepEqual(requests.at(-1).body, { confirmation: 'DELETE_REQUEST', reason: 'ขอยุติการใช้บริการ' });
+  assert(q('[data-deletion-receipt]').textContent.includes('delete-1'));
+  assert.equal(w.getComputedStyle(q('[data-deletion-form]')).display, 'none', 'pending request hides new-submission form');
+  assert(!q('.pp-request-status').textContent.includes('ลบแล้ว'), 'request receipt must never claim deletion completed');
+  request = { ...request, status: 'completed', resolution: '<img src=x onerror=alert(1)> ข้อมูลบางรายการต้องเก็บต่อ' };
+  q('[data-deletion-refresh]').click();
+  await until(() => q('.pp-request-status').textContent.includes('ปิดคำขอ'), 'manual resolution state missing');
+  assert.equal(q('[data-deletion-receipt] img'), null, 'resolution is plain text');
+  assert(q('[data-deletion-receipt]').textContent.includes('ข้อมูลบางรายการ'));
+  w.PanthoriumPrivacyPolicy.openAIReport({ sourceType: 'cloud_app_run', sourceId: 'owned-run-1' });
+  q('[data-report-category]').value = 'privacy'; q('[data-report-details]').value = 'ข้อมูลไม่ตรงกับที่ให้';
+  q('[data-report-form]').dispatchEvent(new w.Event('submit', { cancelable: true }));
+  await until(() => q('[data-report-status]').textContent.includes('report-1'), 'result report receipt missing');
+  assert.deepEqual(requests.at(-1).body, { sourceType: 'cloud_app_run', sourceId: 'owned-run-1', category: 'privacy', details: 'ข้อมูลไม่ตรงกับที่ให้' });
+  assert(q('[data-report-status]').textContent.includes('ยังไม่ใช่ผลการตรวจสอบ'));
+  assert.equal(w.getComputedStyle(q('[data-report-form]')).display, 'none');
+  w.PanthoriumPrivacyPolicy.openAIReport();
+  const beforeGeneral = requests.length; q('[data-report-form]').dispatchEvent(new w.Event('submit', { cancelable: true }));
+  assert.equal(requests.length, beforeGeneral, 'general report requires details');
+  q('[data-report-details]').value = 'คำตอบเสียงเมื่อสักครู่มีข้อมูลผิด'; q('[data-report-form]').dispatchEvent(new w.Event('submit', { cancelable: true }));
+  await until(() => q('[data-report-status]').textContent.includes('report-1'), 'general report receipt missing');
+  assert.equal(requests.at(-1).body.sourceType, 'general'); assert.equal(requests.at(-1).body.sourceId, undefined);
+  w.PanthoriumPrivacyPolicy.openAIReport(); q('[data-report-details]').value = 'hold report'; q('[data-report-form]').dispatchEvent(new w.Event('submit', { cancelable: true }));
+  await until(() => release, 'pending report missing');
+  w.OS.state.user = { id: 'guest:2', roles: ['guest'] }; w.dispatchEvent(new w.Event('panthorium:auth-changed'));
+  assert.equal(q('[data-report-details]'), null, 'logout clears private report immediately');
+  release(); await pause(); await pause(); assert(!q('[data-ai-report]').textContent.includes('previous-account-report'), 'late report response cannot appear to next account');
+  assert.equal(d.getElementById('desktop-icons').textContent, 'unchanged'); assert.equal(d.getElementById('orb').textContent, 'unchanged');
+  dom.window.close();
+  console.log('Privacy request UI: public route, auth/acknowledgement, manual request status, safe resolution, general/result reporting, errors and account isolation passed');
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

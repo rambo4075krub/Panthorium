@@ -2,12 +2,15 @@ const { getDatabasePool } = require('./databasePool');
 const { randomUUID } = require('crypto');
 
 class AgentJobRepository {
-  constructor({ databaseUrl = '', databaseSslMode = 'disable' } = {}) {
+  constructor({ databaseUrl = '', databaseSslMode = 'disable', requireDatabase = false } = {}) {
+    this.requireDatabase = requireDatabase;
     this.pool = databaseUrl ? getDatabasePool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } }) : null;
     this.memory = new Map();
   }
 
-  async init() {
+  ensureStorage() { if (this.requireDatabase && !this.pool) throw new Error('scheduler_database_required'); }
+
+  async init() { this.ensureStorage();
     if (!this.pool) return;
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS panthorium_agent_jobs (
@@ -67,7 +70,7 @@ class AgentJobRepository {
     });
   }
 
-  async create(input) {
+  async create(input) { this.ensureStorage();
     const item = this.normalize(input);
     if (this.pool) {
       const result = await this.pool.query(`
@@ -81,20 +84,20 @@ class AgentJobRepository {
     this.memory.set(item.jobId, item); return item;
   }
 
-  async get(userId, jobId) {
+  async get(userId, jobId) { this.ensureStorage();
     if (!this.pool) { const item = this.memory.get(String(jobId || '')); return item && item.userId === userId ? item : null; }
     const result = await this.pool.query(`SELECT job_id AS "jobId", user_id AS "userId", user_context AS "userContext", request, provider, run_at AS "runAt", status, workflow_id AS "workflowId", result, error, attempts, locked_at AS "lockedAt", locked_by AS "lockedBy", created_at AS "createdAt", updated_at AS "updatedAt", completed_at AS "completedAt", cancelled_at AS "cancelledAt" FROM panthorium_agent_jobs WHERE job_id=$1 AND user_id=$2`, [jobId, userId]);
     return this.mapRow(result.rows[0]);
   }
 
-  async list(userId, limit = 30) {
+  async list(userId, limit = 30) { this.ensureStorage();
     const safe = Math.min(Math.max(Number(limit) || 30, 1), 100);
     if (!this.pool) return [...this.memory.values()].filter((j) => j.userId === userId).sort((a,b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, safe);
     const result = await this.pool.query(`SELECT job_id AS "jobId", user_id AS "userId", user_context AS "userContext", request, provider, run_at AS "runAt", status, workflow_id AS "workflowId", result, error, attempts, locked_at AS "lockedAt", locked_by AS "lockedBy", created_at AS "createdAt", updated_at AS "updatedAt", completed_at AS "completedAt", cancelled_at AS "cancelledAt" FROM panthorium_agent_jobs WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2`, [userId, safe]);
     return result.rows.map((row) => this.mapRow(row));
   }
 
-  async cancel(userId, jobId) {
+  async cancel(userId, jobId) { this.ensureStorage();
     const now = new Date().toISOString();
     if (!this.pool) {
       const item = this.memory.get(String(jobId || '')); if (!item || item.userId !== userId || !['scheduled','waiting_confirmation'].includes(item.status)) return null;
@@ -104,7 +107,7 @@ class AgentJobRepository {
     return this.mapRow(result.rows[0]);
   }
 
-  async claimDue(workerId, limit = 5) {
+  async claimDue(workerId, limit = 5) { this.ensureStorage();
     const safe = Math.min(Math.max(Number(limit) || 5, 1), 20); const now = Date.now();
     if (!this.pool) {
       const due = [...this.memory.values()].filter((j) => j.status === 'scheduled' && Date.parse(j.runAt) <= now).sort((a,b) => Date.parse(a.runAt)-Date.parse(b.runAt)).slice(0,safe);
@@ -125,31 +128,31 @@ class AgentJobRepository {
     return result.rows.map((row) => this.mapRow(row));
   }
 
-  async finish(jobId, patch = {}) {
+  async finish(jobId, patch = {}) { this.ensureStorage();
     const now = new Date().toISOString();
     if (!this.pool) {
-      const current = this.memory.get(String(jobId || '')); if (!current) return null;
+      const current = this.memory.get(String(jobId || '')); if (!current || !['running','waiting_confirmation'].includes(current.status)) return null;
       const next = { ...current, ...patch, updatedAt: now, lockedAt: null, lockedBy: null }; this.memory.set(current.jobId,next); return next;
     }
     const currentResult = await this.pool.query(`SELECT job_id AS "jobId", user_id AS "userId", user_context AS "userContext", request, provider, run_at AS "runAt", status, workflow_id AS "workflowId", result, error, attempts, locked_at AS "lockedAt", locked_by AS "lockedBy", created_at AS "createdAt", updated_at AS "updatedAt", completed_at AS "completedAt", cancelled_at AS "cancelledAt" FROM panthorium_agent_jobs WHERE job_id=$1`, [jobId]);
-    const current = this.mapRow(currentResult.rows[0]); if (!current) return null; const next = { ...current, ...patch };
-    const result = await this.pool.query(`UPDATE panthorium_agent_jobs SET status=$2,workflow_id=$3,result=$4::jsonb,error=$5,updated_at=NOW(),completed_at=$6,cancelled_at=$7,locked_at=NULL,locked_by=NULL WHERE job_id=$1 RETURNING job_id AS "jobId", user_id AS "userId", user_context AS "userContext", request, provider, run_at AS "runAt", status, workflow_id AS "workflowId", result, error, attempts, locked_at AS "lockedAt", locked_by AS "lockedBy", created_at AS "createdAt", updated_at AS "updatedAt", completed_at AS "completedAt", cancelled_at AS "cancelledAt"`, [jobId,next.status,next.workflowId,JSON.stringify(next.result),next.error,next.completedAt,next.cancelledAt]);
+    const current = this.mapRow(currentResult.rows[0]); if (!current || !['running','waiting_confirmation'].includes(current.status)) return null; const next = { ...current, ...patch };
+    const result = await this.pool.query(`UPDATE panthorium_agent_jobs SET status=$2,workflow_id=$3,result=$4::jsonb,error=$5,updated_at=NOW(),completed_at=$6,cancelled_at=$7,locked_at=NULL,locked_by=NULL WHERE job_id=$1 AND status=$8 AND locked_by IS NOT DISTINCT FROM $9 RETURNING job_id AS "jobId", user_id AS "userId", user_context AS "userContext", request, provider, run_at AS "runAt", status, workflow_id AS "workflowId", result, error, attempts, locked_at AS "lockedAt", locked_by AS "lockedBy", created_at AS "createdAt", updated_at AS "updatedAt", completed_at AS "completedAt", cancelled_at AS "cancelledAt"`, [jobId,next.status,next.workflowId,JSON.stringify(next.result),next.error,next.completedAt,next.cancelledAt,current.status,current.lockedBy]);
     return this.mapRow(result.rows[0]);
   }
 
-  async listWaiting(limit = 50) {
+  async listWaiting(limit = 50) { this.ensureStorage();
     const safe = Math.min(Math.max(Number(limit) || 50,1),100);
     if (!this.pool) return [...this.memory.values()].filter((j) => j.status === 'waiting_confirmation' && j.workflowId).slice(0,safe);
     const result = await this.pool.query(`SELECT job_id AS "jobId", user_id AS "userId", user_context AS "userContext", request, provider, run_at AS "runAt", status, workflow_id AS "workflowId", result, error, attempts, locked_at AS "lockedAt", locked_by AS "lockedBy", created_at AS "createdAt", updated_at AS "updatedAt", completed_at AS "completedAt", cancelled_at AS "cancelledAt" FROM panthorium_agent_jobs WHERE status='waiting_confirmation' AND workflow_id IS NOT NULL ORDER BY updated_at ASC LIMIT $1`, [safe]);
     return result.rows.map((row) => this.mapRow(row));
   }
 
-  async recoverStale(staleMs = 15 * 60 * 1000) {
+  async recoverStale(staleMs = 15 * 60 * 1000) { this.ensureStorage();
     const cutoff = Date.now() - staleMs;
     if (!this.pool) {
-      let count = 0; for (const [id,item] of this.memory.entries()) if (item.status === 'running' && item.lockedAt && Date.parse(item.lockedAt) < cutoff) { this.memory.set(id,{...item,status:'scheduled',lockedAt:null,lockedBy:null,updatedAt:new Date().toISOString()}); count++; } return count;
+      let count = 0; for (const [id,item] of this.memory.entries()) if (item.status === 'running' && item.lockedAt && Date.parse(item.lockedAt) < cutoff) { this.memory.set(id,{...item,status:'failed',error:'scheduled_execution_interrupted_manual_review',completedAt:new Date().toISOString(),lockedAt:null,lockedBy:null,updatedAt:new Date().toISOString()}); count++; } return count;
     }
-    const result = await this.pool.query(`UPDATE panthorium_agent_jobs SET status='scheduled',locked_at=NULL,locked_by=NULL,updated_at=NOW() WHERE status='running' AND locked_at < NOW() - ($1 * INTERVAL '1 millisecond')`, [Math.max(1000,Number(staleMs)||900000)]);
+    const result = await this.pool.query(`UPDATE panthorium_agent_jobs SET status='failed',error='scheduled_execution_interrupted_manual_review',completed_at=NOW(),locked_at=NULL,locked_by=NULL,updated_at=NOW() WHERE status='running' AND locked_at < NOW() - ($1 * INTERVAL '1 millisecond')`, [Math.max(1000,Number(staleMs)||900000)]);
     return result.rowCount || 0;
   }
 }

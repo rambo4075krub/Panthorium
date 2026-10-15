@@ -20,9 +20,15 @@ function createReminderRouter(authService, reminders) {
   });
   router.post('/', auth, requirePermission('chat'), limiter, async (req, res, next) => {
     try {
-      const { kind, title, details, dueAt, timeZone, emailConsent } = req.body || {};
-      const result = await reminders.create({ user: req.user, kind, title, details, dueAt, timeZone, emailConsent });
+      const { kind, title, details, dueAt, timeZone, emailConsent, recurrence } = req.body || {};
+      const result = await reminders.create({ user: req.user, kind, title, details, dueAt, timeZone, emailConsent, recurrence });
       res.status(result.ok ? 201 : statusFor(result)).json(result);
+    } catch (error) { next(error); }
+  });
+  router.post('/:reminderId/snooze', auth, requirePermission('chat'), limiter, async (req, res, next) => {
+    try {
+      const result = await reminders.snooze({ user: req.user, reminderId: req.params.reminderId, dueAt: req.body?.dueAt });
+      res.status(statusFor(result)).json(result);
     } catch (error) { next(error); }
   });
   router.delete('/:reminderId', auth, requirePermission('chat'), limiter, async (req, res, next) => {

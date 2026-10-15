@@ -32,7 +32,7 @@ jobs:
           packages: "platform-tools platforms;android-36 build-tools;36.0.0"
       - name: Install Capacitor
         working-directory: mobile/android
-        run: npm install --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Generate Android project and sync
         working-directory: mobile/android
         run: |

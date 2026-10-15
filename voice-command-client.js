@@ -24,6 +24,9 @@
     function_not_available: 'ฟังก์ชันนี้ยังไม่พร้อมใช้งานในหน้าต่าง',
     workflow_not_found: 'คำสั่งที่รอยืนยันหมดอายุหรือดำเนินการไปแล้ว กรุณาสั่งใหม่',
     workflow_permission_denied: 'ไม่สามารถยืนยันคำสั่งของบัญชีอื่นได้',
+    action_approval_invalid: 'รายละเอียดคำสั่งที่ยืนยันไม่ตรงกับงานบน Cloud กรุณาตรวจงานใหม่',
+    action_confirmation_expired: 'การยืนยันคำสั่งหมดอายุ กรุณาตรวจงานก่อนเริ่มใหม่',
+    action_outcome_unknown: 'ยังไม่ทราบผลคำสั่งบน Cloud กรุณาตรวจสถานะก่อนสั่งซ้ำ',
     unknown_ui_action: 'ยังไม่รองรับคำสั่งหน้าต่างนี้',
     external_popup_blocked: 'เบราว์เซอร์บล็อก popup กรุณากดเปิดเว็บไซต์จริงในหน้าต่าง'
     };
@@ -207,7 +210,12 @@
       return { ok: true, text, confirmationRequired: true };
     }
     if (data.confirmationRequired && data.workflowId && data.pendingStep) {
-      pending = { workflowId: data.workflowId, userId, expiresAt: Date.now() + 10 * 60 * 1000 };
+      const step = data.pendingStep;
+      const expiresAt = step.approvalExpiresAt ? Date.parse(step.approvalExpiresAt) : Date.now() + 10 * 60 * 1000;
+      // Durable approvals reference the server's immutable payload. The client
+      // never recreates or edits tool arguments when confirming a workflow.
+      if (step.actionId && (typeof step.approvalHash !== 'string' || !/^[a-f0-9]{64}$/.test(step.approvalHash) || !Number.isFinite(expiresAt))) return failure('action_approval_invalid');
+      pending = { workflowId: data.workflowId, userId, expiresAt, ...(step.actionId ? { actionId: step.actionId, approvalHash: step.approvalHash } : {}) };
       const text = `คำสั่ง ${data.pendingStep.toolId} ต้องยืนยันก่อนดำเนินการ ตรวจรายละเอียดแล้วพูด ยืนยัน หรือ ยกเลิก`;
       showResult(text, data, data.pendingStep);
       return { ok: true, text, confirmationRequired: true, workflowId: data.workflowId };
@@ -245,6 +253,7 @@
       const cancellation = /^(ยกเลิก|ยกเลิกคำสั่ง|ยกเลิกคำสั่งนี้|cancel)$/.test(normalized);
       let path = '/api/sentinel/command';
       let confirmed = false;
+      let requestBody = null;
       if (confirmation || cancellation) {
         if (!pending || pending.userId !== userId || pending.expiresAt < Date.now()) { pending = null; return failure('workflow_not_found'); }
         if (pending.kind === 'direct') {
@@ -252,6 +261,7 @@
           command = pending.command; pending = null; confirmed = true;
         } else {
           path = `/api/agent/workflow/${encodeURIComponent(pending.workflowId)}/${confirmation ? 'confirm' : 'cancel'}`;
+          requestBody = confirmation && pending.actionId ? { actionId: pending.actionId, approvalHash: pending.approvalHash } : {};
           // Never retry a mutation after a network error; its outcome is unknown.
           pending = null;
         }
@@ -259,7 +269,7 @@
         return { ok: true, text: 'มีคำสั่งรอยืนยัน กรุณาพูด ยืนยัน หรือ ยกเลิก ก่อนสั่งงานถัดไป', confirmationRequired: true };
       }
       const base = (system()?.config?.backendUrl || '').replace(/\/$/, '');
-      const response = await authorizedFetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command, confirmed }), signal: AbortSignal.timeout(30000) });
+      const response = await authorizedFetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody || { command, confirmed }), signal: AbortSignal.timeout(30000) });
       const data = await response.json();
       if (system()?.state?.user?.id !== userId) return failure('authentication_required');
       if (!response.ok && response.status !== 409) return await consume({ ...data, ok: false }, command);

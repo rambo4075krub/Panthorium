@@ -7,6 +7,12 @@ class AgentPolicyService {
     return Object.prototype.hasOwnProperty.call(this.levels, value) ? value : 'low';
   }
 
+  requiresConfirmation(tool = {}) {
+    const risk = this.normalizeRisk(tool.risk);
+    return !!tool.requiresConfirmation || !!tool.mutates || risk === 'high' || risk === 'critical';
+  }
+
+  // `confirmed` is a trusted server decision; AgentService with a ledger ignores model flags.
   evaluate({ user, tool, confirmed = false }) {
     if (!tool) return { ok: false, error: 'tool_not_found' };
     const permissions = new Set(user?.permissions || []);
@@ -14,7 +20,7 @@ class AgentPolicyService {
 
     const risk = this.normalizeRisk(tool.risk);
     const mutates = !!tool.mutates;
-    const requiresConfirmation = !!tool.requiresConfirmation || mutates || risk === 'high' || risk === 'critical';
+    const requiresConfirmation = this.requiresConfirmation(tool);
 
     if (risk === 'critical' && !permissions.has('sentinel:command')) {
       return { ok: false, error: 'tool_privileged_permission_required', risk };
