@@ -17,8 +17,7 @@
 
   function shouldOpenFullscreen(app, options = {}) {
     return app.id !== 'calculator'
-      && app.fullscreenOnOpen !== false
-      && options.fullscreenOnOpen !== false;
+      && (options.fullscreenOnOpen ?? app.fullscreenOnOpen ?? manager.preferences?.fullscreenOnOpen) === true;
   }
 
   function closeAfterAppHandler(id, root) {

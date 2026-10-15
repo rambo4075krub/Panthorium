@@ -33,8 +33,8 @@ assert.match(voiceUi, /!root\.querySelector\('\[data-consent\]'\)\.checked/, 'En
 assert.doesNotMatch(access, /setInterval\(/, 'Access shell must be event-driven, not polling');
 assert.doesNotMatch(layout, /setInterval\(/, 'UI layout must not poll sync loops');
 assert.match(server, /staging-admin-desktop\.js/, 'Server shell must load Desktop Manager V2 directly');
-assert.match(shell, /panthorium\.window\.preferences\.v1/, 'window preferences are persisted in shared storage');
-assert.match(shell, /fullscreenOnOpen:\s*true/, 'all managed app windows open fullscreen by default');
+assert.match(shell, /panthorium\.window\.preferences\.v2/, 'window preferences are persisted in shared storage');
+assert.match(shell, /fullscreenOnOpen:\s*false/, 'reference windows open with a visible desktop frame by default');
 assert.match(shell, /minimizeToStartMenu:\s*true/, 'the shared preference keeps minimized windows in Start Menu');
 assert.match(shell, /preserveStateUntilClose:\s*true/, 'window state persists until explicit close');
 assert.match(shell, /dataset\.panthoriumImmersive/, 'the shell tracks immersive fullscreen state');
