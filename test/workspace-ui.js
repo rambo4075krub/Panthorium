@@ -85,6 +85,13 @@ const read = name => fs.readFileSync(name, 'utf8');
   chat.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
   await new Promise(resolve=>setTimeout(resolve,5));assert.equal(requests,1);assert(!w.document.getElementById('chat-send').disabled);
   assert(w.document.querySelector('#chat-messages').textContent.includes('reply'));
+  // App search mirrors additional shell visibility rules, not just catalog permissions.
+  const menu=w.document.createElement('div');menu.id='sm-apps';
+  menu.innerHTML='<button class="sm-app" data-app-id="sentinel"><span>Sentinel AI</span></button><button class="sm-app" data-app-id="account-login"><span>เข้าสู่ระบบ</span></button>';
+  w.document.body.append(menu);let login=0;menu.lastElementChild.onclick=()=>login++;
+  ui.openPalette();assert(!w.document.getElementById('pt-result-notes'));
+  assert(w.document.getElementById('pt-result-account-login'));ui.launch('account-login');assert.equal(login,1);
+  assert.equal(ui.launch('notes'),false,'palette cannot expose an app the shell has removed');
   w.close();
   console.log('Workspace: shared structure, external cleanup, reference chat, IME, shortcuts, snap/restore, draft preservation and RBAC passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

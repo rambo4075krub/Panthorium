@@ -30,13 +30,26 @@
     return el;
   };
   function availableApps() {
-    return (catalog()?.apps || []).filter(app => app.opener && catalog().allowed(app, user()));
+    const allowed = (catalog()?.apps || []).filter(app => app.opener && catalog().allowed(app, user()));
+    const menu = document.getElementById('sm-apps');
+    if (!menu) return allowed;
+    // Mirror the shell's account/guest visibility rules as well as catalog RBAC.
+    // Search filtering must not change access: the shell keeps filtered buttons in the DOM.
+    return Array.from(menu.querySelectorAll('.sm-app[data-app-id]')).flatMap(button => {
+      const id = button.dataset.appId;
+      const known = catalog()?.apps.find(app => app.id === id);
+      if (known) return allowed.includes(known) ? [known] : [];
+      return [{ id, label:button.dataset.baseLabel || button.querySelector('span:not(.ico)')?.textContent || button.textContent.trim(), launcher:true }];
+    });
   }
   function launch(id) {
     const app = availableApps().find(item => item.id === id);
     if (!app) return false;
     const existing = window.PanthoriumWindowManager?.findByAppId?.(id);
     if (existing) { api()?.focus(existing.id || existing.el.dataset.id); return true; }
+    const launcher = Array.from(document.querySelectorAll('#sm-apps .sm-app[data-app-id]')).find(button => button.dataset.appId === id);
+    if (launcher) { launcher.click(); return true; }
+    if (!app.opener) return false;
     // Resolve only the catalog's fixed allowlist. Recheck permissions on every launch.
     const parts = app.opener.split('.');
     let owner = window;
@@ -117,7 +130,7 @@
     body.prepend(sidebar(root));
     const top = node('div', 'pt-main-top');
     const crumb = node('div', 'pt-breadcrumb'); crumb.append(node('span', '', 'Workspace'), node('span', '', '/'), node('b', '', title));
-    const help = node('button', 'pt-session'); help.type = 'button'; help.innerHTML = icon('keys'); help.append(node('span', '', 'คีย์ลัด')); help.onclick = openHelp;
+    const help = node('button', 'pt-session'); help.type = 'button'; help.setAttribute('aria-label', 'คีย์ลัด'); help.innerHTML = icon('keys'); help.append(node('span', '', 'คีย์ลัด')); help.onclick = openHelp;
     top.append(crumb, help); main.prepend(top);
     if (root.dataset.id === 'sentinel') root.classList.add('pt-chat-window');
   }

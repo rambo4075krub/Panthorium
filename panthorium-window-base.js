@@ -243,8 +243,8 @@
       : (id !== 'calculator' && DEFAULTS.fullscreenOnOpen);
 
     const compact = id === 'calculator' || opts.compact === true;
-    const width = compact ? Math.min(opts.width || 440, window.innerWidth - 24) : Math.min(1580, window.innerWidth - 76);
-    const height = compact ? Math.min(opts.height || 560, window.innerHeight - 104) : window.innerHeight - 104;
+    const width = compact ? Math.min(id === 'calculator' ? 380 : opts.width || 440, window.innerWidth - 24) : Math.min(1580, window.innerWidth - 76);
+    const height = compact ? Math.min(id === 'calculator' ? 640 : opts.height || 560, window.innerHeight - 104) : window.innerHeight - 104;
     const left = opts.left ?? Math.max(0, (window.innerWidth - width) / 2);
     const top = opts.top ?? 34;
 
