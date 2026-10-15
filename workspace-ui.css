@@ -8,7 +8,7 @@
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .window-titlebar { display:flex!important; align-items:center; justify-content:space-between; height:70px!important; min-height:70px!important; padding:0 23px!important; cursor:grab; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .window-titlebar:active { cursor:grabbing; }
 .pt-brand { display:flex; align-items:center; gap:13px; min-width:0; }
-.pt-brand > svg { width:34px!important; height:38px!important; color:#57f5ff; filter:drop-shadow(0 0 10px #1eeaff66); }
+.pt-brand > .pt-brand-logo { width:38px!important; height:42px!important; object-fit:contain; flex-shrink:0; }
 .pt-brand strong { font-size:20px; letter-spacing:.3px; font-weight:600; }
 .pt-brand small { font-size:10px; color:#89a6bf; display:block; letter-spacing:3px; margin-top:4px; max-width:35vw; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
 :where(.pt-shell,.pt-overlay) svg { width:21px; height:21px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
@@ -38,7 +38,7 @@
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-hero { isolation:isolate; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-action { cursor:pointer; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-chat .msg { position:relative; display:table; max-width:calc(100% - 44px); margin:15px 0 15px 44px; padding:17px 20px; border:1px solid #63defb43; border-radius:0 13px 13px 13px; background:linear-gradient(120deg,#0e31435e,#0d1a2c8c); box-shadow:inset 0 1px #befaff0a; line-height:1.8; font-size:13px; white-space:pre-wrap; overflow-wrap:anywhere; color:#c0d3e2; }
-:is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-chat .msg.ai::before { content:'◇'; position:absolute; left:-44px; top:0; width:31px; height:31px; border:1px solid #5ddfe857; border-radius:10px; background:#10364c80; display:grid; place-items:center; color:#57f5ff; font-size:23px; }
+:is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-chat .msg.ai::before { content:''; position:absolute; left:-44px; top:0; width:31px; height:31px; border:1px solid #5ddfe857; border-radius:10px; background:#10364c80 url('/panthorium-logo-sapphire.png') center / 27px 27px no-repeat; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-chat .msg.user { margin-left:auto; margin-right:0; background:#192a3d8c; border-color:#b1cfff25; border-radius:13px 0 13px 13px; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .msg strong { display:block; font-size:10px; color:#74e2ee; font-weight:500; margin-bottom:5px; letter-spacing:.6px; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-composer.chat-input-area { display:block; padding:0; gap:0; background:linear-gradient(120deg,#16364be6,#0b192cfa 65%,#202440df); border:1px solid #77e0ff6a; }
@@ -82,6 +82,7 @@
 .pt-mini-wave{width:100%;height:36px;color:#50d8ec;opacity:.7}
 .pt-profile{display:flex;align-items:center;gap:10px;margin:18px 5px 0}
 .pt-avatar{width:30px;height:30px;display:grid;place-items:center;background:linear-gradient(140deg,#25536d,#242344);border:1px solid #9cdefa40;border-radius:9px;font-size:11px}
+.pt-avatar img{display:block;width:26px;height:26px;object-fit:contain}
 .pt-profile strong{font-size:11px;font-weight:500}
 .pt-profile small{display:block;font-size:9px;color:#6c8b9e;margin-top:3px}
 .pt-main{display:flex;flex-direction:column;min-height:0;position:relative;overflow:hidden}
@@ -175,7 +176,7 @@
  :is(#pt-workspace-specificity,.pt-shell).pt-shell .window-titlebar { padding:0 13px!important; height:62px!important; min-height:62px!important; }
  .pt-brand strong { font-size:16px; }
  .pt-brand small { font-size:8px; letter-spacing:2px; }
- .pt-brand > svg { width:27px!important; }
+ .pt-brand > .pt-brand-logo { width:30px!important; height:38px!important; }
  .pt-brand { gap:8px; }
  .pt-window-tools { gap:5px; }
  :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-window-tools button { width:28px!important; min-width:28px!important; }
