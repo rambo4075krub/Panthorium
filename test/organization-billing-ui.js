@@ -1,0 +1,44 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { JSDOM } = require('jsdom');
+const read = name => fs.readFileSync(require.resolve('../' + name), 'utf8');
+const catalog = require('../organization-catalog');
+
+async function main() {
+  assert.deepEqual(catalog.profiles.map(profile => profile.id), ['micro', 'small', 'medium', 'large', 'security']);
+  assert.deepEqual(catalog.profiles.map(profile => profile.label), ['องค์กรขนาดย่อม', 'องค์กรขนาดเล็ก', 'องค์กรขนาดกลาง', 'องค์กรขนาดใหญ่', 'องค์กรความมั่นคง']);
+  for (const profile of catalog.profiles) for (const key of ['price', 'amount', 'amountSatang', 'productId', 'checkout', 'free']) assert.equal(profile[key], undefined);
+  const dom = new JSDOM('<div id="desktop-icons">original</div><div id="orb">original</div>', { runScripts: 'outside-only', url: 'https://panthorium.test' });
+  const w = dom.window, d = w.document;
+  w.OS = { state: { user: { id: 'u1', roles: ['user'] } }, windows: new Map() };
+  let opened = null, calls = [];
+  w.PanthoriumOrganizations = { open(options) { opened = options; } };
+  w.createWindow = (id, title, html) => { const win = d.createElement('div'); win.className = 'window'; win.dataset.id = id; win.innerHTML = html; d.body.append(win); w.OS.windows.set(id, { el: win }); };
+  w.fetch = async (url) => { calls.push(url); throw Error('Organization cards must not call a billing endpoint'); };
+  w.eval(read('billing-catalog.js')); const originalProducts = JSON.stringify(w.PanthoriumBillingCatalog.products);
+  w.eval(read('organization-catalog.js')); w.eval(read('billing-ui.js')); w.PanthoriumBilling.open();
+  const root = d.querySelector('[data-billing-root]');
+  const choose = () => Array.from(root.querySelectorAll('.pb-tab')).find(tab => tab.textContent === 'องค์กร').click();
+  choose();
+  assert.equal(root.querySelectorAll('[data-organization-profile]').length, 5);
+  assert.equal(root.querySelector('[data-product-id]'), null, 'organization profiles are not billing products');
+  assert.equal(root.querySelector('.pb-price'), null);
+  assert.equal(root.querySelector('.pb-primary'), null, 'no organization checkout button');
+  assert.equal(root.querySelectorAll('a[href^="mailto:account@panthorium.net"]').length, 5);
+  const security = root.querySelector('[data-organization-profile="security"]');
+  assert.equal(decodeURIComponent(security.querySelector('a').href.split('subject=')[1]), 'Panthorium — สอบถามสัญญาองค์กร Security');
+  security.querySelector('button').click(); assert.deepEqual(JSON.parse(JSON.stringify(opened)), { profile: 'security' });
+  assert.match(root.textContent, /ทั้งห้าโปรไฟล์ใช้ชุดความสามารถทดลองเดียวกัน/);
+  assert.equal(JSON.stringify(w.PanthoriumBillingCatalog.products), originalProducts);
+  assert.equal(calls.length, 0);
+  w.Capacitor = { isNativePlatform: () => true }; choose();
+  assert.equal(root.querySelector('a[href^="mailto:"]'), null, 'native app has no external sales/contact link');
+  assert.match(root.textContent, /สอบถามข้อมูลการใช้งานองค์กร: account@panthorium.net/);
+  assert.equal(root.querySelectorAll('[data-organization-profile]').length, 5);
+  assert(!Array.from(root.querySelectorAll('a,button')).some(node => /สัญญา|ชำระ|ซื้อ/.test(node.textContent)), 'native organization cards have no sales routing CTA');
+  assert.equal(d.getElementById('desktop-icons').textContent, 'original'); assert.equal(d.getElementById('orb').textContent, 'original');
+  dom.window.close();
+  console.log('Organization billing UI: five unpriced profiles, separate catalog, encoded contact, native text only and unchanged billing products passed');
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });
