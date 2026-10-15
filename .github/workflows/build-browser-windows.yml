@@ -70,7 +70,7 @@ jobs:
           done
           exit 1
 
-      - name: Render approved Panthorium sapphire logo
+      - name: Render original Panthorium logo
         shell: bash
         run: |
           node -e "const fs=require('fs'); const {Resvg}=require('@resvg/resvg-js'); const svg=fs.readFileSync('panthorium-logo.svg','utf8'); const png=new Resvg(svg,{fitTo:{mode:'width',value:512}}).render().asPng(); fs.mkdirSync('build',{recursive:true}); fs.writeFileSync('build/icon.png',png);"

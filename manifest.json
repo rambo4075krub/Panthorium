@@ -10,13 +10,13 @@
   "lang": "th",
   "icons": [
     {
-      "src": "/panthorium-logo-sapphire.png",
-      "sizes": "1254x1254",
+      "src": "/panthorium-logo.png?v=original-orange-20261015",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/panthorium-logo.svg?v=sapphire-glow-20261015",
+      "src": "/panthorium-logo.svg?v=original-orange-20261015",
       "sizes": "256x256",
       "type": "image/svg+xml",
       "purpose": "maskable"

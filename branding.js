@@ -1,6 +1,6 @@
 (() => {
-  const logo = '/panthorium-logo.svg?v=sapphire-glow-20261015';
-  const logoUrl = '/panthorium-logo-sapphire.png';
+  const logo = '/panthorium-logo.svg?v=original-orange-20261015';
+  const logoUrl = logo;
 
   function installLogoStyles() {
     if (document.getElementById('panthorium-logo-fit-style')) return;
