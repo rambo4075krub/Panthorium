@@ -6,6 +6,7 @@ on:
       - staging
     paths:
       - "mobile/android/**"
+      - "panthorium-logo*.png"
       - ".github/workflows/android-preview-build.yml"
 
 permissions:

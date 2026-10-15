@@ -24,7 +24,7 @@
 
   function dashboardMarkup() {
     return '<div class="app-content" data-p3-security style="overflow:auto;height:100%;">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;"><img src="/panthorium-logo.svg" alt="Panthorium" style="width:38px;height:38px;object-fit:contain;"><div><h3 style="margin:0;">Security Dashboard</h3><div style="font-size:12px;color:var(--text-dim);">Panthorium Administrator Security Center</div></div></div>' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;"><img src="/panthorium-logo.svg?v=sapphire-glow-20261015" alt="Panthorium" style="width:38px;height:38px;object-fit:contain;"><div><h3 style="margin:0;">Security Dashboard</h3><div style="font-size:12px;color:var(--text-dim);">Panthorium Administrator Security Center</div></div></div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;"><button data-p3-refresh style="padding:8px 12px;border:0;border-radius:8px;cursor:pointer;">รีเฟรช Security Data</button><button data-p3-add-block style="padding:8px 12px;border:0;border-radius:8px;cursor:pointer;">+ Block IP</button></div>' +
       '<div data-p3-summary>กำลังโหลด...</div>' +
       '<h4 style="margin:16px 0 6px;">Security Alerts</h4><div data-p3-alerts></div>' +

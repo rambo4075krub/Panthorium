@@ -1,5 +1,5 @@
-const CACHE_NAME = 'panthorium-os-v8-logo-safe-inset';
-const STATIC_ASSETS = ['./manifest.json'];
+const CACHE_NAME = 'panthorium-os-v9-sapphire-glow';
+const STATIC_ASSETS = ['./manifest.json?v=sapphire-glow-20261015'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
