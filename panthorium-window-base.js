@@ -376,6 +376,11 @@
     element.setAttribute('aria-label', title || 'Workspace');
     element.tabIndex = -1;
 
+    // Keep every app in the desktop stacking context. A body-level legacy
+    // overlay otherwise paints above the entire fixed desktop, including Start.
+    const container = document.getElementById('windows') || document.getElementById('desktop');
+    if (container && !container.contains(element)) container.appendChild(element);
+
     if (store.get(id)?.el === element && element.querySelector(':scope > .window-titlebar')) return store.get(id);
     const previous = store.get(id);
     const fullscreen = opts.fullscreenOnOpen === true && id !== 'calculator';
