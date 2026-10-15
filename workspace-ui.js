@@ -8,7 +8,6 @@
   const catalog = () => window.PanthoriumWindowCatalog;
   const user = () => typeof OS !== 'undefined' ? OS.state?.user : null;
   const icons = {
-    logo: '<path d="m12 2 9 5v10l-9 5-9-5V7Z"/><path d="m3 7 9 5 9-5M12 12v10M7 5l10 6v5"/>',
     chat: '<path d="M20 11a8 8 0 0 1-8 8H5l-3 3V11a9 9 0 0 1 18 0Z"/><path d="M7 10h8M7 14h5"/>',
     grid: '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
     spark: '<path d="m12 3 2.3 6.7L21 12l-6.7 2.3L12 21l-2.3-6.7L3 12l6.7-2.3Z"/>',
@@ -89,7 +88,7 @@
     all.innerHTML = icon('search'); all.append(node('span', '', 'แอปทั้งหมด'));
     all.onclick = () => openPalette(); side.append(all);
     const bottom = node('div', 'pt-sidebar-bottom');
-    bottom.innerHTML = '<div class="pt-sidebar-card"><strong>พื้นที่สำหรับทุกความคิด</strong><small>Imagine. Create. Make it happen.</small><svg class="pt-mini-wave" viewBox="0 0 160 40" aria-hidden="true"><path d="M0 29Q20 28 35 19T65 25T95 15T125 23T160 12M0 32Q25 12 45 25T90 23T130 15T160 24"/></svg><small>Panthorium OS</small></div><div class="pt-profile"><div class="pt-avatar">P</div><div><strong>Personal workspace</strong><small>PANTHORIUM OS</small></div></div>';
+    bottom.innerHTML = '<div class="pt-sidebar-card"><strong>พื้นที่สำหรับทุกความคิด</strong><small>Imagine. Create. Make it happen.</small><svg class="pt-mini-wave" viewBox="0 0 160 40" aria-hidden="true"><path d="M0 29Q20 28 35 19T65 25T95 15T125 23T160 12M0 32Q25 12 45 25T90 23T130 15T160 24"/></svg><small>Panthorium OS</small></div><div class="pt-profile"><div class="pt-avatar"><img src="/panthorium-logo-sapphire.png" alt="" draggable="false"></div><div><strong>Personal workspace</strong><small>PANTHORIUM OS</small></div></div>';
     side.append(bottom); return side;
   }
   function apply(root) {
@@ -101,7 +100,11 @@
     const name = bar.querySelector('.window-name');
     const title = name?.textContent || root.getAttribute('aria-label') || 'Workspace';
     if (name) {
-      const brand = node('div', 'pt-brand'); brand.innerHTML = icon('logo');
+      const brand = node('div', 'pt-brand');
+      const logo = node('img', 'pt-brand-logo');
+      logo.src = window.PanthoriumBranding?.logoUrl || '/panthorium-logo-sapphire.png';
+      logo.alt = ''; logo.setAttribute('aria-hidden', 'true'); logo.draggable = false;
+      brand.append(logo);
       const text = node('div', ''); text.append(node('strong', '', 'Panthorium'), node('small', '', title.toUpperCase()));
       brand.append(text); name.parentElement.replaceWith(brand);
     }
