@@ -63,13 +63,34 @@ async function main() {
   assert.equal(d.getElementById('sm-apps').lastElementChild.dataset.appId, 'privacy-policy');
   assert.equal(packs.reduce((sum, p) => sum + p.features.length, 0), 186);
   const menu = d.getElementById('sm-apps'), ui = w.PanthoriumStartMenuUI;
+  for (const section of d.querySelectorAll('[data-cloud-pack-group]')) {
+    assert.equal(ui.groupItems(section).hidden, true, 'pack lists begin collapsed under their category');
+    assert.equal(section.querySelector('[data-start-group-toggle]').getAttribute('aria-expanded'), 'false');
+    assert.equal(Number(section.querySelector('.sm-group-count').textContent), section.querySelectorAll('[data-cloud-pack]').length);
+    assert.equal(section.querySelectorAll(':scope > [data-cloud-pack]').length, 0, 'pack launches are children of the disclosure body');
+  }
+  assert.equal(d.querySelectorAll('[data-cloud-pack] .sm-pack-icon svg').length, 31, 'every pack has a line icon');
+  const life = d.querySelector('[data-start-group="life"]');
+  life.querySelector('[data-start-group-toggle]').click();
+  assert.equal(ui.groupItems(life).hidden, false);
   ui.filter(packs.find(p => p.id === 'profession_1').features[0].name, menu);
   assert.equal(d.querySelector('[data-cloud-pack="profession_1"]').dataset.searchHidden, undefined, 'feature keywords find their pack');
+  const study = d.querySelector('[data-start-group="study"]');
+  assert.equal(ui.groupItems(study).hidden, false, 'matching features expand a formerly collapsed category');
   assert.equal(d.querySelector('[data-app-id="admin"]').hidden, true, 'search preserves access restrictions');
   ui.filter('วิชาชีพเฉพาะ', menu);
   assert(d.querySelectorAll('[data-start-group="specialist"] .sm-app:not([data-search-hidden])').length > 0, 'category search finds members');
   ui.filter('', menu);
-  await w.PanthoriumCloudApps.open('profession_1');
+  assert.equal(ui.groupItems(study).hidden, true, 'clearing search restores collapsed categories');
+  assert.equal(ui.groupItems(life).hidden, false, 'clearing search restores expanded categories');
+  const teacherLauncher = d.querySelector('[data-cloud-pack="profession_1"]');
+  w.dispatchEvent(new w.Event('panthorium:auth-changed'));
+  assert.equal(d.querySelector('[data-cloud-pack="profession_1"]'), teacherLauncher, 'same-account reinstall preserves launcher listeners');
+  assert.equal(d.querySelectorAll('[data-cloud-pack]').length, 31, 'reinstall creates no duplicate pack launchers');
+  ui.filter(packs.find(p => p.id === 'profession_1').features[0].name, menu);
+  study.click(); // Same direct-group click used by the shell's search Enter key.
+  await until(() => d.querySelector('[data-cloud-apps] [data-title]')?.textContent === packs.find(p => p.id === 'profession_1').title, 'search Enter did not open the matching nested pack');
+  ui.filter('', menu);
   await until(() => d.querySelector('.window[data-id="cloud-apps"]').dataset.panthoriumTheme === 'reference-glass', 'new Cloud Apps window must inherit shared reference theme');
   const q = selector => d.querySelector('[data-cloud-apps] ' + selector);
   assert.equal(w.PanthoriumCloudApps.voiceContext(), null, 'selection alone does not invent a server session');
@@ -127,10 +148,13 @@ async function main() {
   Object.defineProperty(w.navigator, 'onLine', { configurable: true, value: true });
   mode = 'account-switch'; q('[data-input]').value = 'private draft'; q('[data-form]').dispatchEvent(new w.Event('submit', { cancelable: true }));
   await until(() => pending !== null, 'account swap run missing');
+  const unrelated = ui.group('native-tools', 'Other producer', menu);
+  const unrelatedLauncher = d.createElement('button'); unrelatedLauncher.className = 'sm-app'; unrelatedLauncher.textContent = 'Unrelated tool'; ui.groupItems(unrelated).appendChild(unrelatedLauncher);
   w.OS.state.user = { id: 'guest:2', roles: ['guest'], permissions: ['chat'] };
   w.dispatchEvent(new w.Event('panthorium:auth-changed'));
   assert.equal(d.querySelector('[data-cloud-apps]'), null, 'account swap clears private window immediately');
   assert.equal(d.querySelector('[data-cloud-pack]'), null, 'guest has no Cloud Apps launchers');
+  assert.equal(d.querySelector('[data-start-group="native-tools"]'), unrelated, 'Cloud account cleanup does not delete other producers\' categories');
   assert.equal(w.PanthoriumCloudApps.voiceContext(), null);
   pending(); pending = null; await sleep(20);
   assert.equal(d.querySelector('[data-cloud-apps]'), null, 'late response cannot render previous account data');

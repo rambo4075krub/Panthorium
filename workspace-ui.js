@@ -1,4 +1,4 @@
-/* Shared reference workspace, permission-aware navigation and OS-style keyboard controls.
+/* Shared window frame, permission-aware app search and OS-style keyboard controls.
  * Application DOM nodes are moved, never cloned: live forms, handlers and sessions survive.
  */
 (function () {
@@ -35,10 +35,15 @@
     // Mirror the shell's account/guest visibility rules as well as catalog RBAC.
     // Search filtering must not change access: the shell keeps filtered buttons in the DOM.
     return Array.from(menu.querySelectorAll('.sm-app[data-app-id]')).flatMap(button => {
+      // Explicit account visibility is separate from search's data-search-hidden flag.
+      for (let parent = button; parent && parent !== menu; parent = parent.parentElement) {
+        if (parent.hasAttribute('data-start-group-items')) continue; // accordion state is not an access rule
+        if (parent.hidden || parent.style.display === 'none' || parent.getAttribute('aria-hidden') === 'true') return [];
+      }
       const id = button.dataset.appId;
       const known = catalog()?.apps.find(app => app.id === id);
       if (known) return allowed.includes(known) ? [known] : [];
-      return [{ id, label:button.dataset.baseLabel || button.querySelector('span:not(.ico)')?.textContent || button.textContent.trim(), launcher:true }];
+      return [{ id, label:button.dataset.baseLabel || button.querySelector('.sm-pack-label')?.textContent || button.querySelector('span:not(.ico):not(.sm-pack-icon)')?.textContent || button.textContent.trim(), launcher:true }];
     });
   }
   function launch(id) {
@@ -61,35 +66,21 @@
     if (typeof fn !== 'function') return false;
     fn.call(owner); return true;
   }
-  const navigation = [
-    { label: 'แชท', icon: 'chat', ids: ['sentinel'] },
-    { label: 'พื้นที่ทำงาน', icon: 'grid', ids: ['files', 'notes', 'calendar', 'reminders', 'goals'] },
-    { label: 'สร้างสรรค์', icon: 'spark', ids: ['media-studio', 'developer-studio'] },
-    { label: 'คลังความรู้', icon: 'book', ids: ['memory-knowledge'] },
-    { label: 'ระบบอัตโนมัติ', icon: 'auto', ids: ['agent-automation', 'sentinel-agent'] },
-    { label: 'ตั้งค่า', icon: 'settings', ids: ['settings', 'assistant-preferences', 'voice-identity'] }
-  ];
-  function sidebar(root) {
-    const side = node('nav', 'pt-sidebar'); side.setAttribute('aria-label', 'เมนูพื้นที่ทำงาน');
-    side.append(node('div', 'pt-section-label', 'YOUR UNIVERSE'));
-    const allowed = new Set(availableApps().map(app => app.id));
-    for (const item of navigation) {
-      const targets = item.ids.filter(id => allowed.has(id));
-      if (!targets.length) continue;
-      const current = item.ids.includes(root.dataset.id);
-      const button = node('button', 'pt-nav' + (current ? ' active' : ''));
-      button.type = 'button'; button.title = item.label;
-      button.innerHTML = icon(item.icon); button.append(node('span', '', item.label));
-      if (current) button.setAttribute('aria-current', 'page');
-      button.onclick = () => targets.length === 1 ? launch(targets[0]) : openPalette('', targets);
-      side.append(button);
-    }
-    const all = node('button', 'pt-nav'); all.type = 'button'; all.title = 'ค้นหาแอป · Alt+Shift+K';
-    all.innerHTML = icon('search'); all.append(node('span', '', 'แอปทั้งหมด'));
-    all.onclick = () => openPalette(); side.append(all);
-    const bottom = node('div', 'pt-sidebar-bottom');
-    bottom.innerHTML = '<div class="pt-sidebar-card"><strong>พื้นที่สำหรับทุกความคิด</strong><small>Imagine. Create. Make it happen.</small><svg class="pt-mini-wave" viewBox="0 0 160 40" aria-hidden="true"><path d="M0 29Q20 28 35 19T65 25T95 15T125 23T160 12M0 32Q25 12 45 25T90 23T130 15T160 24"/></svg><small>Panthorium OS</small></div><div class="pt-profile"><div class="pt-avatar"><img src="/panthorium-logo.svg?v=original-orange-20261015" alt="" draggable="false"></div><div><strong>Personal workspace</strong><small>PANTHORIUM OS</small></div></div>';
-    side.append(bottom); return side;
+  function fitApplication(inner) {
+    const children = Array.from(inner.children).filter(child => !child.matches('style,script,link,template'));
+    if (children.length !== 1) return;
+    const surface = children[0];
+    // Keep plain forms on the frame's scroller. Full application surfaces that
+    // own a scroller (including nested split panels) use the available area.
+    if (!surface.matches('div,main,section,article')) return;
+    const scrolls = element => {
+      const style = getComputedStyle(element);
+      return /^(auto|scroll)$/.test(style.overflowY || style.overflow);
+    };
+    const display = getComputedStyle(surface).display;
+    const ownsScroll = scrolls(surface) || (/^(flex|grid)$/.test(display) && Array.from(surface.querySelectorAll('div,main,section,article,nav,aside')).some(scrolls));
+    if (!ownsScroll) return;
+    inner.classList.add('pt-app-contained'); surface.classList.add('pt-app-surface');
   }
   function apply(root) {
     if (!root?.isConnected || root.querySelector(':scope > .pt-workspace')) return;
@@ -113,8 +104,9 @@
       controls.classList.add('pt-window-tools');
       const search = node('button', 'pt-title-search'); search.type = 'button'; search.innerHTML = icon('search');
       search.title = 'ค้นหาแอป · Alt+Shift+K'; search.setAttribute('aria-label', search.title); search.onclick = () => openPalette();
-      const meta = node('span', 'pt-title-meta'); meta.innerHTML = '<i class="pt-pill-dot"></i> PERSONAL WORKSPACE';
-      controls.prepend(meta, search);
+      const help = node('button', 'pt-title-help'); help.type = 'button'; help.innerHTML = icon('keys');
+      help.title = 'คีย์ลัด · Alt+Shift+/'; help.setAttribute('aria-label', help.title); help.onclick = openHelp;
+      controls.prepend(search, help);
     }
     let body = root.querySelector(':scope > .window-body');
     let main, inner;
@@ -132,21 +124,13 @@
     }
     if (!main || !inner) return;
     body.classList.add('pt-workspace'); main.classList.add('pt-main'); inner.classList.add('pt-app-content');
-    // Custom application sidebars remain within the application region.
-    body.querySelectorAll(':scope > .window-sidebar').forEach(side => inner.prepend(side));
-    body.prepend(sidebar(root));
-    const top = node('div', 'pt-main-top');
-    const crumb = node('div', 'pt-breadcrumb'); crumb.append(node('span', '', 'Workspace'), node('span', '', '/'), node('b', '', title));
-    const help = node('button', 'pt-session'); help.type = 'button'; help.setAttribute('aria-label', 'คีย์ลัด'); help.innerHTML = icon('keys'); help.append(node('span', '', 'คีย์ลัด')); help.onclick = openHelp;
-    top.append(crumb, help); main.prepend(top);
+    // A supplied .window-sidebar belongs to its app. Preserve its layout,
+    // live nodes and handlers beside main; the frame adds no generic rail.
+    fitApplication(inner);
     if (root.dataset.id === 'sentinel') root.classList.add('pt-chat-window');
   }
   function scan() { document.querySelectorAll('.window,.panthorium-managed-window,[data-panthorium-window]').forEach(apply); }
   function refreshAccess() {
-    document.querySelectorAll('.pt-shell').forEach(root => {
-      const old = root.querySelector(':scope > .pt-workspace > .pt-sidebar');
-      if (old) old.replaceWith(sidebar(root));
-    });
     closePalette(); desktopWindows = [];
   }
   const records = () => Array.from(api()?.all?.() || []).filter(([, rec]) => rec.el?.isConnected);

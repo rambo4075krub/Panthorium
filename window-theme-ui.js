@@ -44,7 +44,8 @@
  background:transparent!important;color:var(--pt-text);scrollbar-width:thin;scrollbar-color:#34617b transparent;
 }
 :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(button,input,select,textarea) {font-family:inherit!important;}
-:is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),select,textarea) {
+:is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),textarea),
+:is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) select {
  background:var(--pt-input-background)!important;color:#e8f7ff!important;
  border:1px solid #77e0ff6a!important;border-radius:12px!important;
  box-shadow:inset 0 1px #bcffff25;max-width:100%;
@@ -75,6 +76,42 @@
 }
 :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(th,td){border-color:var(--pt-border)!important;}
 :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) th{background:#12314570!important;color:#b6dceb!important;}
+/* Native select palette: use solid surfaces because OS popups cannot render
+ * our glass gradients reliably. Keep the native arrow, picker and keyboard UI.
+ * Mirrored in window-theme-ui.js / panthorium-window-base.css for either loader. */
+:is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select,
+:is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select :is(option,optgroup) {
+ color-scheme:dark!important;
+ background:#0b192c!important;color:#e8f7ff!important;
+ text-shadow:none!important;
+}
+:is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select option:checked {
+ background:#24566b!important;color:#ffffff!important;
+}
+:is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select:disabled,
+:is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select:disabled :is(option,optgroup),
+:is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select :is(option,optgroup):disabled,
+:is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select optgroup:disabled option {
+ background:#0b192c!important;color:#9eb3c3!important;
+}
+@media(forced-colors:active) {
+ :is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select,
+ :is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select :is(option,optgroup) {
+  color-scheme:light dark!important;forced-color-adjust:auto!important;
+  background:Canvas!important;color:CanvasText!important;
+  border-color:ButtonText!important;box-shadow:none!important;
+ }
+ :is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select option:checked {
+  background:Highlight!important;color:HighlightText!important;
+ }
+ :is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select:disabled,
+ :is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select:disabled :is(option,optgroup),
+ :is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select :is(option,optgroup):disabled,
+ :is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select optgroup:disabled option {
+  background:Canvas!important;color:GrayText!important;
+ }
+ :is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select:focus-visible {outline:2px solid Highlight!important;outline-offset:3px;}
+}
 @media(max-height:800px) and (min-width:761px){
  :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(.window-titlebar,[data-pt-titlebar]){min-height:60px!important;}
 }

@@ -157,6 +157,9 @@ const productionIntelligence = new ProductionIntelligenceService({ databaseUrl: 
 const toolRegistry = new ToolRegistry({ sentinel, conversations, securityResponse, aiOperations, integrations, mediaStudio });
 const agentPolicy = new AgentPolicyService();
 const agentService = new AgentService({ tools: toolRegistry, audit, policy: agentPolicy, ledger: actionLedger });
+const mcpOAuthRepository = config.mcpEnabled ? new (require('./services/mcpOAuthRepository').McpOAuthRepository)({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, required: config.isProduction, allowMemory: !config.isProduction && !config.databaseUrl }) : null;
+const mcpOAuth = config.mcpEnabled ? new (require('./services/mcpOAuthService').McpOAuthService)({ repository: mcpOAuthRepository, authService, baseUrl: config.mcpBaseUrl, allowedRedirectUris: config.mcpRedirectUris }) : null;
+const mcpTools = config.mcpEnabled ? new (require('./services/mcpToolService').McpToolService)({ agentService, mediaStudio, baseUrl: config.mcpBaseUrl, audit }) : null;
 const agentKnowledge = new AgentKnowledgeService({ repository: agentKnowledgeRepository, audit });
 toolRegistry.register({
   id: 'knowledge.search', description: 'Search the current user knowledge base', permission: 'chat', risk: 'low', mutates: false,
@@ -216,6 +219,7 @@ app.post('/api/webhooks/resend', express.raw({type:'application/json',limit:'2mb
 app.use(express.json({ limit: "2mb", type: "application/json" }));
 app.use(cookieParser());
 app.use(requestContext(audit));
+if (config.mcpEnabled) app.use(require('./routes/mcp').createMcpRouter({ oauth: mcpOAuth, toolService: mcpTools, authService, config, audit }));
 app.use('/internal/jobs', createInternalJobsRouter({ scheduler: { tick: async () => {
   await voiceSessions.purgeExpired();
   return agentScheduler.tick();
@@ -296,7 +300,7 @@ for (const script of [...shellScripts, "workspace-ui.css"]) {
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
   html = html.replace('<body>', '<body data-gemini-live-enabled="' + (process.env.GEMINI_LIVE_ENABLED === "1" ? "true" : "false") + '" data-ai-mode="' + (process.env.PANTHORIUM_AI_MODE === "gemini-live-only" ? "gemini-live-only" : "legacy") + '" data-voice-identity-required="' + (config.biometricGateEnabled ? "true" : "false") + '">');
-  const version = `${require("./package.json").version}-media-browser-v2`;
+  const version = `${require("./package.json").version}-workspace-ux-20261015`;
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
   }
@@ -438,6 +442,7 @@ async function start() {
   await audit.init();
   await securityResponse.init();
   await authService.init();
+  if (mcpOAuthRepository) await mcpOAuthRepository.init();
   await organizationRepository.init();
   await biometrics.init();
   await emailOtp.init();
