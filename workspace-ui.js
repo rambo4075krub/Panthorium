@@ -46,7 +46,11 @@
     const app = availableApps().find(item => item.id === id);
     if (!app) return false;
     const existing = window.PanthoriumWindowManager?.findByAppId?.(id);
-    if (existing) { api()?.focus(existing.id || existing.el.dataset.id); return true; }
+    if (existing) {
+      api()?.focus(existing.id || existing.el.dataset.id);
+      existing.el.focus({ preventScroll: true });
+      return true;
+    }
     const launcher = Array.from(document.querySelectorAll('#sm-apps .sm-app[data-app-id]')).find(button => button.dataset.appId === id);
     if (launcher) { launcher.click(); return true; }
     if (!app.opener) return false;
