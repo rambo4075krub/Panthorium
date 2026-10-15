@@ -438,6 +438,11 @@
       try { global.updateTaskbar(); } catch (_) {}
     }
     global.PanthoriumWindowTheme?.apply?.(element);
+    requestAnimationFrame(() => {
+      if (!element.isConnected || store.get(id) !== record || record.minimized) return;
+      focus(id);
+      if (!element.contains(document.activeElement)) element.focus({ preventScroll: true });
+    });
     return record;
   }
 

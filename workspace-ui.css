@@ -1,4 +1,8 @@
 /* Reference layout extracted from design/window-reference.html; all classes scoped. */
+/* Desktop controls stay reachable above native and external windows. */
+#system-controls { z-index:2147483100!important; }
+#start-menu { z-index:2147483200!important; }
+.pt-external-content :where(button) { min-height:36px; padding:8px 12px; cursor:pointer; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell:is(#pt-workspace-specificity,.pt-shell).pt-shell { position:fixed!important; padding:0!important; margin:0!important; min-width:0!important; min-height:0!important; max-width:none!important; max-height:none!important; overflow:hidden!important; flex-direction:column!important; box-sizing:border-box!important; container:pt-window / inline-size; font-size:15px; --pt-border:#87dfff25; --pt-cyan:#57f5ff; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell:not(.maximized):not(.panthorium-window-fullscreen):not(.pw-maximized-workspace):not(.pt-snapped) { max-width:calc(100vw - 24px)!important; max-height:calc(100dvh - 90px)!important; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .window-titlebar { display:flex!important; align-items:center; justify-content:space-between; height:70px!important; min-height:70px!important; padding:0 23px!important; cursor:grab; }
