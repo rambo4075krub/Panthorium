@@ -3,6 +3,7 @@
   'use strict';
   const ID = 'cloud-apps';
   const groups = { life: 'ชีวิตประจำวัน · ช่วงวัย', study: 'การเรียน · การสอน', work: 'การทำงาน · ธุรกิจ', specialist: 'วิชาชีพเฉพาะ' };
+  const packIcons = { profession_1: 'study', profession_2: 'study', profession_3: 'document', profession_4: 'people', profession_5: 'chart', profession_6: 'work', profession_7: 'people', profession_8: 'pen', profession_9: 'pen', profession_10: 'code', profession_11: 'tool', profession_12: 'tool', profession_13: 'health', profession_14: 'balance', profession_15: 'chart', profession_16: 'organizations', profession_17: 'leaf', profession_18: 'transport', profession_19: 'food', profession_20: 'work', profession_21: 'work', profession_22: 'home', profession_23: 'health', profession_24: 'people' };
   const os = () => typeof OS !== 'undefined' ? OS : null;
   const principal = () => String(os()?.state?.user?.sub || os()?.state?.user?.id || '');
   const allowed = () => !!principal() && !principal().startsWith('guest:') && !(os()?.state?.user?.roles || []).includes('guest') && (os()?.state?.user?.permissions || []).includes('chat');
@@ -111,15 +112,20 @@
       const packs = (catalog.packs || []).filter(pack => category(pack) === id);
       if (!packs.length) continue;
       const section = window.PanthoriumStartMenuUI.group(id, label, menu);
+      section.dataset.cloudPackGroup = 'true';
+      const items = window.PanthoriumStartMenuUI.groupItems?.(section) || section;
       for (const pack of packs) {
         if (Array.from(section.querySelectorAll('[data-cloud-pack]')).some(item => item.dataset.cloudPack === pack.id)) continue;
         const button = node('button', null, { type: 'button', class: 'sm-app' });
         button.dataset.appId = ID + '-' + pack.id; button.dataset.cloudPack = pack.id;
         button.dataset.searchText = [label, pack.title, pack.goal, ...(pack.features || []).map(f => f.name)].join(' ');
-        button.append(node('span', pack.title));
+        const icon = node('span', null, { class: 'ico sm-pack-icon', 'aria-hidden': 'true' });
+        const graphic = window.PanthoriumStartMenuUI.icon?.(packIcons[pack.id] || id);
+        if (graphic) icon.append(graphic);
+        button.append(icon, node('span', pack.title));
         if (pack.blocked) { button.title = 'ดูรายละเอียด • ยังไม่เปิดใช้งานสำหรับบัญชีนี้'; button.append(node('small', ' · ดูรายละเอียด')); }
         button.addEventListener('click', () => { open(pack.id); if (typeof closeStartMenu === 'function') closeStartMenu(); });
-        section.appendChild(button);
+        items.appendChild(button);
       }
     }
     window.PanthoriumStartMenuUI.keepPinnedLast(menu);
@@ -352,7 +358,7 @@
     if (typeof closeWindow === 'function' && document.querySelector('.window[data-id="cloud-apps"]')) closeWindow(ID);
     else document.querySelector('.window[data-id="cloud-apps"]')?.remove();
     view = null; publishContext(null);
-    document.querySelectorAll('#sm-apps [data-start-group]').forEach(item => item.remove());
+    document.querySelectorAll('#sm-apps [data-cloud-pack-group="true"]').forEach(item => item.remove());
     if (allowed()) loadCatalog().catch(() => {});
   }
   window.PanthoriumCloudApps = Object.freeze({ open, refreshCatalog: () => loadCatalog(true), voiceContext: () => allowed() && view && current(view) && context ? contextFor(view) : null });

@@ -296,7 +296,7 @@ for (const script of [...shellScripts, "workspace-ui.css"]) {
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
   html = html.replace('<body>', '<body data-gemini-live-enabled="' + (process.env.GEMINI_LIVE_ENABLED === "1" ? "true" : "false") + '" data-ai-mode="' + (process.env.PANTHORIUM_AI_MODE === "gemini-live-only" ? "gemini-live-only" : "legacy") + '" data-voice-identity-required="' + (config.biometricGateEnabled ? "true" : "false") + '">');
-  const version = `${require("./package.json").version}-media-browser-v2`;
+  const version = `${require("./package.json").version}-workspace-ux-20261015`;
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
   }
