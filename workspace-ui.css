@@ -7,7 +7,7 @@
 .pt-brand > svg { width:34px!important; height:38px!important; color:#57f5ff; filter:drop-shadow(0 0 10px #1eeaff66); }
 .pt-brand strong { font-size:20px; letter-spacing:.3px; font-weight:600; }
 .pt-brand small { font-size:10px; color:#89a6bf; display:block; letter-spacing:3px; margin-top:4px; max-width:35vw; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
-:is(#pt-workspace-specificity,.pt-shell).pt-shell svg, .pt-overlay svg { width:21px; height:21px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+:where(.pt-shell,.pt-overlay) svg { width:21px; height:21px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
 .pt-window-tools, .pt-title-meta { display:flex; align-items:center; gap:12px; flex-shrink:0; }
 .pt-title-meta { font-size:10px; color:#9ac5db; letter-spacing:2px; margin-right:12px; }
 .pt-pill-dot { width:5px; height:5px; background:#6df8ea; border-radius:50%; box-shadow:0 0 9px #6df8ea; }
@@ -30,7 +30,7 @@
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-chat-window, .pt-chat { min-height:0; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell.pt-chat-window .pt-app-content { display:flex; flex-direction:column; padding:0; overflow:hidden; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-chat { display:flex; flex-direction:column; flex:1; height:100%; overflow:hidden; }
-:is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-chat .chat-messages { display:block; flex:1; min-height:0; overflow:auto; padding:0 5% 20px; }
+:is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-chat .chat-messages { display:block; flex:1; min-height:0; overflow:auto; overflow-x:hidden; padding:0 5% 20px; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-hero { isolation:isolate; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-action { cursor:pointer; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-chat .msg { position:relative; display:table; max-width:calc(100% - 44px); margin:15px 0 15px 44px; padding:17px 20px; border:1px solid #63defb43; border-radius:0 13px 13px 13px; background:linear-gradient(120deg,#0e31435e,#0d1a2c8c); box-shadow:inset 0 1px #befaff0a; line-height:1.8; font-size:13px; white-space:pre-wrap; overflow-wrap:anywhere; color:#c0d3e2; }
