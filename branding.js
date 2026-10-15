@@ -1,5 +1,6 @@
 (() => {
-  const logo = '/panthorium-logo.svg';
+  const logo = '/panthorium-logo.svg?v=sapphire-glow-20261015';
+  const logoUrl = '/panthorium-logo-sapphire.png';
 
   function installLogoStyles() {
     if (document.getElementById('panthorium-logo-fit-style')) return;
@@ -35,12 +36,15 @@
       image.alt = 'Panthorium';
       container.replaceChildren(image);
     }
+    if (image.getAttribute('src') !== logo) image.src = logo;
+    image.draggable = false;
     container.classList.add('panthorium-logo-frame');
   }
 
   function applyBranding() {
+    if (typeof document === 'undefined' || !document.documentElement) return;
     installLogoStyles();
-    // Preserve the shell's circular frame, fill and accent border around the original inset mark.
+    // Use the approved artwork inside the existing circular shell frames.
     document.querySelectorAll('.login-avatar, .sm-avatar, .about-logo, [data-panthorium-logo-frame]')
       .forEach(ensureLogo);
   }
@@ -49,5 +53,5 @@
   const observer = new MutationObserver(applyBranding);
   observer.observe(document.documentElement, { childList: true, subtree: true });
   setInterval(applyBranding, 1000);
-  window.PanthoriumBranding = { refresh: applyBranding };
+  window.PanthoriumBranding = { refresh: applyBranding, logoUrl };
 })();
