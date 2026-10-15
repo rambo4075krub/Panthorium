@@ -38,7 +38,7 @@
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-hero { isolation:isolate; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-action { cursor:pointer; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-chat .msg { position:relative; display:table; max-width:calc(100% - 44px); margin:15px 0 15px 44px; padding:17px 20px; border:1px solid #63defb43; border-radius:0 13px 13px 13px; background:linear-gradient(120deg,#0e31435e,#0d1a2c8c); box-shadow:inset 0 1px #befaff0a; line-height:1.8; font-size:13px; white-space:pre-wrap; overflow-wrap:anywhere; color:#c0d3e2; }
-:is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-chat .msg.ai::before { content:''; position:absolute; left:-44px; top:0; width:31px; height:31px; border:1px solid #5ddfe857; border-radius:10px; background:#10364c80 url('/panthorium-logo-sapphire.png') center / 27px 27px no-repeat; }
+:is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-chat .msg.ai::before { content:''; position:absolute; left:-44px; top:0; width:31px; height:31px; border:1px solid #5ddfe857; border-radius:10px; background:#10364c80 url('/panthorium-logo.svg?v=original-orange-20261015') center / 27px 27px no-repeat; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-chat .msg.user { margin-left:auto; margin-right:0; background:#192a3d8c; border-color:#b1cfff25; border-radius:13px 0 13px 13px; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .msg strong { display:block; font-size:10px; color:#74e2ee; font-weight:500; margin-bottom:5px; letter-spacing:.6px; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-composer.chat-input-area { display:block; padding:0; gap:0; background:linear-gradient(120deg,#16364be6,#0b192cfa 65%,#202440df); border:1px solid #77e0ff6a; }

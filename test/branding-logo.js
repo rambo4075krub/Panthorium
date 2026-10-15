@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const { JSDOM } = require('jsdom');
 
 const source = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
@@ -22,15 +23,22 @@ assert(!bootMarkup.includes('data-panthorium-logo'), 'restart remains outside sh
 assert(mark.includes('viewBox="0 0 256 256"') && !mark.includes('<circle'), 'restart mark remains plain');
 assert(bootMarkup.includes('boot-title') && bootMarkup.includes('boot-progress') && bootMarkup.includes('boot-status'), 'restart keeps its existing text and progress');
 
-const png = fs.readFileSync(path.join(__dirname, '..', 'panthorium-logo-sapphire.png'));
-for (const [name, asset] of [['shared', svg], ['boot', mark]]) {
-  const payload = /data:image\/png;base64,([^"']+)/.exec(asset)?.[1];
-  assert(payload, name + ' SVG embeds the approved artwork');
-  assert.deepEqual(Buffer.from(payload, 'base64'), png, name + ' SVG preserves the actual approved PNG bytes');
-  assert(asset.includes('x="40.96" y="40.96" width="174.08" height="174.08"'), name + ' keeps safe circular-frame spacing');
+const png = fs.readFileSync(path.join(__dirname, '..', 'panthorium-logo.png'));
+// Preserve the actual system assets from before the sapphire change, not a redraw
+// of the separately uploaded source image. Hashes are from commit 72f5ffa.
+for (const [name, asset, expected] of [
+  ['shared', svg, '019b2a1a4335375139214b9ec2d2124fe863873a36acb0a72a714d56fece3ca5'],
+  ['boot', mark, '4184ccd856d70ff5f7a6099fcb7c8efd73eacb8e5210f2e08c2fee3bebe4be31'],
+]) {
+  assert.equal(createHash('sha256').update(asset).digest('hex'), expected, name + ' restores the original system SVG exactly');
+  assert(asset.includes('matrix(0.68 0 0 0.68 40.96 40.96)'), name + ' keeps safe circular-frame spacing');
   assert(!asset.includes('<circle'), name + ' does not add a second circle');
 }
-assert.deepEqual(fs.readFileSync(path.join(__dirname, '..', 'mobile/android/www/panthorium-logo-sapphire.png')), png, 'Android fallback uses the same approved artwork');
+assert.equal(png.readUInt32BE(16), 512, 'PNG width matches the manifest');
+assert.equal(png.readUInt32BE(20), 512, 'PNG height matches the manifest');
+for (const file of ['panthorium-logo-sapphire.png', 'mobile/android/www/panthorium-logo.png', 'mobile/android/www/panthorium-logo-sapphire.png']) {
+  assert.deepEqual(fs.readFileSync(path.join(__dirname, '..', file)), png, file + ' serves the original orange artwork, including legacy URLs');
+}
 assert(!branding.includes('.sm-avatar > img[data-panthorium-logo]'), 'avatar art is never enlarged beyond its frame');
 assert(branding.includes('overflow: hidden !important;'), 'logo frames clip their contents');
 assert(cssBlock('.sm-avatar').includes('background: rgba(0,255,204,0.15);') && cssBlock('.sm-avatar').includes('border: 1px solid var(--accent);'), 'restore the original guest avatar fill and border');
@@ -52,7 +60,7 @@ try {
   assert(!restartFrame.classList.contains('panthorium-logo-frame'), 'restart page is untouched by shared branding');
   for (const selector of ['.login-avatar', '.sm-avatar', '.about-logo']) {
     const frame = w.document.querySelector(selector);
-    assert.equal(frame.querySelector('img').getAttribute('src'), '/panthorium-logo.svg?v=sapphire-glow-20261015');
+    assert.equal(frame.querySelector('img').getAttribute('src'), '/panthorium-logo.svg?v=original-orange-20261015');
     assert.equal(frame.style.borderRadius, '50%', selector + ' retains its circle');
     assert(frame.querySelector('img[data-panthorium-logo]'), selector + ' contains the original logo');
     assert(frame.classList.contains('panthorium-logo-frame'));
@@ -61,4 +69,4 @@ try {
 } finally {
   dom.window.close();
 }
-console.log('Branding: approved artwork byte identity, safe spacing, existing-image upgrade, Android fallback and shell frames passed');
+console.log('Branding: original system SVG identity, safe spacing, existing-image upgrade, Android fallback and legacy URL coverage passed');
