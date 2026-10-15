@@ -8,7 +8,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(predicate, message) { for (let i = 0; i < 150; i++) { if (predicate()) return; await sleep(10); } throw Error(message); }
 
 async function main() {
-  const packs = JSON.parse(read('data/cloud-app-packs.json')).packs.map(pack => ({ ...pack, blocked: !!pack.requiresMinorReadiness }));
+  const packs = JSON.parse(read('services/catalog/cloud-app-packs.json')).packs.map(pack => ({ ...pack, blocked: !!pack.requiresMinorReadiness }));
   const dom = new JSDOM('<div id="desktop-icons"><i id="original-desktop"></i></div><div id="orb">original orb</div><div id="start-menu"><input id="start-search"><div id="sm-apps"><button class="sm-app" data-app-id="sentinel">Sentinel AI</button><button class="sm-app" data-app-id="admin" hidden>Private admin</button><button class="sm-app" data-app-id="privacy-policy">Privacy</button></div></div>', { url: 'https://panthorium.test', runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window, d = w.document;
   w.OS = { config: { accessToken: 'test-token', backendUrl: '' }, state: { user: { id: 'user-1', permissions: ['chat'], roles: ['user'] } }, windows: new Map() };
