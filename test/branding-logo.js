@@ -22,13 +22,15 @@ assert(!bootMarkup.includes('data-panthorium-logo'), 'restart remains outside sh
 assert(mark.includes('viewBox="0 0 256 256"') && !mark.includes('<circle'), 'restart mark remains plain');
 assert(bootMarkup.includes('boot-title') && bootMarkup.includes('boot-progress') && bootMarkup.includes('boot-status'), 'restart keeps its existing text and progress');
 
-const groupStart = svg.indexOf('<g transform="matrix(0.68 0 0 0.68 40.96 40.96)">');
-const groupEnd = svg.indexOf('</g>', groupStart);
-const group = groupStart >= 0 && groupEnd > groupStart ? svg.slice(groupStart, groupEnd + 4) : '';
-assert(group, 'logo artwork is contained by its original safe-inset group');
-assert(svg.includes('<rect width="256" height="256" fill="none"/>'), 'logo outside the mark stays transparent');
-assert(!svg.includes('<circle'), 'the shared SVG does not add a second circle to the shell frame');
-assert.equal((group.match(/<path /g) || []).length, 4, 'all original logo facets remain');
+const png = fs.readFileSync(path.join(__dirname, '..', 'panthorium-logo-sapphire.png'));
+for (const [name, asset] of [['shared', svg], ['boot', mark]]) {
+  const payload = /data:image\/png;base64,([^"']+)/.exec(asset)?.[1];
+  assert(payload, name + ' SVG embeds the approved artwork');
+  assert.deepEqual(Buffer.from(payload, 'base64'), png, name + ' SVG preserves the actual approved PNG bytes');
+  assert(asset.includes('x="40.96" y="40.96" width="174.08" height="174.08"'), name + ' keeps safe circular-frame spacing');
+  assert(!asset.includes('<circle'), name + ' does not add a second circle');
+}
+assert.deepEqual(fs.readFileSync(path.join(__dirname, '..', 'mobile/android/www/panthorium-logo-sapphire.png')), png, 'Android fallback uses the same approved artwork');
 assert(!branding.includes('.sm-avatar > img[data-panthorium-logo]'), 'avatar art is never enlarged beyond its frame');
 assert(branding.includes('overflow: hidden !important;'), 'logo frames clip their contents');
 assert(cssBlock('.sm-avatar').includes('background: rgba(0,255,204,0.15);') && cssBlock('.sm-avatar').includes('border: 1px solid var(--accent);'), 'restore the original guest avatar fill and border');
@@ -37,7 +39,7 @@ assert(cssBlock('.about-logo').includes('border: 2px solid var(--accent);'), 're
 
 const dom = new JSDOM(`<!doctype html><html><head></head><body>
   <div class="boot-logo" style="width:120px;height:120px;border-radius:50%"><img src="/panthorium-logo-mark.svg" alt="Panthorium"></div>
-  <div class="login-avatar" style="width:90px;height:90px;border-radius:50%;border:2px solid #00ffcc"></div>
+  <div class="login-avatar" style="width:90px;height:90px;border-radius:50%;border:2px solid #00ffcc"><img data-panthorium-logo src="/panthorium-logo.svg" alt="Panthorium"></div>
   <div class="sm-avatar" style="width:40px;height:40px;border-radius:50%;border:1px solid #00ffcc"></div>
   <div class="about-logo" style="width:80px;height:80px;border-radius:50%;border:2px solid #00ffcc"></div>
 </body></html>`, { runScripts: 'outside-only', pretendToBeVisual: true });
@@ -50,6 +52,7 @@ try {
   assert(!restartFrame.classList.contains('panthorium-logo-frame'), 'restart page is untouched by shared branding');
   for (const selector of ['.login-avatar', '.sm-avatar', '.about-logo']) {
     const frame = w.document.querySelector(selector);
+    assert.equal(frame.querySelector('img').getAttribute('src'), '/panthorium-logo.svg?v=sapphire-glow-20261015');
     assert.equal(frame.style.borderRadius, '50%', selector + ' retains its circle');
     assert(frame.querySelector('img[data-panthorium-logo]'), selector + ' contains the original logo');
     assert(frame.classList.contains('panthorium-logo-frame'));
@@ -58,4 +61,4 @@ try {
 } finally {
   dom.window.close();
 }
-console.log('Branding logo: restore original mark sizing and shell frames; restart remains unchanged');
+console.log('Branding: approved artwork byte identity, safe spacing, existing-image upgrade, Android fallback and shell frames passed');

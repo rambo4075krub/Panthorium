@@ -20,6 +20,8 @@ const read = name => fs.readFileSync(name, 'utf8');
   const notes = w.openNotes();
   assert.equal(notes.querySelectorAll('.pt-sidebar').length,1);
   assert(notes.querySelector('.pt-brand strong').textContent === 'Panthorium');
+  assert.equal(notes.querySelector('.pt-brand-logo').getAttribute('src'), '/panthorium-logo-sapphire.png', 'new windows use the approved logo');
+  assert.equal(notes.querySelectorAll('.pt-brand > svg').length, 0, 'the placeholder cube is removed');
   assert(!notes.classList.contains('maximized'),'normal reference frame is the default');
   assert(Number.parseInt(notes.style.width) < w.innerWidth,'reference has desktop margins');
   assert.deepEqual(Array.from(notes.querySelectorAll('.win-btn')).map(b=>b.className),['win-btn min','win-btn max','win-btn close']);
