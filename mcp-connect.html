@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark">
+  <title>เชื่อมต่อ ChatGPT · Panthorium</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0d1014; --card:#151a21; --line:#2c333e; --ink:#f7f4ef; --muted:#aeb6c1; --orange:#ff9b57; --orange-dark:#271c15; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(ellipse at 80% 0, #3b251b70, transparent 46%),var(--bg); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; line-height:1.7; min-height:100vh; }
+    button,input { font:inherit; }
+    button,a,input { -webkit-tap-highlight-color:transparent; }
+    button { cursor:pointer; }
+    button:disabled { cursor:wait; opacity:.5; }
+    a { color:var(--orange); text-underline-offset:4px; }
+    button:focus-visible,a:focus-visible,input:focus-visible { outline:3px solid var(--orange); outline-offset:4px; }
+    [hidden] { display:none!important; }
+    .shell { width:min(720px,100%); margin:0 auto; padding:38px 24px 56px; }
+    .brand { display:flex; align-items:center; gap:12px; margin-bottom:44px; color:var(--ink); text-decoration:none; font-weight:750; letter-spacing:.13em; font-size:14px; }
+    .brand-mark { display:grid; place-items:center; width:36px; height:36px; border:1px solid #8b532d; border-radius:11px; color:var(--orange); background:#291d15; font-size:21px; letter-spacing:0; }
+    .eyebrow { color:var(--orange); font-size:12px; letter-spacing:.14em; font-weight:750; margin:0 0 10px; }
+    h1 { font-size:clamp(27px,5.5vw,38px); line-height:1.3; letter-spacing:-.035em; margin:0 0 16px; font-weight:700; }
+    h2 { font-size:19px; line-height:1.45; margin:0 0 16px; }
+    h3 { font-size:15px; margin:0 0 6px; }
+    p { margin:0 0 16px; }
+    .intro,.muted { color:var(--muted); }
+    .intro { max-width:580px; font-size:16px; margin-bottom:26px; }
+    .card { border:1px solid var(--line); border-radius:18px; padding:25px; background:var(--card); margin-top:18px; box-shadow:0 18px 50px #00000012; }
+    .account { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; padding:13px 16px; border:1px solid var(--line); border-radius:12px; margin-bottom:18px; background:#14191f; }
+    .account-label { color:var(--muted); font-size:12px; display:block; }
+    #account-name { overflow-wrap:anywhere; }
+    .small { font-size:13px; }
+    .field { margin:16px 0; }
+    label { display:block; font-size:14px; margin-bottom:7px; }
+    input { width:100%; padding:11px 13px; color:var(--ink); background:#0e1218; border:1px solid #414a56; border-radius:9px; }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:23px; }
+    .button { border:1px solid #414a56; border-radius:10px; padding:11px 19px; background:#1c232c; color:var(--ink); font-weight:650; }
+    .button:hover:not(:disabled) { background:#2c3541; }
+    .primary { color:#23150a; background:var(--orange); border-color:var(--orange); }
+    .primary:hover:not(:disabled) { background:#ffb17b; }
+    .text-button { padding:3px 0; border:0; background:none; color:var(--orange); text-decoration:underline; text-underline-offset:4px; font-size:13px; }
+    .notice { margin:18px 0; padding:14px 16px; border:1px solid #6c4930; background:var(--orange-dark); border-radius:11px; color:#ffd1af; font-size:14px; }
+    .notice p:last-child { margin-bottom:0; }
+    #status { padding:14px 16px; margin:18px 0; border:1px solid var(--line); border-radius:11px; color:var(--muted); white-space:pre-wrap; }
+    #status[data-kind="error"] { background:#321d20; border-color:#844049; color:#ffc0c7; }
+    #status[data-kind="success"] { background:#152b24; border-color:#375a4e; color:#b7e9d6; }
+    .scope-list { padding:0; list-style:none; margin:20px 0; }
+    .scope-list li { padding:15px 0; border-top:1px solid var(--line); }
+    .scope-list li:last-child { border-bottom:1px solid var(--line); }
+    .scope-name { display:block; font-family:ui-monospace,SFMono-Regular,monospace; color:var(--orange); font-size:13px; margin-bottom:4px; overflow-wrap:anywhere; }
+    .scope-description { font-size:14px; color:var(--muted); }
+    dl { display:grid; grid-template-columns:110px minmax(0,1fr); gap:9px 18px; margin:18px 0; font-size:14px; }
+    dt { color:var(--muted); }
+    dd { margin:0; overflow-wrap:anywhere; }
+    pre { margin:10px 0 0; padding:16px; background:#0d1218; border:1px solid var(--line); border-radius:10px; white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace; max-height:400px; overflow:auto; }
+    code { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+    .endpoint { display:flex; gap:10px; align-items:center; margin:18px 0; }
+    .endpoint code { display:block; flex:1; min-width:0; padding:12px; border:1px solid var(--line); border-radius:10px; background:#0c1117; font-size:13px; overflow-wrap:anywhere; }
+    .steps { padding-left:23px; color:var(--muted); margin:16px 0; }
+    .steps li { padding:5px 0 5px 5px; }
+    .grant { border-top:1px solid var(--line); padding:18px 0 4px; margin-top:16px; }
+    .grant-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+    .grant p { margin:3px 0; overflow-wrap:anywhere; }
+    .revoke-confirm { margin-top:12px; padding:14px; border:1px solid #6c4930; border-radius:10px; }
+    footer { margin-top:30px; font-size:12px; color:#8d97a5; display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+    @media(max-width:480px) { .shell { padding:24px 17px 38px; } .brand { margin-bottom:32px; } .card { padding:20px 17px; } .actions .button { flex:1; } dl { grid-template-columns:82px minmax(0,1fr); gap:9px 12px; } .endpoint { align-items:stretch; } .endpoint .button { padding:8px 12px; } }
+    @media(prefers-reduced-motion:no-preference) { button { transition:background .15s ease; } }
+  </style>
+  <script src="/mcp-connect.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <a class="brand" href="/" aria-label="Panthorium หน้าหลัก"><span class="brand-mark" aria-hidden="true">P</span>PANTHORIUM</a>
+    <p class="eyebrow">CHATGPT CONNECTION</p>
+    <h1 id="page-title">เชื่อมเครื่องมือของคุณ<br>เข้ากับ ChatGPT</h1>
+    <p id="page-intro" class="intro">ใช้เครื่องมือใน Panthorium ผ่าน ChatGPT ด้วยสิทธิ์ของบัญชีคุณ จัดการและยกเลิกการเชื่อมต่อได้ที่หน้านี้</p>
+    <div id="status" role="status" aria-live="polite">กำลังตรวจสอบบัญชี…</div>
+    <section id="account-panel" class="account" hidden aria-label="บัญชีที่กำลังใช้งาน">
+      <div><span class="account-label">บัญชี Panthorium</span><strong id="account-name"></strong></div>
+      <button id="switch-account" class="text-button" type="button">ใช้บัญชีอื่น</button>
+    </section>
+    <section id="login-panel" class="card" hidden aria-labelledby="login-title">
+      <h2 id="login-title">เข้าสู่ระบบ Panthorium</h2>
+      <p class="muted small">ใช้บัญชีเดียวกับที่คุณใช้ใน Panthorium รหัสผ่านจะส่งตรงไปยัง Panthorium</p>
+      <form id="login-form">
+        <div class="field"><label for="username">อีเมลหรือชื่อผู้ใช้</label><input id="username" name="username" type="text" autocomplete="username" maxlength="254" required></div>
+        <div class="field"><label for="password">รหัสผ่าน</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required></div>
+        <button id="login-button" class="button primary" type="submit">เข้าสู่ระบบ</button>
+      </form>
+    </section>
+    <section id="consent-panel" class="card" hidden aria-labelledby="consent-title">
+      <h2 id="consent-title">ตรวจสอบสิทธิ์ก่อนเชื่อมต่อ</h2>
+      <p><strong id="client-name"></strong> ขอใช้เครื่องมือในบัญชีของคุณตามสิทธิ์ต่อไปนี้</p>
+      <ul id="scope-list" class="scope-list"></ul>
+      <div class="notice">การอนุญาตนี้เชื่อมบัญชีเท่านั้น งานที่เปลี่ยนข้อมูลหรือมีค่าใช้จ่ายยังต้องให้คุณตรวจสอบและยืนยันใน Panthorium ก่อนเริ่ม</div>
+      <p id="consent-expiry" class="small muted"></p>
+      <div class="actions"><button id="allow-button" class="button primary" type="button">อนุญาตและเชื่อมต่อ</button><button id="deny-button" class="button" type="button">ไม่อนุญาต</button></div>
+    </section>
+    <section id="action-panel" class="card" hidden aria-labelledby="action-title">
+      <h2 id="action-title">ตรวจสอบคำสั่งจาก ChatGPT</h2>
+      <p id="action-description"></p>
+      <dl><dt>เครื่องมือ</dt><dd id="action-tool"></dd><dt>สถานะ</dt><dd id="action-state"></dd><dt>ระดับความเสี่ยง</dt><dd id="action-risk"></dd><dt>ยืนยันภายใน</dt><dd id="action-expiry"></dd></dl>
+      <div id="paid-notice" class="notice" hidden><strong>คำสั่งนี้ใช้บริการ AI ที่มีค่าใช้จ่าย</strong><p>จะใช้โควตาหรือคิดค่าบริการตามบัญชี Panthorium และผู้ให้บริการที่ตั้งไว้ ระบบยังไม่ได้แจ้งยอดเงินที่แน่นอนสำหรับคำสั่งนี้ หากไม่ต้องการใช้บริการแบบเสียเงิน ให้ยกเลิกคำสั่งนี้</p></div>
+      <h3>รายละเอียดที่จะส่งให้เครื่องมือ</h3>
+      <pre id="action-args" tabindex="0"></pre>
+      <div id="action-buttons" class="actions"><button id="confirm-action" class="button primary" type="button">ยืนยันคำสั่งนี้</button><button id="cancel-action" class="button" type="button">ยกเลิกคำสั่ง</button></div>
+      <p id="action-followup" class="small muted" hidden></p>
+    </section>
+    <section id="setup-panel" class="card" hidden aria-labelledby="setup-title">
+      <h2 id="setup-title">เพิ่ม Panthorium ใน ChatGPT</h2>
+      <p class="small muted">ใช้ URL นี้สำหรับการเชื่อมต่อ MCP แบบ OAuth</p>
+      <div class="endpoint"><code id="mcp-endpoint"></code><button id="copy-endpoint" class="button" type="button">คัดลอก</button></div>
+      <ol class="steps"><li>ใน ChatGPT เปิด Plugins แล้วเลือกเพิ่ม Custom MCP server</li><li>ตั้งชื่อ Panthorium วาง URL ด้านบน และเลือกการยืนยันตัวตนแบบ OAuth</li><li>เชื่อมบัญชีและตรวจสอบสิทธิ์ในหน้า Panthorium จากนั้นเลือกใช้ Panthorium ในบทสนทนา</li></ol>
+      <p class="small muted">การเพิ่ม MCP server ขึ้นอยู่กับสิทธิ์และการตั้งค่าของบัญชีหรือพื้นที่ทำงาน ChatGPT ของคุณ</p>
+    </section>
+    <section id="grants-panel" class="card" hidden aria-labelledby="grants-title">
+      <h2 id="grants-title">บัญชีที่เชื่อมต่อไว้</h2>
+      <p class="small muted">ยกเลิกเพื่อหยุดให้แอปนั้นใช้เครื่องมือผ่านการเชื่อมต่อนี้</p>
+      <div id="grants-list"></div>
+      <button id="refresh-grants" class="text-button" type="button">โหลดรายการอีกครั้ง</button>
+    </section>
+    <noscript><p class="notice">กรุณาเปิด JavaScript เพื่อเข้าสู่ระบบและตรวจสอบการเชื่อมต่อ</p></noscript>
+    <footer><span>Panthorium · เครื่องมือของคุณ บัญชีของคุณ</span><a href="/mcp/connect">จัดการการเชื่อมต่อ</a></footer>
+  </main>
+</body>
+</html>
