@@ -71,7 +71,7 @@ async function main() {
   assert.equal(upstream.sent[0], audioFrame);
   const responseFrame = JSON.stringify({ serverContent: { turnComplete: true } });
   upstream.emit("message", responseFrame, false);
-  assert.equal(client.sent[2], responseFrame);
+  assert.equal(client.sent.at(-1), responseFrame, "legacy provider frames remain compatible alongside versioned events");
   upstream.emit("message", Buffer.from(JSON.stringify({ toolCall: { functionCalls: [{ id: 'call-1', name: 'panthorium_ai_providers', args: {} }] } })), true);
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(JSON.parse(upstream.sent.at(-1)), { tool_response: { function_responses: [{ name: 'panthorium_ai_providers', id: 'call-1', response: { output: { providers: ['vertex'] } } }] } });

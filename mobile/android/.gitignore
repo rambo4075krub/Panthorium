@@ -1,0 +1,10 @@
+/android/
+/node_modules/
+*.jks
+*.keystore
+*.p12
+*.pfx
+__pycache__/
+*.pyc
+keystore.properties
+signing.properties

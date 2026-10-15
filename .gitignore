@@ -1,7 +1,8 @@
-node_modules/
+node_modules
 .env
 *.log
-data/
+data/*
+!data/cloud-app-packs.json
 logs/
 .DS_Store
 gha-creds-*.json

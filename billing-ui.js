@@ -3,7 +3,7 @@
   const ID = 'billing';
   const catalog = window.PanthoriumBillingCatalog;
   if (!catalog) return;
-  const tabs = [['membership', 'สมาชิก'], ['voice', 'เสียงเพิ่ม'], ['text', 'ข้อความเพิ่ม'], ['storage', 'พื้นที่ / ดาวน์โหลด']];
+  const tabs = [['membership', 'สมาชิก'], ['voice', 'เสียงเพิ่ม'], ['text', 'ข้อความเพิ่ม'], ['storage', 'พื้นที่ / ดาวน์โหลด'], ['organizations', 'องค์กร']];
   const os = () => typeof OS !== 'undefined' ? OS : null;
   const price = value => value.toLocaleString('th-TH') + ' บาท';
   const nativeAndroid = () => window.Capacitor?.isNativePlatform?.() === true || /\bPanthoriumAndroid\b/i.test(navigator.userAgent);
@@ -40,6 +40,7 @@
         nav.appendChild(tab);
       });
       main.replaceChildren();
+      if (category === 'organizations') { renderOrganizations(); return; }
       const intro = node('div', null, 'pb-intro');
       intro.append(node('p', 'PANTHORIUM / PLANS', 'pb-eyebrow'), node('h2', category === 'membership' ? 'เลือกแพ็กเกจที่เหมาะกับคุณ' : tabs.find(tab => tab[0] === category)[1]), node('p', 'บัญชีเดียว ใช้โควต้าร่วมกันทุกอุปกรณ์ · ไม่มี Reserve', 'pb-muted'));
       main.appendChild(intro);
@@ -65,6 +66,27 @@
       conditions.append(node('h3', 'เงื่อนไขการใช้งาน'), node('p', 'สมาชิกไม่ทบโควต้า เมื่อหมดให้ซื้อเพิ่มหรือรอรอบใหม่ เสียงเข้า/ออกและข้อความเข้า/ออกแยกโควต้ากัน งานอัตโนมัติและการลองใหม่ใช้วงเงินเดียวกัน'), node('p', 'Voice/Text เสริมไม่ต่ออายุและไม่เติมอัตโนมัติ ใช้แพ็กที่หมดอายุก่อน บัญชี Free ต้องยืนยันบัญชีก่อนซื้อ และยังดาวน์โหลดไม่ได้'), node('p', 'พื้นที่และดาวน์โหลดเสริมสำหรับ Life ขึ้นไป การยกเลิกพื้นที่มีผลเมื่อสิ้นรอบ หากเกินโควต้าจะหยุดอัปโหลดและแจ้งให้ลดไฟล์ภายใน 30 วันก่อนดำเนินการตามนโยบายที่ยอมรับไว้'), node('p', 'ราคาสุทธิสำหรับผู้ขายบุคคลธรรมดาที่ยังไม่จด VAT · เกณฑ์วันที่ 11 ตุลาคม 2569', 'pb-muted'));
       main.appendChild(conditions);
       announce.textContent = 'เลือกแพ็กเกจเพื่อดูยอดและโหมดชำระก่อนยืนยัน';
+    }
+    function renderOrganizations() {
+      const profiles = window.PanthoriumOrganizationCatalog?.profiles || [];
+      const intro = node('div', null, 'pb-intro');
+      intro.append(node('p', 'PANTHORIUM / ORGANIZATIONS', 'pb-eyebrow'), node('h2', 'พื้นที่องค์กรและทีม'), node('p', nativeAndroid() ? 'เลือกโปรไฟล์เพื่อทดลองพื้นที่องค์กร สอบถามข้อมูลการใช้งานองค์กรได้ที่ account@panthorium.net' : 'เลือกโปรไฟล์การทำงาน แล้วติดต่อเพื่อกำหนดขอบเขตและเงื่อนไขสัญญา', 'pb-muted'));
+      main.appendChild(intro);
+      const grid = node('div', null, 'pb-grid'); grid.dataset.organizationProfiles = '';
+      for (const profile of profiles) {
+        const card = node('article', null, 'pb-card'); card.dataset.organizationProfile = profile.id;
+        card.append(node('p', profile.label, 'pb-eyebrow'), node('h3', profile.name), node('p', profile.description));
+        const list = node('ul'); profile.features.forEach(text => list.append(node('li', text))); card.append(list);
+        card.append(button('เปิดพื้นที่องค์กร', () => window.PanthoriumOrganizations?.open?.({ profile: profile.id }), 'pb-back'));
+        if (nativeAndroid()) card.append(node('p', 'สอบถามข้อมูลการใช้งานองค์กร: account@panthorium.net', 'pb-muted'));
+        else { const contact = node('a', 'สอบถามสัญญาองค์กร', 'pb-back'); contact.href = window.PanthoriumOrganizationCatalog.contactUrl(profile.id); contact.style.cssText = 'display:block;margin-top:10px;text-align:center;color:inherit;text-decoration:none'; card.append(contact); }
+        grid.append(card);
+      }
+      if (!profiles.length) main.append(node('p', 'ข้อมูลโปรไฟล์องค์กรยังโหลดไม่สำเร็จ กรุณาเปิดหน้าต่างใหม่', 'pb-notice'));
+      main.appendChild(grid);
+      const note = node('section', null, 'pb-conditions');
+      note.append(node('h3', 'สิ่งที่ควรทราบ'), node('p', 'โปรไฟล์องค์กรแยกจากแพ็กสมาชิกส่วนตัว ยังไม่มีราคาหรือรายการชำระจากหน้านี้ การสร้างพื้นที่ไม่ได้เปิดสิทธิ์สัญญาหรือโควต้าการใช้งานเพิ่มเติม'), node('p', 'ทั้งห้าโปรไฟล์ใช้ชุดความสามารถทดลองเดียวกันภายใต้ขีดจำกัดปัจจุบัน ต่างกันที่การจัดวางการใช้งานและนโยบาย Security ไม่ใช่การเปิดระบบขนาดใหญ่พร้อมใช้งาน'), node('p', 'SSO, SCIM และการส่งต่อ SIEM ยังไม่เชื่อมต่อ โปรไฟล์ Security ไม่ใช่ใบรับรองมาตรฐานหรือการรับรองให้ใช้ข้อมูลลับ'), node('p', nativeAndroid() ? 'สอบถามข้อมูลการใช้งานองค์กร: account@panthorium.net' : 'ติดต่อ account@panthorium.net เพื่อหารือขอบเขตบริการ การเปิดลิงก์อีเมลยังไม่ส่งข้อความ', 'pb-muted'));
+      main.append(note); announce.textContent = nativeAndroid() ? 'โปรไฟล์องค์กร • รุ่นทดลอง • สอบถามข้อมูลการใช้งานองค์กร' : 'โปรไฟล์องค์กร • กำหนดเงื่อนไขตามสัญญา • ไม่มีการเรียกเก็บเงินจากหน้านี้';
     }
     function checkout(product) {
       if (nativeAndroid()) return;

@@ -18,14 +18,36 @@ function resolveLiveTarget({ projectId, location = DEFAULT_LOCATION } = {}) {
   };
 }
 
-function createSetupMessage({ model, systemInstruction = "", tools = [], transcription = false } = {}) {
+function createSetupMessage({ model, systemInstruction = "", tools = [], transcription = false, responseModality = 'audio', sessionResumption = null, contextCompression = null, maxOutputTokens = null } = {}) {
+  const modality = String(responseModality).toLowerCase();
+  if (!['audio', 'text'].includes(modality)) throw new Error('gemini_live_modality_unsupported');
   const setup = {
     model,
     generation_config: {
-      response_modalities: ["audio"]
+      response_modalities: [modality]
     }
   };
-  if (transcription) { setup.input_audio_transcription = {}; setup.output_audio_transcription = {}; }
+  if (maxOutputTokens != null) {
+    if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 65536) throw new Error('invalid_live_output_limit');
+    setup.generation_config.max_output_tokens = maxOutputTokens;
+  }
+  if (transcription) { setup.input_audio_transcription = {}; if (modality === 'audio') setup.output_audio_transcription = {}; }
+  // Official Vertex BidiGenerateContentSetup fields. Callers opt in: resumption
+  // retains provider context and must not be enabled for zero-retention users.
+  // https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/live-api/start-manage-session
+  if (sessionResumption) {
+    setup.session_resumption = {};
+    if (sessionResumption.handle) {
+      if (typeof sessionResumption.handle !== 'string' || sessionResumption.handle.length > 16384) throw new Error('invalid_live_resumption_handle');
+      setup.session_resumption.handle = sessionResumption.handle;
+    }
+  }
+  if (contextCompression) {
+    const trigger = Number(contextCompression.triggerTokens);
+    const target = Number(contextCompression.targetTokens);
+    if (!Number.isInteger(trigger) || trigger < 5000 || trigger > 128000 || !Number.isInteger(target) || target < 0 || target >= trigger) throw new Error('invalid_live_context_compression');
+    setup.context_window_compression = { trigger_tokens: trigger, sliding_window: { target_tokens: target } };
+  }
   if (Array.isArray(tools) && tools.length) setup.tools = [{ function_declarations: tools }];
   const instruction = String(systemInstruction || "").trim();
   if (instruction) setup.system_instruction = { parts: [{ text: instruction }] };
@@ -50,10 +72,16 @@ async function connectGeminiLive({
   systemInstruction,
   tools = [],
   transcription = false,
+  responseModality = 'audio',
+  sessionResumption = null,
+  contextCompression = null,
+  maxOutputTokens = null,
+  signal = null,
   authClient,
   WebSocketImpl,
   handshakeTimeoutMs = 10000
 } = {}) {
+  if (signal?.aborted) throw new Error('gemini_live_connection_aborted');
   let client = authClient;
   let resolvedProjectId = projectId || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
   if (!client) {
@@ -66,6 +94,7 @@ async function connectGeminiLive({
   }
   const target = resolveLiveTarget({ projectId: resolvedProjectId, location });
   const token = await getVertexAccessToken(client);
+  if (signal?.aborted) throw new Error('gemini_live_connection_aborted');
   const Socket = WebSocketImpl || require("ws");
   const socket = new Socket(target.url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -79,6 +108,7 @@ async function connectGeminiLive({
     const cleanup = () => {
       socket.removeListener("open", onOpen);
       socket.removeListener("error", onError);
+      signal?.removeEventListener('abort', onAbort);
     };
     const onOpen = () => {
       if (settled) return;
@@ -88,7 +118,7 @@ async function connectGeminiLive({
       // its relay handler yet.
       socket.on("error", () => {});
       cleanup();
-      socket.send(JSON.stringify(createSetupMessage({ model: target.model, systemInstruction, tools, transcription })), error => {
+      socket.send(JSON.stringify(createSetupMessage({ model: target.model, systemInstruction, tools, transcription, responseModality, sessionResumption, contextCompression, maxOutputTokens })), error => {
         if (error) socket.close(1011, "setup_failed");
       });
       resolve(socket);
@@ -99,8 +129,11 @@ async function connectGeminiLive({
       cleanup();
       reject(error);
     };
+    const onAbort = () => { if (!settled) { settled = true; cleanup(); socket.on('error', () => {}); socket.close(1000, 'connection_aborted'); reject(new Error('gemini_live_connection_aborted')); } };
+    signal?.addEventListener('abort', onAbort, { once: true });
     socket.once("open", onOpen);
     socket.once("error", onError);
+    if (signal?.aborted) onAbort();
   });
 }
 

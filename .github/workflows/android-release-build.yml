@@ -1,0 +1,109 @@
+name: Android release bundle preparation
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: "Unique Play versionCode, greater than every previous uploaded build"
+        required: true
+        type: string
+      version_name:
+        description: "Release semver, for example 0.3.0"
+        required: true
+        type: string
+      production_url:
+        description: "Reviewed Panthorium production origin; staging is forbidden"
+        required: true
+        default: "https://panthorium.net/"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-bundle
+  cancel-in-progress: false
+
+jobs:
+  signed-release-aab:
+    # Release credentials are never exposed to pull-request or staging code.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: android-release
+    timeout-minutes: 30
+    env:
+      PANTHORIUM_ANDROID_BUILD: release
+      PANTHORIUM_VERSION_CODE: ${{ inputs.version_code }}
+      PANTHORIUM_VERSION_NAME: ${{ inputs.version_name }}
+      PANTHORIUM_MOBILE_START_URL: ${{ inputs.production_url }}
+    steps:
+      - name: Check out reviewed main revision
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/android/package-lock.json
+      - name: Check release inputs and preparation policy
+        run: node mobile/android/test/release-preparation.cjs
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+      - name: Install locked Capacitor dependencies
+        working-directory: mobile/android
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate and verify production Browser shell
+        working-directory: mobile/android
+        run: |
+          npx --no-install cap add android
+          npx --no-install cap sync android
+          node scripts/prepare-android.js
+          node scripts/verify-release.cjs
+      - name: Materialize upload key in temporary runner storage
+        env:
+          PANTHORIUM_UPLOAD_KEYSTORE_BASE64: ${{ secrets.PANTHORIUM_UPLOAD_KEYSTORE_BASE64 }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          value = os.environ.get('PANTHORIUM_UPLOAD_KEYSTORE_BASE64', '')
+          if not value:
+              raise SystemExit('Missing PANTHORIUM_UPLOAD_KEYSTORE_BASE64 secret')
+          data = base64.b64decode(''.join(value.split()), validate=True)
+          if not data:
+              raise SystemExit('Upload keystore secret is empty')
+          target = Path(os.environ['RUNNER_TEMP']) / 'panthorium-upload.keystore'
+          fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+          with os.fdopen(fd, 'wb') as output:
+              output.write(data)
+          PY
+      - name: Build signed Android App Bundle
+        working-directory: mobile/android/android
+        env:
+          PANTHORIUM_UPLOAD_KEYSTORE_PATH: ${{ runner.temp }}/panthorium-upload.keystore
+          PANTHORIUM_UPLOAD_STORE_PASSWORD: ${{ secrets.PANTHORIUM_UPLOAD_STORE_PASSWORD }}
+          PANTHORIUM_UPLOAD_KEY_ALIAS: ${{ secrets.PANTHORIUM_UPLOAD_KEY_ALIAS }}
+          PANTHORIUM_UPLOAD_KEY_PASSWORD: ${{ secrets.PANTHORIUM_UPLOAD_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon bundleRelease
+      - name: Verify signature, packaged configuration and merged manifest
+        run: python3 mobile/android/scripts/verify-bundle.py
+      - name: Upload reviewable AAB and verification receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: panthorium-android-release-${{ inputs.version_code }}
+          path: |
+            mobile/android/android/app/build/outputs/bundle/release/app-release.aab
+            mobile/android/android/app/build/outputs/bundle/release/release-info.json
+            mobile/android/android/app/build/outputs/bundle/release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove temporary upload key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/panthorium-upload.keystore"

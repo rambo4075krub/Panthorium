@@ -1,4 +1,5 @@
 const windowCatalog = require('../voice-window-catalog');
+const { payloadHash } = require('./actionLedgerRepository');
 
 const TOOL_DEFINITIONS = [
   ...['minimize', 'maximize', 'fullscreen', 'restore'].map(operation => ({ name: `panthorium_window_${operation}`, toolId: `window.${operation}`, description: `${operation} a Panthorium window. Thai/English requests: ย่อ/minimize, ขยาย/maximize, เต็มจอ/fullscreen, คืนขนาด/restore. Use desktop-browser for the installed Panthorium Browser app; active-window for the current window.`, properties: { appId: { type: 'STRING', description: 'Window id, desktop-browser (native app), or active-window (current window).' } }, required: ['appId'], windowOperation: operation })),
@@ -87,7 +88,10 @@ class AgentFunctionCallingService {
   async execute({ user, call, requestId, source = 'sentinel-chat', requireCallId = false, confirmed = false } = {}) {
     const name = String(call?.name || '');
     const definition = TOOL_DEFINITIONS.find(item => item.name === name);
-    const callId = String(call?.id || '').slice(0, 128);
+    const rawCallId = call?.id;
+    if (rawCallId != null && (typeof rawCallId !== 'string' || (rawCallId.length > 0 && !rawCallId.trim()) || rawCallId.length > 128 || /[\x00-\x1f\x7f]/.test(rawCallId))) return this.rejected({ user, requestId, name, error: 'invalid_function_call_id', source });
+    const callId = rawCallId || '';
+    if (requestId != null && (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 256 || /[\x00-\x1f\x7f]/.test(requestId))) return this.rejected({ user, requestId: null, name, error: 'invalid_request_id', source, callId });
     if (requireCallId && !callId) return this.rejected({ user, requestId, name, error: 'missing_function_call_id', source });
     const declaration = definition && this.declarationsFor(user, { surface: source }).find(item => item.name === name);
     if (!definition || !declaration) {
@@ -104,6 +108,48 @@ class AgentFunctionCallingService {
       return this.rejected({ user, requestId, name, error: 'tool_permission_denied', source, callId, toolId: definition.toolId });
     }
     const result = await this.agentService.execute({ user, toolId: definition.toolId, args, requestId, confirmed: confirmed === true });
+    return this.formatResult({ result, definition, callId, name, args });
+  }
+
+  // Invoked by the authenticated UI/server confirmation path, never by model tool flags.
+  async confirm({ user, call, actionId, approvalHash, requestId, source = 'gemini-live' } = {}) {
+    const name = String(call?.name || '');
+    const callId = typeof call?.id === 'string' ? call.id : '';
+    const definition = TOOL_DEFINITIONS.find(item => item.name === name);
+    if (!definition || !this.agentService.confirmAction || callId.length > 128 || /[\x00-\x1f\x7f]/.test(callId)) return this.rejected({ user, requestId, name, callId, error: 'invalid_action_confirmation', source });
+    const stored = await this.agentService.getAction({ user, actionId });
+    if (!stored.ok) return this.rejected({ user, requestId, name, callId, error: stored.error, source });
+    const action = stored.action;
+    let args = call?.args;
+    if (typeof args === 'string') { try { args = JSON.parse(args); } catch { return this.rejected({ user, requestId, name, callId, error: 'invalid_tool_args', source }); } }
+    if (Object.prototype.hasOwnProperty.call(call || {}, 'args') && (!args || typeof args !== 'object' || Array.isArray(args))) return this.rejected({ user, requestId, name, callId, error: 'invalid_tool_args', source });
+    try {
+      if (action.toolId !== definition.toolId || (args != null && payloadHash(definition.toolId, args) !== action.argsHash)) return this.rejected({ user, requestId, name, callId, error: 'action_request_conflict', source });
+    } catch { return this.rejected({ user, requestId, name, callId, error: 'invalid_tool_args', source }); }
+    const result = await this.agentService.confirmAction({ user, actionId, approvalHash });
+    return this.formatResult({ result, definition, callId, name, args: action.args });
+  }
+
+  confirmAction(input) { return this.confirm(input); }
+
+  // Trusted transport controls only. These methods are intentionally absent from TOOL_DEFINITIONS.
+  async cancel({ user, actionId } = {}) {
+    if (typeof this.agentService.cancelAction !== 'function') return { ok: false, error: 'action_ledger_unavailable' };
+    return this.agentService.cancelAction({ user, actionId });
+  }
+
+  async getOutcome({ user, actionId } = {}) {
+    if (typeof this.agentService.getAction !== 'function') return { ok: false, error: 'action_ledger_unavailable' };
+    const stored = await this.agentService.getAction({ user, actionId });
+    if (!stored.ok) return stored;
+    const action = stored.action;
+    return { ok: true, actionId: action.actionId, actionState: action.state, result: action.result || null,
+      cancellationEffective: action.state === 'cancel_requested' && !action.startedAt,
+      reconciliationRequired: action.state === 'unknown' };
+  }
+
+  formatResult({ result, definition, callId, name, args }) {
+    const receipt = result.actionId ? { actionId: result.actionId, actionState: result.actionState, replayed: result.replayed === true, reconciliationRequired: result.reconciliationRequired === true } : {};
     if (!result.ok && result.error === 'confirmation_required') {
       return {
         id: callId || null,
@@ -111,14 +157,17 @@ class AgentFunctionCallingService {
         toolId: definition.toolId,
         ok: false,
         requiresConfirmation: true,
+        ...receipt,
         confirmation: {
+          ...(result.confirmation || {}),
+          ...(result.actionId ? { actionId: result.actionId, approvalHash: result.approvalHash, approvalExpiresAt: result.approvalExpiresAt } : {}),
           toolId: definition.toolId,
           description: String(result.tool?.description || definition.description).slice(0, 240),
           risk: result.risk || 'medium',
           mutates: result.tool?.mutates === true,
-          args: safeOutput(args, 256000)
+          args: safeOutput(result.confirmation?.args || args, 300000)
         },
-        functionResponse: { name, ...(callId ? { id: callId } : {}), response: { error: 'awaiting_user_confirmation' } }
+        functionResponse: { name, ...(callId ? { id: callId } : {}), response: { error: 'awaiting_user_confirmation', ...receipt } }
       };
     }
     const response = result.ok
@@ -129,9 +178,10 @@ class AgentFunctionCallingService {
       name,
       toolId: definition.toolId,
       ok: result.ok === true,
+      ...receipt,
       output: result.ok ? result.output : undefined,
       error: result.ok ? undefined : response.error,
-      functionResponse: { name, ...(callId ? { id: callId } : {}), response }
+      functionResponse: { name, ...(callId ? { id: callId } : {}), response: { ...response, ...receipt } }
     };
   }
 

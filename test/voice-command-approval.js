@@ -1,0 +1,51 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { JSDOM } = require('jsdom');
+
+async function main() {
+  const dom = new JSDOM('<div id="toast"></div>', { url: 'https://panthorium.test', runScripts: 'outside-only' });
+  const w = dom.window;
+  w.AbortSignal = AbortSignal;
+  w.OS = { config: { backendUrl: '' }, state: { user: { id: 'owner', roles: ['user'], permissions: ['chat'] } } };
+  w.PanthoriumWindowCatalog = { apps: [], normalize: value => String(value).trim().toLowerCase() };
+  w.PanthoriumAuth = { ensureSession: async () => true };
+  const requests = [], responses = [];
+  w.authorizedFetch = async (url, options) => {
+    requests.push({ url, body: JSON.parse(options.body) });
+    const data = responses.shift(); if (data instanceof Error) throw data;
+    return { ok: true, status: data.confirmationRequired ? 409 : 200, json: async () => data };
+  };
+  w.eval(fs.readFileSync(path.join(__dirname, '..', 'voice-command-client.js'), 'utf8'));
+  const execute = w.PanthoriumVoiceCommands.execute;
+  const approvalHash = 'a'.repeat(64);
+  const proposal = (overrides = {}) => ({ ok: true, workflowId: 'workflow-1', confirmationRequired: true, pendingStep: { toolId: 'notes.write', args: { content: 'immutable original' }, actionId: 'action-1', approvalHash, approvalExpiresAt: new Date(Date.now() + 60000).toISOString(), ...overrides }, results: [] });
+  responses.push(proposal());
+  assert.equal((await execute('สร้างโน้ต')).confirmationRequired, true);
+  responses.push({ ok: true, workflowId: 'workflow-1', completed: true, results: [{ ok: true, toolId: 'notes.write' }] });
+  assert.equal((await execute('ยืนยัน')).ok, true);
+  assert.deepEqual(requests.at(-1), { url: '/api/agent/workflow/workflow-1/confirm', body: { actionId: 'action-1', approvalHash } }, 'immutable tuple only, no command/confirmed/args');
+  responses.push(proposal()); await execute('สร้างอีกโน้ต');
+  responses.push({ ok: true, cancelled: true }); await execute('ยกเลิก');
+  assert.deepEqual(requests.at(-1), { url: '/api/agent/workflow/workflow-1/cancel', body: {} });
+  responses.push(proposal({ approvalExpiresAt: new Date(Date.now() - 1000).toISOString() })); await execute('งานหมดอายุ');
+  let count = requests.length;
+  assert.equal((await execute('ยืนยัน')).error, 'workflow_not_found');
+  assert.equal(requests.length, count, 'expired approval never sent');
+  responses.push(proposal({ approvalHash: 'bad-hash' }));
+  assert.equal((await execute('ข้อมูลยืนยันผิด')).error, 'action_approval_invalid');
+  responses.push(proposal()); await execute('งานที่ยังรอ');
+  w.OS.state.user = { id: 'other', roles: ['user'], permissions: ['chat'] }; w.dispatchEvent(new w.Event('panthorium:auth-changed'));
+  count = requests.length; assert.equal((await execute('ยืนยัน')).error, 'workflow_not_found');
+  assert.equal(requests.length, count, 'approval cannot cross account');
+  responses.push(proposal()); await execute('งานเน็ตหลุด');
+  responses.push(new Error('lost response')); assert.equal((await execute('ยืนยัน')).error, 'command_connection_failed');
+  count = requests.length; await execute('ยืนยัน'); assert.equal(requests.length, count, 'unknown mutation is not automatically replayed');
+  responses.push({ ok: true, confirmationRequired: true, pendingAction: { command: 'legacy UI action' } }); await execute('legacy UI action');
+  responses.push({ ok: true }); await execute('ยืนยัน');
+  assert.deepEqual(requests.at(-1), { url: '/api/sentinel/command', body: { command: 'legacy UI action', confirmed: true } }, 'legacy UI navigation confirmation path remains compatible');
+  dom.window.close();
+  console.log('Voice command approval: immutable workflow tuple, expiry, cancellation, account isolation, unknown result, and legacy UI compatibility passed');
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,0 +1,48 @@
+// Generated Android projects apply this source-controlled policy. Secret values
+// are read at build time and are never written into Gradle/config assets.
+import groovy.json.JsonSlurper
+
+def releaseMode = System.getenv('PANTHORIUM_ANDROID_BUILD') == 'release'
+if (releaseMode) {
+    def required = ['PANTHORIUM_UPLOAD_KEYSTORE_PATH', 'PANTHORIUM_UPLOAD_STORE_PASSWORD', 'PANTHORIUM_UPLOAD_KEY_ALIAS', 'PANTHORIUM_UPLOAD_KEY_PASSWORD']
+    required.each { name ->
+        if (!System.getenv(name)) throw new GradleException("Missing Android signing environment: ${name}")
+    }
+    def uploadStore = file(System.getenv('PANTHORIUM_UPLOAD_KEYSTORE_PATH'))
+    if (!uploadStore.isFile()) throw new GradleException('Android upload keystore is unavailable')
+    android {
+        compileSdkVersion 36
+        defaultConfig { targetSdkVersion 36 }
+        signingConfigs {
+            panthoriumUpload {
+                storeFile uploadStore
+                storePassword System.getenv('PANTHORIUM_UPLOAD_STORE_PASSWORD')
+                keyAlias System.getenv('PANTHORIUM_UPLOAD_KEY_ALIAS')
+                keyPassword System.getenv('PANTHORIUM_UPLOAD_KEY_PASSWORD')
+            }
+        }
+        buildTypes {
+            release {
+                debuggable false
+                signingConfig signingConfigs.panthoriumUpload
+            }
+        }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.project == project && it.name.toLowerCase().contains('release') }) {
+        if (!releaseMode) throw new GradleException('Release tasks require PANTHORIUM_ANDROID_BUILD=release and release preparation')
+        def manifest = file('src/release/AndroidManifest.xml')
+        def configFile = file('src/main/assets/capacitor.config.json')
+        def receiptFile = file('../panthorium-release-info.json')
+        if (!manifest.isFile() || !configFile.isFile() || !receiptFile.isFile()) throw new GradleException('Run Capacitor sync and Panthorium release preparation first')
+        def config = new JsonSlurper().parse(configFile)
+        def receipt = new JsonSlurper().parse(receiptFile)
+        if (config.android?.webContentsDebuggingEnabled != false || config.server?.cleartext != false || config.android?.allowMixedContent != false || config.server?.url) throw new GradleException('Unsafe release WebView configuration')
+        if (receipt.mode != 'release' || receipt.applicationId != 'com.panthorium.browser' || receipt.versionCode != android.defaultConfig.versionCode) throw new GradleException('Release preparation does not match this build')
+        if (config.server?.allowNavigation != [new URI(receipt.startUrl).host]) throw new GradleException('Release navigation origin mismatch')
+        if (!file('src/main/assets/public/panthorium-cloud-start.js').isFile()) throw new GradleException('Release cloud Browser bootstrap is missing')
+        if (android.buildTypes.release.debuggable) throw new GradleException('Release must not be debuggable')
+    }
+}
