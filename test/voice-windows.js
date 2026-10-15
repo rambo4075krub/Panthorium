@@ -46,6 +46,10 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
   assert.equal(catalog.parse('เปิดความชอบ Sentinel')?.action, 'open_sentinel_preferences');
   assert.equal(catalog.allowed(preferencesApp, registeredUser), true, 'registered users may use account-scoped Sentinel preferences');
   assert.equal(catalog.allowed(preferencesApp, guest), false, 'Guest cannot use private Sentinel preferences');
+  const organizationsApp = catalog.apps.find(app => app.id === 'organizations');
+  assert.equal(catalog.parse('เปิดพื้นที่องค์กร')?.action, 'open_organizations');
+  assert.equal(catalog.allowed(organizationsApp, registeredUser), true);
+  assert.equal(catalog.allowed(organizationsApp, guest), false, 'Organization navigation requires a real account');
   const policyApp = catalog.apps.find(app => app.id === 'privacy-policy');
   assert.equal(catalog.parse('เปิด Privacy Policy')?.action, 'open_privacy_policy');
   assert.equal(catalog.allowed(policyApp, guest), true, 'Guests can read public Privacy/Policy articles');
@@ -136,7 +140,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       if (pathname === '/api/auth/logout') return Response.json({ ok: true });
       if (pathname === '/api/auth/login') return Response.json({ ok: true, user: admin, accessToken: auth.signAccessToken(admin) });
       if (pathname === '/api/sentinel/command' || pathname.startsWith('/api/agent/workflow/')) {
-        const headers = new Headers(options.headers); headers.set('x-forwarded-for', `192.0.2.${client}`);
+        const headers = new Headers(options.headers); headers.set('x-forwarded-for', `198.18.${Math.floor(client / 254) % 254}.${client % 254 + 1}`);
         return fetch(base + pathname, { ...options, headers });
       }
       if (pathname.startsWith('/api/chat')) throw new Error('Voice must never fall back to a chat endpoint');
@@ -156,7 +160,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="files"]'), 'Files appears in Start menu after account authentication');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="goals"]'), 'Goals appears in Start menu for signed-in chat accounts');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="assistant-preferences"]'), 'Sentinel Preferences appears in Start menu for signed-in chat accounts');
-    for (const file of ['user-manager.js', 'developer-studio-ui.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'window-manager-ui.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'privacy-policy-ui.js', 'billing-admin-ui.js', 'admin-mailbox-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    for (const file of ['user-manager.js', 'developer-studio-ui.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'window-manager-ui.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'organization-catalog.js', 'organizations-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'privacy-policy-ui.js', 'billing-admin-ui.js', 'admin-mailbox-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumStagingAdminDesktop.render();
     await new Promise(resolve => setTimeout(resolve, 40));
     for (const appId of ['media-studio', 'browser']) {
