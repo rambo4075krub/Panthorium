@@ -1,5 +1,5 @@
 'use strict';
-const source = require('../data/cloud-app-packs.json');
+const source = require('./catalog/cloud-app-packs.json');
 function copy(value) { return JSON.parse(JSON.stringify(value)); }
 class CloudAppCatalog {
   constructor({ allowMinorProfiles = false, minorPolicyVerified = false } = {}) {
