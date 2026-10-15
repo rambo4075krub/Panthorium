@@ -1,5 +1,14 @@
 # Panthorium window appearance
 
+## Social Media product design
+
+The [Social Media design package](social-media/README.md) contains the interactive
+six-window proposal and its Thai architecture specification. It is a standalone
+design artifact, excluded from the production image; it does not register apps
+in the live Start Menu or enable social services.
+
+## Shared application window appearance
+
 `window-reference.html` is the user-approved visual source, preserved verbatim.
 `../window-theme-ui.js` owns the shared colors, borders and shadows.
 `../workspace-ui.js` and `../workspace-ui.css` own the actual reference structure:
