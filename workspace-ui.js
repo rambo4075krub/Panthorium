@@ -88,7 +88,7 @@
     all.innerHTML = icon('search'); all.append(node('span', '', 'แอปทั้งหมด'));
     all.onclick = () => openPalette(); side.append(all);
     const bottom = node('div', 'pt-sidebar-bottom');
-    bottom.innerHTML = '<div class="pt-sidebar-card"><strong>พื้นที่สำหรับทุกความคิด</strong><small>Imagine. Create. Make it happen.</small><svg class="pt-mini-wave" viewBox="0 0 160 40" aria-hidden="true"><path d="M0 29Q20 28 35 19T65 25T95 15T125 23T160 12M0 32Q25 12 45 25T90 23T130 15T160 24"/></svg><small>Panthorium OS</small></div><div class="pt-profile"><div class="pt-avatar"><img src="/panthorium-logo-sapphire.png" alt="" draggable="false"></div><div><strong>Personal workspace</strong><small>PANTHORIUM OS</small></div></div>';
+    bottom.innerHTML = '<div class="pt-sidebar-card"><strong>พื้นที่สำหรับทุกความคิด</strong><small>Imagine. Create. Make it happen.</small><svg class="pt-mini-wave" viewBox="0 0 160 40" aria-hidden="true"><path d="M0 29Q20 28 35 19T65 25T95 15T125 23T160 12M0 32Q25 12 45 25T90 23T130 15T160 24"/></svg><small>Panthorium OS</small></div><div class="pt-profile"><div class="pt-avatar"><img src="/panthorium-logo.svg?v=original-orange-20261015" alt="" draggable="false"></div><div><strong>Personal workspace</strong><small>PANTHORIUM OS</small></div></div>';
     side.append(bottom); return side;
   }
   function apply(root) {
@@ -102,7 +102,7 @@
     if (name) {
       const brand = node('div', 'pt-brand');
       const logo = node('img', 'pt-brand-logo');
-      logo.src = window.PanthoriumBranding?.logoUrl || '/panthorium-logo-sapphire.png';
+      logo.src = window.PanthoriumBranding?.logoUrl || '/panthorium-logo.svg?v=original-orange-20261015';
       logo.alt = ''; logo.setAttribute('aria-hidden', 'true'); logo.draggable = false;
       brand.append(logo);
       const text = node('div', ''); text.append(node('strong', '', 'Panthorium'), node('small', '', title.toUpperCase()));
