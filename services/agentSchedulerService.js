@@ -1,10 +1,12 @@
 const { randomUUID } = require('crypto');
 
 class AgentSchedulerService {
-  constructor({ jobs, workflow, runs, audit, authService, automation, reminders, pollMs = 5000, workerId } = {}) {
+  constructor({ jobs, workflow, runs, audit, authService, automation, reminders, pollMs = 5000, workerId, maxJobs = 3, maxReminders = 3, maxMaterialized = 5, tickBudgetMs = 45000 } = {}) {
     this.jobs = jobs; this.workflow = workflow; this.runs = runs; this.audit = audit; this.authService = authService || null; this.automation = automation || null; this.reminders = reminders || null;
     this.pollMs = Math.max(1000, Number(pollMs) || 5000); this.workerId = workerId || `scheduler:${randomUUID()}`;
     this.timer = null; this.running = false;
+    const bound = (value, fallback, max) => Math.min(max, Math.max(1, Math.floor(Number(value) || fallback)));
+    this.maxJobs = bound(maxJobs, 3, 10); this.maxReminders = bound(maxReminders, 3, 10); this.maxMaterialized = bound(maxMaterialized, 5, 20); this.tickBudgetMs = bound(tickBudgetMs, 45000, 120000);
   }
 
   async init() { await this.jobs?.init?.(); await this.automation?.init?.(); await this.reminders?.init?.(); await this.jobs?.recoverStale?.(); }
@@ -17,7 +19,7 @@ class AgentSchedulerService {
     const text = String(request || '').trim(); if (!text || text.length > 8000) return { ok: false, error: 'invalid_agent_request' };
     const timing = this.validateRunAt(runAt); if (!timing.ok) return timing;
     if (provider != null && (typeof provider !== 'string' || !provider.trim() || provider.length > 40)) return { ok: false, error: 'invalid_provider' };
-    const userContext = { sub: user?.sub, username: user?.username || null, roles: Array.isArray(user?.roles) ? [...user.roles] : [], permissions: Array.isArray(user?.permissions) ? [...user.permissions] : [] };
+    const userContext = { sub: user?.sub, username: user?.username || null, roles: Array.isArray(user?.roles) ? [...user.roles] : [], permissions: Array.isArray(user?.permissions) ? [...user.permissions] : [], accountVersion: Number(user?.accountVersion) || 0 };
     if (!userContext.sub) return { ok: false, error: 'invalid_user' };
     if (String(userContext.sub).startsWith('guest:')) return { ok: false, error: 'scheduled_jobs_require_account' };
     const job = await this.jobs.create({ userId: userContext.sub, userContext, request: text, provider: provider?.toLowerCase() || null, runAt: timing.runAt, status: 'scheduled' });
@@ -28,7 +30,7 @@ class AgentSchedulerService {
   async get(userId, jobId) { return this.jobs.get(userId, jobId); }
   async cancel({ user, jobId, requestId } = {}) { const current = await this.jobs.get(user?.sub, jobId); if (!current) return { ok: false, error: 'agent_job_not_found' }; if (current.status === 'waiting_confirmation' && current.workflowId) await this.workflow.cancel({ user, workflowId: current.workflowId, requestId }).catch(() => null); const job = await this.jobs.cancel(user.sub, jobId); if (!job) return { ok: false, error: 'agent_job_not_cancellable' }; this.audit?.record('agent.job_cancelled', { userId: user.sub, requestId, jobId, workflowId: job.workflowId || null }); return { ok: true, job }; }
 
-  async resolveUser(job) { if (!this.authService?.repository?.findUserById) return job.userContext; const user = await this.authService.repository.findUserById(job.userId); if (!user) return null; return { sub: user.id, username: user.username, roles: user.roles || [], permissions: user.permissions || [] }; }
+  async resolveUser(job) { if (!this.authService?.repository?.findUserById) return job.userContext; const user = await this.authService.repository.findUserById(job.userId); if (!user) return null; const principal = { sub: user.id, username: user.username, roles: user.roles || [], permissions: user.permissions || [], accountVersion: Number(job.userContext?.accountVersion) || 0 }; return this.authService.validateAccountPrincipal ? this.authService.validateAccountPrincipal(principal) : principal; }
   async syncWaiting() { if (!this.runs) return; const waiting = await this.jobs.listWaiting(50); for (const job of waiting) { const run = await this.runs.getAny(job.workflowId); if (!run || ['planned','running','waiting_confirmation'].includes(run.status)) continue; const terminal = ['completed','failed','cancelled','expired'].includes(run.status) ? run.status : 'failed'; await this.jobs.finish(job.jobId, { status: terminal, error: run.error || null, result: { workflowId: job.workflowId, runStatus: run.status }, completedAt: new Date().toISOString() }); this.audit?.record('agent.job_terminal', { userId: job.userId, jobId: job.jobId, workflowId: job.workflowId, status: terminal, error: run.error || null }); } }
 
   async executeJob(job) {
@@ -43,6 +45,25 @@ class AgentSchedulerService {
     } catch (error) { const next = await this.jobs.finish(job.jobId, { status: 'failed', error: String(error?.message || 'scheduler_error').slice(0,500), completedAt: new Date().toISOString() }); this.audit?.record('agent.job_failed', { userId: job.userId, jobId: job.jobId, error: String(error?.message || 'scheduler_error').slice(0,500) }); return next; }
   }
 
-  async tick() { if (this.running) return { ok: true, skipped: true }; this.running = true; try { await this.syncWaiting(); let remindersSent = 0; try { const delivered = await this.reminders?.deliverDue?.(10); remindersSent = Number(delivered?.sent) || 0; } catch (error) { this.audit?.record('reminder.scheduler_failed', { error: String(error?.message || 'reminder_scheduler_failed').slice(0,120) }); } const recurring = await this.automation?.materializeDue?.(10) || []; const jobs = await this.jobs.claimDue(this.workerId, 5); for (const job of jobs) await this.executeJob(job); return { ok: true, materialized: recurring.length, claimed: jobs.length, remindersSent }; } finally { this.running = false; } }
+  async tick() {
+    if (this.running) return { ok: true, skipped: true, reason: 'tick_in_progress' };
+    this.running = true; const started = Date.now();
+    try {
+      await this.jobs?.recoverStale?.();
+      await this.syncWaiting();
+      let remindersSent = 0, reminderError = null;
+      try { const delivered = await this.reminders?.deliverDue?.(this.maxReminders); remindersSent = Number(delivered?.sent) || 0; }
+      catch (error) { reminderError = 'reminder_scheduler_failed'; this.audit?.record('reminder.scheduler_failed', { error: String(error?.message || reminderError).slice(0,120) }); }
+      const recurring = Date.now() - started < this.tickBudgetMs ? await this.automation?.materializeDue?.(this.maxMaterialized) || [] : [];
+      let claimed = 0;
+      // Claim one at a time: a soft time budget must not strand a batch of unstarted jobs.
+      while (claimed < this.maxJobs && Date.now() - started < this.tickBudgetMs) {
+        const jobs = await this.jobs.claimDue(this.workerId, 1);
+        if (!jobs.length) break;
+        claimed++; await this.executeJob(jobs[0]);
+      }
+      return { ok: true, materialized: recurring.length, claimed, remindersSent, reminderError, durationMs: Date.now() - started };
+    } finally { this.running = false; }
+  }
 }
 module.exports = { AgentSchedulerService };

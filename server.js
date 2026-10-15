@@ -81,6 +81,16 @@ const { createEmailOtpRepository } = require("./services/emailOtpRepository");
 const { EmailOtpService } = require("./services/emailOtpService");
 const { requestContext } = require("./middleware/requestContext");
 const { createGeminiLiveWebSocketGateway } = require("./services/geminiLiveWebSocket");
+const { ActionLedgerRepository } = require('./services/actionLedgerRepository');
+const { VoiceSessionRepository } = require('./services/voiceSessionRepository');
+const { UsageLedgerRepository } = require('./services/usageLedgerRepository');
+const { CloudAppRuntime } = require('./services/cloudAppRuntime');
+const { createCloudAppCompletion } = require('./services/cloudAppCompletion');
+const { createCloudAppsRouter } = require('./routes/cloudApps');
+const { createActionsRouter } = require('./routes/actions');
+const { createInternalJobsRouter } = require('./routes/internalJobs');
+const { PrivacyRequestService } = require('./services/privacyRequestService');
+const { createPrivacyRequestsRouter } = require('./routes/privacyRequests');
 
 const app = express();
 if (config.trustProxy) app.set("trust proxy", 1);
@@ -99,8 +109,8 @@ const conversations = new ConversationRepository({ databaseUrl: config.databaseU
 const aiOperations = new AiOperationsService({ audit, conversations });
 const agentRuns = new AgentRunRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const agentPending = new AgentPendingRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
-const agentJobs = new AgentJobRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
-const agentAutomationRepository = new AgentAutomationRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
+const agentJobs = new AgentJobRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, requireDatabase: config.isProduction });
+const agentAutomationRepository = new AgentAutomationRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, requireDatabase: config.isProduction });
 const cloudNotesRepository = new CloudNotesRepository({ bucket: process.env.PANTHORIUM_FILES_BUCKET });
 const agentMemoryRepository = new AgentMemoryRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, requireDatabase: config.isProduction, notesRepository: cloudNotesRepository });
 const agentKnowledgeRepository = new AgentKnowledgeRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
@@ -113,14 +123,23 @@ const billingService = new (require('./services/omiseBillingService').OmiseBilli
 const accountAdminService = new (require("./services/accountAdminService").AccountAdminService)(authService,billingService.pool);
 if (billingService.pool) { authService.validateAccountPrincipal = principal => accountAdminService.validate(principal); authService.accountPolicy = id => accountAdminService.policy(id); authService.invalidateAccountSessions = (id,actor) => accountAdminService.invalidate(id,actor); }
 const developerStudioService = new (require("./services/developerStudioService").DeveloperStudioService)({pool:billingService.pool,providers:sentinel.providers});
-const liveEntitlements = billingService.live && billingService.liveEnabled ? billingService.entitlements() : null;
+// AI and file quotas apply independently of the payment checkout mode.
+const liveEntitlements = billingService.pool ? billingService.entitlements() : null;
 sentinel.providers.entitlements=liveEntitlements;
+const cloudStoreOptions = { databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, required: config.isProduction };
+const actionLedger = new ActionLedgerRepository({ ...cloudStoreOptions, allowMemory: !config.isProduction && !config.databaseUrl });
+const voiceSessions = new VoiceSessionRepository({ ...cloudStoreOptions, secret: process.env.VOICE_SESSION_ENCRYPTION_KEY || config.jwtSecret });
+const usageLedger = new UsageLedgerRepository(cloudStoreOptions);
+const cloudApps = new CloudAppRuntime({ ...cloudStoreOptions,
+  complete: process.env.GEMINI_LIVE_ENABLED === '1' ? createCloudAppCompletion({ entitlements: liveEntitlements, usageLedger, gate: sentinel.gateway.concurrencyGate }) : null,
+  allowMinorProfiles: process.env.PANTHORIUM_CHILD_FEATURES_ENABLED === '1',
+  minorPolicyVerified: process.env.PANTHORIUM_CHILD_PROVIDER_POLICY_VERIFIED === '1' });
 const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET, entitlements:liveEntitlements });
 const mediaStudio = new MediaStudioService({ files: cloudFiles, providers: sentinel.providers, gateway: sentinel.gateway, audit, jobSecret: config.jwtSecret });
 const productionIntelligence = new ProductionIntelligenceService({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, audit, gateway: sentinel.gateway });
 const toolRegistry = new ToolRegistry({ sentinel, conversations, securityResponse, aiOperations, integrations, mediaStudio });
 const agentPolicy = new AgentPolicyService();
-const agentService = new AgentService({ tools: toolRegistry, audit, policy: agentPolicy });
+const agentService = new AgentService({ tools: toolRegistry, audit, policy: agentPolicy, ledger: actionLedger });
 const agentKnowledge = new AgentKnowledgeService({ repository: agentKnowledgeRepository, audit });
 toolRegistry.register({
   id: 'knowledge.search', description: 'Search the current user knowledge base', permission: 'chat', risk: 'low', mutates: false,
@@ -147,6 +166,7 @@ const sentinelTraining = new SentinelTrainingService({ repository: sentinelTrain
 toolRegistry.register({ id: 'training.status', description: 'Read Sentinel Learning Lab status', permission: 'settings', risk: 'low', mutates: false, argsSchema: {}, run: async () => sentinelTraining.list({ limit: 1 }) });
 toolRegistry.register({ id: 'learning_lab.open', description: 'Open the Learning Lab in the admin interface', permission: 'settings', risk: 'low', mutates: false, argsSchema: {}, run: async () => ({ ok: true, uiAction: 'open_learning_lab' }) });
 const agentFunctionCalling = new AgentFunctionCallingService({ agentService, audit });
+const privacyRequests = new PrivacyRequestService({ ...cloudStoreOptions, cloudApps, agentService, audit });
 const sentinelRecovery = new SentinelRecoveryService({ learning: sentinelLearning, training: sentinelTraining, trainingRepository: sentinelTrainingRepository, providers: sentinel.providers, audit, maxAttempts: Number(process.env.SENTINEL_AUTONOMOUS_RECOVERY_MAX_ATTEMPTS || 3) });
 const sentinelBenchmark = new SentinelBenchmarkService({ sentinel, providers: sentinel.providers, audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const { SentinelShadowEvaluator } = require('./services/sentinelShadowEvaluator');
@@ -179,6 +199,10 @@ app.post('/api/webhooks/resend', express.raw({type:'application/json',limit:'2mb
 app.use(express.json({ limit: "2mb", type: "application/json" }));
 app.use(cookieParser());
 app.use(requestContext(audit));
+app.use('/internal/jobs', createInternalJobsRouter({ scheduler: { tick: async () => {
+  await voiceSessions.purgeExpired();
+  return agentScheduler.tick();
+} } }));
 
 app.get("/health", async (req, res) => {
   try {
@@ -208,6 +232,9 @@ app.use("/api/billing", require("./routes/billing").createBillingRouter(authServ
 app.use("/api/files", createFilesRouter(authService, cloudFiles));
 app.use("/api/media", createMediaStudioRouter(authService, mediaStudio));
 app.use("/api/reminders", createReminderRouter(authService, reminders));
+app.use('/api/actions', createActionsRouter(authService, agentService));
+app.use('/api/cloud-apps', createCloudAppsRouter(authService, cloudApps));
+app.use('/api/privacy', createPrivacyRequestsRouter(authService, privacyRequests));
 app.use("/api/agent/knowledge", createKnowledgeRouter(authService, agentKnowledge));
 app.use("/api/agent/orchestration", createOrchestrationRouter(authService, multiAgent));
 app.use("/api/integrations", createIntegrationsRouter(authService, integrations));
@@ -234,7 +261,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "account-ui.js", "privacy-policy-ui.js", "live-voice-client.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "account-ui.js", "privacy-policy-ui.js", "live-voice-client.js"];
 for (const script of [...shellScripts, "workspace-ui.css"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -369,6 +396,7 @@ app.get(["/browser", "/browser/"], (req, res) => {
 });
 app.get("/", serveShell);
 app.get("/sentinel.html", serveShell);
+app.get(['/account-deletion', '/account-deletion/'], serveShell);
 app.get("/admin", serveShell);
 app.get("/admin/", serveShell);
 app.get("/admin.html", serveShell);
@@ -381,6 +409,12 @@ app.use((err, req, res, next) => {
 });
 
 async function start() {
+  await actionLedger.init();
+  await voiceSessions.init();
+  await usageLedger.init();
+  await cloudApps.init();
+  await privacyRequests.init();
+  if (liveEntitlements) await liveEntitlements.init();
   await audit.init();
   await securityResponse.init();
   await authService.init();
@@ -405,7 +439,10 @@ async function start() {
   await sentinelOrchestrator.init();
 
   const liveGateway = process.env.GEMINI_LIVE_ENABLED === "1"
-    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "us-central1", functionCalling: agentFunctionCalling, entitlements:liveEntitlements })
+    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "us-central1", functionCalling: agentFunctionCalling, entitlements:liveEntitlements,
+      sessionStore: voiceSessions.available() ? voiceSessions : null,
+      contextProvider: args => cloudApps.voiceContext(args),
+      onUsage: event => usageLedger.record({ ...event, outcome: 'usage_snapshot' }) })
     : null;
   const server = app.listen(config.port, config.host, () => {
     console.log("========================================");
@@ -425,7 +462,7 @@ async function start() {
     liveGateway.attach(server);
     console.log("  Gemini Live WebSocket enabled · " + (process.env.GEMINI_LIVE_LOCATION || "us-central1"));
   }
-  agentScheduler.start();
+  if (!config.isProduction || process.env.PANTHORIUM_SCHEDULER_INTERVAL_FALLBACK === '1') agentScheduler.start();
   sentinelTraining.start();
   autonomousGovernance.start();
   sentinelOrchestrator.start();
@@ -467,5 +504,5 @@ if (require.main === module) {
   }).catch((error) => { console.error("[BOOT]", error); process.exit(1); });
 }
 
-module.exports = { app, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
+module.exports = { app, privacyRequests, actionLedger, voiceSessions, usageLedger, cloudApps, liveEntitlements, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
 

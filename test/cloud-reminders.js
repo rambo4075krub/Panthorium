@@ -47,10 +47,11 @@ const { ReminderService } = require('../services/reminderService');
   const failing = new ReminderService({ repository: failingRepository, authService: { repository: { findUserById: async id => accounts.get(id) } }, sender: async () => { throw new Error('offline'); }, audit: { record() {} } });
   await failing.deliverDue();
   const retried = (await failingRepository.list('alice'))[0];
-  assert.equal(retried.status, 'scheduled');
+  assert.equal(retried.status, 'delivery_unknown');
+  assert.equal((await failing.deliverDue()).attempted, 0, 'Unknown send outcomes must not be retried automatically');
   assert.equal(retried.attempts, 1);
 
   const unavailable = new ReminderService({ repository: new ReminderRepository(), authService: { repository: { findUserById: async id => accounts.get(id) } }, config: {}, audit: { record() {} } });
   assert.equal((await unavailable.create({ user: alice, kind: 'appointment', title: 'นัด', dueAt, timeZone: 'UTC', emailConsent: true })).error, 'reminder_email_unavailable');
-  console.log('Cloud reminders: account isolation, email consent, delivery and retry checks passed.');
+  console.log('Cloud reminders: account isolation, email consent, delivery and uncertain-outcome checks passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
