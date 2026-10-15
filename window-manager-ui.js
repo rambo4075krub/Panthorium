@@ -17,8 +17,7 @@
 
   function shouldOpenFullscreen(app, options = {}) {
     return app.id !== 'calculator'
-      && app.fullscreenOnOpen !== false
-      && options.fullscreenOnOpen !== false;
+      && (options.fullscreenOnOpen ?? app.fullscreenOnOpen ?? manager.preferences?.fullscreenOnOpen) === true;
   }
 
   function closeAfterAppHandler(id, root) {
@@ -80,6 +79,7 @@
       if (fullscreenOnOpen) manager.setFullscreen?.(app.id, true);
     }
     root.dataset.panthoriumManagedWindow = app.id;
+    window.PanthoriumWindowTheme?.apply(root);
     bindControls(app, root);
     bindClose(app, root);
     managed.set(app.id, root);
@@ -110,9 +110,11 @@
       menuAppId: options.menuAppId || id,
       fullscreenOnOpen
     });
+    if (record) window.PanthoriumWindowTheme?.apply(root);
     if (!record || options.controls === false) return record;
     if (fullscreenOnOpen) manager.setFullscreen?.(id, true);
     root.dataset.panthoriumManagedWindow = id;
+    window.PanthoriumWindowTheme?.apply(root);
     bindControls(app, root);
     bindClose(app, root);
     managed.set(id, root);
