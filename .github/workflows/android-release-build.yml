@@ -52,6 +52,39 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - name: Materialize upload key in temporary runner storage
+        env:
+          PANTHORIUM_UPLOAD_KEYSTORE_BASE64: ${{ secrets.PANTHORIUM_UPLOAD_KEYSTORE_BASE64 }}
+          PANTHORIUM_UPLOAD_STORE_PASSWORD: ${{ secrets.PANTHORIUM_UPLOAD_STORE_PASSWORD }}
+          PANTHORIUM_UPLOAD_KEY_ALIAS: ${{ secrets.PANTHORIUM_UPLOAD_KEY_ALIAS }}
+          PANTHORIUM_UPLOAD_KEY_PASSWORD: ${{ secrets.PANTHORIUM_UPLOAD_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          required = ['PANTHORIUM_UPLOAD_KEYSTORE_BASE64', 'PANTHORIUM_UPLOAD_STORE_PASSWORD',
+                      'PANTHORIUM_UPLOAD_KEY_ALIAS', 'PANTHORIUM_UPLOAD_KEY_PASSWORD']
+          missing = [name for name in required if not os.environ.get(name)]
+          if missing:
+              raise SystemExit('Missing android-release secrets: ' + ', '.join(missing))
+          try:
+              data = base64.b64decode(''.join(os.environ[required[0]].split()), validate=True)
+          except ValueError:
+              raise SystemExit('Upload keystore secret is not valid Base64') from None
+          if not data:
+              raise SystemExit('Upload keystore secret is empty')
+          target = Path(os.environ['RUNNER_TEMP']) / 'panthorium-upload.keystore'
+          fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+          with os.fdopen(fd, 'wb') as output:
+              output.write(data)
+          PY
+      - name: Check upload certificate and private-key password before build
+        env:
+          PANTHORIUM_UPLOAD_KEYSTORE_PATH: ${{ runner.temp }}/panthorium-upload.keystore
+          PANTHORIUM_UPLOAD_STORE_PASSWORD: ${{ secrets.PANTHORIUM_UPLOAD_STORE_PASSWORD }}
+          PANTHORIUM_UPLOAD_KEY_ALIAS: ${{ secrets.PANTHORIUM_UPLOAD_KEY_ALIAS }}
+          PANTHORIUM_UPLOAD_KEY_PASSWORD: ${{ secrets.PANTHORIUM_UPLOAD_KEY_PASSWORD }}
+        run: python3 mobile/android/scripts/signing_preflight.py
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
@@ -66,24 +99,6 @@ jobs:
           npx --no-install cap sync android
           node scripts/prepare-android.js
           node scripts/verify-release.cjs
-      - name: Materialize upload key in temporary runner storage
-        env:
-          PANTHORIUM_UPLOAD_KEYSTORE_BASE64: ${{ secrets.PANTHORIUM_UPLOAD_KEYSTORE_BASE64 }}
-        run: |
-          python3 - <<'PY'
-          import base64, os
-          from pathlib import Path
-          value = os.environ.get('PANTHORIUM_UPLOAD_KEYSTORE_BASE64', '')
-          if not value:
-              raise SystemExit('Missing PANTHORIUM_UPLOAD_KEYSTORE_BASE64 secret')
-          data = base64.b64decode(''.join(value.split()), validate=True)
-          if not data:
-              raise SystemExit('Upload keystore secret is empty')
-          target = Path(os.environ['RUNNER_TEMP']) / 'panthorium-upload.keystore'
-          fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-          with os.fdopen(fd, 'wb') as output:
-              output.write(data)
-          PY
       - name: Build signed Android App Bundle
         working-directory: mobile/android/android
         env:
