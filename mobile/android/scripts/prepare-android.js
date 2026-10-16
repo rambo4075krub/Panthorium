@@ -76,7 +76,7 @@ if (build.release) {
   if (capacitor.android?.webContentsDebuggingEnabled !== false || capacitor.android?.allowMixedContent !== false || capacitor.server?.cleartext !== false || capacitor.server?.url || capacitor.loggingBehavior !== 'none' || JSON.stringify(capacitor.server?.allowNavigation) !== JSON.stringify([build.hostname])) throw new Error('Capacitor assets are not configured for the selected production release.');
   const releaseManifest = path.join(androidRoot, 'app', 'src', 'release', 'AndroidManifest.xml');
   fs.mkdirSync(path.dirname(releaseManifest), { recursive: true });
-  fs.writeFileSync(releaseManifest, '<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">\n  <application android:debuggable="false" android:usesCleartextTraffic="false" android:allowBackup="false" tools:replace="android:debuggable,android:usesCleartextTraffic,android:allowBackup" />\n</manifest>\n');
+  fs.writeFileSync(releaseManifest, '<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">\n  <application android:usesCleartextTraffic="false" android:allowBackup="false" tools:replace="android:usesCleartextTraffic,android:allowBackup" />\n</manifest>\n');
   const publicRoot = path.join(androidRoot, 'app', 'src', 'main', 'assets', 'public');
   const indexPath = path.join(publicRoot, 'index.html');
   if (!fs.existsSync(indexPath)) throw new Error('Bundled Browser bootstrap is missing; run cap sync first.');

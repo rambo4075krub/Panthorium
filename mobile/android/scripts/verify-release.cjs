@@ -16,7 +16,9 @@ function verifyRelease(androidRoot, env = process.env) {
   if (read('app/src/main/assets/public/panthorium-cloud-start.js') !== expectedBootstrap) throw new Error('Release bootstrap URL mismatch');
   if (!read('app/src/main/assets/public/index.html').includes('<script src="panthorium-cloud-start.js"></script>')) throw new Error('Release bootstrap is not loaded');
   const manifest = read('app/src/release/AndroidManifest.xml');
-  for (const attr of ['debuggable', 'usesCleartextTraffic', 'allowBackup']) if (!manifest.includes(`android:${attr}="false"`)) throw new Error('Unsafe release manifest: ' + attr);
+  if (/android:debuggable\s*=/.test(manifest)) throw new Error('Let Gradle set release debugging; do not hardcode it in the source manifest');
+  if (!/debuggable\s+false/.test(read('panthorium-release.gradle'))) throw new Error('Release Gradle policy must disable debugging');
+  for (const attr of ['usesCleartextTraffic', 'allowBackup']) if (!manifest.includes(`android:${attr}="false"`)) throw new Error('Unsafe release manifest: ' + attr);
   if (!read('app/build.gradle').includes("apply from: '../panthorium-release.gradle'")) throw new Error('Release signing policy is not applied');
   return receipt;
 }

@@ -42,6 +42,14 @@ try {
   assert(signing.includes('signingConfig signingConfigs.panthoriumUpload'));
   assert(signing.includes('targetSdkVersion 36')); assert(signing.includes('debuggable false'));
   assert(!gradle.includes('keystore-password-test'), 'secret values are not serialized');
+  const releaseManifest = fs.readFileSync(path.join(root, 'app/src/release/AndroidManifest.xml'), 'utf8');
+  assert(!releaseManifest.includes('android:debuggable'), 'Gradle owns debug mode; source must pass HardcodedDebugMode lint');
+  write('app/src/release/AndroidManifest.xml', releaseManifest.replace('<application ', '<application android:debuggable=\"true\" '));
+  assert.throws(() => verifyRelease(root, release), /do not hardcode/);
+  write('app/src/release/AndroidManifest.xml', releaseManifest);
+  write('panthorium-release.gradle', signing.replace('debuggable false', 'debuggable true'));
+  assert.throws(() => verifyRelease(root, release), /disable debugging/);
+  write('panthorium-release.gradle', signing);
   write('app/src/main/assets/capacitor.config.json', JSON.stringify({ ...config, android: { ...config.android, webContentsDebuggingEnabled: true } }));
   assert.throws(() => verifyRelease(root, release), /Unsafe/);
   assert.notEqual(prepare().status, 0, 'release refuses a debug sync');
