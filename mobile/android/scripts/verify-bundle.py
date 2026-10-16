@@ -37,7 +37,10 @@ if app is None or sdk is None or sdk.get(android + "targetSdkVersion") != "36":
     raise SystemExit("Merged release manifest does not target API 36")
 if manifest.get("package") != "com.panthorium.browser" or manifest.get(android + "versionCode") != str(receipt["versionCode"]) or manifest.get(android + "versionName") != receipt["versionName"]:
     raise SystemExit("Merged manifest identity/version mismatch")
-if any(app.get(android + attr) != "false" for attr in ("debuggable", "usesCleartextTraffic", "allowBackup")):
+# Android defaults debuggable to false when the merged attribute is absent.
+if app.get(android + "debuggable") not in (None, "false"):
+    raise SystemExit("Merged release manifest enables debugging")
+if any(app.get(android + attr) != "false" for attr in ("usesCleartextTraffic", "allowBackup")):
     raise SystemExit("Merged release manifest is not hardened")
 digest = hashlib.sha256(bundle.read_bytes()).hexdigest()
 receipt.update({"aabSha256": digest, "uploadCertificateSha256": signed_certificate_sha256(bundle), "signatureVerified": True, "mergedManifestVerified": True})

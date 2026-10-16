@@ -29,3 +29,56 @@ jobs:
           java-version: '21'
       - name: Test signing preflight with disposable keys and no release secrets
         run: python3 -m unittest discover -s mobile/android/test -p 'test_signing_preflight.py' -v
+
+  release-build-smoke:
+    # Compile the real release variant without accessing production credentials.
+    # The disposable-key bundle is never uploaded as an artifact or to Play.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PANTHORIUM_ANDROID_BUILD: release
+      PANTHORIUM_VERSION_CODE: '1'
+      PANTHORIUM_VERSION_NAME: '0.0.0-ci'
+      PANTHORIUM_MOBILE_START_URL: https://panthorium.net/
+      PANTHORIUM_UPLOAD_KEYSTORE_PATH: ${{ runner.temp }}/panthorium-ci-only.keystore
+      PANTHORIUM_UPLOAD_STORE_PASSWORD: disposable-ci-only
+      PANTHORIUM_UPLOAD_KEY_PASSWORD: disposable-ci-only
+      PANTHORIUM_UPLOAD_KEY_ALIAS: disposable-ci-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - name: Create disposable CI signing key
+        run: >-
+          keytool -genkeypair -storetype PKCS12
+          -keystore "$PANTHORIUM_UPLOAD_KEYSTORE_PATH"
+          -storepass:env PANTHORIUM_UPLOAD_STORE_PASSWORD
+          -keypass:env PANTHORIUM_UPLOAD_KEY_PASSWORD
+          -alias "$PANTHORIUM_UPLOAD_KEY_ALIAS"
+          -keyalg RSA -keysize 2048 -validity 2 -dname 'CN=DISPOSABLE CI ONLY'
+      - name: Prepare real release project
+        working-directory: mobile/android
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx --no-install cap add android
+          npx --no-install cap sync android
+          node scripts/prepare-android.js
+          node scripts/verify-release.cjs
+      - name: Build with release lint enabled
+        working-directory: mobile/android/android
+        run: ./gradlew --no-daemon bundleRelease
+      - name: Verify compiled release bundle
+        run: python3 mobile/android/scripts/verify-bundle.py
+      - name: Remove disposable key and bundle
+        if: always()
+        run: |
+          rm -f "$PANTHORIUM_UPLOAD_KEYSTORE_PATH"
+          rm -rf mobile/android/android/app/build/outputs/bundle/release
