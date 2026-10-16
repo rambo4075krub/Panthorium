@@ -40,7 +40,6 @@ jobs:
       PANTHORIUM_VERSION_CODE: '1'
       PANTHORIUM_VERSION_NAME: '0.0.0-ci'
       PANTHORIUM_MOBILE_START_URL: https://panthorium.net/
-      PANTHORIUM_UPLOAD_KEYSTORE_PATH: ${{ runner.temp }}/panthorium-ci-only.keystore
       PANTHORIUM_UPLOAD_STORE_PASSWORD: disposable-ci-only
       PANTHORIUM_UPLOAD_KEY_PASSWORD: disposable-ci-only
       PANTHORIUM_UPLOAD_KEY_ALIAS: disposable-ci-only
@@ -56,6 +55,8 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - name: Set temporary signing path
+        run: echo "PANTHORIUM_UPLOAD_KEYSTORE_PATH=$RUNNER_TEMP/panthorium-ci-only.keystore" >> "$GITHUB_ENV"
       - name: Create disposable CI signing key
         run: >-
           keytool -genkeypair -storetype PKCS12
