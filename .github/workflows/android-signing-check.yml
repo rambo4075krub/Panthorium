@@ -1,0 +1,31 @@
+name: Android signing checks
+
+on:
+  pull_request:
+    branches: [main, staging]
+    paths:
+      - 'mobile/android/**'
+      - '.github/workflows/android-release-build.yml'
+      - '.github/workflows/android-signing-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/android/**'
+      - '.github/workflows/android-release-build.yml'
+      - '.github/workflows/android-signing-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-key-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Test signing preflight with disposable keys and no release secrets
+        run: python3 -m unittest discover -s mobile/android/test -p 'test_signing_preflight.py' -v

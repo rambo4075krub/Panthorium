@@ -44,7 +44,9 @@ Set `PANTHORIUM_MOBILE_START_URL` for a different HTTPS debug environment. Crede
 Use the existing upload key associated with this application in Play Console. For a genuinely new app, create and retain an upload key using Android Studio's signing workflow and configure Play App Signing. Do not generate a new identity on every CI run. Store the original key and recovery material securely outside this repository.
 
 3. Run the workflow with an explicit `version_code` greater than **all versions already uploaded to Play**, a `version_name` such as `0.3.1`, and the reviewed production URL. A re-run uses the same version code; choose a new code before uploading a new build to Play.
-4. Download the workflow artifact. It contains only `app-release.aab`, `release-info.json`, and `SHA256SUMS`. The receipt records source revision, destination, version, target SDK, digest, and verification results.
+4. Download the workflow artifact. It contains only `app-release.aab`, `release-info.json`, and `SHA256SUMS`. The receipt records source revision, destination, version, target SDK, digest, the actual bundle signer's certificate SHA-256, and verification results. Compare `uploadCertificateSha256` to the **upload key certificate** in Play Console, not Google's separate app signing certificate.
+
+Before downloading the Android SDK or installing Capacitor, the release workflow checks all four signing secrets and proves that the configured private key can sign a temporary probe. It reports missing setting names or a fixed diagnostic, never passwords or raw Java error output. The probe is deleted immediately. The certificate fingerprint is public information; this check does not create or replace a key, build an AAB, or confirm Play eligibility.
 
 The CI runner decodes the upload keystore into a private temporary file. Gradle reads signing passwords from environment variables. An always-run cleanup step removes the temporary key. Neither passwords nor the key are put into an Android asset, Gradle source, log command, or uploaded artifact. Missing secrets cause the build to fail.
 
@@ -70,6 +72,7 @@ For local signing, supply `PANTHORIUM_UPLOAD_KEYSTORE_PATH` as an absolute path 
 ```sh
 node scripts/prepare-android.js
 node scripts/verify-release.cjs
+python3 scripts/signing_preflight.py
 cd android
 ./gradlew --no-daemon bundleRelease
 cd ..
@@ -88,6 +91,41 @@ node test/android-immersive.js
 ```
 
 These cover production URL spoofing/staging rejection, debug-asset refusal, version bounds, signing-policy insertion, bootstrap integrity, idempotency, and preservation of the existing shell interface. They do not compile an APK/AAB or prove Play readiness.
+
+With a full JDK (`keytool` and `jarsigner`), run the signing integration tests:
+
+```sh
+python3 -m unittest discover -s mobile/android/test -p 'test_signing_preflight.py' -v
+```
+
+These create and remove disposable test keys, check separate store/key passwords,
+reject the standard debug alias, and compare a signed fixture's certificate to
+the configured upload certificate. CI runs them without production secrets.
+
+## ขั้นตอนถัดไปสำหรับเจ้าของบัญชี Play
+
+ตัว Android คือ **Panthorium Browser**: รับอินพุต แสดงผล และเล่นเสียง ส่วน AI,
+แอพงานและข้อมูลอยู่บน Google Cloud ที่เชื่อมไว้แล้ว รุ่น release ปัจจุบันเปิด
+`https://panthorium.net/` เป็นหลัก การเตรียมนี้ไม่ได้เพิ่ม AI ที่ประมวลผลบนมือถือ
+และไม่ได้ยืนยันว่าท่องทุกเว็บไซต์ได้เหมือนเบราว์เซอร์ทั่วไป
+
+1. ตรวจว่ามี upload keystore เดิมสำหรับ `com.panthorium.browser` หรือไม่
+   หากมีให้ใช้ของเดิม หากเป็นแอปใหม่ที่ยังไม่มีกุญแจ ให้สร้างและสำรองผ่าน
+   Android Studio ตาม [คู่มือ Android](https://developer.android.com/studio/publish/app-signing)
+   ไม่ใช้กุญแจ debug ของไฟล์ preview และไม่ส่งรหัสผ่านหรือไฟล์กุญแจในแชท
+2. ใน GitHub repository ตั้ง environment `android-release` พร้อม secrets สี่ชื่อ
+   ตามตารางด้านบน โดยจำกัดให้ branch `main` ใช้ได้
+3. เมื่อโค้ดที่ต้องการอยู่บน `main` ให้รัน **Android release bundle preparation**
+   ตั้ง `version_code` มากกว่าทุกเวอร์ชันที่เคยอัปโหลด และตั้ง `version_name`
+   เป็นเวอร์ชันที่ต้องการเผยแพร่ ตัวเลขในเอกสารเป็นตัวอย่าง ไม่ใช่เลขที่จองใน Play
+4. หาก build ผ่าน ให้ดาวน์โหลด artifact แล้วแตก ZIP เพื่อหา `app-release.aab`
+   ไฟล์ APK preview ที่มีอยู่ใช้แทน AAB ไม่ได้ และเปลี่ยนนามสกุลเพื่อแปลงไม่ได้
+5. ตรวจ receipt และนำ AAB เข้าช่องทดสอบของ Play เมื่อบัญชีพร้อม ทดสอบบนเครื่องจริง
+   ก่อนขอเผยแพร่ ระบบ CI นี้ไม่อัปโหลดหรือเผยแพร่ไป Play ให้อัตโนมัติ
+
+การสร้าง AAB ไม่ได้ทำให้ข้อกำหนดอื่นเสร็จโดยอัตโนมัติ: ยังต้องยืนยันบัญชี,
+ทดสอบตามเงื่อนไขที่ Console แสดง, เตรียมข้อมูลหน้าร้านตามฟังก์ชันจริง,
+ตรวจ Data safety และกระบวนการลบบัญชี รวมถึงให้ผู้ตรวจเข้าสู่ระบบได้
 
 Before uploading an AAB, test the signed variant on a physical phone and tablet through an appropriate test track: sign-in/out, microphone permission denial/retry, Thai/English streaming, immediate stop, Bluetooth route changes, returning from background, immersive bars, production origin, and native purchase guards. Background microphone operation and Play Billing are not implemented by this preparation. The Browser must accurately show when its connection or microphone is unavailable.
 
