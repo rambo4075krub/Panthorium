@@ -140,6 +140,55 @@ async function main() {
   assert.equal(created.length, 1, 'late private response cannot become a blob after account switch');
   assert.equal(w.document.querySelector('[data-studio]'), null);
   assert(catalog.apps.filter(item => item.id === 'creative-studio' || item.id.startsWith('studio-')).every(item => !catalog.allowed(item, { sub: 'guest:x', roles: ['guest'], permissions: ['chat'] })));
+
+  // Preview regressions: private reads, inert Office content, media controls,
+  // selection races and account changes must never leak stale file contents.
+  w.OS.state.user = owner; w.dispatchEvent(new w.Event('panthorium:auth-changed')); fileFetch = null;
+  const previewFiles = [
+    { id: 'preview-image', name: 'photo.png', contentType: 'image/png' },
+    { id: 'preview-video', name: 'clip.mp4', contentType: 'video/mp4' },
+    { id: 'preview-doc', name: 'report.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', stepIndex: 0 },
+    { id: 'preview-html', name: 'report.print.html', contentType: 'text/html', stepIndex: 0 },
+    { id: 'preview-csv', name: 'data.csv', contentType: 'text/csv' }
+  ];
+  jobs = [{ id: 'preview-job', status: 'completed', files: previewFiles }, { id: 'failed-table', status: 'failed', error: 'office_tabular_data_required', files: [] }, { id: 'uncertain-image', status: 'needs_review', error: 'image_submission_uncertain', files: [] }];
+  files = previewFiles; root = w.PanthoriumCreativeStudio.openImage(); await tick(); await tick();
+  const openPreview = id => root.querySelector('[data-preview-file="' + id + '"]').click();
+  assert(root.querySelector('[data-preview-body]'), 'visible preview area exists before a file is selected');
+  assert.match(root.querySelector('[data-job-id="failed-table"]').textContent, /ยังไม่ได้ข้อมูลเป็นตาราง/);
+  assert.match(root.querySelector('[data-job-id="uncertain-image"]').textContent, /ข้อความนี้ไม่ใช่ปุ่มอนุมัติ/);
+  assert.equal(root.querySelector('[data-job-id="uncertain-image"] [data-advance-job]'), null);
+  openPreview('preview-image'); await tick(); await tick();
+  const firstPreview = root.querySelector('[data-preview-body] img'); assert(firstPreview.src.startsWith('blob:'));
+  const imageUrl = firstPreview.src;
+  openPreview('preview-video'); await tick(); await tick();
+  const video = root.querySelector('[data-preview-body] video'); assert(video.hasAttribute('controls')); assert.equal(video.autoplay, false);
+  assert(revoked.includes(imageUrl), 'switching previews revokes the prior private image');
+  fileFetch = Promise.resolve({ ok: true, status: 200, text: async () => '<html><head><style>body{background:url(https://evil.test/css)}</style></head><body><h1>รายงานไทย</h1><script>top.alert(1)</script><img src="https://evil.test/private"><iframe src="https://evil.test"></iframe><a href="https://evil.test">อ่าน</a><table><tr><td onclick="alert(1)">100</td></tr></table></body></html>' });
+  openPreview('preview-doc'); await tick(); await tick();
+  const frame = root.querySelector('[data-preview-body] iframe'); assert.equal(frame.getAttribute('sandbox'), '');
+  assert.match(frame.srcdoc, /รายงานไทย/); assert.match(frame.srcdoc, /<table>/);
+  assert(!/evil\.test|<script|onclick|<iframe|href=/.test(frame.srcdoc), 'Office preview removes active elements, attributes and network references');
+  assert.match(frame.srcdoc, /default-src 'none'/);
+  assert(calls.some(call => call.url.endsWith('/api/files/preview-html') && call.options.headers.Authorization === 'Bearer new-token'), 'Office opens only its owned print companion');
+  fileFetch = Promise.resolve({ ok: true, status: 200, text: async () => '<script>not executable</script>,1' });
+  openPreview('preview-csv'); await tick(); await tick();
+  assert.equal(root.querySelector('[data-preview-body] script'), null);
+  assert.match(root.querySelector('[data-preview-body] pre').textContent, /<script>/);
+  let resolveOldPreview; fileFetch = new Promise(resolve => { resolveOldPreview = resolve; });
+  openPreview('preview-image'); await tick(); fileFetch = null;
+  openPreview('preview-video'); await tick(); await tick();
+  const kept = root.querySelector('[data-preview-body] video').src;
+  resolveOldPreview(response({})); await tick(); await tick();
+  assert.equal(root.querySelector('[data-preview-body] video').src, kept, 'late preview cannot replace a newer selection');
+  root.querySelector('[data-preview-close]').click(); assert(revoked.includes(kept));
+  assert.equal(root.querySelector('[data-preview-body] video'), null);
+  let resolvePrivatePreview; fileFetch = new Promise(resolve => { resolvePrivatePreview = resolve; });
+  openPreview('preview-image'); await tick(); const urlsBeforeLogout = created.length;
+  w.OS.state.user = { sub: 'different-owner', roles: ['user'], permissions: ['chat'] }; w.dispatchEvent(new w.Event('panthorium:auth-changed'));
+  resolvePrivatePreview(response({})); await tick(); await tick();
+  assert.equal(created.length, urlsBeforeLogout, 'late preview after logout creates no private URL');
+  assert.equal(w.document.querySelector('[data-studio]'), null);
   dom.window.close();
   console.log('PASS Creative Studio UI: 5 grouped tools, account-scoped files, paid confirmation, safe text, workflow handoff, idempotent retries, modes, Sentinel approval and logout/late-response cleanup');
 }

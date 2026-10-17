@@ -25,11 +25,17 @@
     if (/^image\//.test(type)) return id !== 'spreadsheet' && ['image/png', 'image/jpeg'].includes(type);
     return /\.(docx|xlsx|pptx|txt|csv|tsv|md|json)$/i.test(name) || /^(text\/(plain|csv|tab-separated-values|markdown)|application\/json)$/.test(type);
   }
-  const stateName = value => ({ queued: 'อยู่ในคิว', running: 'กำลังทำงาน', completed: 'เสร็จแล้ว', failed: 'ไม่สำเร็จ', needs_review: 'ต้องตรวจสอบก่อนทำต่อ' })[value] || 'กำลังตรวจสถานะ';
+  const stateName = value => ({ queued: 'อยู่ในคิว', running: 'กำลังทำงาน', completed: 'เสร็จแล้ว', failed: 'ไม่สำเร็จ', needs_review: 'ยังยืนยันผลไม่ได้ · หยุดเพื่อกันงานซ้ำ', blocked: 'หยุดเพราะขั้นตอนก่อนหน้าไม่สำเร็จ' })[value] || 'กำลังตรวจสถานะ';
   const terminal = job => !['queued', 'running'].includes(job.status);
   let view = null, generation = 0, lastIdentity = identity(), menuObserver = null;
   const current = v => view === v && v.root.isConnected && v.owner === principal() && v.generation === generation && allowed();
   const messages = {
+    office_tabular_data_required: 'ยังไม่ได้ข้อมูลเป็นตาราง จึงยังไม่มีไฟล์ กรุณาแนบ CSV/XLSX หรือระบุหัวคอลัมน์และข้อมูล ถ้าต้องการแบบฟอร์มเปล่า ให้สั่ง เช่น สร้างตารางวางแผนค่าใช้จ่ายรายเดือน',
+    invalid_office_ai_output: 'AI ส่งเนื้อหากลับมาในรูปแบบที่สร้างไฟล์ไม่ได้ ยังไม่มีไฟล์จากขั้นตอนนี้ กรุณาปรับคำสั่งแล้วสร้างใหม่',
+    invalid_office_content: 'โครงสร้างเอกสารที่ AI ส่งกลับมายังไม่ถูกต้อง จึงยังสร้างไฟล์ไม่ได้',
+    office_drafting_failed: 'บริการร่างเอกสารไม่สำเร็จ ยังไม่มีไฟล์จากขั้นตอนนี้',
+    office_table_columns_mismatch: 'จำนวนคอลัมน์ของแต่ละแถวไม่ตรงกัน กรุณาตรวจตารางต้นทาง',
+    preview_too_large: 'ไฟล์ใหญ่เกินขนาดตัวอย่าง กรุณาดาวน์โหลดเพื่อเปิดดู',
     account_required: 'กรุณาเข้าสู่ระบบก่อนใช้งาน', account_changed: 'บัญชีเปลี่ยนแล้ว กรุณาเปิดสตูดิโออีกครั้ง',
     session_expired: 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง', studio_plugin_disabled: 'ปลั๊กอินนี้ตั้งค่าเป็น Never เปลี่ยนเป็น Auto ก่อนใช้งาน',
     plugin_disabled: 'ปลั๊กอินนี้ตั้งค่าเป็น Never เปลี่ยนเป็น Auto ก่อนใช้งาน', plugin_unavailable: 'ปลั๊กอินนี้ยังไม่พร้อมใช้งาน',
@@ -86,6 +92,13 @@
       [data-studio] .cs-steps{padding-left:20px;font-size:12px;color:var(--text-dim,#aab0bd)}[data-studio] .cs-result{border:1px solid rgba(174,183,197,.16);border-radius:10px;padding:10px;margin:9px 0}[data-studio] .cs-result-name{display:block;font-size:12px;overflow-wrap:anywhere;margin-bottom:8px}[data-studio] .cs-result button{font-size:11px;min-height:34px;padding:6px 9px}[data-studio] .cs-next{border-top:1px solid rgba(174,183,197,.18);margin-top:18px;padding-top:4px}[data-studio] [hidden]{display:none!important}
       @media(max-width:900px){[data-studio]{padding:16px}[data-studio] .cs-layout{grid-template-columns:1fr}[data-studio] header{align-items:start}[data-studio] h1{font-size:24px}}
       @media(max-width:540px){[data-studio]{padding:12px}[data-studio] header{display:block}[data-studio] .cs-head-actions{margin-top:12px}[data-studio] .cs-tabs{gap:5px}[data-studio] .cs-tabs button{flex-direction:column;font-size:10px;gap:4px;padding:9px 3px}[data-studio] .cs-panel{padding:14px}[data-studio] .cs-field-row{grid-template-columns:1fr}}
+      [data-studio] .cs-preview{margin-bottom:22px;border:1px solid rgba(246,150,91,.3);border-radius:12px;overflow:hidden;background:rgba(0,0,0,.15)}
+      [data-studio] .cs-preview-heading{padding:14px;display:flex;justify-content:space-between;gap:8px;align-items:start}[data-studio] .cs-preview-heading h2{margin:0}
+      [data-studio] .cs-preview-body{min-height:190px;max-height:600px;overflow:auto;padding:12px;overflow-wrap:anywhere}
+      [data-studio] .cs-preview-body img,[data-studio] .cs-preview-body video{display:block;width:100%;max-height:520px;object-fit:contain;background:#080b10}
+      [data-studio] .cs-preview-body iframe{display:block;width:100%;height:520px;border:0;background:white}
+      [data-studio] .cs-preview-body pre{white-space:pre-wrap;overflow-wrap:anywhere}[data-studio] .cs-preview-note{padding:0 14px 12px;font-size:12px}
+      [data-studio] .cs-job details{font-size:12px;overflow-wrap:anywhere;margin:8px 0}[data-studio] .cs-result-name{overflow-wrap:anywhere}
     </style>
     <header><div><span class="cs-eyebrow">PANTHORIUM / CREATIVE STUDIO</span><h1>สร้างสรรค์และเอกสาร</h1><p class="cs-muted">หนึ่งพื้นที่ทำงาน · สั่งผ่าน Sentinel AI หรือเริ่มจากเครื่องมือที่ต้องการ</p></div><div class="cs-head-actions"><button type="button" data-open-sentinel>เปิด Sentinel AI</button><button type="button" data-open-files>ไฟล์ของฉัน</button></div></header>
     <nav class="cs-tabs" role="tablist" aria-label="เครื่องมือสร้างสรรค์" data-studio-tabs></nav>
@@ -98,7 +111,7 @@
       <label class="cs-check" data-confirm-label hidden><input type="checkbox" data-studio-confirm><span>ยืนยันเริ่มสร้างสื่อ โดยใช้โควตาหรือค่าใช้จ่ายของบริการที่เชื่อมต่อ</span></label>
       <p role="status" aria-live="polite" data-studio-status></p><button class="cs-primary" type="submit" data-studio-submit disabled>สร้างผลงาน</button><p><small data-studio-durability></small></p>
       </form></section>
-      <section class="cs-panel"><div data-studio-approvals></div><div class="cs-history-title"><h2>งานและผลงานของฉัน</h2><button type="button" data-studio-refresh>รีเฟรช</button></div><p class="cs-muted">ดาวน์โหลด หรือส่งไฟล์ไปยังเครื่องมือถัดไปได้ทันที</p><div data-studio-jobs></div></section></div>
+      <section class="cs-panel"><section class="cs-preview" aria-label="ตัวอย่างผลงาน"><div class="cs-preview-heading"><div><h2>ตัวอย่างผลงาน</h2><small data-preview-name>ภาพ วิดีโอ และเอกสาร</small></div><button type="button" data-preview-close hidden>ปิดตัวอย่าง</button></div><div class="cs-preview-body" data-preview-body aria-live="polite"><p class="cs-muted">เมื่อมีผลงาน กด “เปิดดู” ที่ไฟล์ด้านล่าง ภาพ วิดีโอ และฉบับอ่านของเอกสารจะแสดงที่นี่</p></div><p class="cs-preview-note" data-preview-note></p></section><div data-studio-approvals></div><div class="cs-history-title"><h2>งานและผลงานของฉัน</h2><button type="button" data-studio-refresh>รีเฟรช</button></div><p class="cs-muted">กดเปิดดูเพื่อแสดงตัวอย่าง · ดาวน์โหลดไฟล์ Office เพื่อเปิดแก้ไข · ส่งต่อไปยังเครื่องมืออื่น</p><div data-studio-jobs></div></section></div>
     </div>`;
   function saveDraft(v) {
     if (!current(v)) return;
@@ -156,7 +169,7 @@
       const label = el('label', null, { class: 'cs-check' }), check = el('input', null, { type: 'checkbox', 'data-source-file-id': file.id });
       check.checked = v.sources.has(file.id); check.disabled = v.busy;
       check.onchange = () => { if (check.checked && v.sources.size >= sourceLimit(v.active)) { check.checked = false; status(v, 'เครื่องมือนี้เลือกไฟล์ต้นทางได้ไม่เกิน ' + sourceLimit(v.active) + ' ไฟล์', true); return; } if (check.checked) v.sources.add(file.id); else v.sources.delete(file.id); };
-      const name = el('span', file.name || file.id); name.append(el('small', String(file.contentType || 'ไฟล์') + ' · ' + Math.ceil(Number(file.size || 0) / 1024) + ' KB')); label.append(check, name); list.append(label);
+      const name = el('span', file.name || file.id); name.append(el('small', String(file.contentType || 'ไฟล์') + ' · ' + Math.ceil(Number(file.size || 0) / 1024) + ' KB')); label.append(check, name); const row = el('div'); row.append(label, button('เปิดดู', () => previewFile(v, file, v.jobs.find(job => job.files?.some(item => item.id === file.id))), { 'data-preview-source': file.id })); list.append(row);
     }
     if (v.files.length && !list.childElementCount) list.append(el('p', 'ยังไม่มีไฟล์ต้นทางที่เครื่องมือนี้รองรับ สร้างผลงานจากคำสั่งได้เลย', { class: 'cs-muted' }));
   }
@@ -176,6 +189,83 @@
     } catch (error) { status(v, friendly(error), true); }
     finally { if (current(v)) source.disabled = false; }
   }
+
+  function clearPreview(v) {
+    v.previewSequence = (v.previewSequence || 0) + 1;
+    const body = v.root.querySelector('[data-preview-body]');
+    body?.replaceChildren();
+    if (v.previewUrl) { URL.revokeObjectURL(v.previewUrl); v.urls.delete(v.previewUrl); v.previewUrl = null; }
+    return v.previewSequence;
+  }
+  function readableDocument(html) {
+    // Parse only in inert template content. Rebuild an allowlist; never render
+    // uploaded HTML directly, execute scripts or request remote resources.
+    const template = document.createElement('template'); template.innerHTML = html;
+    const output = el('div');
+    const tags = new Set('h1 h2 h3 h4 h5 h6 p div span section article main header footer figure figcaption table thead tbody tfoot tr th td ul ol li strong b em i u br hr img'.split(' '));
+    const skip = new Set('script style iframe object embed svg math form input button textarea select link meta base audio video source'.split(' '));
+    let count = 0;
+    function copy(source, target, depth) {
+      if (++count > 25000 || depth > 60) return;
+      if (source.nodeType === 3) { target.append(document.createTextNode(source.textContent)); return; }
+      if (source.nodeType !== 1 || skip.has(source.localName)) return;
+      if (!tags.has(source.localName)) { for (const child of source.childNodes) copy(child, target, depth + 1); return; }
+      const node = el(source.localName);
+      if (source.localName === 'img') {
+        const src = source.getAttribute('src') || '';
+        if (src.length > 12 * 1024 * 1024 || !/^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(src)) return;
+        node.setAttribute('src', src); node.setAttribute('alt', source.getAttribute('alt') || 'ภาพประกอบ');
+      }
+      if (source.classList.contains('slide')) node.className = 'slide';
+      for (const name of ['colspan', 'rowspan']) if (/^\d{1,2}$/.test(source.getAttribute(name) || '')) node.setAttribute(name, String(Math.min(40, Number(source.getAttribute(name)))));
+      for (const child of source.childNodes) copy(child, node, depth + 1);
+      target.append(node);
+    }
+    for (const child of template.content.childNodes) copy(child, output, 0);
+    return '<!doctype html><html lang="th"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; base-uri \'none\'; form-action \'none\'"><style>body{font:15px/1.7 Tahoma,sans-serif;color:#20252c;background:#fff;padding:20px;margin:0;overflow-wrap:anywhere}h1{font-size:24px}h2{font-size:19px}p{white-space:pre-wrap}table{border-collapse:collapse;width:100%;margin:16px 0}th,td{border:1px solid #ccc;padding:8px;text-align:left}th{background:#eee}img{max-width:100%;height:auto}.slide{border-bottom:2px solid #ddd;padding:20px 0;margin-bottom:20px}</style></head><body>' + output.innerHTML + '</body></html>';
+  }
+  async function previewFile(v, file, job = {}) {
+    if (!current(v)) return;
+    const sequence = clearPreview(v), body = v.root.querySelector('[data-preview-body]'), note = v.root.querySelector('[data-preview-note]');
+    const live = () => current(v) && v.previewSequence === sequence;
+    v.root.querySelector('[data-preview-name]').textContent = file.name || 'ผลงาน';
+    v.root.querySelector('[data-preview-close]').hidden = false;
+    note.textContent = ''; body.append(el('p', 'กำลังเปิดตัวอย่าง…'));
+    let target = file, type = String(file.contentType || '').split(';')[0].toLowerCase();
+    const office = /\.(docx|xlsx|pptx)$/i.test(file.name || '');
+    if (office) {
+      target = (job.files || []).find(item => item.contentType === 'text/html' && item.name === file.name.replace(/\.(docx|xlsx|pptx)$/i, '.print.html') && (file.stepIndex == null || item.stepIndex === file.stepIndex));
+      if (!target) { body.replaceChildren(el('p', 'ไฟล์ Office นี้ไม่มีฉบับตัวอย่างคู่กัน กดดาวน์โหลดเพื่อเปิดด้วย Word, Excel, PowerPoint หรือโปรแกรมที่รองรับ')); return; }
+      type = 'text/html';
+    }
+    const image = ['image/png','image/jpeg','image/webp','image/gif'].includes(type), video = ['video/mp4','video/webm'].includes(type);
+    const html = type === 'text/html' && /\.print\.html$/i.test(target.name || '');
+    const plain = /^(text\/(plain|csv|tab-separated-values|markdown)|application\/json)$/.test(type);
+    if (!image && !video && !html && !plain) { body.replaceChildren(el('p', 'รูปแบบนี้ยังไม่มีตัวอย่างในสตูดิโอ กดดาวน์โหลดเพื่อเปิดด้วยโปรแกรมที่รองรับ')); return; }
+    try {
+      const limit = video ? 100 * 1024 * 1024 : 24 * 1024 * 1024;
+      if (Number(target.size || 0) > limit) throw Error('preview_too_large');
+      const response = await api(v, '/api/files/' + encodeURIComponent(target.id), {}, true);
+      if (!live()) return;
+      if (Number(response.headers?.get?.('content-length') || 0) > limit) throw Error('preview_too_large');
+      if (html || plain) {
+        const text = await response.text(); if (!live()) return;
+        if (text.length > limit) throw Error('preview_too_large');
+        if (html) {
+          const frame = el('iframe', null, { title: 'ตัวอย่าง ' + (file.name || 'เอกสาร'), sandbox: '', referrerpolicy: 'no-referrer' });
+          frame.srcdoc = readableDocument(text); body.replaceChildren(frame);
+          note.textContent = 'ฉบับอ่านจากไฟล์สำหรับพิมพ์ รูปแบบอาจต่างจาก Office · ดาวน์โหลด DOCX/XLSX/PPTX เพื่อแก้ไข หรือ .print.html เพื่อพิมพ์';
+        } else body.replaceChildren(el('pre', text));
+      } else {
+        const blob = await response.blob(); if (!live()) return;
+        if (blob.size > limit) throw Error('preview_too_large');
+        const url = URL.createObjectURL(new Blob([blob], { type })); v.previewUrl = url; v.urls.add(url);
+        const media = el(image ? 'img' : 'video', null, image ? { src: url, alt: file.name || 'ผลงานรูปภาพ' } : { src: url, controls: '', playsinline: '', preload: 'metadata' });
+        media.onerror = () => { if (live()) note.textContent = 'เบราว์เซอร์เปิดตัวอย่างนี้ไม่ได้ ลองดาวน์โหลดไฟล์เพื่อตรวจสอบ'; };
+        body.replaceChildren(media);
+      }
+    } catch (error) { if (live()) body.replaceChildren(el('p', friendly(error), { role: 'alert' })); }
+  }
   function renderJobs(v) {
     if (!current(v)) return;
     const list = v.root.querySelector('[data-studio-jobs]'); list.replaceChildren();
@@ -188,10 +278,15 @@
       if (job.summary) article.append(el('p', job.summary));
       const steps = el('ol', null, { class: 'cs-steps' }); for (const step of job.steps || []) steps.append(el('li', (plugin(step.pluginId)?.title || step.pluginId) + ' · ' + stateName(step.status))); article.append(steps);
       if (job.error) article.append(el('p', friendly(typeof job.error === 'string' ? job.error : job.error.code || job.error.message), { role: 'note' }));
+      if (job.status === 'needs_review') article.append(el('p', 'ระบบยังยืนยันผลจากบริการไม่ได้ จึงหยุดเพื่อป้องกันงานหรือค่าใช้จ่ายซ้ำ ข้อความนี้ไม่ใช่ปุ่มอนุมัติ โปรดตรวจ “ไฟล์ของฉัน” ก่อนสร้างใหม่ หากยังไม่พบไฟล์ ให้แจ้งรหัสงานด้านล่าง'));
+      if (!(job.files || []).length) article.append(el('p', terminal(job) ? 'งานนี้ยังไม่มีไฟล์ผลงานให้เปิดดู' : 'ตัวอย่างจะเปิดดูได้เมื่อมีไฟล์ผลงาน', { class: 'cs-muted' }));
+      if (job.error || job.status === 'needs_review') { const details = el('details'); details.append(el('summary', 'รายละเอียดสำหรับแจ้งปัญหา'), el('p', 'รหัสงาน: ' + job.id), el('p', 'รหัสข้อผิดพลาด: ' + String(job.error || 'ไม่ระบุ'))); article.append(details); }
+
       const seen = new Set();
       for (const file of job.files || []) {
         if (!file?.id || seen.has(file.id)) continue; seen.add(file.id);
         const result = el('div', null, { class: 'cs-result' }), actions = el('div', null, { class: 'cs-actions' }); result.append(el('strong', file.name || file.id, { class: 'cs-result-name' }));
+        actions.append(button('เปิดดู', () => previewFile(v, file, job), { 'data-preview-file': file.id }));
         actions.append(button('ดาวน์โหลด', event => download(v, file, event.currentTarget), { 'data-download-file': file.id }));
         const type = String(file.contentType || '');
         const targets = ['document', 'spreadsheet', 'presentation'].filter(id => sourceCompatible(file, id));
@@ -271,7 +366,7 @@
     finally { if (current(v)) { v.busy = false; controls(v); } }
   }
   function cleanup(v) {
-    if (!v) return; clearTimeout(v.timer); v.controller.abort();
+    if (!v) return; clearPreview(v); clearTimeout(v.timer); v.controller.abort();
     for (const timer of v.urlTimers) clearTimeout(timer); for (const url of v.urls) URL.revokeObjectURL(url);
     v.urls.clear(); v.urlTimers.clear(); v.jobs = []; v.files = []; v.sources.clear(); v.drafts = {}; v.pending = null; v.approvals.clear();
     v.root.replaceChildren(); if (view === v) view = null;
@@ -295,6 +390,7 @@
       const icon = window.PanthoriumStartMenuUI?.icon?.(item.icon); if (icon) tab.append(icon); tab.append(el('span', item.title)); tabs.append(tab);
       tab.onkeydown = event => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return; event.preventDefault(); const i = PLUGINS.findIndex(p => p.id === v.active), target = event.key === 'Home' ? 0 : event.key === 'End' ? PLUGINS.length - 1 : (i + (event.key === 'ArrowRight' ? 1 : -1) + PLUGINS.length) % PLUGINS.length; selectPlugin(v, PLUGINS[target].id); tabs.children[target].focus(); };
     }
+    root.querySelector('[data-preview-close]').onclick = () => { clearPreview(v); root.querySelector('[data-preview-body]').append(el('p', 'เลือกเปิดดูจากไฟล์ผลงานด้านล่าง')); root.querySelector('[data-preview-name]').textContent = 'ภาพ วิดีโอ และเอกสาร'; root.querySelector('[data-preview-note]').textContent = ''; root.querySelector('[data-preview-close]').hidden = true; };
     root.querySelector('[data-studio-form]').onsubmit = event => submit(v, event);
     root.querySelector('[data-studio-refresh]').onclick = () => refresh(v);
     root.querySelector('[data-studio-refresh-files]').onclick = () => loadFiles(v);
