@@ -2,6 +2,7 @@ const { URL } = require("node:url");
 const { randomUUID } = require("node:crypto");
 const { ALLOWED_LOCATIONS, DEFAULT_LOCATION, connectGeminiLive } = require("./geminiLiveVertex");
 const { createEventStream, createVoiceChallenge, matchVoiceChallenge } = require("./liveConversationRuntime");
+const { safeOutput } = require('./agentFunctionCallingService');
 
 const AUTH_TIMEOUT_MS = 5000;
 const MAX_SESSIONS_PER_INSTANCE = 50;
@@ -194,7 +195,9 @@ function createGeminiLiveWebSocketGateway({
         assistedContextOnly = contextSupplied;
         const tools = assistedContextOnly ? [] : functionCalling?.declarationsFor?.(user, { surface: "gemini-live" }) || [];
         const contextInstruction = verifiedContext?.systemInstruction || verifiedContext?.systemPrompt;
-        const sessionInstruction = systemInstruction + (typeof contextInstruction === 'string' ? '\n' + contextInstruction.slice(0, 16000) : '');
+        const studioInstruction = tools.some(tool => tool.name === 'panthorium_studio_create')
+          ? '\nFor new images, videos, printable documents, spreadsheets, presentations, and connected creative workflows, prefer panthorium_studio_catalog followed by panthorium_studio_create. This keeps all outputs in the shared Creative Studio job history. Reuse exact current-account source file IDs and only compatible handoffs. Never describe a queued or running job as complete; read panthorium_studio_status for its actual state. Do not change Auto/Never settings or invent links. The exact workflow requires the on-screen approval before work starts.' : '';
+        const sessionInstruction = systemInstruction + studioInstruction + (typeof contextInstruction === 'string' ? '\n' + contextInstruction.slice(0, 16000) : '');
         upstream = await connectLive({ projectId, location, systemInstruction: sessionInstruction, tools, transcription: process.env.PANTHORIUM_AI_MODE === "gemini-live-only" || voiceApprovalEnabled,
           sessionResumption: resumeAllowed ? { handle: resumeHandle } : null, contextCompression });
       } catch (error) {
@@ -454,7 +457,8 @@ function createGeminiLiveWebSocketGateway({
             };
           }
           responses.push(functionResponse);
-          sendClient({ type: "toolResult", callId: id, toolId: execution.toolId || null, ok: execution.ok === true, error: execution.error || null });
+          sendClient({ type: "toolResult", callId: id, toolId: execution.toolId || null, ok: execution.ok === true, error: execution.error || null,
+            ...(execution.toolId?.startsWith('studio.') && execution.output ? { output: safeOutput(execution.output) } : {}) });
         }
         for (const call of calls.slice(8)) {
           responses.push({ name: String(call?.name || "unknown_function"), ...(call?.id ? { id: String(call.id).slice(0, 128) } : {}), response: { error: "too_many_function_calls" } });

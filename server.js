@@ -42,6 +42,11 @@ const { AgentMemoryRepository } = require("./services/agentMemoryRepository");
 const { AgentMemoryService } = require("./services/agentMemoryService");
 const { CloudFilesService } = require("./services/cloudFilesService");
 const { MediaStudioService } = require("./services/mediaStudioService");
+const { CreativeStudioService } = require('./services/creativeStudioService');
+const { createCreativeStudioRepository } = require('./services/creativeStudioRepository');
+const { OfficeArtifactService } = require('./services/officeArtifactService');
+const { registerCreativeStudioTools } = require('./services/creativeStudioTools');
+const { createCreativeStudioRouter } = require('./routes/creativeStudio');
 const { CloudNotesRepository } = require("./services/cloudNotesRepository");
 const { registerPersonalFunctionTools } = require("./services/personalFunctionTools");
 const { AgentKnowledgeRepository } = require("./services/agentKnowledgeRepository");
@@ -153,10 +158,30 @@ const organizationResources = new OrganizationResourceService({ organizations,
 const organizationGovernance = new OrganizationGovernanceService({ organizations });
 const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET, entitlements:liveEntitlements });
 const mediaStudio = new MediaStudioService({ files: cloudFiles, providers: sentinel.providers, gateway: sentinel.gateway, audit, jobSecret: config.jwtSecret });
+const creativeStudio = new CreativeStudioService({
+  repository: createCreativeStudioRepository({ ...cloudStoreOptions, allowMemory: !config.isProduction && !config.databaseUrl }),
+  files: cloudFiles, providers: sentinel.providers, gateway: sentinel.gateway, mediaStudio, audit,
+  office: new OfficeArtifactService({ files: cloudFiles, gateway: sentinel.gateway }),
+  resolveUser: async submitted => {
+    const account = await authRepository.findUserById(submitted.sub);
+    if (!account) return null;
+    const principal = { sub: account.id, roles: account.roles || [], permissions: account.permissions || [], accountVersion: Number(submitted.accountVersion) || 0 };
+    return authService.validateAccountPrincipal ? authService.validateAccountPrincipal(principal) : principal;
+  }
+});
+// The existing Video Studio and MCP route share the same per-capability policy.
+const startMediaGeneration = mediaStudio.startGeneration.bind(mediaStudio);
+mediaStudio.startGeneration = async input => {
+  await creativeStudio.assertAllowed(input.user, 'video');
+  return startMediaGeneration(input);
+};
 const productionIntelligence = new ProductionIntelligenceService({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, audit, gateway: sentinel.gateway });
 const toolRegistry = new ToolRegistry({ sentinel, conversations, securityResponse, aiOperations, integrations, mediaStudio });
 const agentPolicy = new AgentPolicyService();
 const agentService = new AgentService({ tools: toolRegistry, audit, policy: agentPolicy, ledger: actionLedger });
+const mcpOAuthRepository = config.mcpEnabled ? new (require('./services/mcpOAuthRepository').McpOAuthRepository)({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, required: config.isProduction, allowMemory: !config.isProduction && !config.databaseUrl }) : null;
+const mcpOAuth = config.mcpEnabled ? new (require('./services/mcpOAuthService').McpOAuthService)({ repository: mcpOAuthRepository, authService, baseUrl: config.mcpBaseUrl, allowedRedirectUris: config.mcpRedirectUris }) : null;
+const mcpTools = config.mcpEnabled ? new (require('./services/mcpToolService').McpToolService)({ agentService, mediaStudio, baseUrl: config.mcpBaseUrl, audit }) : null;
 const agentKnowledge = new AgentKnowledgeService({ repository: agentKnowledgeRepository, audit });
 toolRegistry.register({
   id: 'knowledge.search', description: 'Search the current user knowledge base', permission: 'chat', risk: 'low', mutates: false,
@@ -166,6 +191,7 @@ toolRegistry.register({
 });
 const agentMemory = new AgentMemoryService({ repository: agentMemoryRepository, audit, knowledge: agentKnowledge });
 registerPersonalFunctionTools(toolRegistry, { memory: agentMemory, reminders, files: cloudFiles, knowledge: agentKnowledge });
+registerCreativeStudioTools(toolRegistry, { studio: creativeStudio });
 sentinel.memory = agentMemory;
 const agentPlanner = new AgentPlannerService({ agentService, gateway: sentinel.gateway, audit, memory: agentMemory });
 const agentWorkflow = new AgentWorkflowService({ agentService, gateway: sentinel.gateway, audit, runs: agentRuns, pendingStore: agentPending, memory: agentMemory });
@@ -216,9 +242,12 @@ app.post('/api/webhooks/resend', express.raw({type:'application/json',limit:'2mb
 app.use(express.json({ limit: "2mb", type: "application/json" }));
 app.use(cookieParser());
 app.use(requestContext(audit));
+if (config.mcpEnabled) app.use(require('./routes/mcp').createMcpRouter({ oauth: mcpOAuth, toolService: mcpTools, authService, config, audit }));
 app.use('/internal/jobs', createInternalJobsRouter({ scheduler: { tick: async () => {
   await voiceSessions.purgeExpired();
-  return agentScheduler.tick();
+  const scheduled = await agentScheduler.tick();
+  const studio = await creativeStudio.tick();
+  return { ...scheduled, studio };
 } } }));
 
 app.get("/health", async (req, res) => {
@@ -248,6 +277,7 @@ app.get("/api/policies/operator", async(req,res)=>{ try { const p=await new (req
 app.use("/api/billing", require("./routes/billing").createBillingRouter(authService,billingService));
 app.use("/api/files", createFilesRouter(authService, cloudFiles));
 app.use("/api/media", createMediaStudioRouter(authService, mediaStudio));
+app.use('/api/studio', createCreativeStudioRouter(authService, creativeStudio));
 app.use("/api/reminders", createReminderRouter(authService, reminders));
 app.use('/api/actions', createActionsRouter(authService, agentService));
 app.use('/api/cloud-apps', createCloudAppsRouter(authService, cloudApps));
@@ -281,7 +311,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "account-ui.js", "privacy-policy-ui.js", "live-voice-client.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "creative-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "account-ui.js", "privacy-policy-ui.js", "live-voice-client.js"];
 for (const script of [...shellScripts, "workspace-ui.css"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -433,11 +463,13 @@ async function start() {
   await voiceSessions.init();
   await usageLedger.init();
   await cloudApps.init();
+  await creativeStudio.init();
   await privacyRequests.init();
   if (liveEntitlements) await liveEntitlements.init();
   await audit.init();
   await securityResponse.init();
   await authService.init();
+  if (mcpOAuthRepository) await mcpOAuthRepository.init();
   await organizationRepository.init();
   await biometrics.init();
   await emailOtp.init();
@@ -525,5 +557,5 @@ if (require.main === module) {
   }).catch((error) => { console.error("[BOOT]", error); process.exit(1); });
 }
 
-module.exports = { app, organizationRepository, organizations, organizationResources, organizationGovernance, privacyRequests, actionLedger, voiceSessions, usageLedger, cloudApps, liveEntitlements, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
+module.exports = { app, creativeStudio, organizationRepository, organizations, organizationResources, organizationGovernance, privacyRequests, actionLedger, voiceSessions, usageLedger, cloudApps, liveEntitlements, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
 

@@ -300,7 +300,7 @@ class MediaStudioService {
     return payload + '.' + signature;
   }
 
-  readGenerationJob(token, userId) {
+  readGenerationJob(token, userId, { allowExpired = false } = {}) {
     const [payload, signature, extra] = String(token || '').split('.');
     if (!payload || !signature || extra || payload.length > 5000 || signature.length > 100) throw new MediaStudioError(400, 'invalid_generation_job');
     const expected = crypto.createHmac('sha256', this.jobSecret).update(payload).digest();
@@ -310,7 +310,7 @@ class MediaStudioService {
     let job;
     try { job = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch (_) { throw new MediaStudioError(400, 'invalid_generation_job'); }
     if (job?.userId !== userId) throw new MediaStudioError(403, 'generation_job_forbidden');
-    if (!Number.isFinite(job.expiresAt) || job.expiresAt < Date.now()) throw new MediaStudioError(410, 'generation_job_expired');
+    if (!Number.isFinite(job.expiresAt) || (!allowExpired && job.expiresAt < Date.now())) throw new MediaStudioError(410, 'generation_job_expired');
     if (!/^[0-9a-f-]{36}$/i.test(String(job.jobId || '')) || !VEO_MODELS.has(job.model) || !/^[a-z0-9-]{2,40}$/.test(String(job.location || ''))) throw new MediaStudioError(400, 'invalid_generation_job');
     const opPattern = new RegExp('^projects/[A-Za-z0-9.-]+/locations/' + job.location + '/publishers/google/models/' + job.model + '/operations/[A-Za-z0-9_-]+$');
     if (!opPattern.test(String(job.operationName || ''))) throw new MediaStudioError(400, 'invalid_generation_job');
@@ -335,7 +335,7 @@ class MediaStudioService {
     return data;
   }
 
-  async startGeneration({ user, prompt, durationSeconds = 8, aspectRatio = '16:9', name = '', confirmed = false } = {}) {
+  async startGeneration({ user, prompt, durationSeconds = 8, aspectRatio = '16:9', name = '', confirmed = false, sourceFileId = '' } = {}) {
     const userId = this.requireAccount(user);
     if (confirmed !== true) throw new MediaStudioError(409, 'generation_confirmation_required');
     const features = this.capabilities();
@@ -348,13 +348,25 @@ class MediaStudioService {
     const location = String(process.env.SENTINEL_VEO_LOCATION || 'us-central1').trim();
     const project = String(this.providers.vertex?.project || '');
     if (!/^[A-Za-z0-9.-]{3,100}$/.test(project) || !/^[a-z0-9-]{2,40}$/.test(location)) throw new MediaStudioError(503, 'video_generation_unavailable');
+    let image;
+    if (sourceFileId) {
+      if (typeof sourceFileId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sourceFileId)) throw new MediaStudioError(400, 'invalid_source_file_id');
+      // Resolve only through the current account's private Cloud Files namespace.
+      const source = await this.files.download(userId, sourceFileId);
+      const bytes = source.body;
+      const png = Buffer.isBuffer(bytes) && bytes.length > 24 && bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+      const jpeg = Buffer.isBuffer(bytes) && bytes.length > 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+      if (!(source.contentType === 'image/png' && png || source.contentType === 'image/jpeg' && jpeg)) throw new MediaStudioError(400, 'video_source_image_required');
+      if (bytes.length > 8 * 1024 * 1024) throw new MediaStudioError(413, 'source_image_too_large');
+      image = { bytesBase64Encoded: bytes.toString('base64'), mimeType: source.contentType };
+    }
     const prepared = await this.generationPrompt({ user, prompt });
     let accessToken;
     try { accessToken = await this.providers.vertexAccessToken(); } catch (_) { throw new MediaStudioError(503, 'video_generation_unavailable'); }
     if (!accessToken) throw new MediaStudioError(503, 'video_generation_unavailable');
     const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(project)}/locations/${location}/publishers/google/models/${model}:predictLongRunning`;
     const operation = await this.vertexJson(endpoint, accessToken, {
-      instances: [{ prompt: prepared.prompt }],
+      instances: [{ prompt: prepared.prompt, ...(image ? { image } : {}) }],
       parameters: { aspectRatio, durationSeconds: Number(durationSeconds), sampleCount: 1, enhancePrompt: true, generateAudio: true, resolution: '720p', personGeneration: 'allow_adult' }
     });
     const operationName = String(operation.name || '');
@@ -368,9 +380,11 @@ class MediaStudioService {
     return { ok: true, status: 'running', jobToken, model, prompt: prepared.prompt, durationSeconds: Number(durationSeconds), aspectRatio };
   }
 
-  async generationStatus({ user, jobToken } = {}) {
+  async generationStatus({ user, jobToken, allowExpired = false } = {}) {
     const userId = this.requireAccount(user);
-    const job = this.readGenerationJob(jobToken, userId);
+    // Only the server-owned durable Studio ledger opts into recovery. Public
+    // routes do not accept/forward this option; signature and ownership remain mandatory.
+    const job = this.readGenerationJob(jobToken, userId, { allowExpired });
     const existing = await this.files.list(userId);
     const completedFile = (existing.files || []).find(file => file.name === job.outputName);
     if (completedFile) return { ok: true, status: 'completed', file: completedFile, jobId: job.jobId };
