@@ -135,6 +135,7 @@ jobs:
             curl --fail --silent --show-error "$URL/$asset" -o "$RUNNER_TEMP/deployed-$asset"
             cmp "$asset" "$RUNNER_TEMP/deployed-$asset"
           done
+          PRIVACY_SMOKE_URL="$URL" node test/public-privacy-deployed.js
           MCP_SMOKE_URL="$URL" MCP_EXPECTED_BASE_URL="https://panthorium-backend-staging-124818950958.asia-southeast1.run.app" node test/mcp-deployed.js
           CHAT_SMOKE_URL="$URL" node test/desktop-chat-deployed.js
           STUDIO_SMOKE_URL="$URL" node test/creative-studio-deployed.js
