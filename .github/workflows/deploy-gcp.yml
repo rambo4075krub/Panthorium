@@ -52,6 +52,9 @@ jobs:
         with:
           node-version: 24
 
+      - name: Install media test dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+
       - name: Install & Run Tests
         run: |
           npm install

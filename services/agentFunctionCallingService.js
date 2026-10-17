@@ -1,7 +1,10 @@
 const windowCatalog = require('../voice-window-catalog');
 const { payloadHash } = require('./actionLedgerRepository');
+const { createHash } = require('crypto');
+const { STUDIO_TOOL_DEFINITIONS } = require('./creativeStudioTools');
 
 const TOOL_DEFINITIONS = [
+  ...STUDIO_TOOL_DEFINITIONS,
   ...['minimize', 'maximize', 'fullscreen', 'restore'].map(operation => ({ name: `panthorium_window_${operation}`, toolId: `window.${operation}`, description: `${operation} a Panthorium window. Thai/English requests: ย่อ/minimize, ขยาย/maximize, เต็มจอ/fullscreen, คืนขนาด/restore. Use desktop-browser for the installed Panthorium Browser app; active-window for the current window.`, properties: { appId: { type: 'STRING', description: 'Window id, desktop-browser (native app), or active-window (current window).' } }, required: ['appId'], windowOperation: operation })),
   { name: 'panthorium_window_open', toolId: 'window.open', description: 'Open one Panthorium window for the current user.', properties: { appId: { type: 'STRING', description: 'Window id: desktop-browser for the installed Panthorium app, browser for its internal Web Browser, active-window for this/current window.' } }, required: ['appId'], windowOperation: 'open' },
   { name: 'panthorium_window_close', toolId: 'window.close', description: 'Close one Panthorium window for the current user.', properties: { appId: { type: 'STRING', description: 'Window id: desktop-browser for the installed Panthorium app, browser for its internal Web Browser, active-window for this/current window.' } }, required: ['appId'], windowOperation: 'close' },
@@ -35,6 +38,7 @@ const TOOL_DEFINITIONS = [
 ];
 
 const ACCOUNT_ONLY_TOOL_IDS = new Set([
+  ...STUDIO_TOOL_DEFINITIONS.map(tool => tool.toolId),
   'knowledge.search', 'knowledge.write',
   'calendar.read', 'calendar.write', 'goals.read', 'goals.write',
   'notes.read', 'notes.write', 'memory.read', 'memory.write',
@@ -63,13 +67,16 @@ class AgentFunctionCallingService {
     const catalog = new Map(this.agentService.catalogFor(user).map(tool => [tool.id, tool]));
     const allowedWindows = windowCatalog.apps.filter(app => windowCatalog.allowed(app, user)).map(app => app.id);
     return TOOL_DEFINITIONS.flatMap(definition => {
-      if (ACCOUNT_ONLY_TOOL_IDS.has(definition.toolId) && (!user?.sub || String(user.sub).startsWith('guest:'))) return [];
+      if (ACCOUNT_ONLY_TOOL_IDS.has(definition.toolId) && (!user?.sub || String(user.sub).startsWith('guest:') || user.roles?.includes('guest'))) return [];
       const tool = catalog.get(definition.toolId);
       if (!tool) return [];
       const risk = tool.risk || 'low';
       if (risk === 'critical') return [];
       const requiresApproval = !!tool.requiresConfirmation || !!tool.mutates || risk === 'high';
-      if (requiresApproval && surface !== 'gemini-live') return [];
+      // Studio is the only chat mutation with a dedicated approval card. Without
+      // a durable ledger the model must not be allowed to propose this action.
+      if (definition.toolId === 'studio.create' && !this.agentService.ledger) return [];
+      if (requiresApproval && surface !== 'gemini-live' && !(surface === 'sentinel-chat' && definition.toolId === 'studio.create' && this.agentService.ledger)) return [];
       if (risk === 'medium' && !requiresApproval) return [];
       if (definition.windowOperation && surface !== 'gemini-live') return [];
       const properties = clone(definition.properties);
@@ -107,7 +114,14 @@ class AgentFunctionCallingService {
     if (definition.windowOperation && !declaration.parameters.properties.appId.enum.includes(args.appId)) {
       return this.rejected({ user, requestId, name, error: 'tool_permission_denied', source, callId, toolId: definition.toolId });
     }
-    const result = await this.agentService.execute({ user, toolId: definition.toolId, args, requestId, confirmed: confirmed === true });
+    let actionRequestId = requestId;
+    if (definition.toolId === 'studio.create' && requestId) {
+      // A server request may contain several different creative actions. Their
+      // keys are derived here, never accepted as model arguments or call IDs.
+      try { actionRequestId = `studio:${createHash('sha256').update(`${requestId}:${payloadHash(definition.toolId, args)}`).digest('hex')}`; }
+      catch { return this.rejected({ user, requestId, name, error: 'invalid_tool_args', source, callId, toolId: definition.toolId }); }
+    }
+    const result = await this.agentService.execute({ user, toolId: definition.toolId, args, requestId: actionRequestId, confirmed: definition.toolId === 'studio.create' ? false : confirmed === true });
     return this.formatResult({ result, definition, callId, name, args });
   }
 

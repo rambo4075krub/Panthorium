@@ -279,6 +279,9 @@
     }
     if (frame.type === "toolResult") {
       if (frame.error) console.info("Gemini Live function result", frame.toolId || "unknown", frame.error);
+      if (frame.toolId?.startsWith('studio.')) {
+        window.dispatchEvent(new CustomEvent('panthorium:ai-done', { detail: { source: 'gemini-live', toolResults: [frame] } }));
+      }
       return;
     }
     const content = frame.serverContent || frame.server_content;
