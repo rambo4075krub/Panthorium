@@ -22,6 +22,10 @@
     food: 'M4 3v6c0 4 6 4 6 0V3M7 3v18M18 3c-4 4-4 10 0 10h2M20 3v18',
     home: 'm3 11 9-8 9 8M5 10v11h14V10M9 21v-7h6v7',
     pen: 'm4 16 12-12 4 4L8 20H4v-4Zm9-9 4 4M3 22h18',
+    creative: 'm12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3ZM20 3v4M18 5h4',
+    image: 'M3 4h18v16H3V4Zm0 12 5-5 4 4 3-3 6 6M16 7h.01',
+    video: 'M3 5h13v14H3V5Zm13 5 5-3v10l-5-3M7 9l5 3-5 3V9Z',
+    presentation: 'M3 4h18v13H3V4ZM12 17v4M7 21l5-4 5 4M7 12V9M12 12V7M17 12v-2',
     chevron: 'm8 5 7 7-7 7'
   };
   function normalize(value) { return String(value || '').normalize('NFKC').trim().toLocaleLowerCase(); }
