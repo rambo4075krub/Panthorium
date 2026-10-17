@@ -311,7 +311,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "creative-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "account-ui.js", "privacy-policy-ui.js", "live-voice-client.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "creative-studio-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "live-voice-client.js"];
 for (const script of [...shellScripts, "workspace-ui.css"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -446,7 +446,7 @@ app.get(["/browser", "/browser/"], (req, res) => {
 });
 app.get("/", serveShell);
 app.get("/sentinel.html", serveShell);
-app.get(['/account-deletion', '/account-deletion/'], serveShell);
+app.use(require('./routes/publicPrivacy').createPublicPrivacyRouter());
 app.get("/admin", serveShell);
 app.get("/admin/", serveShell);
 app.get("/admin.html", serveShell);

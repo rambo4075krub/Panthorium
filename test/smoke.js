@@ -12,6 +12,13 @@ const { app } = require("../server");
   const port = server.address().port;
   const base = `http://127.0.0.1:${port}`;
   try {
+    for (const route of ['/privacy', '/account-deletion']) {
+      const publicResponse = await fetch(base + route);
+      if (publicResponse.status !== 200 || !(await publicResponse.text()).includes('Panthorium Browser')) throw new Error('public policy unavailable: ' + route);
+      if (publicResponse.headers.get('set-cookie')) throw new Error('public notice must not create a session');
+    }
+    const shell = await (await fetch(base + '/')).text();
+    if (shell.indexOf('/privacy-notice.js') < 0 || shell.indexOf('/privacy-notice.js') > shell.indexOf('/privacy-policy-ui.js')) throw new Error('shared policy must load before policy UI');
     let r = await fetch(base + "/api/health");
     if (r.status !== 200) throw new Error("health failed");
     r = await fetch(base + "/health");
