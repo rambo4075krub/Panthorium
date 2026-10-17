@@ -324,6 +324,7 @@
     return { id: String(value.id), title: String(value.title).trim(), subtitle: String(value.subtitle || '').trim(), sections };
   }
   initialPolicies.forEach(policy => policies.set(policy.id, cleanPolicy(policy)));
+  (window.PanthoriumPrivacyNotice?.policies || []).forEach(policy => policies.set(policy.id, cleanPolicy(policy)));
 
   function list() { return Array.from(policies.values(), policy => JSON.parse(JSON.stringify(policy))); }
   function register(policy) {
@@ -368,6 +369,11 @@
       appendText(section, 'p', body);
       content.appendChild(section);
     });
+    if (['privacy-notice', 'account-deletion'].includes(policy.id)) {
+      const link = appendText(content, 'a', policy.id === 'account-deletion' ? 'เปิดหน้าขอลบบัญชีสาธารณะ / ติดต่อทางอีเมล' : 'เปิดนโยบายฉบับสาธารณะ');
+      link.href = policy.id === 'account-deletion' ? '/account-deletion' : '/privacy';
+      link.target = '_blank'; link.rel = 'noopener';
+    }
     if (policy.id === 'account-deletion') renderDeletionRequest(root, content);
     if (policy.id === 'ai-report') renderReportForm(root, content, reportContext);
   }
