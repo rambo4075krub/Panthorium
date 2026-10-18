@@ -79,6 +79,15 @@ function memoryFiles() {
   const proseSheet = await prose.create({ user: owner, pluginId: 'spreadsheet', input: 'วิเคราะห์', sourceFileIds: [csv] });
   const sheetText = extractOfficeText(files.data.get(proseSheet.files[0].id).body); assert.match(sheetText, /สินค้า, ก\t00100/); assert.match(sheetText, /เนื้อหาที่ได้รับจาก AI จริง/);
   assert.deepEqual(core.parseTable('| ชื่อ | ค่า |\n| --- | --- |\n| ก | 2 |'), [['ชื่อ', 'ค่า'], ['ก', '2']]);
+
+  assert.deepEqual(core.parseTable('ตารางตามที่ขอ\n```markdown\n| หมวด | งบ |\n| --- | --- |\n| อาหาร | 200 |\n```\nโปรดตรวจสอบ'), [['หมวด', 'งบ'], ['อาหาร', '200']]);
+  assert.deepEqual(core.parseTable('```csv\nรายการ,จำนวน\nอาหาร,20\n```'), [['รายการ', 'จำนวน'], ['อาหาร', '20']]);
+  const planner = await prose.create({ user: owner, pluginId: 'spreadsheet', input: 'สร้างตารางวางแผนค่าใช้จ่ายรายเดือน' });
+  const plannerText = extractOfficeText(files.data.get(planner.files[0].id).body);
+  assert.match(plannerText, /งบประมาณ/); assert.match(plannerText, /จ่ายจริง/); assert.match(plannerText, /แบบฟอร์มเปล่า/);
+  assert(!/<v>\d/.test(core.unzip(files.data.get(planner.files[0].id).body)['xl/worksheets/sheet1.xml'].toString()), 'blank budget never invents spending amounts');
+  await assert.rejects(prose.create({ user: owner, pluginId: 'spreadsheet', input: 'วิเคราะห์ยอดขายตามจริง' }), error => error.code === 'office_tabular_data_required' && error.artifactNotCreated === true);
+  await assert.rejects(prose.create({ user: owner, pluginId: 'spreadsheet', input: 'วางแผนงบประมาณจากข้อมูลนี้', sourceFileIds: [sourceId] }), /office_tabular_data_required/, 'source analysis is never silently replaced by a blank template');
   const rollbackFiles = memoryFiles(); const originalUpload = rollbackFiles.upload.bind(rollbackFiles); let written = 0;
   rollbackFiles.upload = async (...args) => { if (++written === 2) throw new Error('files_quota_exceeded'); return originalUpload(...args); };
   await assert.rejects(new OfficeArtifactService({ files: rollbackFiles }).create({ user: owner, pluginId: 'document', input: { content: drafts.document } }), /files_quota_exceeded/);

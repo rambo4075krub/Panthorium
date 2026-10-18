@@ -11,6 +11,7 @@ const { sanitizeFilename, MAX_FILE_BYTES } = require('./cloudFilesService');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const IMAGE_MODELS = new Set(['gemini-2.5-flash-image', 'gemini-3.1-flash-image']);
 const ASPECTS = new Set(['1:1','3:2','2:3','3:4','4:3','4:5','5:4','9:16','16:9','21:9']);
+const OFFICE_PREOUTPUT_ERRORS = new Set(['office_tabular_data_required', 'invalid_office_ai_output', 'invalid_office_content', 'office_table_columns_mismatch', 'invalid_office_sheet_name', 'office_drafting_failed']);
 const PLUGINS = Object.freeze([
   { id: 'image', title: 'รูปภาพ', outputs: ['image/png','image/jpeg','image/webp'], acceptedSourceTypes: ['image/png','image/jpeg','image/webp'], maxSources:3, upstreamPlugins:['image'], requiresConfirmation: true },
   { id: 'video', title: 'วิดีโอ', outputs: ['video/mp4'], acceptedSourceTypes:['image/png','image/jpeg'], maxSources:1, upstreamPlugins:['image'], requiresConfirmation: true },
@@ -117,8 +118,11 @@ class CreativeStudioService {
     return { pluginId, mode };
   }
   publicJob(job) {
-    return { id: job.id, status: job.status, pluginId: job.steps.length === 1 ? job.steps[0].pluginId : 'workflow', currentStep: job.currentStep,
-      steps: job.steps.map(step => ({ pluginId: step.pluginId, status: step.status, files: step.files || [], sourceFileIds: step.resolvedSourceFileIds || step.sourceFileIds, usePrevious: step.usePrevious, error: step.error || null })),
+    // Older Office validation failures were classified as uncertain submissions.
+    // Correct the read-only display; never retry or rewrite historical jobs here.
+    const displayState = step => step?.status === 'needs_review' && ['document','spreadsheet','presentation'].includes(step.pluginId) && OFFICE_PREOUTPUT_ERRORS.has(step.error) ? 'failed' : step?.status;
+    return { id: job.id, status: job.status === 'needs_review' && displayState(job.steps[job.currentStep]) === 'failed' ? 'failed' : job.status, pluginId: job.steps.length === 1 ? job.steps[0].pluginId : 'workflow', currentStep: job.currentStep,
+      steps: job.steps.map(step => ({ pluginId: step.pluginId, status: displayState(step), files: step.files || [], sourceFileIds: step.resolvedSourceFileIds || step.sourceFileIds, usePrevious: step.usePrevious, error: step.error || null })),
       files: job.files || [], summary: job.summary || '', error: job.error || null, createdAt: job.createdAt, updatedAt: job.updatedAt };
   }
   async start({ user, pluginId, input, sourceFileIds = [], idempotencyKey, confirmed = false, steps } = {}) {
@@ -211,7 +215,8 @@ class CreativeStudioService {
     } catch (error) {
       if (error.code === 'studio_lease_lost') throw error;
       const code = String(error.code || error.message || 'studio_operation_failed').replace(/[^a-zA-Z0-9_:.-]/g,'_').slice(0,100);
-      const uncertain = error.uncertain === true || (step.status === 'submitting' && !(error instanceof CreativeStudioError && error.uncertain === false));
+      const knownOfficeFailure = ['document','spreadsheet','presentation'].includes(step.pluginId) && error.name === 'OfficeArtifactError' && error.artifactNotCreated === true;
+      const uncertain = !knownOfficeFailure && (error.uncertain === true || (step.status === 'submitting' && !(error instanceof CreativeStudioError && error.uncertain === false)));
       step.error = code; step.status = uncertain ? 'needs_review' : 'failed'; job.status = step.status; job.error = code;
       for (const remaining of job.steps.slice(job.currentStep + 1)) remaining.status = 'blocked';
       this.audit?.record('studio.step_failed', { userId: job.ownerId, jobId: job.id, pluginId: step.pluginId, error: code, status: job.status });
