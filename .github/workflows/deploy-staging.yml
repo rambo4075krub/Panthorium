@@ -139,6 +139,8 @@ jobs:
           MCP_SMOKE_URL="$URL" MCP_EXPECTED_BASE_URL="https://panthorium-backend-staging-124818950958.asia-southeast1.run.app" node test/mcp-deployed.js
           CHAT_SMOKE_URL="$URL" node test/desktop-chat-deployed.js
           STUDIO_SMOKE_URL="$URL" node test/creative-studio-deployed.js
+          PROMOTION_SMOKE_URL="$URL" node test/free-promotion-deployed.js
+          PROMOTION_SMOKE_URL="https://panthorium-backend-staging-124818950958.asia-southeast1.run.app" node test/free-promotion-deployed.js
           MAILBOX_SMOKE_URL="$URL" node test/admin-mailbox-deployed.js
           LIVE_SMOKE_URL="$URL" node test/gemini-live-deployed.js
           if ! STAGING_URL="$URL" node test/voice-deployed.js; then

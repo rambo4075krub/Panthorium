@@ -32,5 +32,16 @@
     `พื้นที่เพิ่ม ${size} GiB`, `ดาวน์โหลดเพิ่ม ${download} GiB/รอบ`, 'ไม่เพิ่มโควต้า AI · เฉพาะสมาชิก Life ขึ้นไป'
   ], 'ต่ออายุรายเดือน · การซื้อกลางรอบต้องแจ้งยอดก่อนชำระ', { kind: 'subscription', paidMembershipRequired: true, quotas:{storageBytes:size*1024**3,downloadBytes:download*1024**3} }));
   add('download-10', 'Download 10', 'storage', 99, ['ดาวน์โหลดเพิ่ม 10 GiB', 'ไม่เพิ่มพื้นที่หรือโควต้า AI', 'เฉพาะสมาชิก Life ขึ้นไป'], 'ซื้อครั้งเดียว · อายุ 30 วันนับจากชำระ', { kind: 'one-time', paidMembershipRequired: true, quotas:{downloadBytes:10*1024**3} });
-  return Object.freeze({ version: '2026-10-11', taxStatus: 'individual-not-vat-registered', products: Object.freeze(products), get: id => products.find(item => item.id === id) || null });
+  // Bangkok-local, end-exclusive: restores the original plan on Dec 1 without a scheduled job.
+  const freeTokenPromotion = Object.freeze({
+    id: 'free-tokens-20261018', startsAt: '2026-10-18T00:00:00+07:00',
+    endsAt: '2026-12-01T00:00:00+07:00', timezone: 'Asia/Bangkok',
+    unlimited: Object.freeze(['voiceInputSeconds', 'voiceOutputSeconds', 'textInputTokens', 'textOutputTokens'])
+  });
+  const promotionAt = (now = Date.now()) => Number(now) >= Date.parse(freeTokenPromotion.startsAt) && Number(now) < Date.parse(freeTokenPromotion.endsAt) ? freeTokenPromotion : null;
+  const hasQuota = (state, key) => state.unlimited?.includes(key) || Number(state.remaining?.[key]) > 0;
+  const displayDetails = (product, now = Date.now()) => product.id === 'free' && promotionAt(now)
+    ? product.details.filter(detail => !detail.startsWith('เสียง')).map(detail => /^ข้อความ(เข้า|ออก)/.test(detail) ? detail.replace(/[\d,]+ โทเคน/, 'ไม่จำกัดโทเคน') : detail).concat('เสียงเข้าและออกไม่จำกัด · ไม่มีโควต้าเสียงรายวัน', 'โปรโมชัน 18 ต.ค.–30 พ.ย. 2026 (เวลาไทย) · กลับโควต้าปกติ 1 ธ.ค. 2026')
+    : product.details;
+  return Object.freeze({ version: '2026-10-18', promotionAt, hasQuota, displayDetails, taxStatus: 'individual-not-vat-registered', products: Object.freeze(products), get: id => products.find(item => item.id === id) || null });
 });

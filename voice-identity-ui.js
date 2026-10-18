@@ -83,7 +83,7 @@
   }
   function label(type) { return ({ user: 'ผู้ใช้', family: 'คนในครอบครัว', administrator: 'แอดมิน' })[type] || type; }
   async function refresh(root = document.getElementById('panthorium-account-register') || document.getElementById('panthorium-voice-identity')) {
-    if (!root) return;
+    if (!root || root.querySelector('[data-registration-form]')) return;
     const state = root.querySelector('[data-state]');
     try {
       const [status, list] = await Promise.all([api('/api/biometrics/status'), profiles(true)]);
@@ -98,6 +98,7 @@
     } catch (error) { state.textContent = `โหลดข้อมูลไม่สำเร็จ: ${error.message}`; state.style.color = '#fda4af'; }
   }
   async function open(options = {}) {
+    if (options.registration === true || (window.PanthoriumAuth?.isGuest?.() === true && !window.PanthoriumAuth?.isAdminEntry?.())) return window.PanthoriumAccounts?.openRegistration?.();
     if (!canManageVoiceProfiles()) { notify('กรุณาเข้าสู่ระบบบัญชีที่มีสิทธิ์จัดการเสียงก่อน'); return false; }
     const guest = window.PanthoriumAuth?.isGuest?.() === true;
     const registration = options.registration === true || !window.PanthoriumAuth?.isAdminEntry?.();

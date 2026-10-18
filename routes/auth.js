@@ -84,7 +84,26 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
     }
   });
 
+  router.post("/register/email", auth, limiter, async (req, res) => {
+    if (!req.user?.roles?.includes("guest")) return res.status(403).json({ ok: false, error: "guest_account_required" });
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (req.body?.password !== req.body?.confirmPassword) return res.status(400).json({ ok: false, error: "password_mismatch" });
+    if (!emailOtp?.verifyRegistrationToken(req.body?.registrationToken, req.user.sub, email)) return res.status(400).json({ ok: false, error: "email_verification_required", requestId: req.requestId });
+    try {
+      const user = await authService.createEmailAccount(email, req.body?.password, req.user.sub);
+      const session = await authService.issueSession(user);
+      setSessionCookies(res, session, req.body?.rememberMe === true);
+      res.status(201).json({ ok: true, accessToken: session.accessToken, user: session.principal });
+    } catch (error) {
+      if (["valid_email_required", "invalid_password"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
+      if (error.message === "email_exists") return res.status(409).json({ ok: false, error: error.message });
+      console.error("[AUTH] email registration failed (" + (req.requestId || "unknown") + "): " + error.message);
+      res.status(503).json({ ok: false, error: "registration_unavailable", requestId: req.requestId });
+    }
+  });
+
   router.post("/register/voice", auth, limiter, async (req, res, next) => {
+    if (config.voiceRegistrationEnabled !== true) return res.status(503).json({ ok: false, error: "voice_registration_paused" });
     if (!req.user?.roles?.includes("guest")) return res.status(403).json({ ok: false, error: "guest_account_required" });
     if (!biometrics || !biometricRepository) return res.status(503).json({ ok: false, error: "registration_unavailable" });
     const email = String(req.body?.email || "").trim().toLowerCase();
