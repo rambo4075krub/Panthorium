@@ -71,5 +71,16 @@ function fixture() {
   const recovered=await crash.service.advance({user:crash.user,jobId:crashJob.job.id});assert.equal(recovered.job.status,'needs_review');assert.equal(crash.calls.image,0);
   const malformed=fixture();malformed.service.vertexFetch=async()=>({ok:true,json:async()=>({candidates:[{content:{parts:[{inlineData:{mimeType:'image/png',data:Buffer.from([137,80,78,71,13,10,26,10,0]).toString('base64')}}]}}]})});
   const corrupt=await malformed.service.start({user:malformed.user,pluginId:'image',input:{prompt:'ภาพ'},idempotencyKey:'corrupt-image-data-01',confirmed:true});assert.equal(corrupt.job.status,'needs_review');assert.equal(corrupt.job.files.length,0);assert.equal(malformed.objects.size,0);
+
+  const invalidOffice = fixture(); let officeAttempts = 0;
+  invalidOffice.office.create = async () => { officeAttempts++; throw new (require('../services/officeArtifactService').OfficeArtifactError)(422, 'office_tabular_data_required'); };
+  const tableFailure = await invalidOffice.service.start({ user: invalidOffice.user, pluginId: 'spreadsheet', input: { prompt: 'ตารางข้อมูล' }, idempotencyKey: 'invalid-table-output' });
+  assert.equal(tableFailure.job.status, 'failed'); assert.equal(tableFailure.job.files.length, 0);
+  await invalidOffice.service.advance({ user: invalidOffice.user, jobId: tableFailure.job.id }); assert.equal(officeAttempts, 1, 'known validation failure does not automatically spend another request');
+  const legacy = invalidOffice.repository.jobs.get(tableFailure.job.id); legacy.status = legacy.steps[0].status = 'needs_review';
+  const legacyDisplay = await invalidOffice.service.get({ user: invalidOffice.user, jobId: legacy.id });
+  assert.equal(legacyDisplay.job.status, 'failed'); assert.equal(legacyDisplay.job.steps[0].status, 'failed');
+  assert.equal(legacy.status, 'needs_review', 'read-only diagnosis preserves stored history');
+  assert.equal(uncertain.repository.jobs.get(timeout.job.id).status, 'needs_review', 'uncertain paid image is not reclassified or retried');
   console.log('creative studio: ownership, policies, replay, workflow, image/video handoff, revocation, uncertain recovery passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

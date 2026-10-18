@@ -18,7 +18,7 @@ const EXT = { document: 'docx', spreadsheet: 'xlsx', presentation: 'pptx' };
 const LIMITS = Object.freeze({ sources: 8, sourceBytes: 16 * 1024 * 1024, imageBytes: 8 * 1024 * 1024, sourceChars: 40000, jsonChars: 180000 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 class OfficeArtifactError extends Error {
-  constructor(status, code) { super(code); this.name = 'OfficeArtifactError'; this.status = status; this.code = code; }
+  constructor(status, code) { super(code); this.name = 'OfficeArtifactError'; this.status = status; this.code = code; this.artifactNotCreated = true; }
 }
 const fail = (code = 'invalid_office_content', status = 400) => { throw new OfficeArtifactError(status, code); };
 const xml = value => String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
@@ -298,7 +298,18 @@ function schemaPrompt(pluginId) {
 }
 function parseTable(source) {
   // Real delimited data only; never infer numeric values from prose or execute formulas.
-  const lines = source.trim().split(/\r?\n/).filter(line => line.trim());
+  let lines = source.trim().split(/\r?\n/).filter(line => line.trim());
+  // Native-audio transcripts often introduce a table or wrap it in a code fence.
+  // Find a real header/separator pair; surrounding prose must not become cells.
+  const start = lines.findIndex((line, i) => i + 1 < lines.length && line.includes('|') && lines[i + 1].includes('|') && lines[i + 1].split('|').filter(cell => cell.trim()).every(cell => /^\s*:?-{3,}:?\s*$/.test(cell)));
+  if (start >= 0) {
+    let end = start + 2;
+    while (end < lines.length && lines[end].includes('|') && !/^\s*```/.test(lines[end])) end++;
+    lines = lines.slice(start, end);
+  } else {
+    source = source.trim().replace(/^```(?:csv|tsv)?\s*\r?\n/i, '').replace(/\r?\n```\s*$/, '');
+    lines = source.split(/\r?\n/).filter(line => line.trim());
+  }
   if (lines.length < 2) return null;
   if (lines[0].includes('|') && lines[1].split('|').filter(Boolean).every(cell => /^\s*:?-{3,}:?\s*$/.test(cell))) {
     const cells = line => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
@@ -323,7 +334,7 @@ function parseTable(source) {
   if (table.length < 2 || table[0].length < 2) return null;
   try { return rows(table, 1000); } catch (_) { return null; }
 }
-function spokenContent(pluginId, draft, title, source) {
+function spokenContent(pluginId, draft, title, source, request = '') {
   const paragraphs = draft.split(/\n\s*\n|\r?\n/).map(p => p.trim()).filter(Boolean);
   const safeTitle = title || (pluginId === 'document' ? 'เอกสารฉบับร่าง' : pluginId === 'presentation' ? 'งานนำเสนอฉบับร่าง' : 'ตารางข้อมูล');
   if (pluginId === 'document') {
@@ -339,6 +350,14 @@ function spokenContent(pluginId, draft, title, source) {
   const sheets = [];
   for (const file of source.texts) { const table = parseTable(file.text); if (table) sheets.push({ name: 'ข้อมูล ' + (sheets.length + 1), rows: table }); }
   if (!sheets.length) { const table = parseTable(draft); if (table) sheets.push({ name: 'ข้อมูล', rows: table }); }
+  if (!sheets.length && !source.texts.length && /วางแผน|แบบฟอร์ม|แม่แบบ|เทมเพลต|plan|template|budget/i.test(request) && /ค่าใช้จ่าย|งบประมาณ|รายรับ|รายจ่าย|expense|budget/i.test(request)) {
+    // A requested planner can be a useful blank workbook. Never turn narrative
+    // advice into invented actual spending or silently replace source analysis.
+    return validateContent(pluginId, { title: title || 'แบบฟอร์มวางแผนค่าใช้จ่าย', sheets: [
+      { name: 'แผนค่าใช้จ่าย', rows: [['หมวดหมู่', 'งบประมาณ (บาท)', 'จ่ายจริง (บาท)', 'หมายเหตุ'], ...['ที่อยู่อาศัย', 'อาหาร', 'เดินทาง', 'สาธารณูปโภค', 'สุขภาพ', 'การศึกษา', 'ออมเงิน', 'อื่น ๆ'].map(category => [category, '', '', ''])] },
+      { name: 'คำแนะนำ', rows: [['รายละเอียด'], ['แบบฟอร์มเปล่าเพื่อกรอกข้อมูล ยังไม่มีตัวเลขค่าใช้จ่ายจริงหรือการคำนวณยอดรวม'], ['คำขอของคุณ'], ...Array.from({ length: Math.ceil(request.length / 2000) }, (_, i) => [request.slice(i * 2000, (i + 1) * 2000)]), ['กรอกงบประมาณและค่าใช้จ่ายจริงในไฟล์ XLSX ที่ดาวน์โหลด แล้วเพิ่มสูตรคำนวณในโปรแกรมตารางได้']] }
+    ] });
+  }
   if (!sheets.length) fail('office_tabular_data_required', 422);
   if (source.texts.length) sheets.push({ name: 'บันทึกจาก AI', rows: [['ร่างคำตอบจาก AI ข้อมูลยังต้องตรวจสอบ'], ...paragraphs.flatMap(p => { const values = []; for (let i = 0; i < p.length; i += 2000) values.push([p.slice(i, i + 2000)]); return values; })] });
   return validateContent(pluginId, { title: safeTitle, sheets });
@@ -396,7 +415,7 @@ class OfficeArtifactService {
       if (/^[{[]/.test(raw)) {
         try { content = validateContent(pluginId, JSON.parse(raw)); }
         catch (error) { if (error instanceof OfficeArtifactError) throw error; fail('invalid_office_ai_output', 502); }
-      } else content = spokenContent(pluginId, raw, title, source);
+      } else content = spokenContent(pluginId, raw, title, source, prompt);
     }
     if (title) content.title = title;
     const buffer = pluginId === 'document' ? documentBuffer(content, source.images) : pluginId === 'spreadsheet' ? spreadsheetBuffer(content) : presentationBuffer(content, source.images);
