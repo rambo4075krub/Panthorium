@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import xml.etree.ElementTree as ET
 import zipfile
+from signing_preflight import signed_certificate_sha256
 
 root = Path(__file__).resolve().parents[1] / "android"
 bundle = root / "app/build/outputs/bundle/release/app-release.aab"
@@ -22,7 +23,7 @@ with zipfile.ZipFile(bundle) as archive:
     bootstrap = archive.read("base/assets/public/panthorium-cloud-start.js").decode()
     if bootstrap != "'use strict';\nwindow.location.replace(" + json.dumps(receipt["startUrl"], separators=(",", ":")) + ");\n":
         raise SystemExit("AAB cloud origin differs from release receipt")
-verified = subprocess.run(["jarsigner", "-verify", str(bundle)], capture_output=True, text=True, check=True)
+verified = subprocess.run(["jarsigner", "-J-Duser.language=en", "-J-Duser.country=US", "-verify", str(bundle)], capture_output=True, text=True, check=True)
 if "jar verified." not in verified.stdout:
     raise SystemExit("AAB signature verification did not succeed")
 manifests = list((root / "app/build/intermediates/merged_manifests/release").rglob("AndroidManifest.xml"))
@@ -34,12 +35,15 @@ app = manifest.find("application")
 sdk = manifest.find("uses-sdk")
 if app is None or sdk is None or sdk.get(android + "targetSdkVersion") != "36":
     raise SystemExit("Merged release manifest does not target API 36")
-if manifest.get("package") != "com.panthorium.browser" or manifest.get(android + "versionCode") != str(receipt["versionCode"]):
+if manifest.get("package") != "com.panthorium.browser" or manifest.get(android + "versionCode") != str(receipt["versionCode"]) or manifest.get(android + "versionName") != receipt["versionName"]:
     raise SystemExit("Merged manifest identity/version mismatch")
-if any(app.get(android + attr) != "false" for attr in ("debuggable", "usesCleartextTraffic", "allowBackup")):
+# Android defaults debuggable to false when the merged attribute is absent.
+if app.get(android + "debuggable") not in (None, "false"):
+    raise SystemExit("Merged release manifest enables debugging")
+if any(app.get(android + attr) != "false" for attr in ("usesCleartextTraffic", "allowBackup")):
     raise SystemExit("Merged release manifest is not hardened")
 digest = hashlib.sha256(bundle.read_bytes()).hexdigest()
-receipt.update({"aabSha256": digest, "signatureVerified": True, "mergedManifestVerified": True})
+receipt.update({"aabSha256": digest, "uploadCertificateSha256": signed_certificate_sha256(bundle), "signatureVerified": True, "mergedManifestVerified": True})
 (bundle.parent / "release-info.json").write_text(json.dumps(receipt, indent=2) + "\n")
 (bundle.parent / "SHA256SUMS").write_text(digest + "  app-release.aab\n")
 print("Signed release AAB, packaged cloud origin and merged Android manifest verified")

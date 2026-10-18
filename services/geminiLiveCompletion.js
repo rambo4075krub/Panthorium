@@ -1,3 +1,4 @@
+const {hasQuota}=require('../billing-catalog');
 const { randomUUID } = require('node:crypto');
 const { connectGeminiLive, MODEL_ID } = require('./geminiLiveVertex');
 
@@ -12,7 +13,7 @@ async function completeLive({ systemPrompt, history = [], tools = [], onDelta = 
   if (signal?.aborted) throw new Error('gemini_live_completion_aborted');
   const responseModality = textOutputEnabled ? 'text' : 'audio';
   let quotaMeter=null;
-  if(entitlements && /^[0-9a-f-]{36}$/i.test(userId || '')){const state=await entitlements.state(userId);if(state.remaining.textInputTokens<=0 || state.remaining.textOutputTokens<=0 || (!textOutputEnabled && state.remaining.voiceOutputSeconds<=0))throw new Error('quota_exceeded');const {LiveQuotaMeter}=require('./liveQuotaMeter');quotaMeter=new LiveQuotaMeter({entitlements,userId});}
+  if(entitlements && /^[0-9a-f-]{36}$/i.test(userId || '')){const state=await entitlements.state(userId);if(!hasQuota(state,'textInputTokens') || !hasQuota(state,'textOutputTokens') || (!textOutputEnabled && !hasQuota(state,'voiceOutputSeconds')))throw new Error('quota_exceeded');const {LiveQuotaMeter}=require('./liveQuotaMeter');quotaMeter=new LiveQuotaMeter({entitlements,userId});}
   const connectionAbort = new AbortController();
   const socket = await new Promise((resolve, reject) => {
     let abandoned = false;

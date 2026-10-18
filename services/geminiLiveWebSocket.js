@@ -1,3 +1,4 @@
+const {hasQuota}=require('../billing-catalog');
 const { URL } = require("node:url");
 const { randomUUID } = require("node:crypto");
 const { ALLOWED_LOCATIONS, DEFAULT_LOCATION, connectGeminiLive } = require("./geminiLiveVertex");
@@ -179,7 +180,7 @@ function createGeminiLiveWebSocketGateway({
       try {
         if(entitlements){
           const state=await entitlements.state(userId);
-          if(state.remaining.voiceInputSeconds<=0 || state.remaining.voiceOutputSeconds<=0 || state.remaining.textInputTokens<=0 || state.remaining.textOutputTokens<=0)throw new Error('quota_exceeded');
+          if(!hasQuota(state,'voiceInputSeconds') || !hasQuota(state,'voiceOutputSeconds') || !hasQuota(state,'textInputTokens') || !hasQuota(state,'textOutputTokens'))throw new Error('quota_exceeded');
           const {LiveQuotaMeter}=require('./liveQuotaMeter');quotaMeter=new LiveQuotaMeter({entitlements,userId});
         }
         // App context is a restrictive capability boundary, not merely a prompt.

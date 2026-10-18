@@ -181,6 +181,10 @@ class AuthService {
   }
 
   async createVoiceAccount(email, password, actorId) {
+    return this.createEmailAccount(email, password, actorId);
+  }
+
+  async createEmailAccount(email, password, actorId) {
     const cleanEmail = String(email || '').trim().toLowerCase();
     if (cleanEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) throw new Error("valid_email_required");
     if (typeof password !== "string" || password.length < 10 || password.length > 256) throw new Error("invalid_password");
@@ -190,7 +194,7 @@ class AuthService {
     try {
       user = await this.repository.createUser({
         id: crypto.randomUUID(),
-        username: "voice_" + crypto.randomBytes(12).toString("hex"),
+        username: "account_" + crypto.randomBytes(12).toString("hex"),
         email: cleanEmail,
         emailVerifiedAt: new Date().toISOString(),
         passwordHash,
@@ -202,7 +206,7 @@ class AuthService {
       if (error.code === "23505" || error.message === "email_exists") throw new Error("email_exists");
       throw error;
     }
-    this.audit.record("auth.voice_account_created", { actorId, userId: user.id });
+    this.audit.record("auth.email_account_created", { actorId, userId: user.id });
     return user;
   }
 

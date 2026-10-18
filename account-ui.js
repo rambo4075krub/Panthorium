@@ -8,7 +8,7 @@
     invalid_credentials: 'อีเมลหรือรหัสผ่านไม่ถูกต้อง', invalid_otp: 'OTP ไม่ถูกต้องหรือหมดอายุ',
     password_mismatch: 'รหัสผ่านทั้งสองช่องไม่ตรงกัน', invalid_password: 'รหัสผ่านต้องมี 10–256 ตัวอักษร',
     email_delivery_not_configured: 'ระบบส่งอีเมลยังไม่พร้อม กรุณาติดต่อผู้ดูแล', email_delivery_failed: 'ส่งอีเมลไม่สำเร็จ กรุณาลองใหม่',
-    auth_unavailable: 'บริการเข้าสู่ระบบยังไม่พร้อม', valid_email_required: 'กรอกอีเมลให้ถูกต้อง'
+    email_exists: 'อีเมลนี้มีบัญชีแล้ว กรุณาเข้าสู่ระบบ', email_verification_required: 'กรุณายืนยันอีเมลด้วย OTP อีกครั้ง', registration_unavailable: 'บริการสมัครบัญชียังไม่พร้อม กรุณาลองใหม่', auth_unavailable: 'บริการเข้าสู่ระบบยังไม่พร้อม', valid_email_required: 'กรอกอีเมลให้ถูกต้อง'
   };
   const explain = error => messages[error?.message] || 'ดำเนินการไม่สำเร็จ กรุณาลองใหม่';
   function close(id) {
@@ -47,9 +47,12 @@
       [data-account-root] [hidden]{display:none!important}[data-account-root] [data-account-state]{min-height:26px;white-space:pre-wrap}
     </style>`;
   }
-  async function request(path, body) {
+  async function request(path, body, authenticated = false) {
     const base = String(auth()?.getBackendUrl?.() || os()?.config?.backendUrl || '').replace(/\/$/, '');
-    const response = await fetch(base + path, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+    if (authenticated && !auth()?.getAccessToken?.()) await auth()?.refreshSession?.();
+    const headers = { 'Content-Type': 'application/json' };
+    if (authenticated) headers.Authorization = 'Bearer ' + (auth()?.getAccessToken?.() || '');
+    const response = await fetch(base + path, { method: 'POST', credentials: 'include', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || 'request_failed');
     return result;
@@ -112,7 +115,72 @@
     return true;
   }
   function openRegistration() {
-    return window.PanthoriumVoiceIdentity?.openRegistration?.();
+    if (signedIn()) return openLogin();
+    const root = mount('account-register', '📝 ลงทะเบียนบัญชี', `
+      <h2>สร้างบัญชี Panthorium</h2><p>สมัครด้วยอีเมลและรหัสผ่าน การลงทะเบียนเสียงปิดชั่วคราว</p>
+      <form data-registration-form>
+      <label>อีเมล<input data-register-email type="email" autocomplete="email" required maxlength="254"></label>
+      <button type="button" data-request-otp>ส่งรหัสยืนยันอีเมล</button>
+      <label>OTP 6 หลัก<input data-register-otp inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6"></label>
+      <button type="button" data-verify-otp>ยืนยันอีเมล</button>
+      <p data-otp-state role="status"></p>
+      <label>รหัสผ่าน<input data-register-password type="password" autocomplete="new-password" minlength="10" maxlength="256" required></label>
+      <label>ยืนยันรหัสผ่าน<input data-register-confirm type="password" autocomplete="new-password" minlength="10" maxlength="256" required></label>
+      <label><input data-register-remember type="checkbox"> จดจำรหัสผ่านและการเข้าสู่ระบบบนอุปกรณ์นี้</label>
+      <button type="submit" data-register-submit disabled>สร้างบัญชีและเข้าสู่ระบบ</button>
+      </form><button type="button" data-register-login>มีบัญชีแล้ว เข้าสู่ระบบ</button>`);
+    const container = root.closest('.window') || root.closest('[data-account-window]');
+    if (container) container.id = 'panthorium-account-register';
+    if (root.dataset.registrationBound) return true;
+    root.dataset.registrationBound = '1';
+    const email = root.querySelector('[data-register-email]'), code = root.querySelector('[data-register-otp]');
+    const password = root.querySelector('[data-register-password]'), confirm = root.querySelector('[data-register-confirm]');
+    const form = root.querySelector('[data-registration-form]'), submit = root.querySelector('[data-register-submit]');
+    const state = root.querySelector('[data-account-state]'), otpState = root.querySelector('[data-otp-state]');
+    const requestOtp = root.querySelector('[data-request-otp]'), verifyOtp = root.querySelector('[data-verify-otp]');
+    let proof = null, verifiedEmail = '', busy = false;
+    const cleanEmail = () => email.value.trim().toLowerCase();
+    const update = () => { submit.disabled = busy || !proof || cleanEmail() !== verifiedEmail; requestOtp.disabled = busy; verifyOtp.disabled = busy; };
+    const run = async action => {
+      if (busy) return;
+      busy = true; update(); state.textContent = 'กำลังดำเนินการ…';
+      try { await action(); } catch (error) {
+        if (error.message === 'email_verification_required') { proof = null; verifiedEmail = ''; otpState.textContent = 'กรุณาส่ง OTP และยืนยันอีเมลใหม่'; }
+        state.textContent = explain(error);
+      } finally { busy = false; update(); }
+    };
+    email.oninput = () => { proof = null; verifiedEmail = ''; otpState.textContent = ''; update(); };
+    requestOtp.onclick = () => run(async () => {
+      if (!email.checkValidity()) throw new Error('valid_email_required');
+      proof = null; verifiedEmail = '';
+      await request('/api/auth/email/otp/request', { email: cleanEmail() }, true);
+      state.textContent = 'ส่งรหัสแล้ว กรุณาตรวจอีเมล รหัสใช้ได้ 10 นาที';
+    });
+    verifyOtp.onclick = () => run(async () => {
+      if (!email.checkValidity()) throw new Error('valid_email_required');
+      if (!/^[0-9]{6}$/.test(code.value.trim())) throw new Error('invalid_otp');
+      const verifyingEmail = cleanEmail();
+      const result = await request('/api/auth/email/otp/verify', { email: verifyingEmail, code: code.value.trim() }, true);
+      if (!root.isConnected || cleanEmail() !== verifyingEmail) return;
+      proof = result.registrationToken; verifiedEmail = verifyingEmail;
+      otpState.textContent = 'ยืนยันอีเมลแล้ว'; state.textContent = 'ตั้งรหัสผ่านแล้วกดสร้างบัญชีได้เลย';
+    });
+    form.onsubmit = event => {
+      event.preventDefault(); if (!form.checkValidity()) return;
+      return run(async () => {
+        if (!proof || verifiedEmail !== cleanEmail()) throw new Error('email_verification_required');
+        if (password.value !== confirm.value) throw new Error('password_mismatch');
+        const registrationEmail = cleanEmail(), value = password.value;
+        const rememberMe = root.querySelector('[data-register-remember]').checked;
+        const result = await request('/api/auth/register/email', { email: registrationEmail, password: value, confirmPassword: confirm.value, registrationToken: proof, rememberMe }, true);
+        password.value = ''; confirm.value = ''; code.value = ''; proof = null;
+        auth().acceptSession(result);
+        try { await auth().savePassword?.(registrationEmail, value, rememberMe); } catch (_) {}
+        close('account-register');
+      });
+    };
+    root.querySelector('[data-register-login]').onclick = () => { close('account-register'); openLogin(); };
+    return true;
   }
   function openLogout() {
     if (!signedIn()) return openLogin();

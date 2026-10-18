@@ -39,7 +39,7 @@ const { createBiometricsRouter } = require('../routes/biometrics');
       ? providerFailure ? { ok: false, status: 503, json: async () => ({}) } : { ok: true, json: async () => ({ signalPresent: true, embedding: Array.from({ length: 32 }, (_, i) => i === 0 ? 1 : 0.01) }) }
       : originalFetch(url, options);
     const app = express(); app.use(express.json({ limit: '2mb' })); app.use(cookieParser()); app.use((req, res, next) => { req.requestId = 'test-request-id'; next(); });
-    app.use('/api/auth', createAuthRouter(auth, { isProduction: false, refreshTokenDays: 30 }, null, voices, biometrics, otp));
+    app.use('/api/auth', createAuthRouter(auth, { isProduction: false, refreshTokenDays: 30, voiceRegistrationEnabled: true }, null, voices, biometrics, otp));
     app.use('/api/biometrics', createBiometricsRouter(auth, biometrics));
     server = app.listen(0, '127.0.0.1');
     await new Promise(resolve => server.once('listening', resolve));
