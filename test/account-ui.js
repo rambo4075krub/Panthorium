@@ -22,7 +22,7 @@ async function main() {
   w.eval(fs.readFileSync(require.resolve('../account-ui.js'), 'utf8'));
   const ui = w.PanthoriumAccounts;
   const tick = () => new Promise(resolve => setTimeout(resolve, 0));
-  ui.openRegistration(); assert.equal(signups, 1);
+  ui.openRegistration(); assert.ok(w.document.querySelector('[data-registration-form]')); assert.equal(signups, 0); w.dispatchEvent(new w.Event('panthorium:auth-changed'));
   ui.openLogin(); ui.openLogin(); assert.equal(w.document.querySelectorAll('.window').length, 1);
   const root = w.document.querySelector('[data-account-root]');
   root.querySelector('[data-login-email]').value = 'test@example.com';

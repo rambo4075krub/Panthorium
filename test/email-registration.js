@@ -1,0 +1,54 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const express = require('express');
+const cookieParser = require('cookie-parser');
+const { AuthService } = require('../services/authService');
+const { JsonAuthRepository } = require('../repositories/authRepository');
+const { JsonEmailOtpRepository } = require('../services/emailOtpRepository');
+const { EmailOtpService } = require('../services/emailOtpService');
+const { createAuthRouter } = require('../routes/auth');
+(async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'email-signup-')), file = path.join(dir, 'store.json');
+  let server;
+  try {
+    const repository = new JsonAuthRepository(file), config = { jwtSecret: 'email-registration-test-secret', accessTokenTtl: '15m', refreshTokenDays: 30 };
+    const auth = new AuthService({ repository, config, audit: { record() {} } }); await auth.init();
+    let code;
+    const otp = new EmailOtpService({ repository: new JsonEmailOtpRepository(file), authService: auth, config, sender: async (_, value) => { code = value; } }); await otp.init();
+    const app = express(); app.use(express.json()); app.use(cookieParser());
+    // No speaker or biometrics dependency at all.
+    app.use('/api/auth', createAuthRouter(auth, config, null, null, null, otp));
+    server = app.listen(0, '127.0.0.1'); await new Promise(r => server.once('listening', r));
+    const base = 'http://127.0.0.1:' + server.address().port;
+    const post = (route, body, token) => fetch(base + '/api/auth/' + route, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify(body) });
+    const guest = await (await post('guest', {})).json(), other = await (await post('guest', {})).json();
+    const email = 'signup@example.com', password = 'secure-test-password';
+    const body = { email, password, confirmPassword: password };
+    assert.equal((await post('register/email', body)).status, 401);
+    assert.equal((await post('register/email', body, guest.accessToken)).status, 400);
+    const paused = await post('register/voice', body, guest.accessToken);
+    assert.equal(paused.status, 503); assert.equal((await paused.json()).error, 'voice_registration_paused');
+    assert.equal((await post('email/otp/request', { email }, guest.accessToken)).status, 202);
+    const proof = await (await post('email/otp/verify', { email, code }, guest.accessToken)).json(); body.registrationToken = proof.registrationToken;
+    assert.equal((await post('register/email', body, other.accessToken)).status, 400, 'OTP is bound to the guest');
+    assert.equal((await post('register/email', { ...body, email: 'changed@example.com' }, guest.accessToken)).status, 400, 'OTP is bound to the email');
+    assert.equal((await post('register/email', { ...body, confirmPassword: 'wrong' }, guest.accessToken)).status, 400);
+    const response = await post('register/email', { ...body, roles: ['administrator'], permissions: ['*'], rememberMe: false }, guest.accessToken);
+    assert.equal(response.status, 201); const result = await response.json();
+    assert(!result.user.roles.includes('administrator')); assert(!result.user.permissions.includes('*'));
+    assert(response.headers.get('set-cookie').includes('pt_session='));
+    const stored = await repository.findUserByEmail(email); assert(stored.emailVerifiedAt); assert(stored.passwordHash); assert.notEqual(stored.passwordHash, password);
+    assert.equal((await post('register/email', body, guest.accessToken)).status, 409, 'repeat cannot create duplicate account');
+    assert.equal((await post('register/email', body, result.accessToken)).status, 403);
+    const login = await post('login', { username: email, password, rememberMe: true });
+    assert.equal(login.status, 200); assert.equal((await login.json()).user.id, result.user.id); assert(login.headers.get('set-cookie').includes('Max-Age='));
+    assert.equal((await post('login', { username: email, password: 'incorrect' })).status, 401);
+    assert.equal((await post('password/forgot', { email })).status, 202);
+    assert.equal((await post('password/reset', { email, code, password: 'new-secure-password', confirmPassword: 'new-secure-password' })).status, 200);
+    assert.equal((await post('login', { username: email, password: 'new-secure-password' })).status, 200);
+    console.log('Email signup: real OTP, identity binding, paused voice signup, no biometrics dependency, password hashing, permissions, duplicate, login and reset passed');
+  } finally { if (server) await new Promise(r => server.close(r)); fs.rmSync(dir, { recursive: true, force: true }); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

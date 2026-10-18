@@ -50,7 +50,7 @@
         const card = node('article', null, 'pb-card' + (product.id === 'work' ? ' pb-featured' : ''));
         card.append(node('p', product.kind === 'subscription' ? 'รายเดือน' : product.kind === 'free' ? 'เริ่มใช้งาน' : 'ซื้อครั้งเดียว', 'pb-eyebrow'), node('h3', product.name), node('p', price(product.price), 'pb-price'), node('p', product.kind==='subscription' ? 'รอบ 1 เดือน · ต่ออายุด้วยการชำระใหม่' : product.term, 'pb-muted'));
         const list = node('ul');
-        product.details.forEach(detail => list.appendChild(node('li', detail)));
+        catalog.displayDetails(product).forEach(detail => list.appendChild(node('li', detail)));
         card.appendChild(list);
         if (product.kind === 'free') card.appendChild(node('p', 'ไม่ต้องชำระเงิน · สิทธิ์จริงขึ้นกับบัญชี', 'pb-muted'));
         else {
@@ -96,7 +96,7 @@
       const summary = node('section', null, 'pb-summary');
       summary.append(node('p', 'CHECKOUT / สรุปรายการ', 'pb-eyebrow'), node('h2', product.name), node('p', product.kind==='subscription' ? 'รอบ 1 เดือน · ต่ออายุด้วยการชำระใหม่' : product.term, 'pb-muted'));
       const list = node('ul');
-      product.details.forEach(detail => list.appendChild(node('li', detail)));
+      catalog.displayDetails(product).forEach(detail => list.appendChild(node('li', detail)));
       summary.appendChild(list);
       const total = node('div', null, 'pb-total');
       total.append(node('strong', 'ยอดชำระ'), node('strong', price(product.price)));

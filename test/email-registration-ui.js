@@ -1,0 +1,41 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { JSDOM } = require('jsdom');
+(async () => {
+  const dom = new JSDOM('<body></body>', { runScripts: 'outside-only', url: 'https://panthorium.test/' });
+  const w = dom.window, calls = []; let session;
+  try {
+    w.OS = { state: { user: { roles: ['guest'] } }, config: {} };
+    w.PanthoriumAuth = { isGuest: () => true, getAccessToken: () => 'guest-token', acceptSession: s => { session = s; }, savePassword: async () => {} };
+    w.fetch = async (url, options) => { calls.push({ url, headers: options.headers, body: JSON.parse(options.body) }); return { ok: true, json: async () => ({ registrationToken: 'verified-proof', accessToken: 'user-token', user: { id: 'new-user' } }) }; };
+    w.eval(fs.readFileSync(require.resolve('../account-ui'), 'utf8'));
+    w.eval(fs.readFileSync(require.resolve('../voice-identity-ui'), 'utf8'));
+    await w.PanthoriumVoiceIdentity.openRegistration();
+    w.PanthoriumAccounts.openRegistration();
+    assert.equal(w.document.querySelectorAll('[data-registration-form]').length, 1);
+    assert.equal(w.document.querySelector('[data-record]'), null, 'signup never offers recording');
+    const q = s => w.document.querySelector(s), tick = () => new Promise(r => setImmediate(r));
+    q('[data-register-email]').value = 'signup@example.com';
+    assert(q('[data-register-submit]').disabled);
+    q('[data-request-otp]').click(); q('[data-request-otp]').click(); await tick();
+    assert.equal(calls.length, 1, 'repeat click cannot send duplicate OTP');
+    assert.equal(calls[0].headers.Authorization, 'Bearer guest-token');
+    q('[data-register-otp]').value = '123456'; q('[data-verify-otp]').click(); await tick();
+    assert.equal(q('[data-register-submit]').disabled, false);
+    q('[data-register-email]').value = 'changed@example.com'; q('[data-register-email]').dispatchEvent(new w.Event('input'));
+    assert(q('[data-register-submit]').disabled, 'email edits invalidate proof');
+    q('[data-register-email]').value = 'signup@example.com'; q('[data-verify-otp]').click(); await tick();
+    q('[data-register-password]').value = 'secure-test-password'; q('[data-register-confirm]').value = 'mismatch-password';
+    const form = q('[data-registration-form]');
+    form.dispatchEvent(new w.Event('submit', { cancelable: true })); await tick();
+    assert(!calls.some(x => x.url.endsWith('/register/email')));
+    q('[data-register-confirm]').value = 'secure-test-password';
+    form.dispatchEvent(new w.Event('submit', { cancelable: true })); await tick();
+    assert.equal(session.accessToken, 'user-token'); assert.equal(q('[data-registration-form]'), null);
+    const signup = calls.find(x => x.url.endsWith('/register/email'));
+    assert.equal(signup.body.registrationToken, 'verified-proof'); assert.equal(signup.body.samples, undefined);
+    assert(!calls.some(x => /voice|biometrics/.test(x.url)));
+    console.log('Email signup UI: legacy routing, no microphone, OTP, duplicate prevention, proof invalidation, confirmation and accepted session passed');
+  } finally { w.close(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });
