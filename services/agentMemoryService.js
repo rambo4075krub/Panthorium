@@ -64,6 +64,11 @@ class AgentMemoryService {
     const memory=await this.repository.get(user.sub,String(memoryId),scope);
     return memory ? { ok:true,memory } : { ok:false,error:'memory_not_found' };
   }
+  async calendarList({user}={}) {
+    if (!this.allowed(user)) return {ok:false,error:'memory_requires_account'};
+    const rows=await this.repository.calendarRecords(user.sub);
+    return {ok:true,memories:rows.slice(0,10000),truncated:rows.length>10000};
+  }
   async list({ user, limit, kind, scope='personal' } = {}) {
     if (!this.allowed(user)) return { ok:false,error:'memory_requires_account' };
     if (!this.validScope(scope)) return { ok:false,error:'invalid_memory_scope' };

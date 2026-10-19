@@ -79,6 +79,12 @@
     else root.querySelector(app.closeButton)?.click();
   }
   async function windowAction(action) {
+    if (typeof action === 'string' && action.startsWith('calendar_view:')) {
+      const app = catalog.apps.find(item=>item.id==='calendar');
+      if (!catalog.allowed(app,system()?.state?.user)) return failure('voice_action_permission_denied');
+      try { return await window.PanthoriumCalendar.command(JSON.parse(decodeURIComponent(action.slice(14)))); }
+      catch (_) { return failure('invalid_calendar_view'); }
+    }
     const target = catalog.actionFor(action);
     if (!target) return failure('unknown_ui_action');
     const { app, operation } = target;
@@ -189,7 +195,7 @@
       if (!result.ok || result.output?.ok === false || seen.has(index)) continue;
       // Only trusted navigation tool outputs may invoke the client. A search
       // document, integration payload or planner answer is never executable.
-      if (!['window.open', 'window.close', 'window.refresh', 'window.minimize', 'window.maximize', 'window.fullscreen', 'window.restore', 'window.function', 'learning_lab.open'].includes(result.toolId)) continue;
+      if (!['window.open', 'window.close', 'window.refresh', 'window.minimize', 'window.maximize', 'window.fullscreen', 'window.restore', 'window.function', 'calendar.view', 'learning_lab.open'].includes(result.toolId)) continue;
       const action = result.output?.uiAction;
       const outcome = action?.startsWith('function_') ? await functionAction(action) : await windowAction(action);
       outcomes.push(outcome);
