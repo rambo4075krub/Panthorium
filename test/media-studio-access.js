@@ -48,7 +48,7 @@ const catalog = require('../voice-window-catalog');
   const providerCalls = [];
   const providers = {
     vertex: { project: 'panthorium-test-project' },
-    vertexConfigured() { return true; },
+    vertexPublisherConfigured() { return true; },
     async vertexAccessToken() { return 'test-access-token'; },
     async transcribeAudio(audio, contentType, language) { providerCalls.push({ audio: audio.length, contentType, language }); return { text: 'สวัสดี Panthorium', provider: 'test-provider' }; }
   };

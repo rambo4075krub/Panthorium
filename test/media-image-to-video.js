@@ -17,7 +17,7 @@ const { MediaStudioService } = require('../services/mediaStudioService');
         return { id, body, contentType };
       }
     },
-    providers: { vertex: { project: 'test-project' }, vertexConfigured: () => true, vertexAccessToken: async () => 'test-token' },
+    providers: { vertex: { project: 'test-project' }, vertexPublisherConfigured: () => true, vertexAccessToken: async () => 'test-token' },
     gateway: { complete: async () => { prompts++; return { ok: true, text: 'Animate this image with a slow camera movement.' }; } },
     jobSecret: 'image-to-video-test-only',
     vertexFetch: async (url, options) => {

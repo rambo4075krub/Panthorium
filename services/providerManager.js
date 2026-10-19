@@ -72,6 +72,7 @@ class ProviderManager {
       this.vertexEvaluatorModels = [];
     }
   }
+  vertexPublisherConfigured() { return /^[A-Za-z0-9.-]{3,100}$/.test(String(this.vertex.project || '')); }
   vertexConfigured() { if (this.liveOnly) return false; return Boolean(this.vertex.project && (this.vertex.tuningJobId ? this.vertex.tuningJobLocation : (this.vertex.location && this.vertex.endpointId))); }
   async resolveTunedVertexEndpoint() {
     if (!this.vertex.tuningJobId || this.vertex.endpointId) return;
