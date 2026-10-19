@@ -161,6 +161,29 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="goals"]'), 'Goals appears in Start menu for signed-in chat accounts');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="assistant-preferences"]'), 'Sentinel Preferences appears in Start menu for signed-in chat accounts');
     for (const file of ['user-manager.js', 'developer-studio-ui.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'window-manager-ui.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'organization-catalog.js', 'organizations-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'creative-studio-ui.js', 'privacy-policy-ui.js', 'billing-admin-ui.js', 'admin-mailbox-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    load('start-menu-ui.js');
+    load('access-shell-ui.js');
+    for (const [page, account] of [['/', registeredUser], ['/admin', admin]]) {
+      dom.reconfigure({ url: 'https://panthorium-backend-staging.example.run.app' + page });
+      w.calendarMenuAccount = account;
+      evaluate('OS.state.user = window.calendarMenuAccount; renderAppLaunchers();');
+      w.dispatchEvent(new w.CustomEvent('panthorium:auth-changed'));
+      await tick();
+      const launcher = w.document.querySelector('#sm-apps [data-app-id="calendar"]');
+      assert(launcher, `Calendar launcher exists on ${page}`);
+      assert.equal(launcher.textContent.includes('ปฏิทิน'), true);
+      assert.notEqual(w.getComputedStyle(launcher).display, 'none');
+      const search = w.document.getElementById('start-search');
+      search.value = 'ปฏิทิน'; search.dispatchEvent(new w.Event('input'));
+      assert.notEqual(launcher.dataset.searchHidden, 'true');
+      launcher.click(); await tick();
+      assert(w.document.querySelector('[data-calendar-form]'), `Calendar opens from Start on ${page}`);
+      launcher.click(); await tick();
+      assert.equal(w.document.querySelectorAll('[data-calendar-form]').length, 1);
+      evaluate('closeWindow("calendar");');
+      search.value = ''; search.dispatchEvent(new w.Event('input'));
+    }
+    console.log('PASS: Calendar is visible, searchable and opens once from User and Admin Start menus');
     w.PanthoriumStagingAdminDesktop.render();
     await new Promise(resolve => setTimeout(resolve, 40));
     for (const appId of ['media-studio', 'browser']) {
