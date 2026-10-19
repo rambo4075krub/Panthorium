@@ -79,8 +79,8 @@ class AgentFunctionCallingService {
       const requiresApproval = !!tool.requiresConfirmation || !!tool.mutates || risk === 'high';
       // Studio is the only chat mutation with a dedicated approval card. Without
       // a durable ledger the model must not be allowed to propose this action.
-      if (definition.toolId === 'studio.create' && !this.agentService.ledger) return [];
-      if (requiresApproval && surface !== 'gemini-live' && !(surface === 'sentinel-chat' && definition.toolId === 'studio.create' && this.agentService.ledger)) return [];
+      if (['studio.create','studio.edit'].includes(definition.toolId) && !this.agentService.ledger) return [];
+      if (requiresApproval && surface !== 'gemini-live' && !(surface === 'sentinel-chat' && ['studio.create','studio.edit'].includes(definition.toolId) && this.agentService.ledger)) return [];
       if (risk === 'medium' && !requiresApproval) return [];
       if (definition.windowOperation && surface !== 'gemini-live') return [];
       const properties = clone(definition.properties);
@@ -119,13 +119,13 @@ class AgentFunctionCallingService {
       return this.rejected({ user, requestId, name, error: 'tool_permission_denied', source, callId, toolId: definition.toolId });
     }
     let actionRequestId = requestId;
-    if (definition.toolId === 'studio.create' && requestId) {
+    if (['studio.create','studio.edit'].includes(definition.toolId) && requestId) {
       // A server request may contain several different creative actions. Their
       // keys are derived here, never accepted as model arguments or call IDs.
       try { actionRequestId = `studio:${createHash('sha256').update(`${requestId}:${payloadHash(definition.toolId, args)}`).digest('hex')}`; }
       catch { return this.rejected({ user, requestId, name, error: 'invalid_tool_args', source, callId, toolId: definition.toolId }); }
     }
-    const result = await this.agentService.execute({ user, toolId: definition.toolId, args, requestId: actionRequestId, confirmed: definition.toolId === 'studio.create' ? false : confirmed === true });
+    const result = await this.agentService.execute({ user, toolId: definition.toolId, args, requestId: actionRequestId, confirmed: ['studio.create','studio.edit'].includes(definition.toolId) ? false : confirmed === true });
     return this.formatResult({ result, definition, callId, name, args });
   }
 

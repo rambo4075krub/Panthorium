@@ -203,6 +203,20 @@ class CloudFilesService {
     return { ...file, body };
   }
 
+  // Internal workspace read: ownership and size bounds apply; export accounting
+  // remains exclusively on download(). Never exposed as an attachment endpoint.
+  async readOwned(userId, fileId) {
+    const file = await this.findObject(userId, fileId);
+    const size = Number(file.size);
+    if (!Number.isSafeInteger(size) || size < 0 || size > MAX_FILE_BYTES) throw new CloudFilesError(413, 'file_preview_too_large');
+    const objectName = this.ownerPrefix(userId) + file.id + '/' + file.name;
+    const data = await this.request({ url: this.objectsUrl() + '/' + encodeURIComponent(objectName), method: 'GET',
+      params: { alt: 'media' }, responseType: 'arraybuffer', maxContentLength: MAX_FILE_BYTES, timeout: 30000 });
+    const body = Buffer.isBuffer(data) ? data : Buffer.from(data || []);
+    if (body.length > MAX_FILE_BYTES) throw new CloudFilesError(413, 'file_preview_too_large');
+    return { ...file, body };
+  }
+
   async preview(userId, fileId) {
     // Viewing an owned file is separate from exporting it. Never accept an
     // object URL or another account's prefix from the client.

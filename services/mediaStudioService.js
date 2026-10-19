@@ -187,7 +187,7 @@ class MediaStudioService {
   }
 
   async source(userId, fileId, directory) {
-    const file = await this.files.download(userId, String(fileId || ''));
+    const file = await (this.files.readOwned || this.files.download).call(this.files, userId, String(fileId || ''));
     if (!isVideoFile(file)) throw new MediaStudioError(415, 'video_file_required');
     if (!file.body?.length || file.body.length > MAX_FILE_BYTES) throw new MediaStudioError(413, 'video_file_too_large');
     const contentType = String(file.contentType || '').toLowerCase();
@@ -352,7 +352,7 @@ class MediaStudioService {
     if (sourceFileId) {
       if (typeof sourceFileId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sourceFileId)) throw new MediaStudioError(400, 'invalid_source_file_id');
       // Resolve only through the current account's private Cloud Files namespace.
-      const source = await this.files.download(userId, sourceFileId);
+      const source = await (this.files.readOwned || this.files.download).call(this.files, userId, sourceFileId);
       const bytes = source.body;
       const png = Buffer.isBuffer(bytes) && bytes.length > 24 && bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
       const jpeg = Buffer.isBuffer(bytes) && bytes.length > 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
