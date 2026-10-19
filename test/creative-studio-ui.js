@@ -40,6 +40,7 @@ async function main() {
     throw Error('Unexpected URL ' + url);
   };
   w.eval(fs.readFileSync(require.resolve('../start-menu-ui.js'), 'utf8'));
+  w.eval(fs.readFileSync(require.resolve('../file-preview-ui.js'), 'utf8'));
   w.eval(fs.readFileSync(require.resolve('../creative-studio-ui.js'), 'utf8'));
   w.document.dispatchEvent(new w.Event('DOMContentLoaded')); await tick();
   const group = w.document.querySelector('[data-start-group="creative"]');
@@ -170,7 +171,7 @@ async function main() {
   assert.match(frame.srcdoc, /รายงานไทย/); assert.match(frame.srcdoc, /<table>/);
   assert(!/evil\.test|<script|onclick|<iframe|href=/.test(frame.srcdoc), 'Office preview removes active elements, attributes and network references');
   assert.match(frame.srcdoc, /default-src 'none'/);
-  assert(calls.some(call => call.url.endsWith('/api/files/preview-html') && call.options.headers.Authorization === 'Bearer new-token'), 'Office opens only its owned print companion');
+  assert(calls.some(call => call.url.endsWith('/api/files/preview-html/preview') && call.options.headers.Authorization === 'Bearer new-token'), 'Office opens only its owned print companion');
   fileFetch = Promise.resolve({ ok: true, status: 200, text: async () => '<script>not executable</script>,1' });
   openPreview('preview-csv'); await tick(); await tick();
   assert.equal(root.querySelector('[data-preview-body] script'), null);

@@ -4119,8 +4119,10 @@
         const messageFor = error => {
             const code = String(error && error.message || "");
             if (code === "account_required") return "ยังไม่สามารถใช้ Cloud Storage กับเซสชันนี้ได้";
-            if (code === "files_storage_unconfigured") return "Staging ยังไม่ได้กำหนด bucket สำหรับ Files";
+            if (code === "files_storage_unconfigured") return "บริการไฟล์ยังไม่ได้ตั้งค่าพื้นที่จัดเก็บ";
             if (code === "files_storage_permission_denied") return "Cloud Run ยังไม่มีสิทธิ์เข้าถึง bucket";
+            if (code === "quota_exceeded:downloadBytes") return "แพ็กเกจนี้ไม่มีโควต้าดาวน์โหลด หรือโควต้าหมดแล้ว • กดเปิดดูเพื่อดูไฟล์ภายในระบบ";
+            if (code === "file_not_found") return "ไม่พบไฟล์นี้ในบัญชีปัจจุบัน • กรุณารีเฟรชรายการ";
             if (code === "files_quota_exceeded") return "พื้นที่บัญชีถึงขีดจำกัดของแพ็กเกจ";
             if (code === "files_count_limit") return "บัญชีมีไฟล์ถึงขีดจำกัดรุ่นทดสอบ";
             if (code === "file_too_large") return "ไฟล์ใหญ่เกิน 20 MB";
@@ -4159,6 +4161,7 @@
                     '<div style="display:flex;gap:8px;align-items:center;padding:10px;border:1px solid rgba(0,255,204,.18);border-radius:10px;background:rgba(12,24,44,.65);">' +
                         '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(file.name) + '">' + escapeHtml(file.name) + '</span>' +
                         '<span style="font-size:12px;opacity:.7;">' + formatBytes(file.size) + '</span>' +
+                        '<button type="button" data-files-action="open" data-file-id="' + escapeHtml(file.id) + '">เปิดดู</button>' +
                         '<button type="button" data-files-action="download" data-file-id="' + escapeHtml(file.id) + '" data-file-name="' + escapeHtml(file.name) + '">ดาวน์โหลด</button>' +
                         '<button type="button" data-files-action="delete" data-file-id="' + escapeHtml(file.id) + '">ลบ</button>' +
                     '</div>'
@@ -4227,6 +4230,12 @@
             if (!button || busy) return;
             const id = button.getAttribute("data-file-id") || "";
             const action = button.getAttribute("data-files-action");
+            if (action === "open") {
+                const file = cachedFiles.find(item => item.id === id);
+                if (file) window.PanthoriumFilePreview?.open(file);
+                return;
+            }
+            const actionOwner = ownerId();
             busy = true;
             try {
                 if (action === "download") {
@@ -4237,6 +4246,7 @@
                         throw Object.assign(new Error(data.error || "files_download_failed"), { status: response.status });
                     }
                     const blob = await response.blob();
+                    if (!isCurrent() || actionOwner !== ownerId()) return;
                     const link = document.createElement("a");
                     const href = URL.createObjectURL(blob);
                     link.href = href;

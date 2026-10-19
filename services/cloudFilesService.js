@@ -203,6 +203,34 @@ class CloudFilesService {
     return { ...file, body };
   }
 
+  async preview(userId, fileId) {
+    // Viewing an owned file is separate from exporting it. Never accept an
+    // object URL or another account's prefix from the client.
+    const file = await this.findObject(userId, fileId);
+    const extension = String(file.name).split('.').pop().toLowerCase();
+    const types = { png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', webp:'image/webp', gif:'image/gif',
+      mp4:'video/mp4', webm:'video/webm', mp3:'audio/mpeg', wav:'audio/wav', ogg:'audio/ogg', m4a:'audio/mp4',
+      html:'text/html', htm:'text/html', txt:'text/plain', md:'text/plain',
+      csv:'text/plain', tsv:'text/plain', json:'text/plain', xml:'text/plain', yaml:'text/plain', yml:'text/plain',
+      js:'text/plain', ts:'text/plain', py:'text/plain', css:'text/plain', sql:'text/plain' };
+    const office = /^(docx|xlsx|pptx)$/.test(extension);
+    const allowed = new Set(Object.values(types));
+    const contentType = types[extension] || (allowed.has(file.contentType) ? file.contentType : null);
+    if (!office && !contentType) throw new CloudFilesError(415, 'file_preview_unsupported');
+    const size = Number(file.size);
+    if (!Number.isSafeInteger(size) || size < 0 || size > MAX_FILE_BYTES) throw new CloudFilesError(413, 'file_preview_too_large');
+    const objectName = this.ownerPrefix(userId) + file.id + '/' + file.name;
+    const data = await this.request({ url: this.objectsUrl() + '/' + encodeURIComponent(objectName), method: 'GET',
+      params: { alt: 'media' }, responseType: 'arraybuffer', maxContentLength: MAX_FILE_BYTES, timeout: 30000 });
+    let body = Buffer.isBuffer(data) ? data : Buffer.from(data || []);
+    if (body.length > MAX_FILE_BYTES) throw new CloudFilesError(413, 'file_preview_too_large');
+    if (office) {
+      try { body = Buffer.from(require('./officeArtifactService').extractOfficeText(body)); }
+      catch (_) { throw new CloudFilesError(422, 'file_preview_invalid_office'); }
+    }
+    return { ...file, body, contentType: office ? 'text/plain' : contentType, previewFormat: office ? 'office-text' : 'original' };
+  }
+
   async remove(userId, fileId) {
     const file = await this.findObject(userId, fileId);
     const objectName = this.ownerPrefix(userId) + file.id + "/" + file.name;

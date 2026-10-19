@@ -15,12 +15,12 @@ const { JSDOM } = require('jsdom');
     assert.equal([...dom.window.document.scripts].filter(script => new URL(script.src || '/', origin).pathname === '/creative-studio-ui.js').length, 1, route + ' loads the shared Studio exactly once');
     dom.window.close();
   }
-  for (const asset of ['creative-studio-ui.js', 'start-menu-ui.js', 'voice-window-catalog.js', 'ai-stream-client.js']) {
+  for (const asset of ['file-preview-ui.js', 'creative-studio-ui.js', 'start-menu-ui.js', 'voice-window-catalog.js', 'ai-stream-client.js']) {
     const response = await get('/' + asset);
     assert.equal(response.status, 200, asset);
     assert.equal(await response.text(), fs.readFileSync(path.join(__dirname, '..', asset), 'utf8'), asset + ' matches tested source');
   }
-  for (const route of ['/api/studio/catalog', '/api/studio/jobs']) {
+  for (const route of ['/api/studio/catalog', '/api/studio/jobs', '/api/files/11111111-1111-4111-8111-111111111111/preview']) {
     const response = await get(route);
     assert.equal(response.status, 401, route + ' requires an authenticated account');
     const data = await response.json();
