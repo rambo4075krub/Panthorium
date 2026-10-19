@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { folderFor, folderListing } = require('./fileFolders');
 const { GoogleAuth } = require("google-auth-library");
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
@@ -132,7 +133,7 @@ class CloudFilesService {
     this.ensureConfigured();
     const files = await this.listAll(userId);
     const maxBytes=this.entitlements ? (await this.entitlements.state(userId)).remaining.storageBytes : MAX_USER_BYTES;
-    return { files, usedBytes: files.reduce((sum, file) => sum + file.size, 0), maxBytes, maxFiles: this.maxUserFiles };
+    return { ...folderListing(files), usedBytes: files.reduce((sum, file) => sum + file.size, 0), maxBytes, maxFiles: this.maxUserFiles };
   }
 
   async upload(userId, filename, contentType, body) {
@@ -161,7 +162,7 @@ class CloudFilesService {
       headers: { "Content-Type": safeContentType(contentType) },
       data: bytes
     });
-    return { id, name, contentType: safeContentType(contentType), size: bytes.length, updatedAt: new Date().toISOString() };
+    return { id, name, contentType: safeContentType(contentType), folderId: folderFor({ name, contentType }), size: bytes.length, updatedAt: new Date().toISOString() };
   }
 
   async findObject(userId, fileId) {

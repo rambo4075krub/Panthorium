@@ -1,3 +1,11 @@
+const { ProviderManager } = require('../services/providerManager');
+const savedMode = process.env.PANTHORIUM_AI_MODE;
+process.env.PANTHORIUM_AI_MODE = 'gemini-live-only';
+const publisher = new ProviderManager(); publisher.vertex.project = 'test-project';
+require('node:assert/strict').equal(publisher.vertexConfigured(), false);
+require('node:assert/strict').equal(publisher.vertexPublisherConfigured(), true);
+publisher.vertex.project = ''; require('node:assert/strict').equal(publisher.vertexPublisherConfigured(), false);
+if (savedMode === undefined) delete process.env.PANTHORIUM_AI_MODE; else process.env.PANTHORIUM_AI_MODE = savedMode;
 'use strict';
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -22,7 +30,7 @@ function fixture() {
     async generationStatus(args) { calls.poll++;assert.equal(args.jobToken,'private-operation-token');return {status:'completed',file:await files.upload(args.user.sub,'movie.mp4','video/mp4',Buffer.from('video'))}; }
   };
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2e8AAAAASUVORK5CYII=','base64');
-  const service = new CreativeStudioService({repository,files,office,mediaStudio,gateway:{complete(){}},providers:{vertex:{project:'test-project'},vertexConfigured:()=>true,vertexAccessToken:async()=>'not-exposed'},resolveUser:async principal => principal.sub === current?.sub ? current : null,vertexFetch:async(url,options)=>{calls.image++;assert.match(url,/aiplatform\.googleapis\.com\/v1\/projects\/test-project/);assert.ok(!JSON.parse(options.body).contents[0].parts.some(part=>part.fileData));return {ok:true,json:async()=>({candidates:[{content:{parts:[{inlineData:{mimeType:'image/png',data:png.toString('base64')}},{text:'สร้างภาพแล้ว'}]}}]})};}});
+  const service = new CreativeStudioService({repository,files,office,mediaStudio,gateway:{complete(){}},providers:{vertex:{project:'test-project'},vertexPublisherConfigured:()=>true,vertexAccessToken:async()=>'not-exposed'},resolveUser:async principal => principal.sub === current?.sub ? current : null,vertexFetch:async(url,options)=>{calls.image++;assert.match(url,/aiplatform\.googleapis\.com\/v1\/projects\/test-project/);assert.ok(!JSON.parse(options.body).contents[0].parts.some(part=>part.fileData));return {ok:true,json:async()=>({candidates:[{content:{parts:[{inlineData:{mimeType:'image/png',data:png.toString('base64')}},{text:'สร้างภาพแล้ว'}]}}]})};}});
   return {user,other,repository,files,office,mediaStudio,service,calls,objects,revoke:()=>{current=null;}};
 }
 

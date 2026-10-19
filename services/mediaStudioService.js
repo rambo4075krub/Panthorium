@@ -176,7 +176,7 @@ class MediaStudioService {
   capabilities() {
     let filesReady = false;
     try { this.files?.ensureConfigured?.(); filesReady = Boolean(this.files?.bucket); } catch (_) {}
-    const vertexReady = Boolean(this.providers?.vertexConfigured?.() && this.providers?.vertexAccessToken);
+    const vertexReady = Boolean(this.providers?.vertexPublisherConfigured?.() && this.providers?.vertexAccessToken);
     return { aiEditPlanning: Boolean(this.gateway?.complete), videoGeneration: Boolean(filesReady && vertexReady && this.gateway?.complete && this.jobSecret) };
   }
 

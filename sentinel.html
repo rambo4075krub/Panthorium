@@ -4077,18 +4077,24 @@
                 '<button id="files-upload" type="button">อัปโหลดไฟล์</button>' +
                 '<input id="files-input" type="file" hidden>' +
             '</div>' +
-            '<div style="font-size:12px;opacity:.72;">ไฟล์อยู่ใน Cloud Storage ส่วนตัวของบัญชีนี้ • จำกัด 20 MB ต่อไฟล์ และ 100 MB ต่อบัญชีในรุ่นทดสอบ</div>' +
+            '<div style="font-size:12px;opacity:.72;">ไฟล์ส่วนตัว • จัดโฟลเดอร์ตามประเภทอัตโนมัติ • สูงสุด 20 MB ต่อไฟล์ • พื้นที่รวมตามแพ็กเกจ</div>' +
+            '<nav id="files-folders" aria-label="โฟลเดอร์ไฟล์" style="display:flex;flex-wrap:wrap;gap:6px;"></nav>' +
+            '<div id="files-location" role="status"></div>' +
             '<div id="files-list" style="overflow:auto;flex:1;display:flex;flex-direction:column;gap:7px;"></div>' +
         '</div>';
         createWindow("files", "ไฟล์บนคลาวด์", html, { width: 620, height: 460 });
 
         const status = document.getElementById("files-sync-status");
         const list = document.getElementById("files-list");
+        const foldersNav = document.getElementById("files-folders");
+        const locationLabel = document.getElementById("files-location");
+        let folderId = "all", cachedFiles = [], cachedFolders = [];
+        let loadVersion = 0;
         const refreshButton = document.getElementById("files-refresh");
         const uploadButton = document.getElementById("files-upload");
         const input = document.getElementById("files-input");
         let busy = false;
-        const isCurrent = () => OS.windows.has("files");
+        const isCurrent = () => list.isConnected && OS.windows.has("files");
         const apiBase = () => String(OS.config.backendUrl || "").replace(/\/$/, "");
         const escapeHtml = value => String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
         const formatBytes = value => {
@@ -4111,7 +4117,7 @@
             if (code === "account_required") return "ยังไม่สามารถใช้ Cloud Storage กับเซสชันนี้ได้";
             if (code === "files_storage_unconfigured") return "Staging ยังไม่ได้กำหนด bucket สำหรับ Files";
             if (code === "files_storage_permission_denied") return "Cloud Run ยังไม่มีสิทธิ์เข้าถึง bucket";
-            if (code === "files_quota_exceeded") return "พื้นที่บัญชีถึงขีดจำกัด 100 MB";
+            if (code === "files_quota_exceeded") return "พื้นที่บัญชีถึงขีดจำกัดของแพ็กเกจ";
             if (code === "files_count_limit") return "บัญชีมีไฟล์ถึงขีดจำกัดรุ่นทดสอบ";
             if (code === "file_too_large") return "ไฟล์ใหญ่เกิน 20 MB";
             if (error && error.status === 401) return "เซสชันใช้ Files ไม่ได้ • รีเฟรชเพื่อเชื่อมต่อใหม่";
@@ -4130,9 +4136,34 @@
             uploadButton.disabled = false;
             return ownerId();
         }
+        function renderFiles() {
+            const folders = [{ id: 'all', name: 'ไฟล์ทั้งหมด', count: cachedFiles.length }, ...cachedFolders];
+            foldersNav.replaceChildren();
+            for (const folder of folders) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.dataset.folderId = folder.id;
+                button.textContent = (folder.id === 'all' ? '' : '📁 ') + folder.name + ' (' + folder.count + ')';
+                button.setAttribute('aria-pressed', String(folder.id === folderId));
+                button.style.cssText = 'padding:8px 10px;border-radius:9px;color:var(--text);border:1px solid rgba(255,155,60,.4);background:' + (folder.id === folderId ? 'rgba(255,128,32,.25)' : 'rgba(20,25,35,.8)');
+                button.addEventListener('click', () => { folderId = folder.id; renderFiles(); });
+                foldersNav.appendChild(button);
+            }
+            const files = cachedFiles.filter(file => folderId === 'all' || file.folderId === folderId);
+            locationLabel.textContent = 'ไฟล์ของฉัน / ' + (folders.find(folder => folder.id === folderId)?.name || 'ไฟล์ทั้งหมด');
+            list.innerHTML = files.length ? files.map(file =>
+                    '<div style="display:flex;gap:8px;align-items:center;padding:10px;border:1px solid rgba(0,255,204,.18);border-radius:10px;background:rgba(12,24,44,.65);">' +
+                        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(file.name) + '">' + escapeHtml(file.name) + '</span>' +
+                        '<span style="font-size:12px;opacity:.7;">' + formatBytes(file.size) + '</span>' +
+                        '<button type="button" data-files-action="download" data-file-id="' + escapeHtml(file.id) + '" data-file-name="' + escapeHtml(file.name) + '">ดาวน์โหลด</button>' +
+                        '<button type="button" data-files-action="delete" data-file-id="' + escapeHtml(file.id) + '">ลบ</button>' +
+                    '</div>'
+                ).join("") : '<div style="padding:18px;text-align:center;opacity:.7;">ยังไม่มีไฟล์ในโฟลเดอร์นี้</div>';
+        }
         async function loadFiles() {
             if (!isCurrent() || busy) return;
             busy = true;
+            const version = ++loadVersion;
             status.textContent = "กำลังโหลดรายการจาก bucket ส่วนตัว…";
             try {
                 const owner = await ensureAccount();
@@ -4140,16 +4171,10 @@
                 const response = await authorizedFetch(apiBase() + "/api/files", { signal: AbortSignal.timeout(15000) });
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok || !data.ok) throw Object.assign(new Error(data.error || "files_load_failed"), { status: response.status });
-                if (!isCurrent() || owner !== ownerId()) return;
+                if (!isCurrent() || owner !== ownerId() || version !== loadVersion) return;
                 const files = Array.isArray(data.files) ? data.files : [];
-                list.innerHTML = files.length ? files.map(file =>
-                    '<div style="display:flex;gap:8px;align-items:center;padding:10px;border:1px solid rgba(0,255,204,.18);border-radius:10px;background:rgba(12,24,44,.65);">' +
-                        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(file.name) + '">' + escapeHtml(file.name) + '</span>' +
-                        '<span style="font-size:12px;opacity:.7;">' + formatBytes(file.size) + '</span>' +
-                        '<button type="button" data-files-action="download" data-file-id="' + escapeHtml(file.id) + '" data-file-name="' + escapeHtml(file.name) + '">ดาวน์โหลด</button>' +
-                        '<button type="button" data-files-action="delete" data-file-id="' + escapeHtml(file.id) + '">ลบ</button>' +
-                    '</div>'
-                ).join("") : '<div style="padding:18px;text-align:center;opacity:.7;">ยังไม่มีไฟล์ในบัญชีนี้</div>';
+                cachedFiles = files; cachedFolders = Array.isArray(data.folders) ? data.folders : [];
+                renderFiles();
                 status.textContent = "ซิงก์แล้ว • " + files.length + " ไฟล์ • ใช้ " + formatBytes(data.usedBytes) + " จาก " + formatBytes(data.maxBytes);
             } catch (error) {
                 if (isCurrent()) status.textContent = messageFor(error);
@@ -4232,8 +4257,13 @@
                 busy = false;
             }
         });
-        openFiles.authChangedHandler = openFiles.authChangedHandler || (() => {
-            if (OS.windows.has("files")) loadFiles();
+        if (openFiles.authChangedHandler) window.removeEventListener("panthorium:auth-changed", openFiles.authChangedHandler);
+        openFiles.authChangedHandler = (() => {
+            if (isCurrent()) {
+                ++loadVersion; busy = false; folderId = "all";
+                cachedFiles = []; cachedFolders = []; renderFiles();
+                loadFiles();
+            }
         });
         window.removeEventListener("panthorium:auth-changed", openFiles.authChangedHandler);
         window.addEventListener("panthorium:auth-changed", openFiles.authChangedHandler);
