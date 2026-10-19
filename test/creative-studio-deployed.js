@@ -15,7 +15,7 @@ const { JSDOM } = require('jsdom');
     assert.equal([...dom.window.document.scripts].filter(script => new URL(script.src || '/', origin).pathname === '/creative-studio-ui.js').length, 1, route + ' loads the shared Studio exactly once');
     dom.window.close();
   }
-  for (const asset of ['file-preview-ui.js', 'studio-editor-ui.js', 'creative-studio-ui.js', 'start-menu-ui.js', 'voice-window-catalog.js', 'ai-stream-client.js']) {
+  for (const asset of ['file-preview-ui.js', 'office-suite-core.js', 'office-suite-ui.js', 'studio-editor-ui.js', 'creative-studio-ui.js', 'start-menu-ui.js', 'voice-window-catalog.js', 'ai-stream-client.js']) {
     const response = await get('/' + asset);
     assert.equal(response.status, 200, asset);
     assert.equal(await response.text(), fs.readFileSync(path.join(__dirname, '..', asset), 'utf8'), asset + ' matches tested source');

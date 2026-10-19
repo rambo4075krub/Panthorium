@@ -2,6 +2,8 @@
 // Edit owned packages in place, then save a new file. Unchanged Office entries
 // (styles, pictures, relationships, formulas, layouts) remain byte-for-byte intact.
 const crypto = require('node:crypto');
+const suite = require('./officeSuiteService');
+const formulaCore = require('../office-suite-core');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -26,6 +28,7 @@ function typeOf(file) {
 function validateEdit(value) {
   if (!value || Object.keys(value).some(k=>!['fileId','revision','operations'].includes(k)) || !UUID.test(value.fileId || '') || !/^[a-f0-9]{64}$/.test(value.revision || '') || !Array.isArray(value.operations) || !value.operations.length || value.operations.length > 200) fail('invalid_editor_request');
   for (const op of value.operations) {
+    if(suite.validateOperation(op)) continue;
     if (!op || Object.keys(op).some(k=>!['type','sheet','cell','value','index','degrees','axis','x','y','width','height','amount'].includes(k))) fail('invalid_editor_operation');
     const keys = {set_cell:['type','sheet','cell','value'],set_text:['type','index','value'],append_paragraph:['type','value'],rotate:['type','degrees'],flip:['type','axis'],crop:['type','x','y','width','height'],brightness:['type','amount']}[op.type];
     if (!keys || keys.length !== Object.keys(op).length || !keys.every(k=>Object.hasOwn(op,k))) fail('invalid_editor_operation');
@@ -70,13 +73,14 @@ function officeModel(entries, pluginId) {
         const cell=attr(match[0],'r'), type=attr(match[0],'t'); if (!/^[A-Z]{1,3}[1-9]\d*$/.test(cell)) fail('editor_office_unsupported',422);
         const raw=textOf(match[0],'v'), formula=/<f\b/.test(match[0]);
         const value=type==='s' ? shared[Number(raw)] ?? '' : type==='inlineStr' ? textOf(match[0],'t') : raw && !type && Number.isFinite(Number(raw)) ? Number(raw) : raw;
-        cells.push({cell,value,...(formula?{formula:true}:{})});
+        const f=match[0].match(/<f\b[^>]*>([\s\S]*?)<\/f>/);
+        cells.push({cell,value,...(formula?{formula:true,formulaText:f&&!/\bt=/.test(f[0].split('>')[0])?'='+decode(f[1]):null}:{})});
       }
       if(cells.length>10000) fail('editor_file_too_complex',413);
       return {name:attr(m[0],'name'),file,cells};
     });
     if (!sheets.length || sheets.length>32) fail('editor_office_unsupported',422);
-    return {sheets};
+    return suite.enrich(entries,pluginId,{sheets});
   }
   const blocks=[];
   let files = pluginId==='document' ? ['word/document.xml'] : [];
@@ -96,19 +100,22 @@ function officeModel(entries, pluginId) {
     }
   });
   if(blocks.length>2000) fail('editor_file_too_complex',413);
-  return {blocks};
+  return suite.enrich(entries,pluginId,{blocks,...(pluginId==='presentation'?{slideFiles:files}:{})});
 }
 function patchOffice(entries, pluginId, operations) {
   // Resolve indexes once. Operations cannot shift the meaning of later indexes.
   const model=officeModel(entries,pluginId);
   for(const op of operations) {
-    if(op.type==='set_cell' && pluginId==='spreadsheet') {
+    if(op.type==='format_cell'&&model.sheets?.[op.sheet]){const sf=model.sheets[op.sheet].file;entries[sf]=Buffer.from(addressedSheet(entries[sf].toString()));}
+    if(suite.apply(entries,pluginId,op,model))continue;
+    if(['set_cell','set_formula'].includes(op.type) && pluginId==='spreadsheet') {
       const sheet=model.sheets[op.sheet]; if(!sheet || column(op.cell)>40 || Number(op.cell.match(/\d+/)[0])>1000) fail('editor_cell_out_of_range');
       let xml=addressedSheet(entries[sheet.file].toString()); const row=Number(op.cell.match(/\d+/)[0]);
       let old=''; xml.replace(/<c\b[^>]*(?:\/>|>[\s\S]*?<\/c>)/g,m=>{if(attr(m,'r')===op.cell) old=m;return m;});
-      if(old && /<f\b/.test(old)) fail('editor_formula_cell_readonly',409);
-      const style=old ? attr(old,'s') : '', value=typeof op.value==='number'?`<v>${op.value}</v>`:`<is><t xml:space="preserve">${escape(op.value)}</t></is>`;
-      const cell=`<c r="${op.cell}"${style?` s="${escape(style)}"`:''}${typeof op.value==='number'?'':' t="inlineStr"'}>${value}</c>`;
+      if(op.type==='set_cell' && old && /<f\b/.test(old)) fail('editor_formula_cell_readonly',409);
+      if(op.type==='set_formula' && old && /<f\b[^>]*\bt=/.test(old))fail('editor_formula_shared_readonly',409);
+      const style=old ? attr(old,'s') : '', value=op.type==='set_formula'?`<f>${escape(op.value.slice(1))}</f>`:typeof op.value==='number'?`<v>${op.value}</v>`:`<is><t xml:space="preserve">${escape(op.value)}</t></is>`;
+      const cell=`<c r="${op.cell}"${style?` s="${escape(style)}"`:''}${op.type==='set_formula'||typeof op.value==='number'?'':' t="inlineStr"'}>${value}</c>`;
       if(old) xml=xml.replace(old,()=>cell);
       else {
         let found=false;
@@ -143,6 +150,29 @@ function patchOffice(entries, pluginId, operations) {
       else xml=xml.replace('</w:body>',()=>p+'</w:body>');entries['word/document.xml']=Buffer.from(xml);
     } else fail('editor_operation_type_mismatch');
   }
+  if(pluginId==='spreadsheet' && operations.some(op=>['set_cell','set_formula'].includes(op.type))) {
+    const updated=officeModel(entries,pluginId),calculated=formulaCore.calculate(updated.sheets);
+    for(const [si,sheet]of updated.sheets.entries()) {
+      const byCell=new Map(calculated[si].cells.filter(c=>c.formula).map(c=>[c.cell,c]));
+      if(!byCell.size)continue;
+      entries[sheet.file]=Buffer.from(addressedSheet(entries[sheet.file].toString()).replace(/<c\b[^>]*(?:\/>|>[\s\S]*?<\/c>)/g,c=>{
+        const item=byCell.get(attr(c,'r'));if(!item)return c;
+        // Unsupported/shared formula caches must not look current after edits.
+        c=c.replace(/<v\b[^>]*>[\s\S]*?<\/v>/g,'').replace(/\s+t=["'](?:str|b|e)["']/g,'');
+        if(item.calculationError)return c;
+        const value=item.calculated,type=typeof value==='boolean'?'b':typeof value==='string'?'str':'';
+        if(type)c=c.replace('<c','<c t="'+type+'"');return c.replace('</c>',()=>'<v>'+escape(typeof value==='boolean'?+value:value)+'</v></c>');
+      }));
+    }
+    if(updated.sheets.some(s=>s.cells.some(c=>c.formula))) {
+    // Recalculate also in external Office engines, including unsupported formulas.
+    let workbook=entries['xl/workbook.xml'].toString();workbook=workbook.replace(/<calcPr\b[^>]*(?:\/>|>[\s\S]*?<\/calcPr>)/g,'').replace('</workbook>','<calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>');entries['xl/workbook.xml']=Buffer.from(workbook);
+    // A stale dependency chain is invalid after changing formulas.
+    delete entries['xl/calcChain.xml'];
+    if(entries['xl/_rels/workbook.xml.rels'])entries['xl/_rels/workbook.xml.rels']=Buffer.from(entries['xl/_rels/workbook.xml.rels'].toString().replace(/<Relationship\b[^>]*Type=["'][^"']*\/calcChain["'][^>]*\/>/g,''));
+    entries['[Content_Types].xml']=Buffer.from(entries['[Content_Types].xml'].toString().replace(/<Override\b[^>]*PartName=["']\/xl\/calcChain.xml["'][^>]*\/>/g,''));
+  }
+  }
   return entries;
 }
 class StudioEditorService {
@@ -152,7 +182,8 @@ class StudioEditorService {
     const model=['document','spreadsheet','presentation'].includes(pluginId)?officeModel(_internals.unzip(file.body),pluginId):{};
     // Internal archive names are not accepted as patch targets from callers.
     if(model.blocks) model.blocks=model.blocks.map(({file,ordinal,...block})=>block);
-    if(model.sheets) model.sheets=model.sheets.map(({file,...sheet})=>sheet);
+    if(model.sheets) model.sheets=formulaCore.calculate(model.sheets.map(({file,...sheet})=>sheet));
+    if(model.slideFiles){model.pageCount=model.slideFiles.length;delete model.slideFiles;}
     return {file:{id:file.id,name:file.name,contentType:file.contentType},pluginId,revision:hash(file.body),...model};
   }
   async apply({user,pluginId,input}) {
