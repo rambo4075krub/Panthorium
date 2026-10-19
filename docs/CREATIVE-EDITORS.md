@@ -95,7 +95,10 @@ has its own count/42 KB operation bounds.
 package bytes, formula safety/recalculation and geometry. `test/office-suite-ui.js`
 uses jsdom for editing, formula preview, autosave recovery, conflict handling and
 account cleanup. PostgreSQL CI checks concurrent writers and restart persistence.
-Staging acceptance exercises real Cloud Storage files and draft APIs using
+`test/office-suite-browser.js` additionally exercises real Chromium input, native
+save, draft recovery and account cleanup through HTTP. It runs in CI with the
+already-installed Playwright test dependency. Staging acceptance exercises real
+Cloud Storage files and draft APIs using
 throwaway Free accounts before production promotion. Pixel-level browser/device
 acceptance and full Office conformance are separate checks; do not infer them
 from these automated tests.

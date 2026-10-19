@@ -41,9 +41,10 @@
     function cell(si,ref,depth=0){
       if(depth>64||--budget<0)error('#LIMIT!');const key=si+':'+ref;if(cache.has(key)){const v=cache.get(key);if(v.error)error(v.error);return v.value;}
       if(active.has(key))error('#CYCLE!');const c=maps[si]?.get(ref);if(!c)return '';
+      if(c.cellError)error(/^#[A-Z0-9/!?]+$/.test(c.cellError)?c.cellError:'#VALUE!');
       if(!c.formula)return c.value;
       if(!c.formulaText)error('#UNSUPPORTED!');
-      active.add(key);try{const value=evalNode(parse(c.formulaText),si,depth+1);if(typeof value==='number'&&!Number.isFinite(value))error('#NUM!');cache.set(key,{value});return value;}catch(e){cache.set(key,{error:e.message});throw e;}finally{active.delete(key);}
+      active.add(key);try{const value=scalar(evalNode(parse(c.formulaText),si,depth+1));if(typeof value==='number'&&!Number.isFinite(value))error('#NUM!');cache.set(key,{value});return value;}catch(e){cache.set(key,{error:e.message});throw e;}finally{active.delete(key);}
     }
     function evalNode(n,si,depth){
       if(--budget<0||depth>64)error('#LIMIT!');if(Object.hasOwn(n,'value'))return n.value;

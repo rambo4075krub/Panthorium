@@ -72,9 +72,9 @@ function officeModel(entries, pluginId) {
       for (const match of addressedSheet(xml).matchAll(/<c\b[^>]*(?:\/>|>[\s\S]*?<\/c>)/g)) {
         const cell=attr(match[0],'r'), type=attr(match[0],'t'); if (!/^[A-Z]{1,3}[1-9]\d*$/.test(cell)) fail('editor_office_unsupported',422);
         const raw=textOf(match[0],'v'), formula=/<f\b/.test(match[0]);
-        const value=type==='s' ? shared[Number(raw)] ?? '' : type==='inlineStr' ? textOf(match[0],'t') : raw && !type && Number.isFinite(Number(raw)) ? Number(raw) : raw;
+        const value=type==='b' ? raw==='1' : type==='s' ? shared[Number(raw)] ?? '' : type==='inlineStr' ? textOf(match[0],'t') : raw && !type && Number.isFinite(Number(raw)) ? Number(raw) : raw;
         const f=match[0].match(/<f\b[^>]*>([\s\S]*?)<\/f>/);
-        cells.push({cell,value,...(formula?{formula:true,formulaText:f&&!/\bt=/.test(f[0].split('>')[0])?'='+decode(f[1]):null}:{})});
+        cells.push({cell,value,...(type==='e'?{cellError:raw}:{}),...(formula?{formula:true,formulaText:f&&!/\bt=/.test(f[0].split('>')[0])?'='+decode(f[1]):null}:{})});
       }
       if(cells.length>10000) fail('editor_file_too_complex',413);
       return {name:attr(m[0],'name'),file,cells};

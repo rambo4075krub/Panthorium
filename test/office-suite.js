@@ -10,6 +10,7 @@ function value(formula,cells=[],sheets=[]){return core.calculate([{name:'Sheet1'
   const cells=[{cell:'A1',value:20},{cell:'A2',value:30},{cell:'B1',formula:true,formulaText:'=SUM(A1:A2)',value:0}];
   assert.equal(value('=B1+\'ยอด รวม\'!$A$1',cells,[{name:'ยอด รวม',cells:[{cell:'A1',value:7}]}]).calculated,57);
   assert.equal(value('=A1',[{cell:'A1',formula:true,formulaText:'=Z99'}]).calculated,'#CYCLE!');
+  assert.equal(value('=A1:A2',cells).calculated,'#VALUE!','unsupported array result never becomes an invalid numeric cache');assert.equal(value('=A1',[{cell:'A1',cellError:'#DIV/0!',value:'#DIV/0!'}]).calculated,'#DIV/0!');
   assert.equal(value('=1/0').calculated,'#DIV/0!');assert.equal(value('=IMPORTXML("https://evil.test")').calculated,'#NAME?');assert.equal(value('=SUM(A1:Z9999)').calculated,'#LIMIT!');
   for(const bad of ['=globalThis.process.exit()','=WEBSERVICE("https://evil.test")','=A1.constructor','=SUM(1);alert(1)'])assert.throws(()=>core.parse(bad));
   const user={sub:randomUUID()},store=new Map(),files={async upload(owner,name,contentType,body){const f={id:randomUUID(),name,contentType,body:Buffer.from(body),owner};store.set(f.id,f);return {id:f.id,name,contentType};},async readOwned(owner,id){const f=store.get(id);if(!f||f.owner!==owner)throw Error('file_not_found');return f;}};
