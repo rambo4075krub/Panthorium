@@ -42,6 +42,15 @@ const { PostgresCreativeStudioRepository } = require('../services/creativeStudio
     const limited = await Promise.allSettled(Array.from({ length: 6 }, (_, index) => repository.create({ ...input, id: crypto.randomUUID(), idempotencyKey: 'parallel-cap-' + index })));
     assert.equal(limited.filter(value => value.status === 'fulfilled').length, 2, 'active-job cap is atomic across simultaneous submissions');
     assert.ok(limited.filter(value => value.status === 'rejected').every(value => value.reason.code === 'studio_active_limit'));
+    const draftFile=crypto.randomUUID(),draft={revision:'a'.repeat(64),name:'test',operations:[{type:'set_formula',sheet:0,cell:'A1',value:'=1+2'}]};
+    const edits=await Promise.allSettled(Array.from({length:8},()=>repository.saveDraft(ownerId,draftFile,0,draft)));
+    assert.equal(edits.filter(r=>r.status==='fulfilled').length,1,'one concurrent draft writer');
+    assert(edits.filter(r=>r.status==='rejected').every(r=>r.reason.code==='editor_draft_conflict'));
+    assert.equal((await new PostgresCreativeStudioRepository({pool}).getDraft(ownerId,draftFile)).data.name,'test');
+    assert.equal((await repository.getDraft(other,draftFile)).data,null);
+    await repository.saveDraft(ownerId,draftFile,1,null);assert.equal((await repository.getDraft(ownerId,draftFile)).version,2);
+    await assert.rejects(repository.saveDraft(ownerId,draftFile,0,draft),/editor_draft_conflict/);
+    console.log('PASS real PostgreSQL Office drafts: concurrent writers, restart persistence, ownership, clear tombstones');
     console.log('PASS real PostgreSQL Studio: concurrent idempotency, leases, backoff, stale-worker rejection and account policies');
   } finally {
     if (pool) await pool.end();
