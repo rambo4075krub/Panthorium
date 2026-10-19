@@ -21,11 +21,18 @@
   const localTime = date => String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
 
   function markup() {
-    return '<div data-calendar-root style="height:100%;display:flex;flex-direction:column;gap:12px;padding:14px;overflow:auto;color:var(--text);">' +
+    return '<div data-calendar-root style="height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:12px;padding:14px;overflow:auto;color:var(--text);">' +
+      '<style>[data-calendar-root] .cal-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}[data-calendar-root] .cal-toolbar button{background:rgba(255,140,45,.12);border:1px solid rgba(255,155,65,.35);color:var(--text);border-radius:9px;padding:8px 12px;cursor:pointer}[data-calendar-grid]{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;flex:none}[data-calendar-grid] .cal-weekday{text-align:center;font-size:12px;padding:5px;color:var(--text-dim)}[data-calendar-day]{min-width:0;min-height:64px;display:flex;flex-direction:column;gap:3px;text-align:left;border:1px solid rgba(160,175,190,.22);border-radius:8px;background:rgba(20,28,40,.6);color:var(--text);padding:6px;cursor:pointer;font:inherit}[data-calendar-day][data-outside]{opacity:.5}[data-calendar-day][aria-current=date]{border-color:#ff9b42}[data-calendar-day][aria-pressed=true]{background:rgba(255,140,45,.2);box-shadow:inset 0 0 0 1px #ff9b42}[data-calendar-day]:focus-visible{outline:2px solid #ffb36c;outline-offset:1px}[data-calendar-day] .cal-event{font-size:10px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#ffc38e}[data-calendar-day] .cal-count{font-size:10px;color:var(--text-dim)}@media(max-width:540px){[data-calendar-day]{min-height:50px;padding:4px}[data-calendar-day] .cal-event{display:none}[data-calendar-grid]{gap:3px}}</style>' +
       '<div style="display:flex;align-items:center;gap:8px;">' +
         '<span data-calendar-status role="status" aria-live="polite" style="flex:1;color:var(--text-dim);font-size:13px;">กำลังเชื่อมต่อคลาวด์…</span>' +
         '<button type="button" data-calendar-refresh style="border:1px solid rgba(0,255,204,.3);background:rgba(0,255,204,.08);color:var(--text);border-radius:9px;padding:7px 11px;cursor:pointer;">รีเฟรช</button>' +
       '</div>' +
+      '<div class="cal-toolbar"><button type="button" data-calendar-prev aria-label="เดือนก่อนหน้า">‹</button><strong data-calendar-month aria-live="polite" style="flex:1;text-align:center;"></strong><button type="button" data-calendar-next aria-label="เดือนถัดไป">›</button><button type="button" data-calendar-today>วันนี้</button></div>' +
+      '<div data-calendar-grid role="group" aria-label="ปฏิทินรายเดือน"></div>' +
+      '<div data-calendar-zone style="font-size:12px;color:var(--text-dim);"></div>' +
+      '<strong data-calendar-selected></strong>' +
+      '<section data-calendar-events aria-label="นัดหมายของวันที่เลือก" style="display:grid;gap:8px;"></section>' +
+      '<details data-calendar-editor><summary style="cursor:pointer;color:#ffb36c;padding:8px 0;">เพิ่มนัดหมายวันที่เลือก</summary>' +
       '<form data-calendar-form style="display:grid;gap:9px;padding:13px;border:1px solid rgba(0,255,204,.18);border-radius:14px;background:linear-gradient(145deg,rgba(13,42,62,.58),rgba(17,25,42,.76));">' +
         '<label style="display:grid;gap:5px;font-size:13px;">หัวข้อนัดหมาย' +
           '<input data-calendar-title required maxlength="240" autocomplete="off" placeholder="เช่น นัดแพทย์" style="box-sizing:border-box;width:100%;padding:10px;border-radius:9px;border:1px solid rgba(151,190,216,.25);background:rgba(3,10,21,.65);color:var(--text);font:inherit;">' +
@@ -36,8 +43,7 @@
         '</div>' +
         '<label style="display:grid;gap:5px;font-size:13px;">รายละเอียด<textarea data-calendar-description maxlength="3000" rows="2" placeholder="รายละเอียดเพิ่มเติม (ไม่บังคับ)" style="box-sizing:border-box;width:100%;resize:vertical;padding:9px;border-radius:9px;border:1px solid rgba(151,190,216,.25);background:rgba(3,10,21,.65);color:var(--text);font:inherit;"></textarea></label>' +
         '<button data-calendar-save type="submit" style="justify-self:start;border:1px solid rgba(0,255,204,.45);background:linear-gradient(120deg,rgba(0,255,204,.2),rgba(21,157,255,.18));color:var(--text);border-radius:10px;padding:9px 15px;font:inherit;cursor:pointer;">บันทึกนัดหมายบนคลาวด์</button>' +
-      '</form>' +
-      '<section data-calendar-events aria-label="นัดหมายที่บันทึกบนคลาวด์" style="display:grid;gap:8px;"></section>' +
+      '</form></details>' +
     '</div>';
   }
 
@@ -53,7 +59,7 @@
     const os = api();
     if (!os || typeof createWindow !== 'function') return false;
     if (os.windows.has('calendar')) { focusWindow('calendar'); return true; }
-    createWindow('calendar', '📅 Calendar', markup(), { width: 560, height: 580 });
+    createWindow('calendar', '📅 ปฏิทิน', markup(), { width: 840, height: 740 });
     const win = document.querySelector(selector);
     const root = win?.querySelector('[data-calendar-root]');
     if (!root) return false;
@@ -68,6 +74,10 @@
     const now = new Date();
     dateField.value = localDate(now);
     timeField.value = localTime(now);
+    let selectedDate = localDate(now), month = new Date(now.getFullYear(), now.getMonth(), 1), memories = [], loadSequence = 0;
+    const grid = root.querySelector('[data-calendar-grid]');
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    root.querySelector('[data-calendar-zone]').textContent = 'เวลาตามอุปกรณ์: ' + zone;
 
     const setStatus = message => { if (root.isConnected) status.textContent = message; };
     const isCurrent = owner => root.isConnected && owner === currentUserId();
@@ -84,13 +94,51 @@
       return data;
     }
 
-    function render(memories) {
-      events.replaceChildren();
-      const entries = (Array.isArray(memories) ? memories : []).map(decode).filter(Boolean);
-      entries.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+    function chooseDay(date, focus = false) {
+      selectedDate = localDate(date); month = new Date(date.getFullYear(), date.getMonth(), 1);
+      dateField.value = selectedDate;
+      render();
+      if (focus) grid.querySelector('[data-calendar-day="' + selectedDate + '"]')?.focus();
+    }
+    function render() {
+      events.replaceChildren(); grid.replaceChildren();
+      const all = memories.map(decode).filter(Boolean).sort((a,b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+      const byDay = new Map();
+      for (const entry of all) {
+        const day = localDate(new Date(entry.startsAt));
+        if (!byDay.has(day)) byDay.set(day, []);
+        byDay.get(day).push(entry);
+      }
+      root.querySelector('[data-calendar-month]').textContent = new Intl.DateTimeFormat('th-TH', { month:'long', year:'numeric' }).format(month);
+      root.querySelector('[data-calendar-selected]').textContent = 'นัดหมาย ' + new Intl.DateTimeFormat('th-TH', { dateStyle:'full' }).format(new Date(selectedDate + 'T12:00:00'));
+      for (const name of ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.']) {
+        const label = document.createElement('div'); label.className = 'cal-weekday'; label.textContent = name; grid.appendChild(label);
+      }
+      const first = new Date(month.getFullYear(), month.getMonth(), 1 - month.getDay());
+      for (let i = 0; i < 42; i++) {
+        const date = new Date(first.getFullYear(), first.getMonth(), first.getDate() + i);
+        const key = localDate(date), items = byDay.get(key) || [];
+        const button = document.createElement('button'); button.type = 'button'; button.dataset.calendarDay = key;
+        button.setAttribute('aria-pressed', String(key === selectedDate));
+        button.setAttribute('aria-label', new Intl.DateTimeFormat('th-TH', {dateStyle:'full'}).format(date) + ' • ' + items.length + ' นัดหมาย');
+        if (date.getMonth() !== month.getMonth()) button.dataset.outside = 'true';
+        if (key === localDate(new Date())) button.setAttribute('aria-current', 'date');
+        const number = document.createElement('span'); number.textContent = String(date.getDate()); button.appendChild(number);
+        for (const entry of items.slice(0, 1)) {
+          const preview = document.createElement('span'); preview.className = 'cal-event'; preview.textContent = localTime(new Date(entry.startsAt)) + ' ' + entry.title; button.appendChild(preview);
+        }
+        if (items.length) { const count = document.createElement('span'); count.className = 'cal-count'; count.textContent = items.length + ' นัด'; button.appendChild(count); }
+        button.addEventListener('click', () => chooseDay(date));
+        button.addEventListener('keydown', event => {
+          const delta = {ArrowLeft:-1,ArrowRight:1,ArrowUp:-7,ArrowDown:7}[event.key];
+          if (delta) { event.preventDefault(); chooseDay(new Date(date.getFullYear(),date.getMonth(),date.getDate()+delta), true); }
+        });
+        grid.appendChild(button);
+      }
+      const entries = byDay.get(selectedDate) || [];
       if (!entries.length) {
         const empty = document.createElement('p');
-        empty.textContent = 'ยังไม่มีนัดหมายที่บันทึกบนคลาวด์';
+        empty.textContent = 'ยังไม่มีนัดหมายในวันนี้ • กดเพิ่มนัดหมายวันที่เลือกด้านล่าง';
         empty.style.cssText = 'margin:4px 0;color:var(--text-dim);font-size:13px;';
         events.appendChild(empty);
         return;
@@ -138,18 +186,19 @@
 
     async function load() {
       if (!root.isConnected) return false;
-      const owner = currentUserId();
+      const owner = currentUserId(), sequence = ++loadSequence;
       if (!registered()) {
-        events.replaceChildren();
+        memories = []; render();
         setStatus('ปฏิทินคลาวด์ใช้ได้กับบัญชีผู้ใช้ที่ลงชื่อเข้าใช้');
         return false;
       }
       setStatus('กำลังโหลดนัดหมายจากคลาวด์…');
       try {
         const result = await call('/api/agent/memory?kind=calendar-event&limit=100');
-        if (!isCurrent(owner)) return false;
-        render(result.memories);
-        setStatus('ข้อมูลปฏิทินซิงก์กับบัญชีของคุณบนคลาวด์แล้ว');
+        if (!isCurrent(owner) || sequence !== loadSequence) return false;
+        memories = Array.isArray(result.memories) ? result.memories : [];
+        render();
+        setStatus(memories.length >= 100 ? 'แสดงนัดหมายล่าสุดสูงสุด 100 รายการจากคลาวด์' : 'ข้อมูลปฏิทินซิงก์กับบัญชีของคุณบนคลาวด์แล้ว');
         return true;
       } catch (error) {
         if (!isCurrent(owner)) return false;
@@ -185,9 +234,8 @@
         });
         if (!isCurrent(owner)) return;
         form.reset();
-        const next = new Date();
-        dateField.value = localDate(next);
-        timeField.value = localTime(next);
+        chooseDay(localStart);
+        timeField.value = localTime(localStart);
         await load();
         setStatus('บันทึกนัดหมายบนคลาวด์แล้ว');
       } catch (error) {
@@ -197,9 +245,14 @@
       }
     });
     root.querySelector('[data-calendar-refresh]').addEventListener('click', load);
+    root.querySelector('[data-calendar-prev]').addEventListener('click', () => chooseDay(new Date(month.getFullYear(), month.getMonth()-1, 1)));
+    root.querySelector('[data-calendar-next]').addEventListener('click', () => chooseDay(new Date(month.getFullYear(), month.getMonth()+1, 1)));
+    root.querySelector('[data-calendar-today]').addEventListener('click', () => chooseDay(new Date()));
+    dateField.addEventListener('change', () => { const date = new Date(dateField.value + 'T12:00:00'); if (Number.isFinite(date.getTime())) chooseDay(date); });
     if (open.authChangedHandler) window.removeEventListener('panthorium:auth-changed', open.authChangedHandler);
-    open.authChangedHandler = () => { if (root.isConnected) load(); };
+    open.authChangedHandler = () => { if (root.isConnected) { ++loadSequence; memories = []; form.reset(); timeField.value = localTime(new Date()); chooseDay(new Date()); load(); } };
     window.addEventListener('panthorium:auth-changed', open.authChangedHandler);
+    render();
     await load();
     return true;
   }
