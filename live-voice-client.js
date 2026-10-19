@@ -278,6 +278,7 @@
       return;
     }
     if (frame.type === "toolResult") {
+      if (frame.toolId === 'calendar.write' && frame.ok && !frame.error) window.dispatchEvent(new CustomEvent('panthorium:calendar-changed'));
       if (frame.error) console.info("Gemini Live function result", frame.toolId || "unknown", frame.error);
       if (frame.toolId?.startsWith('studio.')) {
         window.dispatchEvent(new CustomEvent('panthorium:ai-done', { detail: { source: 'gemini-live', toolResults: [frame] } }));

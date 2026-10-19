@@ -29,6 +29,7 @@
       '</div>' +
       '<div class="cal-toolbar"><button type="button" data-calendar-prev aria-label="เดือนก่อนหน้า">‹</button><strong data-calendar-month aria-live="polite" style="flex:1;text-align:center;"></strong><button type="button" data-calendar-next aria-label="เดือนถัดไป">›</button><button type="button" data-calendar-today>วันนี้</button></div>' +
       '<div data-calendar-grid role="group" aria-label="ปฏิทินรายเดือน"></div>' +
+      '<details><summary style="cursor:pointer;color:#ffb36c">🎙 คำสั่งเสียงปฏิทิน</summary><p style="font-size:12px">พูดกับ Sentinel: ปฏิทินเดือนหน้า • ไปวันที่ 25 ตุลาคม • พรุ่งนี้มีนัดอะไร • ค้นหานัดหมอ • เพิ่มประชุมพรุ่งนี้ 9 ถึง 10 โมง • เลื่อนนัดประชุมเป็น 11 โมง • ตรวจนัดที่เวลาชนกัน • หาช่วงว่าง 1 ชั่วโมง • เพิ่มนัดทุกจันทร์ 4 ครั้ง • ลบเฉพาะครั้งนี้/ทั้งชุด • เตือนก่อนนัด 30 นาที (อีเมล แยกจากนัดหมาย)</p></details>' +
       '<div data-calendar-zone style="font-size:12px;color:var(--text-dim);"></div>' +
       '<strong data-calendar-selected></strong>' +
       '<section data-calendar-events aria-label="นัดหมายของวันที่เลือก" style="display:grid;gap:8px;"></section>' +
@@ -51,7 +52,7 @@
     try {
       const value = JSON.parse(String(item.content || ''));
       if (value?.version !== 1 || typeof value.startsAt !== 'string' || !Number.isFinite(Date.parse(value.startsAt))) return null;
-      return { memoryId: String(item.memoryId || ''), title: String(item.title || ''), startsAt: value.startsAt, timeZone: String(value.timeZone || ''), description: String(value.description || '') };
+      return { memoryId: String(item.memoryId || ''), title: String(item.title || ''), startsAt: value.startsAt, timeZone: String(value.timeZone || ''), description: String(value.description || ''), endsAt:value.endsAt || null, location:String(value.location || ''), additionalStartsAt:Array.isArray(value.additionalStartsAt)?value.additionalStartsAt.filter(s=>typeof s==='string'&&Number.isFinite(Date.parse(s))).slice(0,51):[],excludedStartsAt:Array.isArray(value.excludedStartsAt)?value.excludedStartsAt:[],occurrenceOverrides:value.occurrenceOverrides&&typeof value.occurrenceOverrides==='object'?value.occurrenceOverrides:{} };
     } catch (_) { return null; }
   }
 
@@ -102,7 +103,7 @@
     }
     function render() {
       events.replaceChildren(); grid.replaceChildren();
-      const all = memories.map(decode).filter(Boolean).sort((a,b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+      const all = memories.map(decode).filter(Boolean).flatMap(entry => { const starts=[entry.startsAt,...entry.additionalStartsAt]; const duration=entry.endsAt ? Date.parse(entry.endsAt)-Date.parse(entry.startsAt):0; return starts.filter(s=>Number.isFinite(Date.parse(s))&&!entry.excludedStartsAt.includes(s)).map(startsAt=>({...entry,startsAt,endsAt:duration>0?new Date(Date.parse(startsAt)+duration).toISOString():null,...Object.fromEntries(Object.entries(entry.occurrenceOverrides[startsAt]||{}).filter(([key,value])=>['title','location','description','timeZone'].includes(key)&&typeof value==='string'||['startsAt','endsAt'].includes(key)&&typeof value==='string'&&Number.isFinite(Date.parse(value)))),series:starts.length>1})); }).sort((a,b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
       const byDay = new Map();
       for (const entry of all) {
         const day = localDate(new Date(entry.startsAt));
@@ -154,7 +155,9 @@
         when.dateTime = entry.startsAt;
         when.textContent = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(entry.startsAt));
         when.style.cssText = 'display:block;margin-top:4px;color:#84d9ff;font-size:12px;';
+        if(entry.endsAt)when.textContent += ' – ' + new Intl.DateTimeFormat(undefined,{dateStyle:'short',timeStyle:'short'}).format(new Date(entry.endsAt));
         details.append(heading, when);
+        if(entry.location || entry.series){const info=document.createElement('div');info.textContent=(entry.location ? 'สถานที่: '+entry.location : '')+(entry.series?' • นัดหมายซ้ำ (ลบทั้งชุด)':'');details.appendChild(info);}
         if (entry.description) {
           const description = document.createElement('p');
           description.textContent = entry.description;
@@ -168,7 +171,7 @@
         remove.setAttribute('aria-label', 'ลบนัดหมาย ' + entry.title);
         remove.style.cssText = 'border:1px solid rgba(255,120,140,.3);background:rgba(255,80,110,.08);color:var(--text);border-radius:8px;padding:6px 9px;cursor:pointer;';
         remove.addEventListener('click', async () => {
-          if (!window.confirm('ลบนัดหมายนี้จากคลาวด์หรือไม่?')) return;
+          if (!window.confirm(entry.series?'ลบนัดหมายซ้ำทั้งชุดจากคลาวด์หรือไม่?':'ลบนัดหมายนี้จากคลาวด์หรือไม่?')) return;
           remove.disabled = true;
           try {
             await call('/api/agent/memory/' + encodeURIComponent(entry.memoryId), { method: 'DELETE' });
@@ -194,11 +197,11 @@
       }
       setStatus('กำลังโหลดนัดหมายจากคลาวด์…');
       try {
-        const result = await call('/api/agent/memory?kind=calendar-event&limit=100');
+        const result = await call('/api/agent/memory?kind=calendar-event&limit=10000');
         if (!isCurrent(owner) || sequence !== loadSequence) return false;
         memories = Array.isArray(result.memories) ? result.memories : [];
         render();
-        setStatus(memories.length >= 100 ? 'แสดงนัดหมายล่าสุดสูงสุด 100 รายการจากคลาวด์' : 'ข้อมูลปฏิทินซิงก์กับบัญชีของคุณบนคลาวด์แล้ว');
+        setStatus(result.truncated ? 'นัดหมายเกินขีดจำกัดการแสดง 10,000 รายการ'  : 'ข้อมูลปฏิทินซิงก์กับบัญชีของคุณบนคลาวด์แล้ว');
         return true;
       } catch (error) {
         if (!isCurrent(owner)) return false;
@@ -244,6 +247,15 @@
         saveButton.disabled = false;
       }
     });
+    root.calendarCommand = async args => {
+      if (!registered()) return {ok:false,error:'account_required'};
+      if (args.action==='today')chooseDay(new Date());
+      else if(args.action==='next_month')chooseDay(new Date(month.getFullYear(),month.getMonth()+1,1));
+      else if(args.action==='previous_month')chooseDay(new Date(month.getFullYear(),month.getMonth()-1,1));
+      else if(args.date)chooseDay(new Date(args.date+'T12:00:00'));
+      if(args.action==='new_event'){root.querySelector('[data-calendar-editor]').open=true;if(args.title)titleField.value=args.title;titleField.focus();}
+      return {ok:true,text:'แสดงปฏิทินวันที่ '+selectedDate,selectedDate};
+    };
     root.querySelector('[data-calendar-refresh]').addEventListener('click', load);
     root.querySelector('[data-calendar-prev]').addEventListener('click', () => chooseDay(new Date(month.getFullYear(), month.getMonth()-1, 1)));
     root.querySelector('[data-calendar-next]').addEventListener('click', () => chooseDay(new Date(month.getFullYear(), month.getMonth()+1, 1)));
@@ -264,5 +276,21 @@
     return true;
   }
 
-  window.PanthoriumCalendar = { open, refresh };
+  async function command(args) {
+    if(!args || typeof args!=='object' || Object.keys(args).some(k=>!['action','date','title'].includes(k)) || !['today','next_month','previous_month','date','new_event'].includes(args.action))return {ok:false,error:'invalid_calendar_view'};
+    if(args.date!=null && (typeof args.date!=='string'||!/^\d{4}-\d\d-\d\d$/.test(args.date)||!Number.isFinite(Date.parse(args.date+'T00:00:00Z'))||new Date(args.date+'T00:00:00Z').toISOString().slice(0,10)!==args.date))return {ok:false,error:'invalid_calendar_view'};
+    if(args.action==='date'&&!args.date || args.title!=null&&(typeof args.title!=='string'||args.title.length>240))return {ok:false,error:'invalid_calendar_view'};
+    const owner=currentUserId();if(!registered())return {ok:false,error:'account_required'};
+    await open();if(owner!==currentUserId())return {ok:false,error:'account_changed'};
+    return document.querySelector(selector)?.querySelector('[data-calendar-root]')?.calendarCommand(args) || {ok:false,error:'calendar_unavailable'};
+  }
+  window.addEventListener('panthorium:calendar-changed',()=>{if(document.querySelector(selector))refresh();});
+  window.addEventListener('panthorium:ai-done',event=>{
+    for(const result of event.detail?.toolResults || []){
+      if(result.ok===false || result.error || result.confirmationRequired || result.requiresConfirmation)continue;
+      if(result.toolId==='calendar.write' && result.output && document.querySelector(selector))refresh();
+      if(result.toolId==='calendar.view' && result.output?.uiAction?.startsWith('calendar_view:'))window.PanthoriumVoiceCommands?.windowAction(result.output.uiAction);
+    }
+  });
+  window.PanthoriumCalendar = { open, refresh, command };
 })();

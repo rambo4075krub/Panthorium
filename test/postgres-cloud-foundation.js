@@ -39,6 +39,11 @@ async function main() {
     assert.equal(await memories.get('memory-owner','legacy','work'),null);
     assert.equal(await memories.get('other-owner','legacy','personal'),null);
 
+    for (const [userId,scope,title] of [['memory-owner','personal','mine'],['memory-owner','work','work'],['other-owner','personal','other']]) {
+      await memories.create({userId,scope,kind:'calendar-event',title,content:JSON.stringify({version:1,startsAt:'2030-01-01T00:00:00Z'})});
+    }
+    assert.deepEqual((await memories.calendarRecords('memory-owner')).map(x=>x.title),['mine'],'Calendar SQL stays within the owner and personal scope');
+
     const ledger = new ActionLedgerRepository({pool,required:true}); await ledger.init();
     const proposal = {userId:'action-owner',requestId:'same-logical-action',toolId:'test.draft',args:{value:'immutable payload'},requiresConfirmation:true};
     const proposed = await Promise.all(Array.from({length:12},()=>ledger.propose(proposal)));

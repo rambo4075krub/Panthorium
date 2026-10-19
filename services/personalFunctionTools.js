@@ -1,5 +1,6 @@
 'use strict';
 
+const {stamp,registerCalendarView,queryCalendar,validateRead}=require('./calendarTools');
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SESSION_ID_RE = /^[A-Za-z0-9._:-]{1,120}$/;
 const MAX_TEXT_BYTES = 64 * 1024;
@@ -30,7 +31,7 @@ function recordContent(item) {
 function asCalendar(item) {
   const data = recordContent(item);
   if (item?.kind !== 'calendar-event' || data?.version !== 1 || !Number.isFinite(Date.parse(data.startsAt))) return null;
-  return { eventId: item.memoryId, title: item.title, startsAt: new Date(data.startsAt).toISOString(), timeZone: data.timeZone || 'Asia/Bangkok', description: String(data.description || ''), updatedAt: item.updatedAt || null };
+  return { eventId: item.memoryId, title: item.title, startsAt: new Date(data.startsAt).toISOString(), timeZone: data.timeZone || 'Asia/Bangkok', description: String(data.description || ''), endsAt:stamp(data.endsAt)?data.endsAt:null, location:String(data.location || ''), additionalStartsAt:Array.isArray(data.additionalStartsAt)?data.additionalStartsAt.filter(stamp).slice(0,51):[], excludedStartsAt:Array.isArray(data.excludedStartsAt)?data.excludedStartsAt:[], occurrenceOverrides:isObject(data.occurrenceOverrides)?data.occurrenceOverrides:{}, updatedAt: item.updatedAt || null };
 }
 function asGoal(item) {
   const data = recordContent(item);
@@ -53,37 +54,61 @@ function registerPersonalFunctionTools(registry, { memory, reminders, files, kno
   if (!registry || typeof registry.register !== 'function') throw new Error('tool_registry_required');
 
   if (memory) {
+    registerCalendarView(registry);
     registry.register({
       id: 'calendar.read', description: 'List the current user calendar events', permission: 'chat', risk: 'low', mutates: false,
-      argsSchema: { limit: 'integer 1..100 (optional)' },
-      validateArgs: args => onlyKeys(args, ['limit']) && (args.limit == null || boundedInt(args.limit, 1, 100)) ? null : 'invalid_tool_args',
-      run: async ({ user, args }) => {
-        const out = ensureOk(await memory.list({ user, kind: 'calendar-event', limit: args.limit == null ? 30 : Number(args.limit) }));
-        return { events: out.memories.map(asCalendar).filter(Boolean) };
-      }
+      argsSchema: {limit:'1..100',query:'title/details/location search',from:'inclusive ISO offset start',to:'exclusive ISO offset end',action:'list,conflicts,availability',durationMinutes:'minimum free slot 1..1440'},
+      validateArgs: validateRead,
+      run:async({user,args})=>queryCalendar(memory,user,args,asCalendar)
     });
     registry.register({
       id: 'calendar.write', description: 'Create, update, or delete one calendar event owned by the current user; requires explicit confirmation', permission: 'chat', risk: 'medium', mutates: true, requiresConfirmation: true,
-      argsSchema: { action: 'create, update, or delete', eventId: 'required for update/delete', expectedTitle: 'required for update/delete', title: 'event title max 240', startsAt: 'ISO date-time', timeZone: 'IANA time zone', description: 'max 3000 characters' },
+      argsSchema: { action: 'create, update, or delete', eventId: 'required for update/delete', expectedTitle: 'required for update/delete', title: 'event title max 240', startsAt: 'ISO date-time with explicit offset', endsAt:'end ISO timestamp after start', location:'max 500', additionalStartsAt:'up to 51 exact repeat starts', occurrenceAt:'returned occurrence key for single-instance edit/delete', timeZone: 'IANA time zone', description: 'max 3000 characters' },
       validateArgs: args => {
-        if (!onlyKeys(args, ['action', 'eventId', 'expectedTitle', 'title', 'startsAt', 'timeZone', 'description'])) return 'invalid_tool_args';
+        if (!onlyKeys(args, ['action', 'eventId', 'expectedTitle', 'title', 'startsAt', 'timeZone', 'description', 'endsAt', 'location', 'additionalStartsAt', 'occurrenceAt'])) return 'invalid_tool_args';
+        if(args.occurrenceAt!=null && (!stamp(args.occurrenceAt)||args.action==='create'||args.additionalStartsAt!=null))return 'invalid_calendar_occurrence';
+        if (args.endsAt!=null && !stamp(args.endsAt) || args.location!=null && (typeof args.location!=='string'||args.location.length>500) || args.additionalStartsAt!=null && (!Array.isArray(args.additionalStartsAt)||args.additionalStartsAt.length>51||!args.additionalStartsAt.every(stamp))) return 'invalid_calendar_event';
+        if (args.startsAt!=null && !stamp(args.startsAt)) return 'invalid_calendar_event';
         if (args.action === 'create') return trimText(args.title, 240) && Number.isFinite(Date.parse(args.startsAt)) && (args.timeZone == null || validTimeZone(args.timeZone)) && (args.description == null || typeof args.description === 'string' && args.description.length <= 3000) ? null : 'invalid_calendar_event';
         if (!['update', 'delete'].includes(args.action) || !UUID_RE.test(String(args.eventId || '')) || !trimText(args.expectedTitle, 240)) return 'invalid_calendar_event';
-        if (args.action === 'delete') return Object.keys(args).every(k => ['action', 'eventId', 'expectedTitle'].includes(k)) ? null : 'invalid_calendar_event';
-        const hasPatch = ['title', 'startsAt', 'timeZone', 'description'].some(k => Object.prototype.hasOwnProperty.call(args, k));
+        if (args.action === 'delete') return Object.keys(args).every(k => ['action', 'eventId', 'expectedTitle', 'occurrenceAt'].includes(k)) ? null : 'invalid_calendar_event';
+        const hasPatch = ['title', 'startsAt', 'timeZone', 'description', 'endsAt', 'location', 'additionalStartsAt'].some(k => Object.prototype.hasOwnProperty.call(args, k));
         return hasPatch && (args.title == null || trimText(args.title, 240)) && (args.startsAt == null || Number.isFinite(Date.parse(args.startsAt))) && (args.timeZone == null || validTimeZone(args.timeZone)) && (args.description == null || typeof args.description === 'string' && args.description.length <= 3000) ? null : 'invalid_calendar_event';
       },
       run: async ({ user, args, requestId }) => {
         if (args.action === 'create') {
           const startsAt = new Date(args.startsAt).toISOString();
-          const data = { version: 1, startsAt, timeZone: args.timeZone || 'Asia/Bangkok', description: String(args.description || '').trim() };
+          const data = { version: 1, startsAt, timeZone: args.timeZone || 'Asia/Bangkok', description: String(args.description || '').trim(), endsAt:args.endsAt || null, location:args.location || '', additionalStartsAt:args.additionalStartsAt || [] };
+          if(data.endsAt && Date.parse(data.endsAt)<=Date.parse(startsAt))throw new Error('invalid_calendar_duration');
+          if(new Set([startsAt,...data.additionalStartsAt].map(Date.parse)).size!==data.additionalStartsAt.length+1)throw new Error('duplicate_calendar_occurrence');
           const out = ensureOk(await memory.remember({ user, kind: 'calendar-event', title: args.title.trim(), content: JSON.stringify(data), tags: ['calendar'], requestId }));
           return { event: asCalendar(out.memory) };
         }
         const current = await ownedMemory(memory, user, args.eventId, 'calendar-event', args.expectedTitle);
+        if(args.occurrenceAt){
+          const previous=recordContent(current)||{};
+          if(![previous.startsAt,...(previous.additionalStartsAt||[])].includes(args.occurrenceAt)||(previous.excludedStartsAt||[]).includes(args.occurrenceAt))throw new Error('calendar_occurrence_not_found');
+          if(args.action==='delete')previous.excludedStartsAt=[...(previous.excludedStartsAt||[]),args.occurrenceAt];
+          else {
+            const patch={...(previous.occurrenceOverrides?.[args.occurrenceAt]||{})};
+            const oldStart=patch.startsAt||args.occurrenceAt, oldEnd=patch.endsAt;
+            if(args.startsAt && args.endsAt==null && oldEnd)patch.endsAt=new Date(Date.parse(args.startsAt)+Date.parse(oldEnd)-Date.parse(oldStart)).toISOString();
+            for(const k of ['title','startsAt','endsAt','location','description','timeZone'])if(args[k]!=null)patch[k]=args[k];
+            const start=patch.startsAt||args.occurrenceAt;
+            if(!patch.endsAt && previous.endsAt)patch.endsAt=new Date(Date.parse(start)+Date.parse(previous.endsAt)-Date.parse(previous.startsAt)).toISOString();
+            if(patch.endsAt && Date.parse(patch.endsAt)<=Date.parse(start))throw new Error('invalid_calendar_duration');
+            previous.occurrenceOverrides={...(previous.occurrenceOverrides||{}),[args.occurrenceAt]:patch};
+          }
+          const out=ensureOk(await memory.update({user,memoryId:current.memoryId,content:JSON.stringify(previous),requestId}));
+          return {event:asCalendar(out.memory),changedOccurrenceAt:args.occurrenceAt};
+        }
         if (args.action === 'delete') return ensureOk(await memory.remove({ user, memoryId: current.memoryId, requestId }));
         const previous = recordContent(current) || {};
-        const data = { version: 1, startsAt: args.startsAt == null ? previous.startsAt : new Date(args.startsAt).toISOString(), timeZone: args.timeZone || previous.timeZone || 'Asia/Bangkok', description: args.description == null ? String(previous.description || '') : args.description.trim() };
+        const data = { ...previous, version: 1, startsAt: args.startsAt == null ? previous.startsAt : new Date(args.startsAt).toISOString(), timeZone: args.timeZone || previous.timeZone || 'Asia/Bangkok', description: args.description == null ? String(previous.description || '') : args.description.trim(), location:args.location??previous.location??'', additionalStartsAt:args.additionalStartsAt??previous.additionalStartsAt??[], endsAt:args.endsAt??previous.endsAt??null };
+        if(args.additionalStartsAt!=null){data.excludedStartsAt=[];data.occurrenceOverrides={};}
+        if(args.startsAt && args.endsAt==null && previous.endsAt)data.endsAt=new Date(Date.parse(args.startsAt)+Date.parse(previous.endsAt)-Date.parse(previous.startsAt)).toISOString();
+        if(data.endsAt && Date.parse(data.endsAt)<=Date.parse(data.startsAt))throw new Error('invalid_calendar_duration');
+        if(new Set([data.startsAt,...data.additionalStartsAt].map(Date.parse)).size!==data.additionalStartsAt.length+1)throw new Error('duplicate_calendar_occurrence');
         const out = ensureOk(await memory.update({ user, memoryId: current.memoryId, ...(args.title == null ? {} : { title: args.title.trim() }), content: JSON.stringify(data), requestId }));
         return { event: asCalendar(out.memory) };
       }
@@ -207,12 +232,12 @@ function registerPersonalFunctionTools(registry, { memory, reminders, files, kno
       id: 'reminders.write', description: 'Schedule or cancel a reminder for the current user; scheduling sends email to the verified account and requires explicit on-screen confirmation', permission: 'chat', risk: 'high', mutates: true, requiresConfirmation: true,
       argsSchema: { action: 'create or cancel', kind: 'medication or appointment', title: 'max 240 characters', details: 'max 1000 characters', dueAt: 'future ISO date-time', timeZone: 'IANA time zone', emailConsent: 'must be true; approval dialog confirms email delivery', reminderId: 'required for cancel', expectedTitle: 'required for cancel' },
       validateArgs: args => {
-        if (!onlyKeys(args, ['action', 'kind', 'title', 'details', 'dueAt', 'timeZone', 'emailConsent', 'reminderId', 'expectedTitle'])) return 'invalid_tool_args';
+        if (!onlyKeys(args, ['action', 'kind', 'title', 'details', 'dueAt', 'timeZone', 'emailConsent', 'reminderId', 'expectedTitle', 'recurrence'])) return 'invalid_tool_args';
         if (args.action === 'create') return ['medication', 'appointment'].includes(args.kind) && trimText(args.title, 240) && (args.details == null || typeof args.details === 'string' && args.details.length <= 1000) && Number.isFinite(Date.parse(args.dueAt)) && validTimeZone(args.timeZone) && args.emailConsent === true ? null : 'invalid_reminder';
         return args.action === 'cancel' && /^[0-9a-f-]{36}$/i.test(String(args.reminderId || '')) && trimText(args.expectedTitle, 240) && Object.keys(args).every(k => ['action', 'reminderId', 'expectedTitle'].includes(k)) ? null : 'invalid_reminder';
       },
       run: async ({ user, args }) => {
-        if (args.action === 'create') return ensureOk(await reminders.create({ user, kind: args.kind, title: args.title.trim(), details: String(args.details || '').trim(), dueAt: new Date(args.dueAt).toISOString(), timeZone: args.timeZone, emailConsent: true }));
+        if (args.action === 'create') return ensureOk(await reminders.create({ user, kind: args.kind, title: args.title.trim(), details: String(args.details || '').trim(), dueAt: new Date(args.dueAt).toISOString(), timeZone: args.timeZone, emailConsent: true, ...(args.recurrence?{recurrence:args.recurrence}:{}) }));
         const list = ensureOk(await reminders.list({ user, limit: 100 }));
         const existing = list.reminders.find(item => item.reminderId === args.reminderId && item.title === args.expectedTitle);
         if (!existing) throw new Error('reminder_not_found');
