@@ -1,5 +1,6 @@
 'use strict';
 
+const { StudioEditorService, validateEdit } = require('./studioEditorService');
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -35,7 +36,7 @@ function sourceIds(value) {
 function normalizeInput(value) {
   if (typeof value === 'string') value = { prompt: value };
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CreativeStudioError(400, 'invalid_studio_input');
-  if (Object.keys(value).some(key => !['prompt','name','title','content','aspectRatio','durationSeconds'].includes(key))) throw new CreativeStudioError(400, 'unsupported_studio_input');
+  if (Object.keys(value).some(key => !['prompt','name','title','content','edit','aspectRatio','durationSeconds'].includes(key))) throw new CreativeStudioError(400, 'unsupported_studio_input');
   if (Buffer.byteLength(JSON.stringify(value), 'utf8') > 48000) throw new CreativeStudioError(413, 'studio_input_too_large');
   if (typeof value.prompt !== 'string' || !value.prompt.trim() || value.prompt.length > 12000) throw new CreativeStudioError(400, 'invalid_studio_prompt');
   if (value.name != null && (typeof value.name !== 'string' || value.name.length > 150)) throw new CreativeStudioError(400, 'invalid_output_name');
@@ -53,6 +54,8 @@ function normalizeSteps({ pluginId, input, sourceFileIds = [], steps }) {
     if (step.usePrevious && !PLUGINS.find(plugin=>plugin.id===step.pluginId).upstreamPlugins.includes(proposed[index-1]?.pluginId)) throw new CreativeStudioError(400,'incompatible_studio_workflow');
     const normalizedInput = normalizeInput(step.input);
     const ids = sourceIds(step.sourceFileIds || []);
+    if (normalizedInput.content && (!['document','spreadsheet','presentation'].includes(step.pluginId) || normalizedInput.edit)) throw new CreativeStudioError(400,'invalid_office_input');
+    if (normalizedInput.edit) { validateEdit(normalizedInput.edit); if (step.usePrevious || ids.length !== 1 || ids[0] !== normalizedInput.edit.fileId || step.pluginId === 'video') throw new CreativeStudioError(400,'invalid_editor_request'); }
     if (['document','spreadsheet','presentation'].includes(step.pluginId) && (normalizedInput.prompt.length > 8000 || (normalizedInput.title || '').length > 160)) throw new CreativeStudioError(400,'invalid_office_input');
     if (step.pluginId === 'video') {
       if (normalizedInput.prompt.length > 1600) throw new CreativeStudioError(400, 'invalid_generation_prompt');
@@ -70,6 +73,7 @@ function normalizeSteps({ pluginId, input, sourceFileIds = [], steps }) {
 class CreativeStudioService {
   constructor({ repository, files, providers, gateway, mediaStudio, office, resolveUser, audit, vertexFetch } = {}) {
     Object.assign(this, { repository, files, providers, gateway, mediaStudio, office, resolveUser, audit });
+    this.editor = new StudioEditorService({ files });
     this.vertexFetch = vertexFetch || ((...args) => fetch(...args));
     this.imageGate = gateway?.concurrencyGate || new ConcurrencyGate({limit:2,maxQueue:4,name:'studio-images',audit});
   }
@@ -133,7 +137,7 @@ class CreativeStudioService {
     normalized = normalizeSteps({ pluginId, input, sourceFileIds, steps });
     for (const step of normalized) {
       await this.assertAllowed(current, step.pluginId);
-      const unavailable = this.available(step.pluginId); if (unavailable) throw new CreativeStudioError(503, unavailable);
+      const unavailable = step.input.edit || step.input.content ? (this.fileStorageReady() ? null : 'files_storage_unconfigured') : this.available(step.pluginId); if (unavailable) throw new CreativeStudioError(503, unavailable);
       if (['image','video'].includes(step.pluginId) && confirmed !== true) throw new CreativeStudioError(409, 'generation_confirmation_required');
       for (const id of step.sourceFileIds) await this.files.findObject(ownerId, id);
     }
@@ -165,7 +169,7 @@ class CreativeStudioService {
     try {
       const user = await this.principal(job.principal);
       await this.assertAllowed(user, step.pluginId);
-      const unavailable = this.available(step.pluginId); if (unavailable) throw new CreativeStudioError(503, unavailable);
+      const unavailable = step.input.edit || step.input.content ? (this.fileStorageReady() ? null : 'files_storage_unconfigured') : this.available(step.pluginId); if (unavailable) throw new CreativeStudioError(503, unavailable);
       // The previous process may have crossed a billing/storage boundary before it died.
       if (step.status === 'submitting') throw new CreativeStudioError(409, 'studio_submission_uncertain', true);
       const previous = step.usePrevious ? job.steps[job.currentStep - 1].files.map(file => file.id) : [];
@@ -197,7 +201,8 @@ class CreativeStudioService {
           step.providerJobToken = result.jobToken; step.status = 'running';
           return this.repository.save(job, { release: true, delayMs: 15000 });
         }
-        if (step.pluginId === 'image') result = await this.imageGate.run(()=>this.generateImage({ user, input: step.input, sourceFileIds: ids }));
+        if (step.input.edit) result = await this.imageGate.run(()=>this.editor.apply({user,pluginId:step.pluginId,input:step.input}));
+        else if (step.pluginId === 'image') result = await this.imageGate.run(()=>this.generateImage({ user, input: step.input, sourceFileIds: ids }));
         else {
           const officeInput = Object.fromEntries(Object.entries(step.input).filter(([key]) => ['prompt','title','content'].includes(key)));
           result = await this.office.create({ user, pluginId: step.pluginId, input: officeInput, sourceFileIds: ids, name: step.input.name || '' });
@@ -235,7 +240,7 @@ class CreativeStudioService {
     const parts = [{ text: 'Create one image following the user request. Return the image with a short description.\n' + input.prompt }];
     let totalBytes = 0;
     for (const id of sourceFileIds) {
-      const file = await this.files.download(ownerId,id);
+      const file = await (this.files.readOwned || this.files.download).call(this.files, ownerId,id);
       if (!['image/png','image/jpeg','image/webp'].includes(file.contentType)) throw new CreativeStudioError(415, 'image_source_required');
       if (!file.body?.length || file.body.length > 7*1024*1024 || (totalBytes += file.body.length) > 14*1024*1024) throw new CreativeStudioError(413, 'image_source_too_large');
       parts.push({ inlineData: { mimeType: file.contentType, data: file.body.toString('base64') } });

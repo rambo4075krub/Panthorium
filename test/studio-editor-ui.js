@@ -1,0 +1,32 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const {JSDOM}=require('jsdom');
+const {randomUUID}=require('node:crypto');
+const tick=()=>new Promise(r=>setTimeout(r,0));
+(async()=>{
+  const dom=new JSDOM('<!doctype html><body></body>',{url:'https://panthorium.test',runScripts:'outside-only'}),w=dom.window,windows=new Map(),calls=[],id=randomUUID(),copy=randomUUID(),video=randomUUID();let pending=null,mic=0,context='',selectedVideo='';
+  const original={ok:true,file:{id,name:'ตาราง.xlsx'},pluginId:'spreadsheet',revision:'a'.repeat(64),sheets:[{name:'ข้อมูล',cells:[{cell:'A1',value:'หัวข้อ'},{cell:'B2',value:100},{cell:'C2',value:100,formula:true}]}]};
+  w.OS={state:{user:{sub:randomUUID(),roles:['user'],permissions:['chat']}},config:{accessToken:'test-token'}};w.PanthoriumWindowCatalog=require('../voice-window-catalog');w.confirm=()=>true;
+  w.createWindow=(id,title,html,options)=>{const el=w.document.createElement('section');el.className='window';el.dataset.id=id;el.innerHTML=html;w.document.body.append(el);windows.set(id,{el,...options});};
+  w.closeWindow=id=>{const r=windows.get(id);if(r){r.onClose?.();r.el.remove();windows.delete(id);}};w.PanthoriumWindowManager={restore(){}};
+  w.PanthoriumCreativeStudio={showJob(){}};w.PanthoriumLiveVoice={isActive:()=>mic>0,toggle:async()=>{mic++;},sendText:t=>{context=t;}};w.PanthoriumMediaStudio={open:options=>{selectedVideo=options.fileId;}};
+  w.fetch=async(url,options={})=>{
+    calls.push({url,options});const response=data=>({ok:true,status:200,json:async()=>data});
+    if(url.endsWith('/editor/'+id))return pending||response(original);
+    if(url.endsWith('/editor/'+copy))return response({...original,file:{id:copy,name:'ตาราง-edited.xlsx'}});
+    if(url.endsWith('/editor/'+video))return response({ok:true,file:{id:video,name:'clip.mp4'},pluginId:'video'});
+    if(url.endsWith('/jobs'))return response({ok:true,job:{id:randomUUID(),status:'completed',files:[{id:copy,name:'ตาราง-edited.xlsx',pluginId:'spreadsheet'}]}});
+    throw Error(url);
+  };
+  w.eval(fs.readFileSync(require.resolve('../studio-editor-ui.js'),'utf8'));
+  await w.PanthoriumStudioEditor.open(id);const root=w.document.querySelector('[data-studio-editor]');assert(root);assert(root.querySelector('[data-cell=C2]').readOnly);
+  const input=root.querySelector('[data-cell=B2]');input.value='500';input.dispatchEvent(new w.Event('change'));assert.match(root.querySelector('[data-count]').textContent,/1 /);
+  root.querySelector('[data-voice]').click();await tick();assert.equal(mic,0,'unsaved drafts do not become mismatched voice edits');
+  root.querySelector('[data-undo]').click();assert.equal(root.querySelector('[data-cell=B2]').value,'100');root.querySelector('[data-redo]').click();assert.equal(root.querySelector('[data-cell=B2]').value,'500');
+  root.querySelector('[data-save]').click();await tick();await tick();const request=JSON.parse(calls.find(c=>c.options.method==='POST').options.body);assert.equal(request.input.edit.fileId,id);assert.equal(request.input.edit.operations[0].value,500);assert.equal(request.input.edit.revision,original.revision);assert.deepEqual(request.sourceFileIds,[id]);assert.match(root.querySelector('[data-status]').textContent,/บันทึกแล้ว/);
+  root.querySelector('[data-saved] button').click();await tick();await tick();const next=w.document.querySelector('[data-studio-editor]');next.querySelector('[data-voice]').click();await tick();assert.equal(mic,1);assert(context.includes(copy));
+  await w.PanthoriumStudioEditor.open(video);assert.equal(selectedVideo,video);assert(!w.document.querySelector('[data-studio-editor]'));
+  let resolve;pending=new Promise(r=>{resolve=r;});const opening=w.PanthoriumStudioEditor.open(id);await tick();w.OS.state.user={sub:randomUUID(),roles:['user'],permissions:['chat']};w.dispatchEvent(new w.Event('panthorium:auth-changed'));resolve({ok:true,status:200,json:async()=>original});await opening;assert(!w.document.querySelector('[data-studio-editor]'),'late content from previous account discarded');
+  assert(calls.every(c=>c.options.cache==='no-store'));dom.window.close();console.log('PASS studio editor UI: numeric cell edits, formulas, undo/redo, saved-copy handoff, contextual microphone, video selection and account-change cleanup');
+})().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,4 +1,5 @@
 'use strict';
+const { OfficeArtifactError } = require('../services/officeArtifactService');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { requireAuth } = require('../middleware/auth');
@@ -13,6 +14,7 @@ function createCreativeStudioRouter(authService, studio) {
   const submit = rateLimit({ windowMs: 60000, limit: 8, standardHeaders: true, legacyHeaders: false });
   const progress = rateLimit({ windowMs: 60000, limit: 30, standardHeaders: true, legacyHeaders: false });
   const handle = fn => async (req,res,next) => { try { await fn(req,res); } catch(error) { next(error); } };
+  router.get('/editor/:fileId', handle(async(req,res) => { const user=await studio.principal(req.user); res.json({ok:true,...await studio.editor.read(user,req.params.fileId)}); }));
   router.get('/catalog', handle(async(req,res) => res.json({ok:true,...await studio.catalog({user:req.user})})));
   router.get('/jobs', handle(async(req,res) => res.json({ok:true,...await studio.list({user:req.user})})));
   router.get('/jobs/:jobId', handle(async(req,res) => res.json({ok:true,...await studio.get({user:req.user,jobId:req.params.jobId})})));
@@ -28,7 +30,7 @@ function createCreativeStudioRouter(authService, studio) {
     res.json({ok:true,...await studio.setMode({user:req.user,pluginId:req.params.pluginId,mode:req.body?.mode})});
   }));
   router.use((error,req,res,next) => {
-    if (error instanceof CreativeStudioError || error instanceof CloudFilesError || error instanceof CreativeStudioRepositoryError) return res.status(error.status || 500).json({ok:false,error:error.code || 'studio_operation_failed'});
+    if (error instanceof OfficeArtifactError || error instanceof CreativeStudioError || error instanceof CloudFilesError || error instanceof CreativeStudioRepositoryError) return res.status(error.status || 500).json({ok:false,error:error.code || 'studio_operation_failed'});
     next(error);
   });
   return router;

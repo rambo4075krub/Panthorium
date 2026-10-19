@@ -1,7 +1,8 @@
 (function () {
   'use strict';
   const MAX_FILE_BYTES = 20 * 1024 * 1024;
-  let currentUrl = '';
+  let currentUrl = '', previewSequence = 0;
+  const owner = () => JSON.stringify([os()?.state?.user?.sub || os()?.state?.user?.id, os()?.state?.user?.roles, os()?.state?.user?.permissions]);
   let generationJobToken = '';
   let generationPolls = 0;
 
@@ -15,12 +16,16 @@
     return token();
   }
   async function api(path, options = {}) {
+    const account=owner();
     const accessToken = await ensureToken();
+    if(account!==owner())throw Error('account_changed');
     const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) };
     if (accessToken) headers.Authorization = 'Bearer ' + accessToken;
     let response = await fetch(path, { ...options, headers, credentials: 'include' });
+    if(account!==owner())throw Error('account_changed');
     if (response.status === 401 && window.PanthoriumAuth?.refreshSession) {
       await window.PanthoriumAuth.refreshSession().catch(() => false);
+      if(account!==owner())throw Error('account_changed');
       const fresh = token();
       if (fresh) {
         headers.Authorization = 'Bearer ' + fresh;
@@ -28,6 +33,7 @@
       }
     }
     const data = await response.json().catch(() => ({}));
+    if(account!==owner())throw Error('account_changed');
     if (!response.ok) throw new Error(data.error || 'HTTP ' + response.status);
     return data;
   }
@@ -79,6 +85,7 @@
   async function refreshFiles(root, keepId = '') {
     const select = root.querySelector('[data-media-file]');
     const data = await api('/api/media/files');
+    if(!root.isConnected)return null;
     select.replaceChildren();
     const bin = root.querySelector('[data-media-bin]');
     bin.replaceChildren();
@@ -142,18 +149,21 @@
     if (duration) { slider.max = String(duration); if (document.activeElement !== slider) slider.value = String(preview.currentTime || 0); }
   }
   async function loadPreview(root, fileId) {
+    const account=owner(), sequence=++previewSequence, current=()=>root.isConnected && account===owner() && sequence===previewSequence;
     if (currentUrl) URL.revokeObjectURL(currentUrl);
     currentUrl = '';
     const preview = root.querySelector('[data-media-preview]');
     preview.removeAttribute('src');
     if (!fileId) return;
     const accessToken = await ensureToken();
-    const response = await fetch('/api/files/' + encodeURIComponent(fileId), { headers: { Authorization: 'Bearer ' + accessToken }, credentials: 'include' });
+    if(!current())return;
+    const response = await fetch('/api/files/' + encodeURIComponent(fileId) + '/preview', { headers: { Authorization: 'Bearer ' + accessToken }, credentials: 'include' });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
       throw new Error(error.error || 'file_download_failed');
     }
-    currentUrl = URL.createObjectURL(await response.blob());
+    const blob=await response.blob();if(!current())return;
+    currentUrl = URL.createObjectURL(blob);
     preview.src = currentUrl;
     preview.onloadedmetadata = () => {
       root.querySelector('[data-end]').value = String(Math.max(0.1, preview.duration || 0).toFixed(1));
@@ -401,6 +411,7 @@
     else root.style.display = 'none';
   }
   function close(root) {
+    previewSequence++;generationJobToken='';
     if (currentUrl) URL.revokeObjectURL(currentUrl);
     currentUrl = '';
     if (root._mediaResize) window.removeEventListener('resize', root._mediaResize);
@@ -436,7 +447,7 @@
     window.dispatchEvent(new CustomEvent('panthorium:apps-changed', { detail: { app: 'media-studio' } }));
     return true;
   }
-  function open() {
+  function open(options = {}) {
     if (!accountUser() || !window.PanthoriumWindowCatalog?.allowed(window.PanthoriumWindowCatalog.apps.find(app => app.id === 'media-studio'), os()?.state?.user)) {
       if (typeof toast === 'function') toast('Media Studio ใช้ได้สำหรับบัญชีผู้ใช้ที่เข้าสู่ระบบ');
       return;
@@ -446,10 +457,12 @@
       if (window.PanthoriumWindowManager?.restore) window.PanthoriumWindowManager.restore('media-studio');
       else existing.style.display = 'flex';
       existing.focus();
+      if(options.fileId) refreshFiles(existing,options.fileId).then(file=>file && loadPreview(existing,file.id)).catch(error=>setStatus(existing,formatError(error.message),true));
       return existing;
     }
     const root = document.createElement('section');
     root.id = 'media-studio-dashboard';
+    root._mediaOwner=owner();
     root.tabIndex = -1;
     root.style.cssText = 'position:fixed;inset:1%;z-index:10030;background:#11151a;border:1px solid #34414a;border-radius:10px;color:#e2e8f0;padding:0;display:flex;flex-direction:column;box-shadow:0 24px 80px #000;font-family:system-ui;overflow:hidden';
     root.innerHTML = `
@@ -572,8 +585,11 @@
     window.addEventListener('resize', root._mediaResize);
     root.addEventListener('keydown', event => { if (event.key === 'Escape') close(root); });
     if (generationJobToken) root.querySelector('[data-check-generation]').style.display = 'inline-block';
+    const voiceButton=document.createElement('button');voiceButton.type='button';voiceButton.textContent='🎙 สั่งตัดต่อด้วยเสียง';voiceButton.dataset.editorVoice='';
+    voiceButton.onclick=async()=>{const id=root.querySelector('[data-media-file]').value;if(!id)return setStatus(root,'เลือกวิดีโอก่อนเปิดไมค์',true);const account=owner(),live=window.PanthoriumLiveVoice;if(!live)return setStatus(root,'ระบบเสียงยังไม่พร้อม',true);if(!live.isActive())await live.toggle('media-studio');if(root.isConnected && account===owner())live.sendText?.('บริบทวิดีโอที่ผู้ใช้เลือก fileId='+id+' ใช้ studio.editor อ่านไฟล์และใช้ media.video tools สำหรับแก้ไข รอฟังคำสั่งเสียงถัดไป และยืนยันก่อนบันทึก');};
+    root.querySelector('header')?.append(voiceButton);
     loadCapabilities(root);
-    refreshFiles(root).then(file => file && loadPreview(root, file.id)).catch(error => setStatus(root, formatError(error.message), true));
+    refreshFiles(root,options.fileId || '').then(file => file && loadPreview(root, file.id)).catch(error => setStatus(root, formatError(error.message), true));
     return root;
   }
   function trackGeneration(jobToken) {
@@ -590,6 +606,7 @@
     return true;
   }
   window.PanthoriumMediaStudio = { open, trackGeneration, close: () => { const root = document.getElementById('media-studio-dashboard'); if (root) close(root); }, roughSrt };
+  window.addEventListener('panthorium:auth-changed',()=>{const root=document.getElementById('media-studio-dashboard');if(root && root._mediaOwner!==owner())close(root);});
   const sync = () => requestAnimationFrame(installLauncher);
   for (const event of ['panthorium:auth-changed', 'panthorium:apps-changed', 'panthorium:boot-complete']) window.addEventListener(event, sync);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', sync, { once: true }); else sync();
