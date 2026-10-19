@@ -1,0 +1,31 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const {randomUUID}=require('node:crypto');
+const {JSDOM}=require('jsdom');
+const wait=(ms=0)=>new Promise(r=>setTimeout(r,ms));
+(async()=>{
+  const dom=new JSDOM('<!doctype html><body></body>',{url:'https://panthorium.test',runScripts:'outside-only'}),w=dom.window,id=randomUUID(),windows=new Map(),calls=[];let kind='spreadsheet',version=0,draft=null;
+  w.OS={state:{user:{sub:randomUUID(),roles:['user'],permissions:['chat']}},config:{accessToken:'test'}};w.PanthoriumWindowCatalog=require('../voice-window-catalog');w.confirm=()=>true;w.PanthoriumCreativeStudio={showJob(){}};
+  w.createWindow=(id,title,html,options)=>{const n=w.document.createElement('div');n.className='window';n.dataset.id=id;n.innerHTML=html;w.document.body.append(n);windows.set(id,{n,...options});};w.closeWindow=id=>{const item=windows.get(id);if(item){item.onClose?.();item.n.remove();windows.delete(id);}};
+  const model=()=>({ok:true,file:{id,name:kind+'.'+({spreadsheet:'xlsx',document:'docx',presentation:'pptx'})[kind]},pluginId:kind,revision:'a'.repeat(64),...(kind==='spreadsheet'?{sheets:[{name:'Data',cells:[{cell:'A1',value:100},{cell:'A2',value:200},{cell:'B1',value:300,formula:true,formulaText:'=SUM(A1:A2)'}]}]}:{blocks:[{index:0,page:1,text:'Title <script>bad()</script>',style:{bold:false,fontSize:24,color:'20252C'},geometry:{x:10,y:10,width:80,height:20},shapeIndex:0}],pageCount:1,slideSize:{width:12000000,height:6750000},backgrounds:['FFFFFF']})});
+  w.fetch=async(url,options={})=>{calls.push({url,options});const response=(body,status=200)=>({ok:status===200,status,json:async()=>body});
+    if(url.endsWith('/draft')){if(options.method==='PUT'){const body=JSON.parse(options.body);if(body.version!==version)return response({error:'editor_draft_conflict'},409);version++;draft=body.operations.length?{revision:body.revision,operations:body.operations,name:body.name}:null;}return response({ok:true,version,data:draft});}
+    if(url.includes('/editor/'))return response(model());
+    if(url.endsWith('/jobs'))return response({ok:true,job:{status:'completed',files:[{id:randomUUID(),name:'saved.xlsx',pluginId:kind}]}});throw Error(url);
+  };
+  for(const script of ['office-suite-core.js','office-suite-ui.js','studio-editor-ui.js'])w.eval(fs.readFileSync(require.resolve('../'+script),'utf8'));
+  const root=()=>w.document.querySelector('[data-studio-editor]'),byLabel=label=>root().querySelector('[aria-label="'+label+'"]'),click=text=>{const b=[...root().querySelectorAll('button')].find(b=>b.textContent===text);assert(b,text);b.click();};
+  await w.PanthoriumStudioEditor.open(id);assert.equal(root().querySelector('[data-cell=B1]').value,'300');assert(root().querySelector('.po-sheet'));
+  const cell=root().querySelector('[data-cell=A1]');cell.value='150';cell.dispatchEvent(new w.Event('change'));assert.equal(root().querySelector('[data-cell=B1]').value,'350');
+  byLabel('ตำแหน่งเซลล์').value='B2';byLabel('ค่าหรือสูตร').value='=AVERAGE(A1:A2)';byLabel('ค่าหรือสูตร').closest('form').dispatchEvent(new w.Event('submit',{cancelable:true}));assert.equal(root().querySelector('[data-cell=B2]').value,'175');
+  await wait(1600);assert.equal(draft.operations.length,2);assert.match(root().querySelector('[data-draft-status]').textContent,/เก็บฉบับร่าง/);
+  w.PanthoriumStudioEditor.close();await w.PanthoriumStudioEditor.open(id);click('กู้คืนฉบับร่าง');assert.equal(root().querySelector('[data-cell=B2]').value,'175');root().querySelector('[data-save]').click();await wait();await wait();assert.equal(draft,null,'saved file clears only its own versioned draft');
+  const submitted=JSON.parse(calls.find(c=>c.url.endsWith('/jobs')).options.body);assert.equal(submitted.input.edit.operations[1].type,'set_formula');
+  w.PanthoriumStudioEditor.close();kind='document';await w.PanthoriumStudioEditor.open(id);assert(!root().querySelector('script'));const block=root().querySelector('[data-text-index="0"]');block.focus();block.textContent='New heading';block.dispatchEvent(new w.Event('input',{bubbles:true}));click('ตัวหนา');assert.equal(root().querySelector('[data-text-index="0"]').style.fontWeight,'700');root().querySelector('[data-undo]').click();assert.notEqual(root().querySelector('[data-text-index="0"]').style.fontWeight,'700');
+  w.PanthoriumStudioEditor.close();kind='presentation';await w.PanthoriumStudioEditor.open(id);assert(root().querySelector('.po-slide'));byLabel('ซ้าย %').value='15';byLabel('บน %').value='12';byLabel('กว้าง %').value='70';byLabel('สูง %').value='25';byLabel('ซ้าย %').closest('form').dispatchEvent(new w.Event('submit',{cancelable:true}));assert.equal(root().querySelector('.po-shape').style.left,'15%');
+  const bg=byLabel('สีพื้นหลังสไลด์');bg.value='#ff0000';bg.dispatchEvent(new w.Event('change'));assert.equal(root().querySelector('.po-slide').style.backgroundColor,'rgb(255, 0, 0)');
+  version+=1;await wait(1600);assert.match(root().querySelector('[data-draft-status]').textContent,/หน้าต่างอื่น/,'concurrent window cannot overwrite draft');
+  w.OS.state.user={sub:randomUUID(),roles:['user'],permissions:['chat']};w.dispatchEvent(new w.Event('panthorium:auth-changed'));assert.equal(root(),null);
+  assert(calls.every(c=>c.options.cache==='no-store'));dom.window.close();console.log('PASS Office suite UI: live formulas, native operation payloads, styles, slide geometry/background, autosave recovery, conflicting drafts and account cleanup');
+})().catch(e=>{console.error(e);process.exitCode=1;});

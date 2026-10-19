@@ -36,11 +36,31 @@ class PostgresCreativeStudioRepository {
       );
       CREATE INDEX IF NOT EXISTS idx_studio_jobs_due ON panthorium_studio_jobs(status, next_run_at);
       CREATE INDEX IF NOT EXISTS idx_studio_jobs_owner ON panthorium_studio_jobs(owner_id, created_at);
+      CREATE TABLE IF NOT EXISTS panthorium_office_drafts (
+        owner_id UUID NOT NULL, file_id UUID NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+        data JSONB, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(owner_id,file_id)
+      );
       CREATE TABLE IF NOT EXISTS panthorium_studio_modes (
         owner_id UUID NOT NULL, plugin_id TEXT NOT NULL, mode TEXT NOT NULL CHECK(mode IN ('auto','never')),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(owner_id,plugin_id)
       );
     `);
+  }
+  async getDraft(ownerId,fileId) {
+    const row=(await this.pool.query('SELECT version,data,updated_at FROM panthorium_office_drafts WHERE owner_id=$1 AND file_id=$2',[ownerId,fileId])).rows[0];
+    return row?{version:row.version,data:row.data,updatedAt:date(row.updated_at)}:{version:0,data:null};
+  }
+  async saveDraft(ownerId,fileId,version,data) {
+    const client=await this.pool.connect();
+    try {
+      await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['office-draft:'+ownerId]);
+      const row=(await client.query('SELECT version,data FROM panthorium_office_drafts WHERE owner_id=$1 AND file_id=$2',[ownerId,fileId])).rows[0];
+      if((row?.version||0)!==version)throw Object.assign(Error('editor_draft_conflict'),{status:409,code:'editor_draft_conflict'});
+      if(data&&!row?.data){const count=(await client.query("SELECT COUNT(*)::int AS n FROM panthorium_office_drafts WHERE owner_id=$1 AND data IS NOT NULL AND data <> 'null'::jsonb",[ownerId])).rows[0].n;if(count>=100)throw Object.assign(Error('editor_draft_limit'),{status:429,code:'editor_draft_limit'});}
+      const result=await client.query(`INSERT INTO panthorium_office_drafts(owner_id,file_id,version,data) VALUES($1,$2,$3,$4::jsonb)
+        ON CONFLICT(owner_id,file_id) DO UPDATE SET version=EXCLUDED.version,data=EXCLUDED.data,updated_at=NOW() RETURNING version,data,updated_at`,[ownerId,fileId,version+1,JSON.stringify(data)]);
+      await client.query('COMMIT');const saved=result.rows[0];return {version:saved.version,data:saved.data,updatedAt:date(saved.updated_at)};
+    }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
   }
   map(row) {
     return row ? { ...row.data, id: row.id, ownerId: row.owner_id, fingerprint: row.fingerprint, status: row.status, createdAt: date(row.created_at), updatedAt: date(row.updated_at), leaseToken: row.lease_token || null } : null;
@@ -84,8 +104,11 @@ class PostgresCreativeStudioRepository {
 }
 
 class MemoryCreativeStudioRepository {
-  constructor() { this.available = true; this.durable = false; this.jobs = new Map(); this.policy = new Map(); }
+  constructor() { this.available = true; this.durable = false; this.jobs = new Map(); this.policy = new Map(); this.drafts = new Map(); }
   async init() {}
+  async getDraft(ownerId,fileId){return copy(this.drafts.get(ownerId+':'+fileId)||{version:0,data:null});}
+  async saveDraft(ownerId,fileId,version,data){const old=this.drafts.get(ownerId+':'+fileId)||{version:0};if(old.version!==version)throw Object.assign(Error('editor_draft_conflict'),{status:409,code:'editor_draft_conflict'});const saved={version:version+1,data:copy(data),updatedAt:new Date().toISOString()};this.drafts.set(ownerId+':'+fileId,saved);return copy(saved);}
+
   async create(job) {
     const existing = [...this.jobs.values()].find(item => item.ownerId === job.ownerId && item.idempotencyKey === job.idempotencyKey);
     if (existing) return { job: copy(existing), created: false };
