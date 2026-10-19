@@ -265,6 +265,7 @@
       for (const file of job.files || []) {
         if (!file?.id || seen.has(file.id)) continue; seen.add(file.id);
         const result = el('div', null, { class: 'cs-result' }), actions = el('div', null, { class: 'cs-actions' }); result.append(el('strong', file.name || file.id, { class: 'cs-result-name' }));
+        actions.append(button('แชร์ไป Social Media', () => window.PanthoriumSocial?.open(file.contentType?.startsWith('video/') ? 'watch' : 'community', { sourceFileIds: [file.id] })));
         actions.append(button('เปิดดู', () => previewFile(v, file, job), { 'data-preview-file': file.id }));
         if(editable(file)) actions.append(button('แก้ไข / ตัวแก้ไขเต็ม',()=>window.PanthoriumStudioEditor?.open(file.id),{'data-edit-file':file.id}));
         actions.append(button('ดาวน์โหลด', event => download(v, file, event.currentTarget), { 'data-download-file': file.id }));

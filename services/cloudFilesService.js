@@ -181,12 +181,12 @@ class CloudFilesService {
     return file;
   }
 
-  async download(userId, fileId) {
+  async download(userId, fileId, downloadAccountId = userId) {
     const file = await this.findObject(userId, fileId);
     // Reject known over-quota downloads before fetching their cloud payload.
     // Actual transferred size is charged atomically after the fetch as before.
     if (this.entitlements) {
-      const state = await this.entitlements.state(userId);
+      const state = await this.entitlements.state(downloadAccountId);
       const size = Number(file.size);
       if (!Number.isSafeInteger(size) || size < 0) throw new CloudFilesError(503, 'file_size_unavailable');
       if (size > Number(state.remaining?.downloadBytes || 0)) throw new CloudFilesError(402, 'quota_exceeded:downloadBytes');
@@ -199,7 +199,7 @@ class CloudFilesService {
       responseType: "arraybuffer"
     });
     const body=Buffer.isBuffer(data) ? data : Buffer.from(data || []);
-    if(this.entitlements)await this.entitlements.consume(userId,{downloadBytes:body.length});
+    if(this.entitlements)await this.entitlements.consume(downloadAccountId,{downloadBytes:body.length});
     return { ...file, body };
   }
 

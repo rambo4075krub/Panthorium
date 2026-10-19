@@ -280,7 +280,7 @@
     if (frame.type === "toolResult") {
       if (frame.toolId === 'calendar.write' && frame.ok && !frame.error) window.dispatchEvent(new CustomEvent('panthorium:calendar-changed'));
       if (frame.error) console.info("Gemini Live function result", frame.toolId || "unknown", frame.error);
-      if (frame.toolId?.startsWith('studio.')) {
+      if (frame.toolId?.startsWith('studio.') || frame.toolId?.startsWith('social.')) {
         window.dispatchEvent(new CustomEvent('panthorium:ai-done', { detail: { source: 'gemini-live', toolResults: [frame] } }));
       }
       return;
@@ -421,6 +421,7 @@
 
   // Desktop and chat controls share one microphone and one Live connection.
   async function toggle(owner = "chat") {
+    if(window.PanthoriumSocialRTC?.isActive?.()){setStatus("กำลังโทรหรือไลฟ์อยู่ กรุณาวางสายก่อนเปิดไมค์ Sentinel");return;}
     if (starting || reconnectTimer) { cleanup(); return; }
     if (socket && socket.readyState < WebSocket.CLOSING) { cleanup(); return; }
     starting = true;
