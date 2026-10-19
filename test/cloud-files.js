@@ -88,6 +88,41 @@ async function main() {
     assert.equal(own.status, 200);
     assert.equal(await own.text(), "Alice-only test");
 
+    // Preview remains available when export/download allowance is zero.
+    let quotaReads = 0, quotaCharges = 0;
+    files.entitlements = { state: async () => { quotaReads++; return { remaining: { downloadBytes: 0 } }; }, consume: async () => { quotaCharges++; } };
+    const preview = await call('/' + created.file.id + '/preview', 'alice');
+    assert.equal(preview.status, 200);
+    assert.equal(await preview.text(), 'Alice-only test');
+    assert.equal(preview.headers.get('cache-control'), 'private, no-store');
+    assert.equal(preview.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(preview.headers.get('content-security-policy'), /sandbox/);
+    assert.equal(quotaReads, 0); assert.equal(quotaCharges, 0);
+    const exportDenied = await call('/' + created.file.id, 'alice');
+    assert.equal(exportDenied.status, 402);
+    assert.equal((await exportDenied.json()).error, 'quota_exceeded:downloadBytes');
+    assert.equal((await call('/' + created.file.id + '/preview', 'bob')).status, 404);
+    assert.equal((await call('/' + created.file.id + '/preview', 'guest')).status, 403);
+    assert.equal((await call('/' + created.file.id + '/preview', 'invalid')).status, 401);
+    const item = objects.get(objectName);
+    item.size = String(21 * 1024 * 1024);
+    const readsBefore = requests.filter(r => r.params?.alt === 'media').length;
+    assert.equal((await call('/' + created.file.id + '/preview', 'alice')).status, 413);
+    assert.equal(requests.filter(r => r.params?.alt === 'media').length, readsBefore);
+    item.size = String(item.body.length);
+    files.entitlements = null;
+    const core = require('../services/officeArtifactService')._internals;
+    const workbook = core.spreadsheetBuffer({title:'ตาราง',sheets:[{name:'ข้อมูล',rows:[['ชื่อ','ค่า'],['สินค้า',100]]}]});
+    const sheet = await files.upload(accounts.alice.sub, 'ตาราง.xlsx', 'application/octet-stream', workbook);
+    const sheetPreview = await call('/' + sheet.id + '/preview', 'alice');
+    assert.equal(sheetPreview.status, 200);
+    assert.equal(sheetPreview.headers.get('x-panthorium-preview'), 'office-text');
+    assert.match(await sheetPreview.text(), /สินค้า\t100/);
+    await files.remove(accounts.alice.sub, sheet.id);
+    const unknown = await files.upload(accounts.alice.sub, 'archive.zip', 'application/zip', Buffer.from('zip'));
+    assert.equal((await call('/' + unknown.id + '/preview', 'alice')).status, 415);
+    await files.remove(accounts.alice.sub, unknown.id);
+
     const deleteDenied = await call("/" + created.file.id, "bob", { method: "DELETE" });
     assert.equal(deleteDenied.status, 404, "another account cannot delete Alice's object");
     const removed = await call("/" + created.file.id, "alice", { method: "DELETE" });

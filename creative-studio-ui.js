@@ -197,33 +197,7 @@
     if (v.previewUrl) { URL.revokeObjectURL(v.previewUrl); v.urls.delete(v.previewUrl); v.previewUrl = null; }
     return v.previewSequence;
   }
-  function readableDocument(html) {
-    // Parse only in inert template content. Rebuild an allowlist; never render
-    // uploaded HTML directly, execute scripts or request remote resources.
-    const template = document.createElement('template'); template.innerHTML = html;
-    const output = el('div');
-    const tags = new Set('h1 h2 h3 h4 h5 h6 p div span section article main header footer figure figcaption table thead tbody tfoot tr th td ul ol li strong b em i u br hr img'.split(' '));
-    const skip = new Set('script style iframe object embed svg math form input button textarea select link meta base audio video source'.split(' '));
-    let count = 0;
-    function copy(source, target, depth) {
-      if (++count > 25000 || depth > 60) return;
-      if (source.nodeType === 3) { target.append(document.createTextNode(source.textContent)); return; }
-      if (source.nodeType !== 1 || skip.has(source.localName)) return;
-      if (!tags.has(source.localName)) { for (const child of source.childNodes) copy(child, target, depth + 1); return; }
-      const node = el(source.localName);
-      if (source.localName === 'img') {
-        const src = source.getAttribute('src') || '';
-        if (src.length > 12 * 1024 * 1024 || !/^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(src)) return;
-        node.setAttribute('src', src); node.setAttribute('alt', source.getAttribute('alt') || 'ภาพประกอบ');
-      }
-      if (source.classList.contains('slide')) node.className = 'slide';
-      for (const name of ['colspan', 'rowspan']) if (/^\d{1,2}$/.test(source.getAttribute(name) || '')) node.setAttribute(name, String(Math.min(40, Number(source.getAttribute(name)))));
-      for (const child of source.childNodes) copy(child, node, depth + 1);
-      target.append(node);
-    }
-    for (const child of template.content.childNodes) copy(child, output, 0);
-    return '<!doctype html><html lang="th"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; base-uri \'none\'; form-action \'none\'"><style>body{font:15px/1.7 Tahoma,sans-serif;color:#20252c;background:#fff;padding:20px;margin:0;overflow-wrap:anywhere}h1{font-size:24px}h2{font-size:19px}p{white-space:pre-wrap}table{border-collapse:collapse;width:100%;margin:16px 0}th,td{border:1px solid #ccc;padding:8px;text-align:left}th{background:#eee}img{max-width:100%;height:auto}.slide{border-bottom:2px solid #ddd;padding:20px 0;margin-bottom:20px}</style></head><body>' + output.innerHTML + '</body></html>';
-  }
+  function readableDocument(html) { return window.PanthoriumFilePreview.readableDocument(html); }
   async function previewFile(v, file, job = {}) {
     if (!current(v)) return;
     const sequence = clearPreview(v), body = v.root.querySelector('[data-preview-body]'), note = v.root.querySelector('[data-preview-note]');
@@ -245,7 +219,7 @@
     try {
       const limit = video ? 100 * 1024 * 1024 : 24 * 1024 * 1024;
       if (Number(target.size || 0) > limit) throw Error('preview_too_large');
-      const response = await api(v, '/api/files/' + encodeURIComponent(target.id), {}, true);
+      const response = await api(v, '/api/files/' + encodeURIComponent(target.id) + '/preview', {}, true);
       if (!live()) return;
       if (Number(response.headers?.get?.('content-length') || 0) > limit) throw Error('preview_too_large');
       if (html || plain) {
