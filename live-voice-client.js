@@ -433,6 +433,7 @@
   }
   window.PanthoriumLiveVoice = {
     toggle, stop:cleanup,
+    sendText:text => { if (!serverReady || socket?.readyState !== WebSocket.OPEN || typeof text !== 'string' || !text.trim() || text.length > 2000) return false; socket.send(JSON.stringify({clientContent:{turns:[{role:'user',parts:[{text}]}],turnComplete:true}})); return true; },
     stopPlayback:() => { outputSuppressed = true; stopPlayback(); if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'stopPlayback' })); },
     isActive:() => serverReady, syncChatButton,
     stopChatSession:() => { if (sessionOwner === "chat") cleanup(); }

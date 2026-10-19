@@ -31,6 +31,8 @@ const { _internals } = require('../services/officeArtifactService');
     const cases = [
       ['preview.print.html', 'text/html', Buffer.from('<h1>Preview fixture</h1><table><tr><td>100</td></tr></table>')],
       ['preview.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', _internals.spreadsheetBuffer({title:'Preview',sheets:[{name:'Data',rows:[['Value'],[100]]}]})],
+      ['preview.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document',_internals.documentBuffer({title:'Preview',sections:[{paragraphs:['Original text']}]},[])],
+      ['preview.pptx','application/vnd.openxmlformats-officedocument.presentationml.presentation',_internals.presentationBuffer({title:'Preview',slides:[{title:'Original title',bullets:['Original bullet']}]},[])],
       ['preview.png', 'image/png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2e8AAAAASUVORK5CYII=', 'base64')]
     ];
     for (const [name, type, body] of cases) {
@@ -41,15 +43,30 @@ const { _internals } = require('../services/officeArtifactService');
       assert.equal(preview.status,200,'owned preview');
       assert.equal(preview.headers.get('cache-control'),'private, no-store');
       const bytes = Buffer.from(await preview.arrayBuffer());
-      if (name.endsWith('.xlsx')) { assert.equal(preview.headers.get('x-panthorium-preview'),'office-text'); assert.match(bytes.toString(),/100/); }
+      if (/\.(xlsx|docx|pptx)$/.test(name)) { assert.equal(preview.headers.get('x-panthorium-preview'),'office-text'); assert.match(bytes.toString(),/100|Original/); }
       else assert.ok(bytes.equals(body), 'stored fixture is readable');
       assert.equal((await call('/api/files/' + file.id + '/preview', users[1].token)).status,404,'other account denied');
       assert.equal((await call('/api/files/' + file.id + '/preview', guest.accessToken)).status,403,'guest denied');
+      if (/\.(xlsx|docx|pptx|png)$/.test(name)) {
+        const editorResponse=await call('/api/studio/editor/'+file.id,owner);assert.equal(editorResponse.status,200,'editor owned read');
+        const edit=await editorResponse.json();
+        assert.equal((await call('/api/studio/editor/'+file.id,users[1].token)).status,404,'editor isolation');
+        assert.equal((await call('/api/studio/editor/'+file.id,guest.accessToken)).status,403,'editor guest denial');
+        const operations=edit.pluginId==='spreadsheet'?[{type:'set_cell',sheet:0,cell:'A2',value:500}]:edit.pluginId==='image'?[{type:'rotate',degrees:90}]:[{type:'set_text',index:0,value:'Edited text'}];
+        const request={pluginId:edit.pluginId,sourceFileIds:[file.id],input:{prompt:'Staging editor acceptance',edit:{fileId:file.id,revision:edit.revision,operations}},confirmed:true,idempotencyKey:'acceptance:'+crypto.randomUUID()};
+        const saved=await json('/api/studio/jobs',owner,request);assert.equal(saved.job.status,'completed','real editor save');
+        for(const output of saved.job.files)fixtures.push(output.id);
+        const replay=await json('/api/studio/jobs',owner,request);assert.equal(replay.job.id,saved.job.id,'no duplicate save');
+        const read=await call('/api/studio/editor/'+saved.job.files[0].id,owner);assert.equal(read.status,200);const copy=await read.json();
+        if(copy.sheets)assert.equal(copy.sheets[0].cells.find(c=>c.cell==='A2').value,500);
+        if(copy.blocks)assert.equal(copy.blocks[0].text,'Edited text');
+        assert.equal((await (await call('/api/studio/editor/'+file.id,owner)).json()).revision,edit.revision,'original unchanged');
+      }
       const download = await call('/api/files/' + file.id, owner);
       assert.equal(download.status,402,'Free export quota remains enforced');
       assert.equal((await download.json()).error,'quota_exceeded:downloadBytes');
     }
-    console.log('PASS staging real-bucket preview: Free account HTML/XLSX/image round trips, account isolation, Guest denial and export quota');
+    console.log('PASS staging real-bucket preview: Free account preview and DOCX/XLSX/PPTX/image editing round trips, account isolation, Guest denial and export quota');
   } finally {
     let failed = false;
     for (const id of fixtures) { const r = await call('/api/files/' + id, users[0].token, {method:'DELETE'}); if (!r.ok) failed = true; }

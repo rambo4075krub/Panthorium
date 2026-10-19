@@ -369,7 +369,7 @@ class OfficeArtifactService {
     const texts = [], images = []; let bytes = 0, imageBytes = 0, chars = 0;
     for (const id of new Set(sourceFileIds)) {
       // CloudFilesService scopes every lookup to userId before downloading bytes.
-      const file = await this.files.download(userId, id);
+      const file = await (this.files.readOwned || this.files.download).call(this.files, userId, id);
       if (!Buffer.isBuffer(file.body)) fail('invalid_office_source');
       bytes += file.body.length; if (bytes > LIMITS.sourceBytes) fail('office_source_too_large', 413);
       if (/^image\//i.test(file.contentType || '')) {
