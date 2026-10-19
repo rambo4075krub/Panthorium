@@ -388,7 +388,6 @@
         #panthorium-privacy-policy header{min-height:66px;padding:env(safe-area-inset-top,0px) max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px));display:flex;align-items:center;gap:12px;background:#1c242b;border-bottom:1px solid #34404a}
         #panthorium-privacy-policy .pp-brand{min-width:0;flex:1}#panthorium-privacy-policy .pp-brand h1{margin:0;font-size:18px;line-height:1.2}#panthorium-privacy-policy .pp-brand p{margin:4px 0 0;color:#9eacb7;font-size:12px}
         #panthorium-privacy-policy [data-close],#panthorium-privacy-policy [data-minimize]{min-width:40px;min-height:40px;border:1px solid #46535e;border-radius:8px;background:#252e36;cursor:pointer}
-        #panthorium-privacy-policy .pp-review{padding:10px 16px;background:#372d18;color:#ffe3a1;border-bottom:1px solid #6f5c2b;font-size:12px}
         #panthorium-privacy-policy .pp-workspace{display:grid;grid-template-columns:minmax(210px,290px) minmax(0,1fr);flex:1;min-height:0}
         #panthorium-privacy-policy [data-policy-nav]{overflow:auto;padding:12px;background:#151c23;border-right:1px solid #303b45;overscroll-behavior:contain}
         #panthorium-privacy-policy .pp-nav-item{width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin:0 0 6px;padding:11px;border:1px solid transparent;border-radius:8px;background:transparent;text-align:left;cursor:pointer}
@@ -403,12 +402,7 @@
         @media(min-width:701px) and (orientation:portrait){#panthorium-privacy-policy .pp-workspace{grid-template-columns:minmax(190px,30vw) minmax(0,1fr)}}
       </style>
       <header><div class="pp-brand"><h1>🔐 Privacy/Policy</h1><p>ศูนย์รวมนโยบายและข้อกำหนดของ Panthorium</p></div><div class="pp-window-tools"><button type="button" data-close aria-label="ปิด Privacy/Policy" title="ปิด">✕</button></div></header>
-      <div class="pp-review"><strong>ฉบับ 2.0 · 14 ตุลาคม 2026</strong><div data-operator>ผู้ให้บริการ: ปานเทพ มีเหมือน · Panthorium</div></div>
       <div class="pp-workspace"><nav data-policy-nav aria-label="หัวข้อ Privacy/Policy"></nav><main data-policy-content tabindex="0"></main></div>`;
-    const backend = typeof OS !== 'undefined' ? OS.config?.backendUrl || '' : '';
-    if (typeof fetch === 'function') fetch(backend.replace(/\/$/,'')+'/api/policies/operator').then(r=>r.ok?r.json():null).then(p=>{
-      if(p?.ok) root.querySelector('[data-operator]').textContent = 'ผู้ให้บริการ: '+p.name+' · '+(p.address||'ข้อมูลที่อยู่ติดต่อยังไม่ได้ประกาศ')+' · '+(p.email||'ช่องทางติดต่อยังไม่ได้ประกาศ');
-    }).catch(()=>{});
     root.querySelector('[data-close]').addEventListener('click', () => {
       if (window.PanthoriumWindowManager?.close?.(APP_ID)) return;
       root.remove();
