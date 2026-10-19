@@ -95,14 +95,17 @@ class SocialRepository {
         ],
       );
     else this.memory.set(row.id, data);
-    if (row.kind === "signal") {
+    if (row.kind === "signal" || row.transient) {
       if (this.pool)
         await this.pool.query(
-          "DELETE FROM panthorium_social_records WHERE kind='signal' AND created_at<NOW()-INTERVAL '3 minutes'",
+          "DELETE FROM panthorium_social_records WHERE (kind='signal' OR (kind='receipt' AND data->>'transient'='true')) AND created_at<NOW()-INTERVAL '3 minutes'",
         );
       else
         for (const [k, v] of this.memory)
-          if (v.kind === "signal" && Date.parse(v.expiresAt) < Date.now())
+          if (
+            (v.kind === "signal" || v.transient) &&
+            Date.parse(v.createdAt) < Date.now() - 180000
+          )
             this.memory.delete(k);
     }
     return data;

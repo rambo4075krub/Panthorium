@@ -108,15 +108,57 @@ async function suite(repository) {
     download: true,
   });
   assert.deepEqual(downloads[0], { owner: a.sub, id: video, viewer: b.sub });
-  const group=(await write(a,'group-create',{title:'Team group'})).record;
-  await assert.rejects(()=>write(b,'publish',{module:'community',text:'outside',audience:'group',groupId:group.id}),/social_join_required/);
-  await write(b,'group-join',{recordId:group.id});
-  const grouped=(await write(b,'publish',{module:'community',text:'members only',audience:'group',groupId:group.id})).record;
-  assert.equal((await service.read({user:a,recordId:group.id})).items.length,1);
-  await assert.rejects(()=>service.read({user:c,recordId:grouped.id}),/social_not_found/);
-  await write(b,'group-leave',{recordId:group.id});await assert.rejects(()=>service.read({user:b,recordId:grouped.id}),/social_not_found/);
-  const playlist=(await write(b,'playlist-create',{title:'Saved'})).record;await write(b,'playlist-add',{recordId:playlist.id,targetId:watch.id});assert.equal((await service.read({user:b,recordId:playlist.id})).items.length,1);await assert.rejects(()=>service.read({user:c,recordId:playlist.id}),/social_not_found/);
-  await write(a,'edit',{recordId:watch.id,audience:'private'});assert.equal((await service.read({user:b,recordId:playlist.id})).items.length,0);await write(a,'edit',{recordId:watch.id,audience:'public'});
+  const group = (await write(a, "group-create", { title: "Team group" }))
+    .record;
+  await assert.rejects(
+    () =>
+      write(b, "publish", {
+        module: "community",
+        text: "outside",
+        audience: "group",
+        groupId: group.id,
+      }),
+    /social_join_required/,
+  );
+  await write(b, "group-join", { recordId: group.id });
+  const grouped = (
+    await write(b, "publish", {
+      module: "community",
+      text: "members only",
+      audience: "group",
+      groupId: group.id,
+    })
+  ).record;
+  assert.equal(
+    (await service.read({ user: a, recordId: group.id })).items.length,
+    1,
+  );
+  await assert.rejects(
+    () => service.read({ user: c, recordId: grouped.id }),
+    /social_not_found/,
+  );
+  await write(b, "group-leave", { recordId: group.id });
+  await assert.rejects(
+    () => service.read({ user: b, recordId: grouped.id }),
+    /social_not_found/,
+  );
+  const playlist = (await write(b, "playlist-create", { title: "Saved" }))
+    .record;
+  await write(b, "playlist-add", { recordId: playlist.id, targetId: watch.id });
+  assert.equal(
+    (await service.read({ user: b, recordId: playlist.id })).items.length,
+    1,
+  );
+  await assert.rejects(
+    () => service.read({ user: c, recordId: playlist.id }),
+    /social_not_found/,
+  );
+  await write(a, "edit", { recordId: watch.id, audience: "private" });
+  assert.equal(
+    (await service.read({ user: b, recordId: playlist.id })).items.length,
+    0,
+  );
+  await write(a, "edit", { recordId: watch.id, audience: "public" });
   const followerPost = (
     await write(a, "publish", {
       module: "community",
@@ -199,12 +241,17 @@ async function suite(repository) {
     /social_call_not_accepted/,
   );
   await write(b, "call-answer", { recordId: call.id, accept: true });
-  await write(a, "signal", {
+  const sentSignal = await write(a, "signal", {
     recordId: call.id,
     to: b.sub,
     type: "offer",
     payload: { type: "offer", sdp: "test" },
   });
+  for (const user of [a, b, c])
+    await assert.rejects(
+      () => service.read({ user, recordId: sentSignal.id }),
+      /social_not_found/,
+    );
   assert.equal(
     (await service.rtc({ user: b, recordId: call.id })).signals.length,
     1,

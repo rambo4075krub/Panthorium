@@ -60,7 +60,8 @@ class SocialService {
     );
   }
   async allowed(repo, userId, record) {
-    if (!record || record.deleted || record.hidden) return false;
+    if (!record || record.deleted || record.hidden || record.kind === "signal")
+      return false;
     if (await this.blocked(repo, userId, record.ownerId)) return false;
     if (record.kind === "connect") {
       const me = await repo.get("connect:" + userId);
@@ -87,7 +88,6 @@ class SocialService {
     if (
       record.kind === "comment" ||
       record.kind === "message" ||
-      record.kind === "signal" ||
       record.kind === "live-chat"
     )
       return this.allowed(repo, userId, await repo.get(record.parentId));
@@ -322,7 +322,17 @@ class SocialService {
       );
       if (receiptId)
         await repo.put(
-          row("receipt", uid, { id: receiptId, fingerprint, result }),
+          row("receipt", uid, {
+            id: receiptId,
+            fingerprint,
+            result:
+              action === "signal"
+                ? { ok: true, record: { id: result.record.id } }
+                : result,
+            ...(["signal", "live-heartbeat", "call-heartbeat"].includes(action)
+              ? { transient: true }
+              : {}),
+          }),
         );
       return result;
     });
