@@ -5,6 +5,14 @@ const { CloudFilesService } = require("../services/cloudFilesService");
 const { createFilesRouter } = require("../routes/files");
 
 async function main() {
+  const { folderListing } = require('../services/fileFolders');
+  const samples = [ ['a.png','images'], ['v.mp4','videos'], ['a.docx','documents'], ['b.xlsx','spreadsheets'], ['c.pptx','presentations'], ['d.print.html','print'], ['x.mp3','audio'], ['a.zip','archives'], ['a.json','code'], ['x.bin','other'] ];
+  const grouping = folderListing(samples.map(([name], i) => ({ id: String(i), name, size: 1 })));
+  assert.deepEqual(grouping.files.map(f => f.folderId), samples.map(s => s[1]));
+  assert.equal(grouping.folders.length, 10);
+  assert.ok(grouping.folders.every(f => f.count === 1));
+  assert.ok(folderListing([]).folders.every(f => f.count === 0));
+
   const objects = new Map();
   const requests = [];
   const client = {

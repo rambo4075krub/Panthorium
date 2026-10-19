@@ -94,7 +94,7 @@ class CreativeStudioService {
     if (!this.fileStorageReady()) return 'files_storage_unconfigured';
     if (pluginId === 'image') {
       const config = this.imageConfig();
-      return this.providers?.vertexConfigured?.() && this.providers?.vertexAccessToken && IMAGE_MODELS.has(config.model)
+      return this.providers?.vertexPublisherConfigured?.() && this.providers?.vertexAccessToken && IMAGE_MODELS.has(config.model)
         && /^[a-z0-9-]{2,40}$/.test(config.location) && /^[A-Za-z0-9.-]{3,100}$/.test(config.project) ? null : 'image_generation_unavailable';
     }
     if (pluginId === 'video') return this.mediaStudio?.capabilities?.().videoGeneration ? null : 'video_generation_unavailable';
