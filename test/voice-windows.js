@@ -298,15 +298,17 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     // Every registered module function must be callable through the same
     // authenticated command path. Mutating/costly controls stop at approval.
     for (const functionCommand of catalog.functionCommands) {
+      client++; // Independent function cases retain the real per-IP rate limiter.
       assert.equal(catalog.parseFunction(functionCommand.aliases[0]).action, functionCommand.action);
       if (functionCommand.requiresConfirmation) continue;
       const result = await command(functionCommand.aliases[0]);
       assert.equal(result.ok, true, `function ${functionCommand.action}`);
       await command(`ปิด ${catalog.apps.find(app => app.id === functionCommand.appId).aliases[0]}`);
     }
+    client++;
     const gatedFunction = catalog.functionCommands.find(command => command.requiresConfirmation);
     const gatedResult = await command(gatedFunction.aliases[0]);
-    assert.equal(gatedResult.confirmationRequired, true, 'costly function must request approval');
+    assert.equal(gatedResult.confirmationRequired, true, 'costly function must request approval: '+JSON.stringify(gatedResult));
     assert.equal((await command('ยกเลิก')).text, 'ยกเลิกคำสั่ง');
     console.log(`PASS: ${catalog.functionCommands.length} registered system functions dispatch to their real controls; gated functions require approval`);
 

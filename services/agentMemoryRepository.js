@@ -240,6 +240,11 @@ class AgentMemoryRepository {
     return meta ? { ...note, ...this.metadata(meta) } : note;
   }
 
+  async calendarRecords(userId) {
+    if (!this.pool) return [...this.memory.values()].filter(item => item.userId === userId && (item.scope || 'personal') === 'personal' && item.kind === 'calendar-event' && isCurrent(item)).slice(0,10001);
+    const out = await this.pool.query(`SELECT ${COLUMNS} FROM panthorium_agent_memories WHERE user_id=$1 AND scope='personal' AND kind='calendar-event' AND (expires_at IS NULL OR expires_at>NOW()) ORDER BY updated_at DESC LIMIT 10001`,[userId]);
+    return out.rows.map(row=>this.mapRow(row));
+  }
   async listSql(userId, limit = 30, kind = null, excludeNotes = false, scope = 'personal') {
     scopeValue(scope);
     const safe = Math.min(Math.max(Number(limit) || 30,1),100);

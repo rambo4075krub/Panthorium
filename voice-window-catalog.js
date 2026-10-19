@@ -71,6 +71,9 @@
     return app ? { app, operation: match[1], action: match[0] } : null;
   }
   const functionCommands = [
+    {action:'function_calendar_next',appId:'calendar',permission:'chat',aliases:['ปฏิทินเดือนหน้า','ปฏิทินเดือนถัดไป','next calendar month'],button:'[data-calendar-next]'},
+    {action:'function_calendar_previous',appId:'calendar',permission:'chat',aliases:['ปฏิทินเดือนก่อน','ปฏิทินเดือนที่แล้ว','previous calendar month'],button:'[data-calendar-prev]'},
+    {action:'function_calendar_today',appId:'calendar',permission:'chat',aliases:['ปฏิทินวันนี้','กลับไปวันนี้ในปฏิทิน','calendar today'],button:'[data-calendar-today]'},
     { action: 'function_ai_refresh', appId: 'ai-platform', permission: 'chat', aliases: ['รีเฟรช AI Platform', 'รีเฟรช AI Dashboard', 'รีเฟรชสถานะ AI', 'refresh AI Platform'], button: '#ai-refresh' },
     { action: 'function_security_refresh', appId: 'security', permission: 'settings', role: 'administrator', aliases: ['รีเฟรช Security', 'รีเฟรช Security Dashboard', 'ตรวจ Security', 'refresh Security'], button: '[data-p3-refresh]' },
     { action: 'function_agent_refresh', appId: 'sentinel-agent', permission: 'chat', aliases: ['ดูประวัติ Sentinel Agent', 'รีเฟรช Sentinel Agent', 'refresh Sentinel Agent'], button: '#agent-history' },

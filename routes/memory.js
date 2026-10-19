@@ -29,7 +29,7 @@ function createMemoryRouter(authService, memory) {
 
   router.get('/',async(req,res,next)=>{
     try {
-      const out=await memory.list({ user:req.user,limit:Number(req.query.limit) || 30,kind:req.query.kind,scope:requestScope(req) });
+      const out=req.query.kind==='calendar-event' && req.query.limit==='10000' && requestScope(req)==='personal' && memory.calendarList ? await memory.calendarList({user:req.user}) : await memory.list({ user:req.user,limit:Number(req.query.limit) || 30,kind:req.query.kind,scope:requestScope(req) });
       res.status(statusFor(out)).json(publicResult(out));
     } catch(error) { next(error); }
   });
