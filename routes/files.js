@@ -39,6 +39,19 @@ function createFilesRouter(authService, files) {
     } catch (error) { next(error); }
   });
 
+  router.get('/:fileId/preview', auth, requireAccount, limiter, async (req, res, next) => {
+    try {
+      const file = await files.preview(req.user.sub, req.params.fileId);
+      res.set('Cache-Control', 'private, no-store');
+      res.set('X-Content-Type-Options', 'nosniff');
+      res.set('Content-Security-Policy', "sandbox; default-src 'none'; base-uri 'none'; form-action 'none'");
+      res.set('Content-Type', file.contentType);
+      res.set('X-Panthorium-Preview', file.previewFormat);
+      res.set('Content-Disposition', "inline; filename*=UTF-8''" + encodeURIComponent(file.name).replace(/'/g, '%27'));
+      res.status(200).send(file.body);
+    } catch (error) { next(error); }
+  });
+
   router.get("/:fileId", auth, requireAccount, limiter, async (req, res, next) => {
     try {
       const file = await files.download(req.user.sub, req.params.fileId);

@@ -36,6 +36,7 @@ console.log("Cloud Files UI session: registered-account upload gating and Guest 
   w.OS = { windows: new Map(), config: { backendUrl: 'https://panthorium.test' }, state: { user: { sub: accountId, roles: [] } } };
   w.createWindow = (id, title, markup) => { w.OS.windows.set(id, true); w.document.body.innerHTML = markup; };
   w.focusWindow = () => {};
+  let opened; w.PanthoriumFilePreview = { open: file => { opened = file; } };
   const { folderListing } = require('../services/fileFolders');
   const payload = { ok: true, ...folderListing([{id: '1', name:'photo.png', size:10}, {id:'2',name:'report.xlsx',size:20}]), usedBytes:30,maxBytes:100 };
   let resolveLate;
@@ -49,6 +50,8 @@ console.log("Cloud Files UI session: registered-account upload gating and Guest 
   w.document.querySelector('[data-folder-id="spreadsheets"]').click();
   assert.match(w.document.querySelector('#files-list').textContent, /report.xlsx/);
   assert.doesNotMatch(w.document.querySelector('#files-list').textContent, /photo.png/);
+  w.document.querySelector('[data-files-action="open"]').click();
+  assert.equal(opened.name, 'report.xlsx');
   w.document.querySelector('[data-folder-id="videos"]').click();
   assert.match(w.document.querySelector('#files-list').textContent, /ยังไม่มีไฟล์/);
   w.authorizedFetch = () => new Promise(resolve => { resolveLate = resolve; });
