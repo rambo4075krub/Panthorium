@@ -488,5 +488,27 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     sw.close();
     console.log('PASS: separate account window can change password with email OTP and confirmation');
     console.log('PASS: guest and signed-in Voice Identity security flows are separated');
+    load('start-menu-ui.js');
+    load('access-shell-ui.js');
+    for (const [page, account] of [['/', registeredUser], ['/admin', admin]]) {
+      dom.reconfigure({ url: 'https://panthorium-backend-staging.example.run.app' + page });
+      replaceUser(account);
+      evaluate('renderAppLaunchers();');
+      await tick();
+      const launcher = w.document.querySelector('#sm-apps [data-app-id="calendar"]');
+      assert(launcher, `Calendar launcher exists on ${page}`);
+      assert.equal(launcher.textContent.includes('ปฏิทิน'), true);
+      assert.notEqual(w.getComputedStyle(launcher).display, 'none');
+      const search = w.document.getElementById('start-search');
+      search.value = 'ปฏิทิน'; search.dispatchEvent(new w.Event('input'));
+      assert.notEqual(launcher.dataset.searchHidden, 'true');
+      launcher.click(); await tick();
+      assert(w.document.querySelector('[data-calendar-form]'), `Calendar opens from Start on ${page}`);
+      launcher.click(); await tick();
+      assert.equal(w.document.querySelectorAll('[data-calendar-form]').length, 1);
+      evaluate('closeWindow("calendar");');
+      search.value = ''; search.dispatchEvent(new w.Event('input'));
+    }
+    console.log('PASS: Calendar is visible, searchable and opens once from User and Admin Start menus');
   } finally { w.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

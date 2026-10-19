@@ -134,7 +134,7 @@
         if (id === 'voice-identity' || el.id === 'voice-identity-launcher') return false;
         if (!id || restrictedLaunchers.includes(el.id) || el.dataset.productionIntelligence === '1') return false;
         if (guest() && id !== 'sentinel' && id !== 'voice-identity' && id !== 'billing' && id !== 'account-register' && id !== 'account-login') return false;
-        if ((id === 'notes' || id === 'files') && !account?.permissions?.includes('chat')) return false;
+        if ((id === 'notes' || id === 'files' || id === 'calendar') && !account?.permissions?.includes('chat')) return false;
         return true;
       });
       const registeredIds = new Set(['sentinel', 'voice-identity', ...registered.map(el => el.dataset.appId)]);
