@@ -249,7 +249,7 @@ async function suite(repository) {
   });
   for (const user of [a, b, c])
     await assert.rejects(
-      () => service.read({ user, recordId: sentSignal.id }),
+      () => service.read({ user, recordId: sentSignal.record.id }),
       /social_not_found/,
     );
   assert.equal(
