@@ -20,7 +20,7 @@ if (!fs.existsSync(gradlePath)) {
 }
 
 let manifest = fs.readFileSync(manifestPath, 'utf8');
-const permissions = ['android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS'];
+const permissions = ['android.permission.CAMERA', 'android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS'];
 for (const permission of permissions) {
   if (!manifest.includes('android:name="' + permission + '"')) {
     manifest = manifest.replace(

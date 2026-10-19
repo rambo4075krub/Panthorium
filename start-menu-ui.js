@@ -5,6 +5,7 @@
   const groupState = new WeakMap();
   let sequence = 0;
   const paths = {
+    social:'M16 21v-3c0-3-2-5-5-5s-5 2-5 5v3M11 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM17 5c4 0 4 6 0 6M19 14c2 1 3 3 3 6',
     life: 'M12 21s-8-5-8-11a4 4 0 0 1 8-2 4 4 0 0 1 8 2c0 6-8 11-8 11Z',
     study: 'm3 8 9-5 9 5-9 5-9-5Zm3 2v7c3 3 9 3 12 0v-7M21 8v8',
     work: 'M8 6V4h8v2M3 7h18v13H3V7Zm0 5c6 4 12 4 18 0M10 13h4v3h-4v-3Z',
