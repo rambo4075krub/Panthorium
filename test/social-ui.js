@@ -31,14 +31,14 @@ const { SocialRepository } = require("../services/socialRepository");
         user,
         action: "publish",
         input: {
-          module: "community",
+          module: "watch",
           title: "<img src=x onerror=alert(1)>",
           text: "<script>oops</script>",
         },
       })
     ).record;
     const second = (await service.write({ user, action: "publish",
-      input: { module: "community", text: "Second post" } })).record;
+      input: { module: "watch", text: "Second post" } })).record;
     await service.write({ user, action: "comment", input: { recordId: item.id, text: "First post comment <script>safe</script>" } });
     await service.write({ user, action: "comment", input: { recordId: second.id, text: "Second post comment" } });
     const dom = new JSDOM(
@@ -67,9 +67,9 @@ const { SocialRepository } = require("../services/socialRepository");
     w.fetch = async (url, opts = {}) => {
       const p = new URL(url);
       let out;
-      if (watchFixture && p.pathname === "/api/social/feed/watch")
+      if (watchFixture && p.pathname === "/api/social/feed/short")
         return { ok: true, json: async () => ({ ok: true, items: [{
-          id: "watch-fixture", kind: "watch", ownerId: "another-member", title: "Watch preview",
+          id: "watch-fixture", kind: "short", ownerId: "another-member", title: "Watch preview",
           text: "Inline post text", files: [{id:"video",name:"clip.mp4"},{id:"image",name:"photo.png"},{id:"text",name:"note.txt"}]
         }] }) };
       if (watchFixture && p.pathname.includes("/files/")) {
@@ -131,8 +131,8 @@ const { SocialRepository } = require("../services/socialRepository");
     w.document.dispatchEvent(new w.Event("DOMContentLoaded"));
     assert.equal(
       w.document.querySelectorAll('[data-start-group="social"] .sm-app').length,
-      6,
-      role + " gets six apps",
+      9,
+      role + " gets nine apps",
     );
     for (const mod of [
       "watch",
@@ -141,16 +141,21 @@ const { SocialRepository } = require("../services/socialRepository");
       "market",
       "live",
       "connect",
+      "short",
+      "profile",
+      "friends",
     ])
       await w.PanthoriumSocial.open(mod);
-    assert.equal(w.document.querySelectorAll("[data-social]").length, 6);
+    assert.equal(w.document.querySelectorAll("[data-social]").length, 9);
+    assert.equal(w.document.querySelectorAll(".window").length, 1);
+    await w.PanthoriumSocial.open("watch");
     assert.equal(
       w.document.querySelector("img"),
       null,
       "user text cannot become markup",
     );
     assert.match(
-      w.document.querySelector('[data-social="community"]').textContent,
+      w.document.querySelector('[data-social="watch"]').textContent,
       /<script>oops<\/script>/,
     );
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -173,15 +178,15 @@ const { SocialRepository } = require("../services/socialRepository");
     assert.match(postCard.querySelector('[data-social-comments]').textContent, /New inline comment/);
     assert.equal(inlineText.value, '');
     assert((await service.read({ user, recordId: item.id })).items.some(x => x.text === 'New inline comment'));
-    await w.PanthoriumSocial.open("community", { recordId: item.id });
+    await w.PanthoriumSocial.open("watch", { recordId: item.id });
     assert(w.document.querySelector("[data-social-messages]"));
     assert(w.document.querySelector(`[data-record-id="${item.id}"] [data-social-comments]`), 'direct post link retains the post above its comments');
-    const c = w.document.querySelector('[data-social="community"]');
+    const c = w.document.querySelector('[data-social="watch"]');
     [...c.querySelectorAll("button")]
       .find((b) => b.textContent === "สร้างโพสต์")
       .click();
     await new Promise((r) => setTimeout(r, 10));
-    const form = c.querySelector("form");
+    const form = c.querySelector("[data-social-content] form");
     assert(form);
     const text = form.querySelector("textarea");
     text.value = "created from real UI";
@@ -190,13 +195,14 @@ const { SocialRepository } = require("../services/socialRepository");
     );
     await new Promise((r) => setTimeout(r, 30));
     assert(
-      (await service.read({ user, module: "community" })).items.some(
+      (await service.read({ user, module: "watch" })).items.some(
         (x) => x.text === "created from real UI",
       ),
     );
     watchFixture = true;
-    const watchRoot = await w.PanthoriumSocial.open("watch");
-    [...watchRoot.querySelectorAll('button')].find(b => b.textContent === 'รีเฟรช').click();
+    await w.PanthoriumSocial.open("short");
+    const watchRoot = await w.PanthoriumSocial.open("short");
+    await w.PanthoriumSocial.refresh();
     await new Promise(resolve => setTimeout(resolve, 10));
     const watch = w.document.querySelector('[data-record-id="watch-fixture"]');
     assert(watch.querySelector('video[controls][playsinline]'));
@@ -232,7 +238,7 @@ const { SocialRepository } = require("../services/socialRepository");
     dom.window.close();
   }
   console.log(
-    "Social UI: User/Admin six-app menu, actual service publish, safe rendering, account switch and guest denial passed",
+    "Social UI: User/Admin nine-tab singleton menu, actual service publish, safe rendering, account switch and guest denial passed",
   );
 })().catch((e) => {
   console.error(e);

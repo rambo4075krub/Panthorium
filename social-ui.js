@@ -1,13 +1,18 @@
 (function () {
   "use strict";
   const specs = [
-    ["watch", "Watch", "วิดีโอ", "▶"],
-    ["community", "Community", "โพสต์และชุมชน", "◉"],
-    ["talk", "Talk", "ข้อความและการโทร", "☏"],
-    ["market", "Market", "ร้านค้า", "▣"],
+    ["watch", "Watch", "ภาพและข้อความ", "▧"],
+    ["short", "Short", "วิดีโอและ Reels", "▶"],
     ["live", "Live", "ถ่ายทอดสด", "◉"],
-    ["connect", "Connect", "ทำความรู้จัก 18+", "♡"],
+    ["market", "Market", "ร้านค้า", "▣"],
+    ["community", "Community", "แชตกลุ่ม", "◌"],
+    ["talk", "Talk", "แชตส่วนตัว", "☏"],
+    ["connect", "Connect", "หาคู่ 18+", "♡"],
+    ["profile", "Profile", "โปรไฟล์ส่วนตัว", "◯"],
+    ["friends", "Add Friends", "ค้นหาเพื่อน", "+"],
   ];
+  const WINDOW_ID = "social-media";
+  let workspace;
   const views = new Map();
   const os = () => (typeof OS !== "undefined" ? OS : window.OS);
   const uid = () =>
@@ -43,7 +48,12 @@
     social_not_found: "ไม่พบรายการหรือไม่มีสิทธิ์เข้าถึง",
     files_quota_exceeded: "พื้นที่คลาวด์เต็ม กรุณาจัดการไฟล์หรือแพ็กเกจ",
     file_too_large: "ไฟล์เกินขนาดที่ระบบรองรับ 20 MB",
-    social_video_required: "Watch ต้องแนบวิดีโอ MP4 หรือ WebM",
+    social_video_required: "Short ต้องแนบวิดีโอ MP4 หรือ WebM",
+    social_watch_images_only: "Watch รองรับภาพและข้อความ กรุณาโพสต์วิดีโอใน Short",
+    social_image_required: "โปรไฟล์รองรับรูป PNG, JPEG, WebP หรือ GIF",
+    social_forbidden: "คุณไม่มีสิทธิ์ดำเนินการกับรายการนี้",
+    social_friend_request_not_pending: "คำขอนี้ได้รับการจัดการแล้ว กรุณารีเฟรช",
+    social_invitation_not_pending: "คำขอนี้ได้รับการจัดการแล้ว กรุณารีเฟรช",
     social_live_capacity: "ห้องนี้ครบจำนวนผู้ชม 8 คนแล้ว",
     social_invalid_order: "จำนวนสินค้าไม่พอหรือรายการไม่พร้อมขาย",
     social_connect_disabled: "ฝ่ายใดฝ่ายหนึ่งปิด Connect แล้ว",
@@ -53,7 +63,10 @@
   const friendly = (e) =>
     messages[e.message] || e.message || "ดำเนินการไม่สำเร็จ";
   function status(v, text) {
-    if (current(v)) v.status.textContent = text;
+    if (current(v)) {
+      const target = v.status || views.get(workspace?.active)?.status;
+      if (target) target.textContent = text;
+    }
   }
   async function api(v, path, options = {}, raw = false) {
     if (!current(v)) throw Error("account_changed");
@@ -127,7 +140,7 @@
   }
   function select(form, label, options, value) {
     const wrap = el("label", label),
-      s = el("select");
+      s = el("select", null, { "aria-label": label });
     for (const [id, name] of options)
       s.append(el("option", name, { value: id }));
     if (value) s.value = value;
@@ -152,6 +165,7 @@
     v.groupItems = null;
     v.groupCursor = null;
     v.detail = null;
+    v.refreshFriends = null;
     for (const url of v.urls) URL.revokeObjectURL(url);
     v.urls.clear();
     v.content.replaceChildren();
@@ -284,7 +298,7 @@
         }
         preview.replaceChildren(view);
       };
-      if (record.kind === "watch" || (record.kind === "group-message" && /^(image\/(png|jpeg|webp|gif)|video\/|audio\/)/.test(file.contentType))) {
+      if (["watch", "short", "listing", "connect"].includes(record.kind) || (record.kind === "group-message" && /^(image\/(png|jpeg|webp|gif)|video\/|audio\/)/.test(file.contentType))) {
         preview.textContent = "กำลังโหลดสื่อ…";
         // Load independently so a slow attachment never blocks the feed or its controls.
         show().catch(() => {
@@ -321,19 +335,21 @@
     clear(v);
     const data = await api(v, "/api/social/profile");
     if (!current(v)) return;
-    const f = section(v, "โปรไฟล์ Social Media"),
+    const f = section(v, "โปรไฟล์ส่วนตัว"),
       form = el("form");
     f.append(form);
     const name = input(form, "ชื่อที่แสดง", "text", data.profile?.name || ""),
       bio = input(form, "เกี่ยวกับฉัน", "textarea", data.profile?.bio || ""),
       visible = input(
         form,
-        "อนุญาตให้คนอื่นค้นหาโปรไฟล์และขอสนทนา",
+        "อนุญาตให้ค้นหาชื่อของฉันและส่งคำขอเป็นเพื่อน",
         "checkbox",
       );
     visible.checked = !!data.profile?.discoverable;
     name.maxLength = 80;
     bio.maxLength = 1000;
+    const getFiles = await attachments(v, form, (data.profile?.files || []).map(file => file.id));
+    form.append(el("p", "แนบรูปโปรไฟล์ได้ ข้อมูลและรูปในหน้านี้เปิดดูได้เฉพาะคุณ"));
     bindForm(
       v,
       form,
@@ -342,13 +358,14 @@
         name: name.value,
         bio: bio.value,
         discoverable: visible.checked,
+        fileIds: getFiles(),
       }),
-      () => feed(v),
+      () => profile(v),
     );
     f.append(
       el(
         "p",
-        "ใช้ชื่อ Social แยกจากบัญชีส่วนตัว ไม่เปิดเผยอีเมลหรือไฟล์ที่ไม่ได้แชร์",
+        "ชื่อที่แสดงใช้กำกับโพสต์และข้อความ ส่วนข้อมูลโปรไฟล์และรูปจะไม่เผยแพร่ หากเปิดการซิงค์ Connect จะแชร์เฉพาะข้อมูลที่ยินยอมไว้ใน Connect",
       ),
     );
     if (os()?.state?.user?.roles?.includes("administrator"))
@@ -400,6 +417,7 @@
       stock = input(form, "จำนวนสินค้า", "number", "1");
       stock.min = 1;
     }
+    if (["watch", "short", "market"].includes(v.module)) { audience.value = "public"; audience.disabled = true; form.append(el("p", v.module === "short" ? "วิดีโอสั้น ยาว และ Reels • สาธารณะ" : v.module === "watch" ? "ภาพและข้อความเท่านั้น • สาธารณะ" : "ร้านค้าสาธารณะ")); }
     const groupId = v.groupId;
     v.groupId = null;
     if (groupId) {
@@ -427,65 +445,53 @@
             }
           : {}),
       }),
-      () => feed(v),
+      () => groupId ? detail(v, groupId) : feed(v),
     );
     submit.textContent = v.module === "market" ? "ลงสินค้า" : "เผยแพร่";
   }
+  function friendActions(v, person, parent, reload) {
+    const relation = person.friendship;
+    if (relation?.status === "accepted") {
+      parent.append(el("small", "เป็นเพื่อนกันแล้ว"), button(v, "ส่งข้อความ", async () => {
+        const out = await write(v, "thread", { userId: person.id }); await open("talk", { recordId: out.record.id });
+      }), button(v, "เลิกเป็นเพื่อน", async () => {
+        if (!window.confirm("เลิกเป็นเพื่อนกับ " + person.name + "?")) return;
+        await write(v, "friend-remove", { recordId: relation.id }); await reload();
+      }));
+    } else if (relation?.status === "pending") {
+      if (relation.direction === "incoming") for (const [text, accept] of [["รับคำขอเป็นเพื่อน", true], ["ปฏิเสธ", false]])
+        parent.append(button(v, text, async () => { await write(v, "friend-review", { recordId: relation.id, accept }); await reload(); }));
+      else parent.append(el("small", "ส่งคำขอเป็นเพื่อนแล้ว"), button(v, "ยกเลิกคำขอ", async () => { await write(v, "friend-cancel", { recordId: relation.id }); await reload(); }));
+    } else parent.append(button(v, "เพิ่มเพื่อน", async () => { await write(v, "friend-request", { userId: person.id }); await reload(); }));
+    parent.append(button(v, "บล็อก", async () => { await write(v, "block", { userId: person.id, enabled: true }); await reload(); }));
+  }
   async function people(v) {
     clear(v);
-    const card = section(v, "ค้นหาคนใน Panthorium"),
-      form = el("form"),
-      q = input(form, "ชื่อที่แสดงอย่างน้อย 2 ตัวอักษร"),
-      results = el("div");
-    card.append(form, results);
-    const b = el("button", "ค้นหา", { type: "submit" });
-    form.append(b);
-    form.onsubmit = async (e) => {
-      e.preventDefault();
-      b.disabled = true;
-      try {
-        const data = await api(
-          v,
-          "/api/social/people?query=" + encodeURIComponent(q.value),
-        );
-        if (!current(v)) return;
-        results.replaceChildren();
-        for (const p of data.items) {
-          const item = el("article", null, { class: "social-card" });
-          item.append(
-            el("h4", p.name),
-            el("p", p.bio),
-            button(v, "ขอสนทนา", async () => {
-              const out = await write(v, "thread", { userId: p.id });
-              await open("talk", { recordId: out.record.id });
-            }),
-            button(v, "ติดตาม", async () => {
-              await write(v, "follow", { userId: p.id, enabled: true });
-              status(v, "ติดตามแล้ว");
-            }),
-            button(v, "เลิกติดตาม", async () => {
-              await write(v, "follow", { userId: p.id, enabled: false });
-              status(v, "เลิกติดตามแล้ว");
-            }),
-            button(v, "บล็อก", async () => {
-              await write(v, "block", { userId: p.id, enabled: true });
-              item.remove();
-            }),
-            button(v, "เลิกบล็อก", async () => {
-              await write(v, "block", { userId: p.id, enabled: false });
-              status(v, "เลิกบล็อกแล้ว");
-            }),
-          );
-          results.append(item);
-        }
-        if (!data.items.length)
-          results.append(el("p", "ไม่พบโปรไฟล์ที่เปิดให้ค้นหา"));
-      } catch (e) {
-        status(v, friendly(e));
-      } finally {
-        b.disabled = false;
-      }
+    const card = section(v, "ค้นหาเพื่อน"), form = el("form"), q = input(form, "ชื่อที่แสดงอย่างน้อย 2 ตัวอักษร"), results = el("div");
+    card.append(el("p", "ค้นหาได้เฉพาะชื่อที่เจ้าของอนุญาต หน้าโปรไฟล์และข้อมูลส่วนตัวยังคงเป็นส่วนตัว"), form, results);
+    const submit = el("button", "ค้นหาเพื่อน", { type: "submit" }); form.append(submit);
+    const contacts = el("section", null, { "data-social-friends": "" }); v.content.append(contacts);
+    const renderPerson = (p, parent, reload) => {
+      const row = el("article", null, { class: "social-card", "data-friend-id": p.id }); row.append(el("h4", p.name));
+      friendActions(v, p, row, reload); parent.append(row);
     };
+    const search = async () => {
+      const data = await api(v, "/api/social/people?query=" + encodeURIComponent(q.value));
+      if (!current(v) || !results.isConnected) return;
+      results.replaceChildren();
+      for (const person of data.items) renderPerson(person, results, async () => { await search(); await v.refreshFriends?.(); });
+      if (!data.items.length) results.append(el("p", "ไม่พบชื่อที่อนุญาตให้ค้นหา"));
+    };
+    form.onsubmit = async event => { event.preventDefault(); submit.disabled = true; try { await search(); } catch (error) { status(v, friendly(error)); } finally { submit.disabled = false; } };
+    v.refreshFriends = async (before) => {
+      const data = await api(v, "/api/social/friends" + (before ? "?before=" + encodeURIComponent(before) : ""));
+      if (!current(v) || !contacts.isConnected) return;
+      if (!before) contacts.replaceChildren(el("h3", "เพื่อนและคำขอเป็นเพื่อน"));
+      if (!data.items.length && !before) contacts.append(el("p", "ยังไม่มีเพื่อนหรือคำขอ"));
+      for (const relation of data.items) renderPerson({ id: relation.userId, name: relation.name, friendship: relation }, contacts, () => v.refreshFriends());
+      if (data.nextCursor) contacts.append(button(v, "โหลดเพื่อนเพิ่มเติม", async () => { await v.refreshFriends(data.nextCursor); }));
+    };
+    await v.refreshFriends();
   }
   function inlineComments(v, record, parent, initial) {
     const section = el("section", null, {
@@ -547,7 +553,7 @@
     parent.append(c);
     c.append(
       el("small", r.author?.name || "สมาชิก"),
-      el("h3", r.title || r.name || "Talk"),
+      el("h3", r.title || r.name || (r.kind === "thread" ? "Talk" : r.module === "short" || r.kind === "short" ? "วิดีโอ" : "โพสต์")),
       el("p", r.text || r.bio || ""),
     );
     if (r.kind === "thread") {
@@ -576,7 +582,7 @@
               userId: r.ownerId,
               context: "connect",
             });
-            await open("talk", { recordId: t.record.id });
+            await open("connect", { recordId: t.record.id });
           }),
         );
     } else if (r.kind === "live") {
@@ -634,18 +640,18 @@
         button(v, "ความคิดเห็น", () => c.querySelector("[data-social-comment-input]")?.focus()),
       );
     }
-    if (r.kind === "watch")
+    if (r.module === "short" || r.kind === "short")
       c.append(
         button(v, "เพิ่มลงเพลย์ลิสต์", () => collections(v, "playlist", r.id)),
       );
     if (
       r.ownerId === v.uid &&
-      ["community", "watch", "listing"].includes(r.kind)
+      ["community", "watch", "short", "listing"].includes(r.kind)
     )
       c.append(button(v, "แก้ไข", () => edit(v, r)));
     if (
       r.ownerId === v.uid &&
-      ["community", "watch", "listing"].includes(r.kind)
+      ["community", "watch", "short", "listing"].includes(r.kind)
     )
       c.append(
         button(v, "ลบ", async () => {
@@ -656,7 +662,7 @@
         }),
       );
     if (r.ownerId !== v.uid) {
-      c.append(
+      if (r.kind !== "connect") c.append(
         button(v, "ขอสนทนากับเจ้าของ", async () => {
           const t = await write(v, "thread", {
             userId: r.ownerId,
@@ -664,6 +670,8 @@
           });
           await open("talk", { recordId: t.record.id });
         }),
+      );
+      c.append(
         button(v, "บล็อกเจ้าของ", async () => {
           await write(v, "block", { userId: r.ownerId, enabled: true });
           await feed(v);
@@ -695,7 +703,9 @@
       );
       c.append(reportButton, reportForm);
     }
-    c.append(
+    const tools = el("details", null, { class: "social-record-tools" });
+    tools.append(el("summary", "เครื่องมือของรายการ")); c.append(tools);
+    tools.append(
       button(v, "นำไปใช้กับ Sentinel", async () => {
         await window.PanthoriumVoiceCommands?.windowAction("open_sentinel");
         const field = document.getElementById("chat-input");
@@ -709,7 +719,7 @@
         }
       }),
     );
-    c.append(
+    tools.append(
       button(v, "คัดลอกลิงก์รายการ", async () => {
         await navigator.clipboard.writeText(
           location.origin +
@@ -728,7 +738,7 @@
         }),
       ),
     );
-    if (["watch", "community", "listing"].includes(r.kind))
+    if (["watch", "short", "community", "listing"].includes(r.kind))
       inlineComments(v, r, c, commentData);
   }
   async function detail(v, id, reset = true) {
@@ -737,7 +747,11 @@
     const data = await api(v, "/api/social/records/" + encodeURIComponent(id));
     if (!current(v) || v.detail !== id) return;
     const r = data.record;
-    if (["watch", "community", "listing"].includes(r.kind)) {
+    if (r.module && r.module !== v.module && ["watch", "short", "community", "listing", "thread", "live"].includes(r.kind)) {
+      v.detail = null;
+      return open(r.module, { recordId: id });
+    }
+    if (["watch", "short", "community", "listing"].includes(r.kind)) {
       await window.PanthoriumSocial.renderCard(v, r, v.content, data);
       return;
     }
@@ -788,7 +802,7 @@
     if (
       r.kind === "thread" ||
       r.kind === "live" ||
-      ["community", "watch", "listing"].includes(r.kind)
+      ["community", "watch", "short", "listing"].includes(r.kind)
     ) {
       const f = el("form"),
         text = input(
@@ -908,7 +922,8 @@
     const form = el("form", null, { "data-group-composer": "" });
     card.append(form);
     const text = input(form, "ข้อความในกลุ่ม", "textarea"); text.maxLength = 8000;
-    const getFiles = await attachments(v, form);
+    const getFiles = await attachments(v, form, v.sourceFileIds || []);
+    v.sourceFileIds = [];
     bindForm(v, form, "group-message", () => ({ recordId: r.id, text: text.value, fileIds: getFiles() }), async () => {
       if (v.detail !== r.id || v.messageLog !== log) return;
       text.value = ""; getFiles.reset();
@@ -1075,7 +1090,18 @@
         "ฉันอายุ 18 ปีขึ้นไป และยินยอมแสดงโปรไฟล์นี้ต่อผู้เปิดใช้ Connect",
         "checkbox",
       );
-    const getFiles = await attachments(v, f);
+    const sync = input(f, "ใช้ชื่อ รูป และคำแนะนำจากโปรไฟล์ของฉันใน Connect", "checkbox");
+    sync.checked = old ? old.syncProfile === true : true;
+    let fileFields;
+    const syncFields = () => {
+      if (sync.checked) { name.value = data.profile?.name || ""; bio.value = data.profile?.bio || ""; }
+      name.disabled = bio.disabled = sync.checked;
+      if (fileFields) fileFields.hidden = sync.checked;
+    };
+    sync.onchange = syncFields; syncFields();
+    f.append(el("p", "เพศและความสนใจในการค้นหาเป็นการตั้งค่าส่วนตัว ใช้จับคู่ชาย–ชาย ชาย–หญิง หญิง–หญิง หรือความสนใจที่เลือก ข้อมูลจากโปรไฟล์จะแชร์ใน Connect เมื่อคุณเปิดใช้และยินยอมเท่านั้น"));
+    const getFiles = await attachments(v, f, (old?.files || []).map(file => file.id));
+    fileFields = f.lastElementChild; syncFields();
     bindForm(
       v,
       f,
@@ -1083,6 +1109,7 @@
       () => ({
         enabled: true,
         adultConfirmed: adult.checked,
+        syncProfile: sync.checked,
         name: name.value,
         bio: bio.value,
         gender: gender.value,
@@ -1178,15 +1205,6 @@
       () => feed(v),
     );
   }
-  async function personDetail(v, personId) {
-    clear(v);
-    const data = await api(v, "/api/social/records/" + encodeURIComponent("profile:" + personId));
-    const p = data.record, box = section(v, p.name || "สมาชิก");
-    box.append(el("p", p.bio || ""), button(v, "ขอสนทนา", async () => {
-      const out = await write(v, "thread", { userId: personId });
-      await open("talk", { recordId: out.record.id });
-    }));
-  }
   async function orders(v, selectedId) {
     clear(v);
     const data = await api(v, "/api/social/inbox"),
@@ -1269,11 +1287,12 @@
     if (!current(v)) return;
     let groupDetailId;
     try {
-      if (v.module === "talk") {
+      if (["talk", "connect"].includes(v.module)) {
         const data = await api(v, "/api/social/inbox");
         if (!current(v)) return;
         v.incoming.replaceChildren();
         for (const c of data.calls) {
+          if ((c.context === "connect") !== (v.module === "connect")) continue;
           if (c.status === "ringing" && c.ownerId !== v.uid) {
             const box = el("div", null, { class: "social-card" });
             box.append(
@@ -1301,7 +1320,7 @@
             await startRTC(v, c);
         }
       }
-      if (v.detail && (v.messageLog?.isConnected || v.groupState)) {
+      if (!v.root.hidden && v.detail && (v.messageLog?.isConnected || v.groupState)) {
         const detailId = v.detail, messageLog = v.messageLog;
         if (v.groupState) groupDetailId = detailId;
         const latest = await api(
@@ -1332,7 +1351,11 @@
       if (current(v)) v.timer = setTimeout(() => poll(v), 4000);
     }
   }
-  async function feed(v, before) {
+  async function feed(v, before, mode) {
+    if (v.module === "community") return collections(v, "group");
+    if (v.module === "profile") return profile(v);
+    if (v.module === "friends") return people(v);
+    if (mode) v.feedMode = mode;
     if (!before) {
       clear(v);
       v.detail = null;
@@ -1344,6 +1367,7 @@
         v.module +
         "?query=" +
         encodeURIComponent(v.search.value) +
+        (v.module === "connect" && v.feedMode === "chats" ? "&mode=chats" : "") +
         (before ? "&before=" + encodeURIComponent(before) : ""),
     );
     if (!current(v)) return;
@@ -1373,248 +1397,213 @@
     else await detail(v, result.record.id);
     status(v, "");
   }
-  async function open(module = "community", options = {}) {
-    if (!allowed()) throw Error("account_required");
-    if (!specs.some((s) => s[0] === module))
-      throw Error("social_invalid_module");
-    const key = "social-" + module;
-    let v = views.get(module);
-    if (v && current(v)) {
-      window.focusWindow?.(key);
-      if (options.support) await support(v);
-      else if (options.orders) await orders(v, options.recordId);
-      else if (options.personId) await personDetail(v, options.personId);
-      else if (options.recordId) await detail(v, options.recordId);
-      if (options.sourceFileIds) {
-        v.sourceFileIds = options.sourceFileIds;
-        await compose(v);
-      }
-      return v.root;
+  function disposeWorkspace() {
+    for (const v of views.values()) {
+      v.controller.abort(); clearTimeout(v.timer); clearTimeout(v.readTimer); v.readObserver?.disconnect();
+      for (const url of v.urls) URL.revokeObjectURL(url);
+      if (v.sessionId) window.PanthoriumSocialRTC?.stop();
     }
-    const markup =
-      '<div class="social-app" data-social="' +
-      module +
-      '"><style>.social-app{height:100%;overflow:auto;padding:20px;color:var(--text,#edf2f7);background:linear-gradient(145deg,#10151f,#191710);box-sizing:border-box}.social-app *{box-sizing:border-box}.social-app button,.social-app input,.social-app select,.social-app textarea{font:inherit;color:inherit;background:#17202d;border:1px solid #66503d;border-radius:9px;padding:9px;max-width:100%}.social-app button{cursor:pointer;margin:4px;min-height:40px}.social-app button:hover{border-color:#ff912e}.social-app button:disabled{opacity:.5}.social-app label{display:block;margin:10px 0}.social-app label input:not([type=checkbox]),.social-app textarea,.social-app select{display:block;width:100%;margin-top:5px}.social-app textarea{min-height:90px}.social-app option{background:#17202d;color:#fff}.social-app h1{color:#ffb26e;font-size:26px}.social-app nav{display:flex;flex-wrap:wrap;gap:4px}.social-card{border:1px solid #514637;border-radius:14px;padding:16px;margin:12px 0;background:#111923}.social-card p,.social-message p{white-space:pre-wrap;overflow-wrap:anywhere}.social-comments{border-top:1px solid #3e4146;margin-top:16px;padding-top:16px}.social-message{padding:12px;border-bottom:1px solid #3e4146}.social-app small{color:#b5becb;overflow-wrap:anywhere}.social-app [role=status]{min-height:24px;color:#ffb26e}.social-media img,.social-media video{display:block;max-width:100%;max-height:420px}.social-media pre{white-space:pre-wrap;max-height:420px;overflow:auto}.social-video-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.social-message-receipt{display:inline-block;margin:4px 8px;color:#9bb1c9;font-size:18px;font-weight:600}.social-message-receipt[data-delivery="read"]{letter-spacing:-6px;padding-right:6px;color:#66d0ff}.social-video-grid video{width:100%;max-height:400px;background:#000}.social-app [hidden]{display:none!important}@media(max-width:540px){.social-app{padding:10px}.social-card{padding:12px}}</style><header><small>PANTHORIUM / SOCIAL MEDIA</small><h1>' +
-      specs.find((s) => s[0] === module)[1] +
-      '</h1></header><nav data-social-nav></nav><p role="status" aria-live="polite"></p><div data-social-incoming></div><section data-social-rtc hidden></section><div data-social-content></div></div>';
-    if (typeof window.createWindow !== "function")
-      throw Error("window_system_unavailable");
-    window.createWindow(
-      key,
-      "Social Media · " + specs.find((s) => s[0] === module)[1],
-      markup,
-      {
-        width: 940,
-        height: 720,
-        onClose: () => {
-          const old = views.get(module);
-          if (old) {
-            if (old.sessionId) window.PanthoriumSocialRTC?.stop();
-            old.controller.abort();
-            clearTimeout(old.timer);
-            clearTimeout(old.readTimer);
-            old.readObserver?.disconnect();
-            for (const url of old.urls) URL.revokeObjectURL(url);
-            views.delete(module);
-          }
-        },
-      },
-    );
-    const root = document.querySelector(
-      '.window[data-id="' + key + '"] [data-social]',
-    );
+    views.clear(); workspace?.controller.abort(); workspace = null;
+  }
+  function ensureWorkspace() {
+    if (workspace && current(workspace)) return workspace;
+    if (workspace) disposeWorkspace();
+    const markup = `<div class="social-shell"><style>
+      .social-shell{height:100%;min-height:0;display:flex;flex-direction:column;color:var(--text,#edf2f7);background:#0b131d;overflow:hidden}
+      .social-shell *{box-sizing:border-box}.social-shell [hidden]{display:none!important}
+      .social-shell button,.social-shell input,.social-shell select,.social-shell textarea{font:inherit;color:inherit;background:#152332;border:1px solid #33495b;border-radius:10px;padding:9px;max-width:100%}
+      .social-shell button{cursor:pointer;min-height:40px;margin:3px}.social-shell button:hover{border-color:#ff9d4d}.social-shell button:focus-visible,.social-shell summary:focus-visible{outline:2px solid #ffb26e;outline-offset:2px}.social-shell button:disabled{opacity:.5}
+      .social-tabs{display:flex;flex:0 0 auto;flex-wrap:nowrap;gap:5px;overflow-x:auto;overflow-y:hidden;padding:8px 12px 6px;border-bottom:1px solid #263b4b;background:#0e1d2a;scrollbar-width:thin;scrollbar-color:#6b8ba1 #101b26}
+      .social-tabs button{white-space:nowrap;flex:0 0 auto;min-height:42px;margin:0;padding:9px 14px;border:1px solid transparent;background:transparent;font-weight:600}
+      .social-tabs button[aria-selected=true]{background:#263343;border-color:#ee984e;color:#ffbf88}.social-tabs button:last-child{color:#bed0df}
+      .social-pages{flex:1;min-height:0;overflow:hidden}.social-app{height:100%;overflow:auto;padding:12px 18px 24px;scrollbar-width:thin;scrollbar-color:#496779 #101923}
+      .social-toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 8px}.social-toolbar form{display:flex;gap:5px;align-items:center}.social-toolbar form label{margin:0}.social-toolbar input{min-width:100px;width:230px!important;margin:0!important}.social-toolbar form button{margin:0}.social-toolbar .social-tools{margin-left:auto}
+      .social-tools{position:relative}.social-tools summary,.social-activity summary{cursor:pointer;padding:9px 12px;border-radius:9px;background:#142433;color:#c2d4e3;min-height:40px}.social-tools>div{padding:10px;max-width:360px}
+      .social-app label{display:block;margin:10px 0}.social-app label input:not([type=checkbox]),.social-app textarea,.social-app select{display:block;width:100%;margin-top:5px}.social-app textarea{min-height:90px;resize:vertical}.social-app option{background:#152332;color:#fff}
+      .social-card{border:1px solid #2b4052;border-radius:14px;padding:16px;margin:12px 0;background:#101c28;min-width:0}.social-card h3,.social-card h4{margin:0 0 10px;overflow-wrap:anywhere}.social-card p,.social-message p{white-space:pre-wrap;overflow-wrap:anywhere}.social-card strong{overflow-wrap:anywhere}
+      .social-record-tools{margin-top:12px}.social-record-tools summary{cursor:pointer;color:#acbfce;padding:6px 0}
+      .social-comments{border-top:1px solid #304252;margin-top:16px;padding-top:12px}.social-message{padding:12px;border-bottom:1px solid #304252}.social-app small{color:#acbfce;overflow-wrap:anywhere}.social-app [role=status]{color:#ffb26e}.social-app [role=status]:empty{display:none}
+      .social-media{margin:10px 0}.social-media img,.social-media video{display:block;max-width:100%;max-height:560px;border-radius:10px}.social-media audio{max-width:100%}.social-media pre{white-space:pre-wrap;max-height:420px;overflow:auto}
+      .social-video-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.social-video-grid video{width:100%;max-height:400px;background:#000}
+      .social-message-receipt{display:inline-block;margin:4px 8px;color:#9bb1c9;font-size:18px;font-weight:600}.social-message-receipt[data-delivery=read]{letter-spacing:-6px;padding-right:6px;color:#66d0ff}
+      .social-activity{border-bottom:1px solid #263b4b;margin-bottom:10px}.social-activity summary{background:transparent;padding:7px 3px;min-height:32px;font-size:13px}.social-activity article{padding:10px;border-bottom:1px solid #263b4b}.social-activity article[data-unread=true]{border-left:3px solid #ff9f43}.social-activity p{margin:4px 0}.social-activity [data-activity-items]{max-height:330px;overflow:auto}
+      @media(max-width:540px){.social-app{padding:10px}.social-tabs{padding:6px 8px}.social-tabs button{padding:8px 11px}.social-card{padding:12px}.social-toolbar{align-items:stretch}.social-toolbar form{flex:1 1 100%;min-width:0}.social-toolbar form label{flex:1;min-width:0}.social-toolbar input{min-width:0;width:100%!important}.social-tools{margin-left:0!important}}
+    </style><nav class="social-tabs" role="tablist" aria-label="Social Media"></nav><div class="social-pages"></div></div>`;
+    if (typeof window.createWindow !== "function") throw Error("window_system_unavailable");
+    window.createWindow(WINDOW_ID, "Social Media", markup, { width: 1040, height: 740, onClose: disposeWorkspace });
+    const root = document.querySelector('.window[data-id="' + WINDOW_ID + '"] .social-shell');
     if (!root) throw Error("window_system_unavailable");
-    v = {
-      uid: uid(),
-      root,
-      module,
-      controller: new AbortController(),
-      urls: new Set(),
-      sourceFileIds: options.sourceFileIds || [],
-      status: root.querySelector("[role=status]"),
-      content: root.querySelector("[data-social-content]"),
-      incoming: root.querySelector("[data-social-incoming]"),
-      rtc: root.querySelector("[data-social-rtc]"),
-    };
-    views.set(module, v);
-    root.addEventListener("scroll", () => scheduleRead(v), { capture: true, signal: v.controller.signal });
-    root.addEventListener("pointerup", () => scheduleRead(v), { signal: v.controller.signal });
-    window.addEventListener("focus", () => scheduleRead(v), { signal: v.controller.signal });
-    document.addEventListener("visibilitychange", () => scheduleRead(v), { signal: v.controller.signal });
-    const nav = root.querySelector("nav");
-    for (const [id, label] of specs)
-      nav.append(button(v, label, () => open(id)));
-    const alerts = button(v, "การแจ้งเตือน", () => showNotifications(v));
-    alerts.dataset.socialOpenNotifications = "";
-    alerts.setAttribute("aria-expanded", "false");
-    alerts.setAttribute("aria-controls", "social-notification-center");
-    alerts.append(notificationBadge()); nav.append(alerts); notificationBadges();
-    nav.append(
-      button(v, "โปรไฟล์", () => profile(v)),
-      button(v, "ค้นหาคน", () => people(v)),
-      button(v, "รีเฟรช", () => feed(v)),
-    );
-    v.search = input(nav, "ค้นหารายการ");
-    nav.append(button(v, "ค้นหา", () => feed(v)));
-    if (["watch", "community", "market"].includes(module))
-      nav.append(
-        button(v, module === "market" ? "ลงสินค้า" : "สร้างโพสต์", () =>
-          compose(v),
-        ),
-      );
-    if (module === "community")
-      nav.append(button(v, "กลุ่ม", () => collections(v, "group")));
-    if (module === "watch")
-      nav.append(button(v, "เพลย์ลิสต์", () => collections(v, "playlist")));
-    nav.append(button(v, "บัญชีที่บล็อก", () => collections(v, "block")));
-    if (module === "market")
-      nav.append(button(v, "รายการซื้อขาย", () => orders(v)));
-    if (module === "connect")
-      nav.append(button(v, "ตั้งค่า Connect", () => connectSettings(v)));
-    if (module === "live")
-      nav.append(
-        button(v, "เริ่มไลฟ์", async () => {
-          clear(v);
-          const form = el("form"),
-            title = input(form, "ชื่อไลฟ์");
-          section(v, "เริ่มถ่ายทอดสด • ผู้ชมพร้อมกันสูงสุด 8 คน").append(form);
-          bindForm(
-            v,
-            form,
-            "live-start",
-            () => ({ title: title.value }),
-            async (out) => {
-              await startRTC(v, out.record);
-              await detail(v, out.record.id);
-            },
-          );
-        }),
-      );
-    const apps = select(nav, "เปิดเครื่องมือ Panthorium ที่เชื่อมงาน", [
-      ["", "เลือกเครื่องมือ"],
-      ...(window.PanthoriumWindowCatalog?.apps || [])
-        .filter(
-          (a) =>
-            !a.virtual &&
-            !a.native &&
-            !a.id.startsWith("social-") &&
-            window.PanthoriumWindowCatalog.allowed(a, os().state.user),
-        )
-        .map((a) => [a.key, a.label]),
-    ]);
-    apps.onchange = () => {
-      if (apps.value)
-        window.PanthoriumVoiceCommands?.windowAction("open_" + apps.value);
-      apps.value = "";
-    };
+    const shell = workspace = { uid: uid(), root, controller: new AbortController() };
+    const nav = root.querySelector(".social-tabs");
+    for (const [id, label, thai] of specs) {
+      const tab = button(shell, label, () => open(id));
+      tab.dataset.socialTab = id; tab.id = "social-tab-" + id;
+      tab.setAttribute("role", "tab"); tab.setAttribute("aria-controls", "social-page-" + id); tab.setAttribute("aria-selected", "false"); tab.title = thai;
+      tab.append(moduleBadge(id)); nav.append(tab);
+    }
+    const refresh = button(shell, "Refresh", () => refreshView(views.get(workspace?.active)));
+    refresh.title = "รีเฟรชเมนูที่เปิดอยู่"; nav.append(refresh);
+    nav.addEventListener("keydown", event => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key) || event.target.getAttribute("role") !== "tab") return;
+      event.preventDefault(); const tabs = [...nav.querySelectorAll('[role="tab"]')], index = tabs.indexOf(event.target);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+      tabs[next].click(); tabs[next].focus();
+    });
+    notificationBadges();
+    return shell;
+  }
+  function activate(module) {
+    const shell = ensureWorkspace(); shell.active = module;
+    shell.root.closest(".window").dataset.socialActive = module;
+    for (const [id, v] of views) {
+      v.root.hidden = id !== module;
+      if (id !== module) v.root.querySelectorAll("video,audio").forEach(media => { if (!media.srcObject) media.pause(); });
+    }
+    for (const tab of shell.root.querySelectorAll("[data-social-tab]")) {
+      const selected = tab.dataset.socialTab === module;
+      tab.setAttribute("aria-selected", String(selected)); tab.tabIndex = selected ? 0 : -1;
+    }
+    shell.root.querySelector('[data-social-tab="' + module + '"]')?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    window.PanthoriumWindowManager?.restore?.(WINDOW_ID); window.focusWindow?.(WINDOW_ID);
+  }
+  function moduleTools(v) {
+    const toolbar = v.root.querySelector("[data-social-toolbar]");
+    v.search = el("input"); v.search.value = "";
+    if (["watch", "short", "live", "market", "talk", "connect"].includes(v.module)) {
+      const form = el("form"), q = input(form, "ค้นหารายการ");
+      q.placeholder = "ค้นหาใน " + specs.find(s => s[0] === v.module)[1];
+      q.parentElement.firstChild.textContent = ""; q.setAttribute("aria-label", "ค้นหารายการ");
+      v.search = q; form.append(el("button", "ค้นหา", { type: "submit" }));
+      form.onsubmit = event => { event.preventDefault(); feed(v).catch(error => status(v, friendly(error))); }; toolbar.append(form);
+    }
+    if (["watch", "short", "market"].includes(v.module)) toolbar.append(button(v, v.module === "market" ? "ลงสินค้า" : v.module === "short" ? "โพสต์วิดีโอ" : "สร้างโพสต์", () => compose(v)));
+    if (["watch", "short", "live", "market", "talk"].includes(v.module)) toolbar.append(button(v, "รายการทั้งหมด", () => feed(v)));
+    if (v.module === "short") toolbar.append(button(v, "เพลย์ลิสต์", () => collections(v, "playlist")));
+    if (v.module === "community") toolbar.append(button(v, "กลุ่ม", () => collections(v, "group")));
+    if (v.module === "talk") toolbar.append(button(v, "ค้นหาเพื่อน", () => open("friends")));
+    if (v.module === "market") toolbar.append(button(v, "รายการซื้อขาย", () => orders(v)));
+    if (v.module === "connect") {
+      toolbar.append(button(v, "ตั้งค่า Connect", () => connectSettings(v)), button(v, "ค้นหาคู่", () => feed(v, null, "discover")), button(v, "บทสนทนา Connect", () => feed(v, null, "chats")));
+    }
+    if (["profile", "friends"].includes(v.module)) toolbar.append(button(v, "บัญชีที่บล็อก", () => collections(v, "block")));
+    if (v.module === "friends") toolbar.append(button(v, "ค้นหาเพื่อน", () => people(v)));
+    if (v.module === "live") toolbar.append(button(v, "เริ่มไลฟ์", async () => {
+      clear(v); const form = el("form"), title = input(form, "ชื่อไลฟ์");
+      section(v, "เริ่มถ่ายทอดสด • ผู้ชมพร้อมกันสูงสุด 8 คน").append(form);
+      bindForm(v, form, "live-start", () => ({ title: title.value }), async out => { await startRTC(v, out.record); await detail(v, out.record.id); });
+    }));
+    if (["watch", "short", "market", "profile"].includes(v.module)) {
+      const tools = el("details", null, { class: "social-tools" }); tools.append(el("summary", "เครื่องมือที่เชื่อมงาน"));
+      const body = el("div"); tools.append(body); toolbar.append(tools);
+      const apps = select(body, "เปิดเครื่องมือ Panthorium", [["", "เลือกเครื่องมือ"], ...(window.PanthoriumWindowCatalog?.apps || []).filter(a => !a.virtual && !a.native && !a.id.startsWith("social-") && window.PanthoriumWindowCatalog.allowed(a, os().state.user)).map(a => [a.key, a.label])]);
+      apps.onchange = () => { if (apps.value) window.PanthoriumVoiceCommands?.windowAction("open_" + apps.value); apps.value = ""; };
+    }
+  }
+  async function refreshView(v) {
+    if (!v || !current(v)) return;
+    if (v.detail) await detail(v, v.detail);
+    else if (v.module === "profile") await profile(v);
+    else if (v.module === "friends") await people(v);
+    else if (v.module === "community") await collections(v, "group");
+    else await feed(v);
+    await refreshNotifications();
+  }
+  async function open(module = "watch", options = {}) {
+    if (!allowed()) throw Error("account_required");
+    if (!specs.some(s => s[0] === module)) throw Error("social_invalid_module");
+    const shell = ensureWorkspace();
+    let v = views.get(module), created = false;
+    if (!v || !current(v)) {
+      created = true;
+      const root = el("div", null, { class: "social-app", "data-social": module, id: "social-page-" + module, role: "tabpanel", "aria-labelledby": "social-tab-" + module });
+      root.innerHTML = '<div class="social-toolbar" data-social-toolbar></div><details class="social-activity"><summary>กิจกรรมในเมนูนี้ </summary><div data-activity-items></div></details><p role="status" aria-live="polite"></p><div data-social-incoming></div><section data-social-rtc hidden></section><div data-social-content></div>';
+      shell.root.querySelector(".social-pages").append(root);
+      v = { uid: uid(), root, module, controller: new AbortController(), urls: new Set(), sourceFileIds: [], status: root.querySelector("[role=status]"), content: root.querySelector("[data-social-content]"), incoming: root.querySelector("[data-social-incoming]"), rtc: root.querySelector("[data-social-rtc]") };
+      views.set(module, v); moduleTools(v);
+      root.querySelector(".social-activity summary").append(moduleBadge(module));
+      root.querySelector(".social-activity").addEventListener("toggle", () => { if (root.querySelector(".social-activity").open) loadActivity(v); });
+      root.addEventListener("scroll", () => scheduleRead(v), { capture: true, signal: v.controller.signal });
+      root.addEventListener("pointerup", () => scheduleRead(v), { signal: v.controller.signal });
+      window.addEventListener("focus", () => scheduleRead(v), { signal: v.controller.signal });
+      document.addEventListener("visibilitychange", () => scheduleRead(v), { signal: v.controller.signal });
+    }
+    activate(module);
     try {
       if (options.support) await support(v);
       else if (options.orders) await orders(v, options.recordId);
-      else if (options.personId) await personDetail(v, options.personId);
+      else if (options.personId) await people(v);
       else if (options.recordId) await detail(v, options.recordId);
-      else if (v.sourceFileIds.length) await compose(v);
-      else await feed(v);
-    } catch (error) {
-      status(v, friendly(error));
-    }
-    if (["talk", "live", "community"].includes(module)) poll(v);
-    return root;
+      else if (options.sourceFileIds) {
+        v.sourceFileIds = options.sourceFileIds;
+        if (module === "community") { await collections(v, "group"); status(v, "เลือกกลุ่มที่เป็นสมาชิกเพื่อแนบไฟล์ในแชต"); }
+        else await compose(v);
+      }
+      else if (created) await refreshView(v);
+    } catch (error) { status(v, friendly(error)); }
+    if (created && ["talk", "live", "community", "connect"].includes(module)) poll(v);
+    if (!created && v.module === "friends") await v.refreshFriends?.();
+    notificationBadges(); loadActivity(v); scheduleRead(v);
+    return v.root;
   }
   let notificationState;
   function notificationStyles() {
     if (document.getElementById("social-notification-style")) return;
-    const style = el("style", `
-      .social-notification-badge{display:inline-block;min-width:19px;padding:1px 5px;margin-left:6px;border-radius:20px;background:#ff9f43;color:#101820;font:700 11px/18px system-ui;text-align:center}
-      #social-notification-center{position:relative;width:100%;margin:16px 0;max-height:min(60dvh,620px);overflow:auto;box-sizing:border-box;padding:16px;border:1px solid #42647a;border-radius:18px;background:#0d1926;color:#edf4ff;box-shadow:0 14px 48px #0009;font:14px/1.5 system-ui}
-      #social-notification-center header{display:flex;align-items:center;justify-content:space-between;gap:12px}#social-notification-center h2{font-size:18px;margin:0}
-      #social-notification-center button,.social-notification-menu{font:inherit;color:inherit;background:#163044;border:1px solid #42647a;border-radius:9px;min-height:40px;padding:8px;cursor:pointer}#social-notification-center button:disabled{opacity:.5}
-      #social-notification-center button:focus-visible{outline:2px solid #66d0ff;outline-offset:2px}
-      #social-notification-center article{padding:12px 0;border-bottom:1px solid #314354;overflow-wrap:anywhere}#social-notification-center article[data-unread=true]{border-left:3px solid #ff9f43;padding-left:10px}
-      #social-notification-center p{margin:4px 0}#social-notification-center small{color:#b5c7d8}#social-notification-center .social-notification-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-      .social-notification-menu{display:block;width:100%;text-align:left;margin:4px 0}#social-notification-center [hidden],.social-notification-badge[hidden]{display:none!important}
-    `, { id: "social-notification-style" });
-    document.head.append(style);
+    document.head.append(el("style", '.social-notification-badge{display:inline-block;min-width:19px;padding:1px 5px;margin-left:6px;border-radius:20px;background:#ff9f43;color:#101820;font:700 11px/18px system-ui;text-align:center}.social-notification-badge[hidden]{display:none!important}', { id: "social-notification-style" }));
   }
+  const moduleBadge = module => el("span", "", { class: "social-notification-badge", "data-social-module-count": module, hidden: "" });
+  const notificationBadge = () => el("span", "", { class: "social-notification-badge", "data-social-notification-count": "", hidden: "" });
   function notificationBadges() {
     const data = notificationState?.data || {};
-    for (const node of document.querySelectorAll("[data-social-notification-count]")) {
-      const count = data.unreadCount || 0;
-      node.textContent = count > 99 ? "99+" : String(count);
-      node.hidden = count === 0;
+    for (const node of document.querySelectorAll("[data-social-notification-count],[data-social-module-count]")) {
+      const count = node.hasAttribute("data-social-module-count") ? data.counts?.[node.dataset.socialModuleCount] || 0 : data.unreadCount || 0;
+      node.textContent = count > 99 ? "99+" : String(count); node.hidden = count === 0;
       node.setAttribute("aria-label", count + " การแจ้งเตือนยังไม่อ่าน");
     }
-    for (const node of document.querySelectorAll("[data-social-module-count]")) {
-      const count = data.counts?.[node.dataset.socialModuleCount] || 0;
-      node.textContent = count > 99 ? "99+" : String(count);
-      node.hidden = count === 0;
-    }
-    for (const trigger of document.querySelectorAll("[data-social-open-notifications]"))
-      trigger.setAttribute("aria-label", "การแจ้งเตือน Social Media • ยังไม่อ่าน " + (data.unreadCount || 0) + " รายการ");
   }
-  const notificationBadge = () => el("span", "", { class: "social-notification-badge", "data-social-notification-count": "", hidden: "" });
-  function closeNotifications() {
-    const n = notificationState;
-    if (!n?.panel) return;
-    n.panel.remove(); n.panel = null;
-    n.trigger?.setAttribute("aria-expanded", "false");
-    if (n.returnFocus?.isConnected) n.returnFocus.focus();
-  }
-  async function readNotifications(n, ids) {
+  async function readNotifications(v, ids) {
     if (!ids.length) return;
-    await api(n, "/api/social/notifications/read", { method: "POST", body: JSON.stringify({ ids }) });
-    await refreshNotifications();
+    await api(v, "/api/social/notifications/read", { method: "POST", body: JSON.stringify({ ids }) });
+    await refreshNotifications(); await loadActivity(v, v.activityCursor);
   }
-  async function navigateNotification(n, item) {
-    if (!item.readAt) await readNotifications(n, [item.id]);
-    if (!current(n)) return;
-    closeNotifications();
-    if (item.target) await open(item.target.module, item.target);
-  }
-  function drawNotifications(n) {
-    if (!current(n) || !n.panel?.isConnected) return;
-    const panel = n.panel;
-    const focusId = panel.contains(document.activeElement) ? document.activeElement.dataset.notificationFocus : null;
-    panel.replaceChildren();
-    const header = el("header"), title = el("h2", "การแจ้งเตือน Social Media");
-    const close = button(n, "ปิด", closeNotifications); close.dataset.notificationFocus = "close";
-    header.append(title, close); panel.append(header);
-    panel.append(el("p", "ยังไม่อ่าน " + (n.data?.unreadCount || 0) + " รายการ"));
-    n.status = el("p", n.error || "", { role: "status", "aria-live": "polite" }); panel.append(n.status);
-    const toolbar = el("div", null, { class: "social-notification-actions" });
-    const refresh = button(n, "รีเฟรช", () => refreshNotifications()); refresh.dataset.notificationFocus = "refresh";
-    toolbar.append(refresh);
-    const items = n.pageItems || n.data?.items || [];
-    const ids = items.filter(x => !x.readAt).map(x => x.id);
-    if (ids.length) {
-      const all = button(n, "อ่านทั้งหมดในหน้านี้", () => readNotifications(n, ids.slice(0, 100)));
-      all.dataset.notificationFocus = "read-page"; toolbar.append(all);
-    }
-    panel.append(toolbar);
-    if (!items.length) panel.append(el("p", n.error ? "โหลดรายการไม่สำเร็จ กรุณาลองอีกครั้ง" : "ยังไม่มีการแจ้งเตือน"));
-    for (const item of items) {
-      const row = el("article", null, { "data-notification-id": item.id, "data-unread": String(!item.readAt) });
-      row.append(el("p", item.name + " • " + item.text), el("small", new Date(item.createdAt).toLocaleString("th-TH")));
-      if (item.reason) row.append(el("p", item.reason));
-      const actions = el("div", null, { class: "social-notification-actions" });
-      if (item.target) {
-        const go = button(n, "เปิดรายการ", () => navigateNotification(n, item));
-        go.dataset.notificationFocus = item.id; actions.append(go);
-      }
-      if (!item.readAt) {
-        const read = button(n, "อ่านแล้ว", () => readNotifications(n, [item.id]));
-        read.dataset.notificationFocus = "read:" + item.id; actions.append(read);
-      }
-      row.append(actions); panel.append(row);
-    }
-    if (n.pageCursor) {
-      panel.append(button(n, "รายการล่าสุด", async () => { n.pageCursor = null; n.pageItems = null; await refreshNotifications(); }));
-    }
-    const cursor = n.pageCursor ? n.nextCursor : n.data?.nextCursor;
-    if (cursor) panel.append(button(n, "รายการก่อนหน้า", async () => {
-      const data = await api(n, "/api/social/notifications?before=" + encodeURIComponent(cursor));
-      n.pageCursor = cursor; n.nextCursor = data.nextCursor; n.pageItems = data.items; drawNotifications(n);
-    }));
-    if (focusId) [...panel.querySelectorAll("[data-notification-focus]")].find(x => x.dataset.notificationFocus === focusId)?.focus({ preventScroll: true });
+  async function loadActivity(v, before = null) {
+    if (!v || !current(v)) return;
+    if (v.activityBusy) return v.activityBusy;
+    v.activityBusy = (async () => {
+      const panel = v.root.querySelector("[data-activity-items]");
+      try {
+        const data = await api(v, "/api/social/notifications?module=" + v.module + (before ? "&before=" + encodeURIComponent(before) : ""));
+        if (!current(v) || !panel?.isConnected) return;
+        const signature = JSON.stringify([data.items, data.nextCursor, before]);
+        if (v.activitySignature === signature) return;
+        v.activitySignature = signature; v.activityCursor = before;
+        const focused = panel.contains(document.activeElement) ? document.activeElement.dataset.notificationFocus : null;
+        panel.replaceChildren();
+        if (!data.items.length) panel.append(el("p", "ยังไม่มีกิจกรรมใหม่ในเมนูนี้"));
+        const unread = data.items.filter(item => !item.readAt).map(item => item.id);
+        if (unread.length) panel.append(button(v, "อ่านทั้งหมดในหน้านี้", () => readNotifications(v, unread)));
+        for (const item of data.items) {
+          const row = el("article", null, { "data-notification-id": item.id, "data-unread": String(!item.readAt) });
+          row.append(el("p", item.name + " • " + item.text), el("small", new Date(item.createdAt).toLocaleString("th-TH")));
+          if (item.reason) row.append(el("p", item.reason));
+          if (item.target) {
+            const go = button(v, "เปิดรายการ", async () => {
+              if (!item.readAt) await readNotifications(v, [item.id]);
+              v.root.querySelector(".social-activity").open = false;
+              await open(item.target.module, item.target);
+              if (item.target.module === "friends") await people(views.get("friends"));
+            }); go.dataset.notificationFocus = item.id; row.append(go);
+          }
+          if (!item.readAt) { const mark = button(v, "อ่านแล้ว", () => readNotifications(v, [item.id])); mark.dataset.notificationFocus = "read:" + item.id; row.append(mark); }
+          panel.append(row);
+        }
+        if (before) panel.append(button(v, "รายการล่าสุด", () => loadActivity(v)));
+        if (data.nextCursor) panel.append(button(v, "รายการก่อนหน้า", () => loadActivity(v, data.nextCursor)));
+        if (focused) [...panel.querySelectorAll("[data-notification-focus]")].find(node => node.dataset.notificationFocus === focused)?.focus({ preventScroll: true });
+      } catch (error) {
+        if (current(v) && panel?.isConnected) panel.replaceChildren(el("p", "โหลดกิจกรรมไม่สำเร็จ"), button(v, "ลองอีกครั้ง", () => loadActivity(v, before)));
+      } finally { v.activityBusy = null; }
+    })();
+    return v.activityBusy;
   }
   async function refreshNotifications() {
     const n = notificationState;
@@ -1625,62 +1614,29 @@
       try {
         const data = await api(n, "/api/social/notifications");
         if (!current(n) || n !== notificationState) return;
-        const newItems = (data.items || []).filter(x => !x.readAt && !n.seen.has(x.id));
-        if (n.initialized && newItems.length && document.visibilityState === "visible" && typeof toast === "function")
-          toast("มีการแจ้งเตือน Social Media ใหม่ " + newItems.length + " รายการ • เปิดการแจ้งเตือนใน Social Media", 5000);
-        for (const item of data.items || []) n.seen.add(item.id);
-        // Bound the in-memory deduplication cache; the server stores read state.
-        if (n.seen.size > 1000) n.seen = new Set((data.items || []).map(x => x.id));
-        const changed = JSON.stringify(n.data) !== JSON.stringify(data) || n.error;
-        n.data = data; n.error = ""; n.initialized = true;
-        notificationBadges();
-        if (n.pageCursor && n.panel?.isConnected) {
-          const page = await api(n, "/api/social/notifications?before=" + encodeURIComponent(n.pageCursor));
-          n.pageItems = page.items; n.nextCursor = page.nextCursor; drawNotifications(n);
-        } else if (changed) drawNotifications(n);
-      } catch (e) {
-        if (current(n)) { n.error = "เชื่อมต่อการแจ้งเตือนไม่สำเร็จ จะลองใหม่อัตโนมัติ"; drawNotifications(n); }
-      } finally {
+        const changed = JSON.stringify(n.data) !== JSON.stringify(data);
+        n.data = data; n.error = ""; notificationBadges();
+        const v = views.get(workspace?.active);
+        if (changed && v) { await loadActivity(v, v.activityCursor); if (v.module === "friends") await v.refreshFriends?.(); }
+      } catch (error) { n.error = "notification_unavailable"; }
+      finally {
         n.polling = null;
-        if (current(n) && n === notificationState) n.timer = setTimeout(refreshNotifications, n.error ? 30000 : document.visibilityState === "hidden" ? 30000 : 5000);
+        if (current(n) && n === notificationState) n.timer = setTimeout(refreshNotifications, n.error || document.visibilityState === "hidden" ? 30000 : 5000);
       }
     })();
     return n.polling;
   }
   async function showNotifications(v) {
-    syncNotifications();
-    const n = notificationState;
-    if (!n || !current(n)) return;
-    if (!v || !current(v)) {
-      await open("talk");
-      v = views.get("talk");
-    }
-    if (!v || !current(v) || !current(n)) return;
-    if (n.panel && (!n.panel.isConnected || n.host !== v.root)) closeNotifications();
-    if (!n.panel) {
-      n.host = v.root;
-      n.trigger = v.root.querySelector("[data-social-open-notifications]");
-      n.returnFocus = n.trigger;
-      n.panel = el("section", null, { id: "social-notification-center", role: "region", "aria-label": "การแจ้งเตือน Social Media", tabindex: "-1" });
-      v.root.querySelector("nav").after(n.panel);
-      n.trigger?.setAttribute("aria-expanded", "true");
-      drawNotifications(n);
-    }
-    n.panel.scrollIntoView?.({ block: "nearest" });
-    n.panel.focus({ preventScroll: true });
-    await refreshNotifications();
+    if (!v || !current(v)) { await open(workspace?.active || "watch"); v = views.get(workspace.active); }
+    v.root.querySelector(".social-activity").open = true; await loadActivity(v);
   }
   function syncNotifications() {
     if (notificationState && !current(notificationState)) {
-      const old = notificationState; old.controller.abort(); clearTimeout(old.timer);
-      old.panel?.remove(); notificationState = null;
-      notificationBadges();
+      notificationState.controller.abort(); clearTimeout(notificationState.timer); notificationState = null; notificationBadges();
     }
     if (!allowed() || notificationState) return;
     notificationStyles();
-    const n = notificationState = { uid: uid(), root: document.body, controller: new AbortController(), seen: new Set(), data: { items: [], unreadCount: 0, counts: {} } };
-    document.addEventListener("keydown", e => { if (e.key === "Escape" && n.panel) closeNotifications(); }, { signal: n.controller.signal });
-    document.addEventListener("pointerdown", e => { if (n.panel && !n.panel.contains(e.target) && !e.target.closest("[data-social-open-notifications]")) closeNotifications(); }, { signal: n.controller.signal });
+    const n = notificationState = { uid: uid(), root: document.body, controller: new AbortController(), data: { items: [], unreadCount: 0, counts: {} } };
     document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshNotifications(); }, { signal: n.controller.signal });
     window.addEventListener("online", refreshNotifications, { signal: n.controller.signal });
     refreshNotifications();
@@ -1700,12 +1656,8 @@
       target,
     );
     if (!g) return;
-    if (!g.querySelector(".social-notification-menu")) {
-      const entry = el("button", "การแจ้งเตือน", { type: "button", class: "social-notification-menu" });
-      entry.append(notificationBadge()); entry.onclick = () => { showNotifications(); document.getElementById("start-menu")?.classList.remove("open"); };
-      window.PanthoriumStartMenuUI.groupItems(g).append(entry);
-      g.querySelector(".sm-group-label")?.append(notificationBadge());
-    }
+    g.querySelector(".social-notification-menu")?.remove();
+    if (!g.querySelector(".sm-group-label [data-social-notification-count]")) g.querySelector(".sm-group-label")?.append(notificationBadge());
     for (const [id, name, thai, icon] of specs) {
       if (g.querySelector('[data-app-id="social-' + id + '"]')) continue;
       const b = el("button", icon + " " + name + " · " + thai, {
@@ -1737,6 +1689,12 @@
         views.delete(v.module);
       }
     }
+    if (workspace && !current(workspace)) {
+      const win = workspace.root.closest(".window");
+      window.PanthoriumWindowManager?.close?.(WINDOW_ID);
+      if (workspace) disposeWorkspace();
+      win?.remove(); os()?.windows?.delete(WINDOW_ID);
+    }
     menu();
   }
   window.PanthoriumSocial = {
@@ -1745,8 +1703,7 @@
     showNotifications,
     refreshNotifications,
     renderCard: card,
-    refresh: () =>
-      Promise.all([...views.values()].filter(current).map((v) => feed(v))),
+    refresh: () => refreshView(views.get(workspace?.active)),
     ...Object.fromEntries(
       specs.map(([id]) => [
         "open" + id[0].toUpperCase() + id.slice(1),

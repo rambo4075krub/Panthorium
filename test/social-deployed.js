@@ -31,6 +31,8 @@ const fs = require("node:fs");
   for (const path of [
     "/api/social/feed/community",
     "/api/social/profile",
+    "/api/social/friends",
+    "/api/social/feed/short",
     "/api/social/inbox",
     "/api/social/notifications",
     "/api/social/reports",
@@ -44,7 +46,7 @@ const fs = require("node:fs");
   assert.equal((await fetch(base + "/api/social/records/unavailable/read", { method: "POST" })).status, 401, "read receipts require authentication");
   assert.equal((await fetch(base + "/api/social/notifications/read", { method: "POST" })).status, 401, "notification acknowledgements require authentication");
   console.log(
-    "Deployed Social: both shells, exact six-app/RTC assets and protected APIs passed. Public posts and real user messages were not created.",
+    "Deployed Social: both shells, exact single-window/RTC assets and protected APIs passed. Public posts and real user messages were not created.",
   );
 })().catch((e) => {
   console.error(e);
