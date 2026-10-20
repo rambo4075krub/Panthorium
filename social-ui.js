@@ -789,7 +789,10 @@
       );
     const log = el("div", null, { "data-social-messages": id });
     card.append(log);
-    if (["thread", "live"].includes(r.kind)) v.messageLog = log;
+    if (["thread", "live"].includes(r.kind)) {
+      v.messageLog = log;
+      v.lastMessages = JSON.stringify(data.items.map(x => [x.id, x.deleted, x.readAt, x.author?.name]));
+    }
     await renderMessages(v, data.items, log);
     if (
       r.kind === "thread" ||
