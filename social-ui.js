@@ -158,6 +158,7 @@
     return n;
   }
   function clear(v) {
+    v.renderVersion = (v.renderVersion || 0) + 1;
     v.readObserver?.disconnect();
     clearTimeout(v.readTimer);
     v.readSeen = new Set();
@@ -169,6 +170,7 @@
     v.groupCursor = null;
     v.detail = null;
     v.refreshFriends = null;
+    v.liveComments = new Map();
     for (const url of v.urls) URL.revokeObjectURL(url);
     v.urls.clear();
     v.content.replaceChildren();
@@ -276,10 +278,13 @@
     };
     return getFiles;
   }
+  const watchPost = (v, record) => ["watch", "community"].includes(record.kind) && (record.module === "watch" || v.module === "watch");
+  const feedPost = (v, record) => ["watch", "short", "listing", "live"].includes(record.kind) || (record.kind === "community" && ["watch", "short"].includes(record.module || v.module));
   async function media(v, record, container) {
+    const compact = feedPost(v, record);
     for (const file of record.files || []) {
       const item = el("div", null, { class: "social-media" });
-      item.append(el("small", file.name));
+      if (!compact) item.append(el("small", file.name));
       const preview = el("div");
       item.append(preview);
       container.append(item);
@@ -292,16 +297,18 @@
           const url = URL.createObjectURL(blob);
           v.urls.add(url);
           view = blob.type.startsWith("image")
-            ? el("img", null, { alt: file.name, src: url })
+            ? el("img", null, { alt: compact ? "ภาพในโพสต์" : file.name, src: url })
             : el(blob.type.startsWith("video") ? "video" : "audio", null,
                 { src: url, controls: "", playsinline: "", preload: "metadata" });
+        } else if (compact && !/^text\//.test(blob.type)) {
+          view = el("p", "ไม่สามารถแสดงตัวอย่างไฟล์ชนิดนี้ได้");
         } else {
           view = el("pre", await blob.text());
           if (!current(v) || !item.isConnected) return;
         }
         preview.replaceChildren(view);
       };
-      if (["watch", "short", "listing", "connect"].includes(record.kind) || (record.kind === "group-message" && /^(image\/(png|jpeg|webp|gif)|video\/|audio\/)/.test(file.contentType))) {
+      if (compact || ["watch", "short", "listing", "connect"].includes(record.kind) || (record.kind === "group-message" && /^(image\/(png|jpeg|webp|gif)|video\/|audio\/)/.test(file.contentType))) {
         preview.textContent = "กำลังโหลดสื่อ…";
         // Load independently so a slow attachment never blocks the feed or its controls.
         show().catch(() => {
@@ -311,7 +318,7 @@
       } else {
         preview.append(button(v, "เปิดไฟล์ / ดูตัวอย่าง", show));
       }
-      item.append(
+      if (!compact) item.append(
         button(v, "ดาวน์โหลดต้นฉบับ", async () => {
           const blob = await api(
             v,
@@ -403,14 +410,15 @@
       ),
       form = el("form");
     card.append(form);
-    const title = input(form, "ชื่อเรื่อง", "text"),
+    const watch = v.module === "watch";
+    const title = ["watch", "short"].includes(v.module) ? null : input(form, v.module === "market" ? "ชื่อสินค้า" : "ชื่อเรื่อง", "text"),
       text = input(form, "รายละเอียด", "textarea"),
-      audience = select(form, "ผู้ที่ดูได้", [
-        ["public", "ผู้ใช้ที่เข้าสู่ระบบ"],
+      audience = select(form, "ผู้ที่ดูได้", watch ? [["public", "สาธารณะ"], ["friends", "เพื่อน"]] : [
+        ["public", "สาธารณะ"],
         ["followers", "ผู้ติดตาม"],
         ["private", "เฉพาะฉัน"],
       ]);
-    title.maxLength = 200;
+    if (title) title.maxLength = 200;
     text.maxLength = 8000;
     let price, stock;
     if (v.module === "market") {
@@ -420,7 +428,8 @@
       stock = input(form, "จำนวนสินค้า", "number", "1");
       stock.min = 1;
     }
-    if (["watch", "short", "market"].includes(v.module)) { audience.value = "public"; audience.disabled = true; form.append(el("p", v.module === "short" ? "วิดีโอสั้น ยาว และ Reels • สาธารณะ" : v.module === "watch" ? "ภาพและข้อความเท่านั้น • สาธารณะ" : "ร้านค้าสาธารณะ")); }
+    if (watch) form.append(el("p", "ภาพ ข้อความ และ GIF"));
+    if (["short", "market"].includes(v.module)) { audience.value = "public"; audience.disabled = true; form.append(el("p", v.module === "short" ? "วิดีโอสั้น ยาว และ Reels • สาธารณะ" : "ร้านค้าสาธารณะ")); }
     const groupId = v.groupId;
     v.groupId = null;
     if (groupId) {
@@ -436,7 +445,7 @@
       v.module === "market" ? "listing" : "publish",
       () => ({
         module: v.module,
-        title: title.value,
+        title: title?.value || "",
         text: text.value,
         audience: groupId ? "group" : audience.value,
         ...(groupId ? { groupId } : {}),
@@ -451,6 +460,12 @@
       () => groupId ? detail(v, groupId) : feed(v),
     );
     submit.textContent = v.module === "market" ? "ลงสินค้า" : "เผยแพร่";
+    if (["watch", "short", "market"].includes(v.module)) composeActions(v, form, submit);
+  }
+  function composeActions(v, form, submit) {
+    const actions = el("div", null, { class: "social-compose-actions" });
+    const cancel = button(v, "ยกเลิก", () => { if (!submit.disabled) return feed(v); });
+    actions.append(submit, cancel); form.append(actions);
   }
   function friendActions(v, person, parent, reload) {
     const relation = person.friendship;
@@ -496,57 +511,99 @@
     };
     await v.refreshFriends();
   }
-  function inlineComments(v, record, parent, initial) {
+  function inlineComments(v, record, parent, initial, toggle) {
+    const collapsible = !!toggle, live = record.kind === "live";
     const section = el("section", null, {
       class: "social-comments", "data-social-comments": record.id,
-      "aria-label": "ความคิดเห็นใต้โพสต์",
+      id: "comments-" + record.id, "aria-label": "ความคิดเห็นใต้โพสต์",
     });
+    section.hidden = collapsible;
     const log = el("div", "กำลังโหลดความคิดเห็น…", { "data-social-messages": record.id });
     const form = el("form", null, { "data-social-comment-form": record.id });
     const text = input(form, "เขียนความคิดเห็น", "textarea");
-    text.setAttribute("data-social-comment-input", "");
-    text.required = true;
-    text.maxLength = 2000;
-    section.append(el("h4", "ความคิดเห็น"), log, form);
-    parent.append(section);
-    let version = 0, items = [];
+    text.setAttribute("data-social-comment-input", ""); text.required = true; text.maxLength = 2000;
+    const notice = el("p"); notice.hidden = true;
+    section.append(el("h4", "ความคิดเห็น"), log, notice, form); parent.append(section);
+    let version = 0, items = [], pending, fingerprint;
     const active = () => current(v) && section.isConnected;
+    const setCount = count => {
+      if (!toggle) return;
+      const value = Number.isSafeInteger(count) && count >= 0 ? count : 0;
+      toggle.textContent = "ความคิดเห็น " + value; toggle.dataset.commentCount = String(value);
+    };
     const render = (data, older = false) => {
       if (!active()) return;
       items = older ? [...data.items, ...items] : data.items;
+      setCount(data.record?.commentCount ?? items.length);
+      if (live) {
+        const latest = data.record || record;
+        const joined = latest.members?.includes(v.uid), ended = latest.status !== "live";
+        form.hidden = ended || !joined; notice.hidden = !form.hidden;
+        notice.textContent = ended ? "การถ่ายทอดสดสิ้นสุดแล้ว" : "เข้าชมไลฟ์เพื่อแสดงความคิดเห็น";
+      }
+      const next = JSON.stringify([items.map(item => [item.id, item.text, item.author?.name]), data.nextCursor]);
+      if (next === fingerprint) return;
+      fingerprint = next;
       log.replaceChildren();
-      if (data.nextCursor)
-        log.append(button(v, "ดูความคิดเห็นก่อนหน้า", () => load(data.nextCursor)));
-      if (!items.length) log.append(el("p", "ยังไม่มีความคิดเห็น"));
+      if (data.nextCursor) log.append(button(v, "ดูความคิดเห็นก่อนหน้า", () => load(data.nextCursor)));
       for (const comment of items) {
         const row = el("article", null, { class: "social-message", "data-comment-id": comment.id });
-        row.append(
-          el("small", (comment.ownerId === v.uid ? "คุณ" : comment.author?.name || "สมาชิก") +
-            " • " + new Date(comment.createdAt).toLocaleString("th-TH")),
-          el("p", comment.text),
-        );
+        row.append(el("small", (comment.ownerId === v.uid ? "คุณ" : comment.author?.name || "สมาชิก") + " • " + new Date(comment.createdAt).toLocaleString("th-TH")), el("p", comment.text));
+        if (collapsible && comment.ownerId === v.uid) row.append(button(v, "ลบความคิดเห็น", async () => {
+          if (!window.confirm("ลบความคิดเห็นนี้?")) return;
+          await write(v, "delete", { recordId: comment.id });
+          if (pending) await pending;
+          await load();
+        }));
         log.append(row);
       }
     };
     const load = async (before) => {
+      if (pending) return pending;
       const request = ++version;
-      try {
-        const data = await api(v, "/api/social/records/" + encodeURIComponent(record.id) +
-          (before ? "?before=" + encodeURIComponent(before) : ""));
-        if (active() && request === version) render(data, !!before);
-      } catch (error) {
-        if (!active() || request !== version) return;
-        log.replaceChildren(el("p", "โหลดความคิดเห็นไม่สำเร็จ: " + friendly(error)),
-          button(v, "ลองโหลดความคิดเห็นอีกครั้ง", () => load()));
-      }
+      pending = (async () => {
+        try {
+          const data = await api(v, "/api/social/records/" + encodeURIComponent(record.id) + (before ? "?before=" + encodeURIComponent(before) : ""));
+          if (active() && request === version) render(data, !!before);
+        } catch (error) {
+          if (!active() || request !== version) return;
+          fingerprint = null;
+          log.replaceChildren(el("p", "โหลดความคิดเห็นไม่สำเร็จ: " + friendly(error)), button(v, "ลองโหลดความคิดเห็นอีกครั้ง", () => load()));
+        } finally { pending = null; }
+      })();
+      return pending;
     };
-    bindForm(v, form, "comment", () => ({ recordId: record.id, text: text.value }), async () => {
+    const submit = bindForm(v, form, live ? "live-chat" : "comment", () => ({ recordId: record.id, text: text.value }), async () => {
       if (!active()) return;
       text.value = "";
+      if (pending) await pending;
       await load();
     });
+    if (collapsible) {
+      const actions = el("div", null, { class: "social-comment-actions" });
+      const erase = button(v, "ลบ", () => {
+        if (submit.disabled) return;
+        text.value = ""; form.dispatchEvent(new Event("input", { bubbles: true })); text.focus();
+      });
+      erase.title = "ล้างข้อความที่กำลังเขียน"; erase.setAttribute("aria-label", "ลบข้อความที่กำลังเขียน");
+      actions.append(submit, erase); form.append(actions);
+      toggle.setAttribute("aria-expanded", "false"); toggle.setAttribute("aria-controls", section.id);
+      setCount(record.commentCount);
+      toggle.addEventListener("click", async () => {
+        if (!current(v)) return;
+        section.hidden = !section.hidden; toggle.setAttribute("aria-expanded", String(!section.hidden));
+        if (!section.hidden) {
+          await load();
+          if (active() && !section.hidden) text.focus({ preventScroll: true });
+        }
+      });
+    }
     if (initial) render(initial);
-    else load();
+    else if (!collapsible) load();
+    if (live) {
+      form.hidden = record.status !== "live" || !record.members?.includes(v.uid);
+      (v.liveComments ||= new Map()).set(record.id, { section, load });
+    }
   }
   async function card(v, r, parent, commentData) {
     const c = el("article", null, {
@@ -554,9 +611,12 @@
       "data-record-id": r.id,
     });
     parent.append(c);
+    const compact = feedPost(v, r);
+    let commentToggle;
+    const actions = compact ? el("div", null, { class: "social-post-actions" }) : c;
     c.append(
       el("small", r.author?.name || "สมาชิก"),
-      el("h3", r.title || r.name || (r.kind === "thread" ? "Talk" : r.module === "short" || r.kind === "short" ? "วิดีโอ" : "โพสต์")),
+      ...(["watch", "short"].includes(r.module || v.module) && !r.title ? [] : [el("h3", r.title || r.name || (r.kind === "thread" ? "Talk" : r.module === "short" || r.kind === "short" ? "วิดีโอ" : "โพสต์"))]),
       el("p", r.text || r.bio || ""),
     );
     if (r.kind === "thread") {
@@ -589,13 +649,15 @@
           }),
         );
     } else if (r.kind === "live") {
-      c.append(
+      if (v.sessionId === r.id) c.append(el("p", r.ownerId === v.uid ? "กำลังถ่ายทอดสด" : "กำลังรับชมไลฟ์"));
+      else if (r.status === "live") c.append(
         button(v, "เข้าชมไลฟ์", async () => {
           const out = await write(v, "live-join", { recordId: r.id });
           await startRTC(v, out.record);
-          await detail(v, r.id, false);
+          await detail(v, r.id);
         }),
       );
+      else c.append(el("p", "การถ่ายทอดสดสิ้นสุดแล้ว"));
     } else {
       await media(v, r, c);
       if (r.kind === "listing") {
@@ -631,32 +693,48 @@
           );
         }
       }
-      c.append(
-        button(
-          v,
-          (r.liked ? "♥" : "♡") + " " + (r.likeCount || 0),
-          async () => {
-            await write(v, "like", { recordId: r.id });
-            await feed(v);
-          },
-        ),
-        button(v, "ความคิดเห็น", () => c.querySelector("[data-social-comment-input]")?.focus()),
-      );
+    }
+    if (["watch", "short", "community", "listing", "live"].includes(r.kind)) {
+      const like = button(v, (r.liked ? "♥" : "♡") + " " + (r.likeCount || 0), async () => {
+        const result = await write(v, "like", { recordId: r.id });
+        if (!compact) return feed(v);
+        r.likeCount = Math.max(0, (r.likeCount || 0) + (result.liked ? 1 : -1)); r.liked = result.liked;
+        like.textContent = (r.liked ? "♥" : "♡") + " " + r.likeCount;
+        like.setAttribute("aria-label", "ถูกใจ " + r.likeCount); like.setAttribute("aria-pressed", String(r.liked));
+      });
+      like.setAttribute("aria-label", "ถูกใจ " + (r.likeCount || 0)); like.setAttribute("aria-pressed", String(!!r.liked));
+      commentToggle = compact ? el("button", "ความคิดเห็น " + (r.commentCount || 0), { type: "button", "data-comment-toggle": r.id }) : button(v, "ความคิดเห็น", () => c.querySelector("[data-social-comment-input]")?.focus());
+      actions.append(like, commentToggle);
+      if (compact) c.append(actions);
+    }
+    let extra = c;
+    if (compact) {
+      const dropdown = el("details", null, { class: "social-post-menu" });
+      const trigger = el("summary", "⋯", { role: "button", "aria-label": "ตัวเลือกโพสต์", "aria-expanded": "false" });
+      extra = el("div", null, { class: "social-post-menu-items" }); dropdown.append(trigger, extra); actions.append(dropdown);
+      const close = focus => { dropdown.open = false; if (focus) trigger.focus({ preventScroll: true }); };
+      dropdown.addEventListener("toggle", () => {
+        trigger.setAttribute("aria-expanded", String(dropdown.open));
+        if (dropdown.open) v.root.querySelectorAll(".social-post-menu[open]").forEach(other => { if (other !== dropdown) other.open = false; });
+      });
+      dropdown.addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); close(true); } });
+      dropdown.addEventListener("focusout", event => { if (!dropdown.contains(event.relatedTarget)) close(false); });
+      extra.addEventListener("click", event => { if (event.target.closest("button")) close(false); });
     }
     if (r.module === "short" || r.kind === "short")
-      c.append(
+      extra.append(
         button(v, "เพิ่มลงเพลย์ลิสต์", () => collections(v, "playlist", r.id)),
       );
     if (
       r.ownerId === v.uid &&
       ["community", "watch", "short", "listing"].includes(r.kind)
     )
-      c.append(button(v, "แก้ไข", () => edit(v, r)));
+      extra.append(button(v, "แก้ไข", () => edit(v, r)));
     if (
       r.ownerId === v.uid &&
       ["community", "watch", "short", "listing"].includes(r.kind)
     )
-      c.append(
+      extra.append(
         button(v, "ลบ", async () => {
           if (!window.confirm("ลบรายการนี้? ไฟล์ต้นฉบับยังอยู่ในพื้นที่ของคุณ"))
             return;
@@ -664,8 +742,14 @@
           await feed(v);
         }),
       );
+    if (r.kind === "live" && r.ownerId === v.uid && r.status === "live") extra.append(button(v, "จบไลฟ์", async () => {
+      if (!window.confirm("จบการถ่ายทอดสดนี้?")) return;
+      await write(v, "live-end", { recordId: r.id });
+      if (v.sessionId === r.id) { await window.PanthoriumSocialRTC?.stop(false); v.sessionId = null; v.rtc.hidden = true; }
+      await feed(v);
+    }));
     if (r.ownerId !== v.uid) {
-      if (r.kind !== "connect") c.append(
+      if (r.kind !== "connect") extra.append(
         button(v, "ขอสนทนากับเจ้าของ", async () => {
           const t = await write(v, "thread", {
             userId: r.ownerId,
@@ -674,7 +758,7 @@
           await open("talk", { recordId: t.record.id });
         }),
       );
-      c.append(
+      extra.append(
         button(v, "บล็อกเจ้าของ", async () => {
           await write(v, "block", { userId: r.ownerId, enabled: true });
           await feed(v);
@@ -692,7 +776,7 @@
       const closeReport = () => {
         reportForm.hidden = true;
         reportButton.setAttribute("aria-expanded", "false");
-        reportButton.focus();
+        (compact ? actions.querySelector("summary") : reportButton).focus();
       };
       reportForm.append(
         button(v, "ส่งรายงาน", async () => {
@@ -704,10 +788,10 @@
         }),
         button(v, "ยกเลิก", closeReport),
       );
-      c.append(reportButton, reportForm);
+      extra.append(reportButton); c.append(reportForm);
     }
-    const tools = el("details", null, { class: "social-record-tools" });
-    tools.append(el("summary", "เครื่องมือของรายการ")); c.append(tools);
+    const tools = compact ? extra : el("details", null, { class: "social-record-tools" });
+    if (!compact) { tools.append(el("summary", "เครื่องมือของรายการ")); c.append(tools); }
     tools.append(
       button(v, "นำไปใช้กับ Sentinel", async () => {
         await window.PanthoriumVoiceCommands?.windowAction("open_sentinel");
@@ -741,20 +825,21 @@
         }),
       ),
     );
-    if (["watch", "short", "community", "listing"].includes(r.kind))
-      inlineComments(v, r, c, commentData);
+    if (["watch", "short", "community", "listing", "live"].includes(r.kind))
+      inlineComments(v, r, c, commentData, compact ? commentToggle : null);
   }
   async function detail(v, id, reset = true) {
     if (reset) clear(v);
     v.detail = id;
+    const version = v.renderVersion;
     const data = await api(v, "/api/social/records/" + encodeURIComponent(id));
-    if (!current(v) || v.detail !== id) return;
+    if (!current(v) || v.detail !== id || version !== v.renderVersion) return;
     const r = data.record;
     if (r.module && r.module !== v.module && ["watch", "short", "community", "listing", "thread", "live"].includes(r.kind)) {
       v.detail = null;
       return open(r.module, { recordId: id });
     }
-    if (["watch", "short", "community", "listing"].includes(r.kind)) {
+    if (["watch", "short", "community", "listing", "live"].includes(r.kind)) {
       await window.PanthoriumSocial.renderCard(v, r, v.content, data);
       return;
     }
@@ -1182,12 +1267,13 @@
     const c = section(v, "แก้ไขรายการ"),
       f = el("form");
     c.append(f);
-    const title = input(f, "ชื่อเรื่อง", "text", r.title),
+    const watch = watchPost(v, r);
+    const title = ["watch", "short"].includes(r.module || v.module) ? null : input(f, r.kind === "listing" ? "ชื่อสินค้า" : "ชื่อเรื่อง", "text", r.title),
       text = input(f, "เนื้อหา", "textarea", r.text),
       audience = select(
         f,
-        "ผู้ชม",
-        [
+        "ผู้ที่ดูได้",
+        watch ? [["public", "สาธารณะ"], ["friends", "เพื่อน"], ...(!["public", "friends"].includes(r.audience) ? [[r.audience, "สิทธิ์เดิม"]] : [])] : [
           ["public", "ผู้ใช้ที่เข้าสู่ระบบ"],
           ["followers", "ผู้ติดตาม"],
           ["private", "เฉพาะฉัน"],
@@ -1195,18 +1281,19 @@
         r.audience,
       );
     if (r.audience === "group") audience.disabled = true;
-    bindForm(
+    const submit = bindForm(
       v,
       f,
       "edit",
       () => ({
         recordId: r.id,
-        title: title.value,
+        title: title?.value ?? r.title,
         text: text.value,
         ...(r.audience === "group" ? {} : { audience: audience.value }),
       }),
       () => feed(v),
     );
+    if (feedPost(v, r)) composeActions(v, f, submit);
   }
   async function orders(v, selectedId) {
     clear(v);
@@ -1290,6 +1377,12 @@
     if (!current(v)) return;
     let groupDetailId;
     try {
+      if (!v.root.hidden && v.module === "live") {
+        for (const [id, comments] of v.liveComments || []) {
+          if (!comments.section.isConnected) { v.liveComments.delete(id); continue; }
+          if (!comments.section.hidden) await comments.load();
+        }
+      }
       if (["talk", "connect"].includes(v.module)) {
         const data = await api(v, "/api/social/inbox");
         if (!current(v)) return;
@@ -1364,6 +1457,7 @@
       v.detail = null;
       v.messageLog = null;
     }
+    const version = v.renderVersion;
     const data = await api(
       v,
       "/api/social/feed/" +
@@ -1373,7 +1467,7 @@
         (v.module === "connect" && v.feedMode === "chats" ? "&mode=chats" : "") +
         (before ? "&before=" + encodeURIComponent(before) : ""),
     );
-    if (!current(v)) return;
+    if (!current(v) || version !== v.renderVersion) return;
     if (data.optInRequired) {
       section(v, "Connect ยังไม่ได้เปิดใช้").append(
         button(v, "ตั้งค่า Connect 18+", () => connectSettings(v)),
@@ -1384,7 +1478,11 @@
       section(v, "ยังไม่มีรายการ").append(
         el("p", "เริ่มสร้างรายการของคุณ หรือค้นหาผู้ใช้เพื่อเชื่อมต่อ"),
       );
-    for (const r of data.items) await card(v, r, v.content);
+    for (const r of data.items) {
+      if (!current(v) || version !== v.renderVersion) return;
+      await card(v, r, v.content);
+    }
+    if (!current(v) || version !== v.renderVersion) return;
     if (data.nextCursor)
       v.content.append(
         button(v, "โหลดรายการก่อนหน้า", async () => {
@@ -1428,6 +1526,10 @@
       .social-app label.social-checkbox span{min-width:0;line-height:1.65;overflow-wrap:anywhere}
       .social-card{border:1px solid #2b4052;border-radius:14px;padding:16px;margin:12px 0;background:#101c28;min-width:0}.social-card h3,.social-card h4{margin:0 0 10px;overflow-wrap:anywhere}.social-card p,.social-message p{white-space:pre-wrap;overflow-wrap:anywhere}.social-card strong{overflow-wrap:anywhere}
       .social-record-tools{margin-top:12px}.social-record-tools summary{cursor:pointer;color:#acbfce;padding:6px 0}
+      .social-post-actions{display:flex;align-items:center;gap:6px;min-width:0}.social-post-actions>button{margin:0}.social-post-menu{position:relative;margin-left:auto;flex:0 0 auto}
+      .social-post-menu>summary{display:flex;align-items:center;justify-content:center;list-style:none;cursor:pointer;font-size:25px;line-height:1;width:42px;height:40px;border:1px solid #33495b;border-radius:10px;background:#152332}.social-post-menu>summary::-webkit-details-marker{display:none}
+      .social-post-menu-items{position:absolute;right:0;top:calc(100% + 5px);z-index:20;width:250px;max-width:calc(100vw - 48px);max-height:280px;overflow:auto;padding:6px;background:#152332;border:1px solid #496779;border-radius:12px;box-shadow:0 12px 28px #0009}.social-post-menu-items button{display:block;width:100%;text-align:left;margin:0;padding:10px;border:0;background:transparent}.social-post-menu-items button:hover{background:#263343}
+      .social-compose-actions,.social-comment-actions{display:flex;align-items:center;gap:8px}.social-compose-actions>button:last-child{margin-left:auto}
       .social-comments{border-top:1px solid #304252;margin-top:16px;padding-top:12px}.social-message{padding:12px;border-bottom:1px solid #304252}.social-app small{color:#acbfce;overflow-wrap:anywhere}.social-app [role=status]{color:#ffb26e}.social-app [role=status]:empty{display:none}
       .social-media{margin:10px 0}.social-media img,.social-media video{display:block;max-width:100%;max-height:560px;border-radius:10px}.social-media audio{max-width:100%}.social-media pre{white-space:pre-wrap;max-height:420px;overflow:auto}
       .social-video-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.social-video-grid video{width:100%;max-height:400px;background:#000}
@@ -1496,7 +1598,10 @@
     if (v.module === "live") toolbar.append(button(v, "เริ่มไลฟ์", async () => {
       clear(v); const form = el("form"), title = input(form, "ชื่อไลฟ์");
       section(v, "เริ่มถ่ายทอดสด • ผู้ชมพร้อมกันสูงสุด 8 คน").append(form);
-      bindForm(v, form, "live-start", () => ({ title: title.value }), async out => { await startRTC(v, out.record); await detail(v, out.record.id); });
+      title.maxLength = 200;
+      const audience = select(form, "ผู้ที่ดูได้", [["public", "สาธารณะ"]]); audience.disabled = true;
+      const submit = bindForm(v, form, "live-start", () => ({ title: title.value }), async out => { await startRTC(v, out.record); await detail(v, out.record.id); });
+      submit.textContent = "เริ่มถ่ายทอดสด"; composeActions(v, form, submit);
     }));
     if (["watch", "short", "market", "profile"].includes(v.module)) {
       const tools = el("details", null, { class: "social-tools" }); tools.append(el("summary", "เครื่องมือที่เชื่อมงาน"));
@@ -1530,6 +1635,9 @@
       root.querySelector(".social-activity").addEventListener("toggle", () => { if (root.querySelector(".social-activity").open) loadActivity(v); });
       root.addEventListener("scroll", () => scheduleRead(v), { capture: true, signal: v.controller.signal });
       root.addEventListener("pointerup", () => scheduleRead(v), { signal: v.controller.signal });
+      document.addEventListener("pointerdown", event => {
+        root.querySelectorAll(".social-post-menu[open]").forEach(menu => { if (!menu.contains(event.target)) menu.open = false; });
+      }, { signal: v.controller.signal });
       window.addEventListener("focus", () => scheduleRead(v), { signal: v.controller.signal });
       document.addEventListener("visibilitychange", () => scheduleRead(v), { signal: v.controller.signal });
     }
