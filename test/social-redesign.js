@@ -32,8 +32,9 @@ async function suite(repo) {
   assert(!(await s.read({user:b,module:"short"})).items.some(r=>r.id===legacy.id));
   await assert.rejects(()=>s.media({user:b,recordId:legacy.id,fileId:video.id}),/social_not_found/);
   const pending=(await write(a,"thread",{userId:b.sub})).record;
-  const pair=await Promise.all([write(a,"friend-request",{userId:b.sub}),write(b,"friend-request",{userId:a.sub})]);
+  const pair=await Promise.all([write(a,"friend-request",{userId:b.sub}),write(a,"friend-request",{userId:b.sub})]);
   assert.equal(pair[0].record.id,pair[1].record.id); const friend=pair[0].record;
+  assert.equal((await write(b,"friend-request",{userId:a.sub})).record.requesterId,a.sub,"reverse requests never auto-accept");
   assert.equal((await s.friends({user:a})).items.length,1);
   await assert.rejects(()=>write(a,"friend-review",{recordId:friend.id,accept:true}),/social_forbidden/);
   await assert.rejects(()=>write(c,"friend-review",{recordId:friend.id,accept:true}),/social_not_found/);
