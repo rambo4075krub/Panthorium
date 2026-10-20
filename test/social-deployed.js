@@ -8,6 +8,7 @@ const fs = require("node:fs");
     const r = await fetch(base + path);
     assert.equal(r.status, 200);
     const html = await r.text();
+    assert(html.includes("window.PanthoriumSocial?.renderMenu?.()"), path + " missing Social menu rebuild hook");
     for (const file of ["social-ui.js", "social-rtc.js"])
       assert(html.includes(file), path + " missing " + file);
   }
