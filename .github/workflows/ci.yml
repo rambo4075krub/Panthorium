@@ -53,6 +53,7 @@ jobs:
           node test/contact-browser.js
           node test/social-notifications-browser.js
           node test/social-redesign-browser.js
+          node test/social-watch-browser.js
           node test/office-suite-browser.js
       - name: Real PostgreSQL foundation and organization integration
         run: npm run test:postgres

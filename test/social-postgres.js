@@ -22,6 +22,7 @@ const { suite } = require("./social-service");
     });
     await suite(new SocialRepository({ pool }));
     await require("./social-redesign").suite(new SocialRepository({ pool }));
+    await require("./social-watch").suite(new SocialRepository({ pool }));
     await require("./social-groups").suite(new SocialRepository({ pool }));
     await require("./contact-support").suite(new SocialRepository({ pool }));
     await require("./social-notifications").suite(new SocialRepository({ pool }));

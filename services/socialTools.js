@@ -47,7 +47,7 @@ const fields = {
   ),
   audience: {
     ...string("Who can read the post"),
-    enum: ["public", "followers", "private", "group"],
+    enum: ["public", "friends", "followers", "private", "group"],
   },
   fileIds: {
     type: "ARRAY",

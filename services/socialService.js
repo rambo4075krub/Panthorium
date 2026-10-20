@@ -152,6 +152,7 @@ class SocialService {
       return (
         record.ownerId === userId ||
         record.audience === "public" ||
+        (record.audience === "friends" && (await repo.get(friendId(userId, record.ownerId)))?.status === "accepted") ||
         (record.audience === "followers" &&
           !!(await repo.get("follow:" + key(userId, record.ownerId))))
       );
@@ -308,6 +309,7 @@ class SocialService {
     if (r.kind === "message") return this.messageView(r, await this.repo.get(r.parentId));
     const p = await this.repo.get("profile:" + r.ownerId);
     const out = { ...r, module: moduleFor(r), author: this.publicProfile(p) };
+    if (["watch", "short", "community", "listing", "live"].includes(r.kind)) out.commentCount = await this.repo.commentCount(r.id, uid, r.kind === "live" ? "live-chat" : "comment");
     if (r.kind === "thread" && r.context === "connect") out.author = (await this.messageView({ ownerId: r.ownerId }, r)).author;
     if (r.kind === "thread" && r.context === "support") {
       out.author = (await this.messageView({ ownerId: r.ownerId }, r)).author;
@@ -323,7 +325,7 @@ class SocialService {
         !!(await this.repo.get("interest:" + key(r.ownerId, uid))) &&
         !!(await this.repo.get("interest:" + key(uid, r.ownerId)));
     }
-    if (["watch", "short", "community", "listing"].includes(r.kind)) {
+    if (["watch", "short", "community", "listing", "live"].includes(r.kind)) {
       out.liked = !!(await this.repo.get("like:" + key(uid, r.id)));
     }
     return out;
@@ -529,7 +531,7 @@ class SocialService {
         fail("social_video_required");
       if (kind === "watch" && files.some(f => !/^image\/(png|jpeg|webp|gif)$/.test(f.contentType))) fail("social_watch_images_only");
       const audience = a.audience || "public";
-      if (!["public", "followers", "private", "group"].includes(audience))
+      if (!["public", "friends", "followers", "private", "group"].includes(audience))
         fail("social_invalid_audience");
       record = row(kind, uid, { title, text, files, audience, likeCount: 0 });
       if (audience === "group") {
@@ -566,7 +568,7 @@ class SocialService {
       record.text = str(a.text ?? record.text, 8000);
       if (a.audience) {
         if (
-          !["public", "followers", "private"].includes(a.audience) ||
+          !["public", "friends", "followers", "private"].includes(a.audience) ||
           record.audience === "group"
         )
           fail("social_invalid_audience");
@@ -643,7 +645,7 @@ class SocialService {
         record.recordIds = record.recordIds.filter((x) => x !== a.targetId);
     } else if (action === "comment" || action === "like") {
       const target = await this.requireRecord(repo, uid, a.recordId);
-      if (!["watch", "short", "community", "listing"].includes(target.kind))
+      if (!["watch", "short", "community", "listing", "live"].includes(target.kind) || (target.kind === "live" && action !== "like"))
         fail("social_invalid_target");
       if (action === "comment") {
         const text = str(a.text, 2000);
@@ -850,7 +852,9 @@ class SocialService {
         !live.members.includes(uid)
       )
         fail("social_join_required");
-      record = row("live-chat", uid, { text: str(a.text, 2000) }, live.id);
+      const text = str(a.text, 2000);
+      if (!text) fail("social_empty_post");
+      record = row("live-chat", uid, { text }, live.id);
     } else if (action === "call") {
       const t = await this.requireRecord(repo, uid, a.recordId, "thread");
       await this.threadAllowed(repo, uid, t);
@@ -972,7 +976,7 @@ class SocialService {
       if (
         !record ||
         record.ownerId !== uid ||
-        !["watch", "short", "community", "listing", "comment", "message", "group-message"].includes(
+        !["watch", "short", "community", "listing", "comment", "message", "group-message", "live-chat"].includes(
           record.kind,
         )
       )

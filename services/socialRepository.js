@@ -81,6 +81,19 @@ class SocialRepository {
       )
     ).rows.map((x) => copy(x.data));
   }
+  async commentCount(parent, viewer, kind = "comment") {
+    this.require();
+    if (!this.pool) {
+      const records = [...this.memory.values()];
+      const blocked = new Set(records.filter(r => r.kind === "block" && (r.ownerId === viewer || r.targetId === viewer)).map(r => r.ownerId === viewer ? r.targetId : r.ownerId));
+      return records.filter(r => r.kind === kind && r.parentId === parent && !r.deleted && !r.hidden && !blocked.has(r.ownerId)).length;
+    }
+    const result = await this.pool.query(`SELECT COUNT(*)::integer AS count FROM panthorium_social_records c
+      WHERE c.kind=$3 AND c.parent_id=$1 AND COALESCE(c.data->>'deleted','false')<>'true' AND COALESCE(c.data->>'hidden','false')<>'true'
+      AND NOT EXISTS (SELECT 1 FROM panthorium_social_records b WHERE b.kind='block'
+        AND ((b.owner_id=$2 AND b.data->>'targetId'=c.owner_id) OR (b.owner_id=c.owner_id AND b.data->>'targetId'=$2)))`, [parent, viewer, kind]);
+    return result.rows[0].count;
+  }
   async notificationPage({ owner, before, unread = false, limit = 100 }) {
     this.require();
     if (!this.pool) return [...this.memory.values()]
