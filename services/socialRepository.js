@@ -22,7 +22,7 @@ class SocialRepository {
   async init() {
     if (this.pool)
       await this.pool.query(
-        `CREATE TABLE IF NOT EXISTS panthorium_social_records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,owner_id TEXT NOT NULL,parent_id TEXT NOT NULL DEFAULT '',members JSONB NOT NULL DEFAULT '[]',data JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());CREATE INDEX IF NOT EXISTS social_kind_date ON panthorium_social_records(kind,created_at DESC,id);CREATE INDEX IF NOT EXISTS social_parent ON panthorium_social_records(parent_id,kind);CREATE INDEX IF NOT EXISTS social_owner ON panthorium_social_records(owner_id,kind);CREATE INDEX IF NOT EXISTS social_members ON panthorium_social_records USING GIN(members);`,
+        `CREATE TABLE IF NOT EXISTS panthorium_social_records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,owner_id TEXT NOT NULL,parent_id TEXT NOT NULL DEFAULT '',members JSONB NOT NULL DEFAULT '[]',data JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());CREATE INDEX IF NOT EXISTS social_kind_date ON panthorium_social_records(kind,created_at DESC,id);CREATE INDEX IF NOT EXISTS social_parent ON panthorium_social_records(parent_id,kind);CREATE INDEX IF NOT EXISTS social_owner ON panthorium_social_records(owner_id,kind);CREATE INDEX IF NOT EXISTS social_notifications_owner_date ON panthorium_social_records(owner_id,(data->>'createdAt') DESC,id DESC) WHERE kind='notification';CREATE INDEX IF NOT EXISTS social_members ON panthorium_social_records USING GIN(members);`,
       );
   }
   require() {
@@ -78,6 +78,18 @@ class SocialRepository {
         values,
       )
     ).rows.map((x) => copy(x.data));
+  }
+  async notificationPage({ owner, before, unread = false, limit = 100 }) {
+    this.require();
+    if (!this.pool) return [...this.memory.values()]
+      .filter(n => n.kind === "notification" && n.ownerId === owner && (!unread || !n.readAt) &&
+        (!before || n.createdAt < before.createdAt || (n.createdAt === before.createdAt && n.id < before.id)))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)).slice(0, limit).map(copy);
+    const values = [owner], where = ["kind='notification'", "owner_id=$1"];
+    if (unread) where.push("data->>'readAt' IS NULL");
+    if (before) { values.push(before.createdAt, before.id); where.push("(data->>'createdAt',id)<($2::text,$3::text)"); }
+    values.push(limit);
+    return (await this.pool.query(`SELECT data FROM panthorium_social_records WHERE ${where.join(" AND ")} ORDER BY data->>'createdAt' DESC,id DESC LIMIT $${values.length}`, values)).rows.map(r => copy(r.data));
   }
   async put(row) {
     this.require();
