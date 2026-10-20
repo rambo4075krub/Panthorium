@@ -4387,6 +4387,7 @@
 
     // ---------- Interactive Procedural Energy Orb ----------
     let scene, camera, renderer, orbGroup, orb, orbMaterial, orbCore, orbHalo;
+    let orbViewportScale = 1;
     let orbPulse = 0;
     let orbLastFrame = performance.now();
     let orbAIActive = false;
@@ -4488,6 +4489,10 @@
         if (!camera || !renderer) return;
         const width = Math.max(1, window.innerWidth);
         const height = Math.max(1, window.innerHeight);
+        // Keep handheld landscape sizing; shrink portrait handhelds and desktops separately.
+        const handheld = isMobileDevice() || navigator.userAgentData?.mobile === true ||
+            (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+        orbViewportScale = handheld ? (height > width ? .95 : 1) : .98;
         const compact = width <= 600;
         const aspect = width / height;
         const halfVerticalFov = camera.fov * Math.PI / 360;
@@ -4670,7 +4675,7 @@
         orbCore.material.uniforms.uTime.value = time;
         orbCore.material.uniforms.uPulse.value = smoothPulse;
         const breathe = 1 + Math.sin(time * 1.35) * .022 + smoothPulse * .16 + orbAIEnergy * (.15 + Math.sin(time * 9) * .01) + orbVoiceEnergy * .018;
-        orbGroup.scale.setScalar(.98 * breathe);
+        orbGroup.scale.setScalar(.98 * orbViewportScale * breathe);
         orbHalo.material.opacity = Math.max(.08, .2 + Math.sin(time * 1.6) * .035 - smoothPulse * .08 + orbAIEnergy * .035 + orbVoiceEnergy * .012);
         renderer.render(scene, camera);
     }
