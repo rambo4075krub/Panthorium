@@ -2,7 +2,7 @@
 const { createHash } = require("node:crypto");
 const hash = (...parts) => createHash("sha256").update(parts.join(":")).digest("hex");
 const noticeId = (type, sourceId, recipient) => "notification:" + hash(type, sourceId, recipient);
-const moduleFor = kind => ({ watch: "watch", community: "community", listing: "market", order: "market", thread: "talk", message: "talk", call: "talk", live: "live", connect: "connect", profile: "community" })[kind] || "community";
+const { moduleFor } = require("./socialContent");
 class SocialNotifications {
   constructor(service) { this.service = service; }
   async emit(repo, type, source, actorId, recipient, targetId = source.id) {
@@ -18,7 +18,11 @@ class SocialNotifications {
       return this.emit(repo, "like", { id: "like:" + hash(uid, target.id) }, uid, target.ownerId, target.id);
     }
     if (!r) return;
-    if (action === "group-join" && result.groupRequest) {
+    if (action === "friend-request" && r.status === "pending") {
+      await this.emit(repo, "friend-request", { id: r.eventId }, r.requesterId, r.recipientId, r.id);
+    } else if (action === "friend-review") {
+      await this.emit(repo, "friend-" + r.status, { id: r.eventId }, uid, r.requesterId, r.id);
+    } else if (action === "group-join" && result.groupRequest) {
       await this.emit(repo, "group-request", { id: result.groupRequest.eventId }, uid, r.ownerId, r.id);
     } else if (action === "group-review") {
       await this.emit(repo, "group-" + result.groupRequest.status, { id: result.groupRequest.eventId }, uid, result.groupRequest.ownerId, r.id);
@@ -78,13 +82,15 @@ class SocialNotifications {
     const s = this.service, r = await repo.get(n.targetId);
     if (!r || await s.blocked(repo, uid, n.actorId)) return null;
     const moderation = n.type.startsWith("moderation-");
-    let thread, target = r, type = n.type, module = moduleFor(r.kind), readAt = n.readAt || null;
+    let thread, target = r, type = n.type, module = moduleFor(r), readAt = n.readAt || null;
     if (r.kind === "call") {
       thread = await repo.get(r.parentId);
       if (!r.members.includes(uid) || !await s.allowed(repo, uid, thread)) return null;
       target = thread;
       if (r.status === "accepted" || r.heartbeats) return null;
       type = r.status === "ringing" && Date.parse(r.expiresAt) > Date.now() ? "call" : "call-missed";
+    } else if (n.type === "follow") {
+      if (!r.discoverable || r.hidden || r.deleted || !await repo.get(n.sourceId)) return null;
     } else if (moderation) {
       if (r.ownerId !== uid || (type === "moderation-hidden") !== !!r.hidden) return null;
     } else {
@@ -103,6 +109,10 @@ class SocialNotifications {
       if (type === "group-accepted" && !r.members.includes(uid)) return null;
     }
     if (type === "thread-request" && r.status !== "pending") return null;
+    if (type.startsWith("friend-")) {
+      const expected = type === "friend-request" ? "pending" : type.slice(7);
+      if (r.kind !== "friend" || r.eventId !== n.sourceId || r.status !== expected) return null;
+    }
     if (type === "follow" && !await repo.get(n.sourceId)) return null;
     if (type === "like" && !await repo.get(n.sourceId)) return null;
     if (type === "connect-match" && (!await repo.get("interest:" + hash(uid, n.actorId)) || !await repo.get("interest:" + hash(n.actorId, uid)))) return null;
@@ -110,6 +120,7 @@ class SocialNotifications {
     const name = moderation ? "ระบบดูแลชุมชน" : (await s.messageView({ ownerId: n.actorId }, { context }, names[context])).author.name;
     const labels = {
       "thread-request": "ส่งคำขอสนทนาถึงคุณ", "thread-accepted": "ตอบรับคำขอสนทนาของคุณแล้ว", "thread-declined": "ปฏิเสธคำขอสนทนาของคุณ",
+      "friend-request": "ส่งคำขอเป็นเพื่อน", "friend-accepted": "ตอบรับคำขอเป็นเพื่อนแล้ว", "friend-declined": "ปฏิเสธคำขอเป็นเพื่อน",
       "group-request": "ขอเข้าร่วมกลุ่ม “" + r.title + "”", "group-accepted": "อนุมัติให้คุณเข้าร่วมกลุ่ม “" + r.title + "” แล้ว",
       "group-declined": "ไม่อนุมัติคำขอเข้าร่วมกลุ่ม “" + r.title + "”", "group-message": "ส่งข้อความใหม่ในกลุ่ม “" + target.title + "”",
       message: "ส่งข้อความใหม่ถึงคุณ", call: r.video ? "กำลังวิดีโอคอลหาคุณ" : "กำลังโทรหาคุณ", "call-missed": "สายที่ไม่ได้รับ",
@@ -118,12 +129,14 @@ class SocialNotifications {
       "connect-match": "สนใจตรงกับคุณใน Connect", "live-ended": "จบการถ่ายทอดสดแล้ว", "moderation-hidden": "ซ่อนเนื้อหาของคุณ", "moderation-restored": "คืนการแสดงเนื้อหาของคุณแล้ว",
     };
     if (!labels[type]) return null;
-    module = context === "connect" && !thread ? "connect" : moduleFor(target.kind);
+    module = context === "connect" ? "connect" : type === "follow" ? "friends" : moduleFor(target);
     return { id: n.id, type, name, text: labels[type], createdAt: n.createdAt, readAt,
-      target: moderation && r.hidden ? null : { module, recordId: target.id, ...(r.kind === "order" ? { orders: true } : {}), ...(type === "follow" ? { personId: n.actorId } : {}) },
+      target: moderation && r.hidden ? null : { module, ...(["friends", "profile"].includes(module) ? {} : { recordId: target.id }), ...(r.kind === "order" ? { orders: true } : {}) },
       ...(moderation ? { reason: r.moderation?.reason || "" } : {}), module };
   }
-  async list(uid, before) {
+  async list(uid, before, module) {
+    if (module && !["watch", "short", "live", "market", "community", "talk", "connect", "profile", "friends"].includes(module))
+      throw Object.assign(Error("social_invalid_module"), { status: 400 });
     const repo = this.service.repo;
     if (!await repo.get("notification-init:" + uid)) await repo.transaction(tx => this.seed(tx, uid));
     let cursor;
@@ -142,7 +155,7 @@ class SocialNotifications {
       const page = await repo.notificationPage({ owner: uid, before: cursor, limit: 100 });
       for (const n of page) {
         const visible = await visibleNotice(n);
-        if (visible) items.push(visible);
+        if (visible && (!module || visible.module === module)) items.push(visible);
         if (items.length === 31) break;
       }
       if (items.length === 31 || page.length < 100) break;

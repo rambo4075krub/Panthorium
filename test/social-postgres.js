@@ -21,6 +21,7 @@ const { suite } = require("./social-service");
       options: "-c search_path=" + schema + ",public",
     });
     await suite(new SocialRepository({ pool }));
+    await require("./social-redesign").suite(new SocialRepository({ pool }));
     await require("./social-groups").suite(new SocialRepository({ pool }));
     await require("./contact-support").suite(new SocialRepository({ pool }));
     await require("./social-notifications").suite(new SocialRepository({ pool }));

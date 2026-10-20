@@ -54,6 +54,7 @@ function createSocialRouter(auth, service) {
     reads,
     route((req) => service.people({ user: req.user, query: req.query.query })),
   );
+  r.get("/friends", reads, route(req => service.friends({ user: req.user, before: req.query.before })));
   r.get(
     "/collections/:kind",
     reads,
@@ -66,7 +67,7 @@ function createSocialRouter(auth, service) {
     reads,
     route((req) => service.inbox({ user: req.user })),
   );
-  r.get("/notifications", reads, route(req => service.notifications.list(account(req.user), req.query.before)));
+  r.get("/notifications", reads, route(req => service.notifications.list(account(req.user), req.query.before, req.query.module)));
   r.post("/notifications/read", writes, route(req => service.notifications.read(account(req.user), req.body?.ids)));
   r.get(
     "/reports",
@@ -87,6 +88,7 @@ function createSocialRouter(auth, service) {
         module: req.params.module,
         query: req.query.query,
         before: req.query.before,
+        mode: req.query.mode,
       }),
     ),
   );
