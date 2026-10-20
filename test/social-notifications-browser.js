@@ -70,7 +70,7 @@ async function until(check, message) { const end = Date.now() + 16000; while (Da
     await reader.bringToFront(); await reader.locator("#social-notification-bell").click();
     const messageRow = panel.locator("article").filter({ hasText: "ส่งข้อความใหม่ถึงคุณ" });
     await messageRow.getByRole("button", { name: "เปิดรายการ", exact: true }).click();
-    await reader.locator('[data-message-id="' + message.id + '"]').scrollIntoViewIfNeeded();
+    await reader.locator('[data-message-id="' + message.id + '"]').evaluate(node => node.scrollIntoView({ block: "center" }));
     await until(async () => !!(await repo.get(message.id)).readAt, "opening and viewing chat sets read receipt");
     await reader.locator("#social-notification-bell").click();
     for (const width of [390, 320]) {
