@@ -100,14 +100,7 @@
       brand.append(text); name.parentElement.replaceWith(brand);
     }
     const controls = bar.querySelector('.window-controls');
-    if (controls) {
-      controls.classList.add('pt-window-tools');
-      const search = node('button', 'pt-title-search'); search.type = 'button'; search.innerHTML = icon('search');
-      search.title = 'ค้นหาแอป · Alt+Shift+K'; search.setAttribute('aria-label', search.title); search.onclick = () => openPalette();
-      const help = node('button', 'pt-title-help'); help.type = 'button'; help.innerHTML = icon('keys');
-      help.title = 'คีย์ลัด · Alt+Shift+/'; help.setAttribute('aria-label', help.title); help.onclick = openHelp;
-      controls.prepend(search, help);
-    }
+    if (controls) controls.classList.add('pt-window-tools');
     let body = root.querySelector(':scope > .window-body');
     let main, inner;
     if (body) {
