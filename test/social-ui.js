@@ -37,6 +37,10 @@ const { SocialRepository } = require("../services/socialRepository");
         },
       })
     ).record;
+    const second = (await service.write({ user, action: "publish",
+      input: { module: "community", text: "Second post" } })).record;
+    await service.write({ user, action: "comment", input: { recordId: item.id, text: "First post comment <script>safe</script>" } });
+    await service.write({ user, action: "comment", input: { recordId: second.id, text: "Second post comment" } });
     const dom = new JSDOM(
         '<body><div id="sm-apps"></div><div id="start-menu"></div></body>',
         { url: "https://panthorium.test", runScripts: "outside-only" },
@@ -73,6 +77,11 @@ const { SocialRepository } = require("../services/socialRepository");
         return { ok: true, blob: async () => new Blob(["<script>plain text</script>"],
           {type: id === "video" ? "video/mp4" : id === "image" ? "image/png" : "text/plain"}) };
       }
+      if (watchFixture && p.pathname === "/api/social/records/watch-fixture")
+        return { ok: true, json: async () => ({ ok: true, items: [{
+          id: "watch-comment", kind: "comment", ownerId: "another-member", author: { name: "เพื่อน" },
+          createdAt: new Date().toISOString(), text: "ความคิดเห็นใต้ Watch",
+        }] }) };
       if (watchFixture && p.pathname === "/api/social/actions") {
         const action = JSON.parse(opts.body);
         if (action.action === "report") { reportCount++; return {ok:true,json:async()=>({ok:true})}; }
@@ -144,8 +153,29 @@ const { SocialRepository } = require("../services/socialRepository");
       w.document.querySelector('[data-social="community"]').textContent,
       /<script>oops<\/script>/,
     );
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const postCard = w.document.querySelector(`[data-record-id="${item.id}"]`);
+    const secondCard = w.document.querySelector(`[data-record-id="${second.id}"]`);
+    assert.match(postCard.querySelector('[data-social-comments]').textContent, /First post comment <script>safe<\/script>/);
+    assert.match(secondCard.querySelector('[data-social-comments]').textContent, /Second post comment/);
+    assert.doesNotMatch(postCard.textContent, /Second post comment/);
+    assert.equal(postCard.querySelector('script'), null);
+    const inlineForm = postCard.querySelector('[data-social-comment-form]');
+    const inlineText = inlineForm.querySelector('textarea');
+    [...postCard.querySelectorAll('button')].find(b => b.textContent === 'ความคิดเห็น').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(w.document.activeElement, inlineText);
+    assert(secondCard.isConnected, 'comment button does not replace the feed');
+    inlineText.value = 'New inline comment';
+    inlineForm.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert(postCard.isConnected && secondCard.isConnected, 'submitting preserves both post cards');
+    assert.match(postCard.querySelector('[data-social-comments]').textContent, /New inline comment/);
+    assert.equal(inlineText.value, '');
+    assert((await service.read({ user, recordId: item.id })).items.some(x => x.text === 'New inline comment'));
     await w.PanthoriumSocial.open("community", { recordId: item.id });
     assert(w.document.querySelector("[data-social-messages]"));
+    assert(w.document.querySelector(`[data-record-id="${item.id}"] [data-social-comments]`), 'direct post link retains the post above its comments');
     const c = w.document.querySelector('[data-social="community"]');
     [...c.querySelectorAll("button")]
       .find((b) => b.textContent === "สร้างโพสต์")
@@ -175,6 +205,8 @@ const { SocialRepository } = require("../services/socialRepository");
     assert.equal(watch.querySelector('pre').textContent, '<script>plain text</script>');
     assert.equal(watch.querySelector('script'), null);
     assert(!watch.textContent.includes('เปิดไฟล์ / ดูตัวอย่าง'));
+    assert.match(watch.querySelector('[data-social-comments]').textContent, /ความคิดเห็นใต้ Watch/);
+    assert.match(watch.querySelector('[data-social-comments]').textContent, /เพื่อน/);
     const report = [...watch.querySelectorAll('button')].find(b => b.textContent === 'รายงาน');
     const reason = watch.querySelector('textarea');
     assert(reason.parentElement.parentElement.hidden);

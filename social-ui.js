@@ -471,7 +471,59 @@
       }
     };
   }
-  async function card(v, r, parent) {
+  function inlineComments(v, record, parent, initial) {
+    const section = el("section", null, {
+      class: "social-comments", "data-social-comments": record.id,
+      "aria-label": "ความคิดเห็นใต้โพสต์",
+    });
+    const log = el("div", "กำลังโหลดความคิดเห็น…", { "data-social-messages": record.id });
+    const form = el("form", null, { "data-social-comment-form": record.id });
+    const text = input(form, "เขียนความคิดเห็น", "textarea");
+    text.setAttribute("data-social-comment-input", "");
+    text.required = true;
+    text.maxLength = 2000;
+    section.append(el("h4", "ความคิดเห็น"), log, form);
+    parent.append(section);
+    let version = 0, items = [];
+    const active = () => current(v) && section.isConnected;
+    const render = (data, older = false) => {
+      if (!active()) return;
+      items = older ? [...data.items, ...items] : data.items;
+      log.replaceChildren();
+      if (data.nextCursor)
+        log.append(button(v, "ดูความคิดเห็นก่อนหน้า", () => load(data.nextCursor)));
+      if (!items.length) log.append(el("p", "ยังไม่มีความคิดเห็น"));
+      for (const comment of items) {
+        const row = el("article", null, { class: "social-message", "data-comment-id": comment.id });
+        row.append(
+          el("small", (comment.ownerId === v.uid ? "คุณ" : comment.author?.name || "สมาชิก") +
+            " • " + new Date(comment.createdAt).toLocaleString("th-TH")),
+          el("p", comment.text),
+        );
+        log.append(row);
+      }
+    };
+    const load = async (before) => {
+      const request = ++version;
+      try {
+        const data = await api(v, "/api/social/records/" + encodeURIComponent(record.id) +
+          (before ? "?before=" + encodeURIComponent(before) : ""));
+        if (active() && request === version) render(data, !!before);
+      } catch (error) {
+        if (!active() || request !== version) return;
+        log.replaceChildren(el("p", "โหลดความคิดเห็นไม่สำเร็จ: " + friendly(error)),
+          button(v, "ลองโหลดความคิดเห็นอีกครั้ง", () => load()));
+      }
+    };
+    bindForm(v, form, "comment", () => ({ recordId: record.id, text: text.value }), async () => {
+      if (!active()) return;
+      text.value = "";
+      await load();
+    });
+    if (initial) render(initial);
+    else load();
+  }
+  async function card(v, r, parent, commentData) {
     const c = el("article", null, {
       class: "social-card",
       "data-record-id": r.id,
@@ -563,7 +615,7 @@
             await feed(v);
           },
         ),
-        button(v, "ความคิดเห็น", () => detail(v, r.id)),
+        button(v, "ความคิดเห็น", () => c.querySelector("[data-social-comment-input]")?.focus()),
       );
     }
     if (r.kind === "watch")
@@ -660,6 +712,8 @@
         }),
       ),
     );
+    if (["watch", "community", "listing"].includes(r.kind))
+      inlineComments(v, r, c, commentData);
   }
   async function detail(v, id, reset = true) {
     if (reset) clear(v);
@@ -667,6 +721,10 @@
     const data = await api(v, "/api/social/records/" + encodeURIComponent(id));
     if (!current(v)) return;
     const r = data.record;
+    if (["watch", "community", "listing"].includes(r.kind)) {
+      await window.PanthoriumSocial.renderCard(v, r, v.content, data);
+      return;
+    }
     const card = section(v, r.title || "บทสนทนา");
     if (r.kind === "thread" && r.status === "pending") {
       card.append(el("p", "คำขอสนทนา • ยังส่งข้อความหรือโทรไม่ได้"));
@@ -1188,7 +1246,7 @@
     const markup =
       '<div class="social-app" data-social="' +
       module +
-      '"><style>.social-app{height:100%;overflow:auto;padding:20px;color:var(--text,#edf2f7);background:linear-gradient(145deg,#10151f,#191710);box-sizing:border-box}.social-app *{box-sizing:border-box}.social-app button,.social-app input,.social-app select,.social-app textarea{font:inherit;color:inherit;background:#17202d;border:1px solid #66503d;border-radius:9px;padding:9px;max-width:100%}.social-app button{cursor:pointer;margin:4px;min-height:40px}.social-app button:hover{border-color:#ff912e}.social-app button:disabled{opacity:.5}.social-app label{display:block;margin:10px 0}.social-app label input:not([type=checkbox]),.social-app textarea,.social-app select{display:block;width:100%;margin-top:5px}.social-app textarea{min-height:90px}.social-app option{background:#17202d;color:#fff}.social-app h1{color:#ffb26e;font-size:26px}.social-app nav{display:flex;flex-wrap:wrap;gap:4px}.social-card{border:1px solid #514637;border-radius:14px;padding:16px;margin:12px 0;background:#111923}.social-card p,.social-message p{white-space:pre-wrap;overflow-wrap:anywhere}.social-message{padding:12px;border-bottom:1px solid #3e4146}.social-app small{color:#b5becb;overflow-wrap:anywhere}.social-app [role=status]{min-height:24px;color:#ffb26e}.social-media img,.social-media video{display:block;max-width:100%;max-height:420px}.social-media pre{white-space:pre-wrap;max-height:420px;overflow:auto}.social-video-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.social-message-receipt{display:inline-block;margin:4px 8px;color:#9bb1c9;font-size:18px;font-weight:600}.social-message-receipt[data-delivery="read"]{letter-spacing:-6px;padding-right:6px;color:#66d0ff}.social-video-grid video{width:100%;max-height:400px;background:#000}.social-app [hidden]{display:none!important}@media(max-width:540px){.social-app{padding:10px}.social-card{padding:12px}}</style><header><small>PANTHORIUM / SOCIAL MEDIA</small><h1>' +
+      '"><style>.social-app{height:100%;overflow:auto;padding:20px;color:var(--text,#edf2f7);background:linear-gradient(145deg,#10151f,#191710);box-sizing:border-box}.social-app *{box-sizing:border-box}.social-app button,.social-app input,.social-app select,.social-app textarea{font:inherit;color:inherit;background:#17202d;border:1px solid #66503d;border-radius:9px;padding:9px;max-width:100%}.social-app button{cursor:pointer;margin:4px;min-height:40px}.social-app button:hover{border-color:#ff912e}.social-app button:disabled{opacity:.5}.social-app label{display:block;margin:10px 0}.social-app label input:not([type=checkbox]),.social-app textarea,.social-app select{display:block;width:100%;margin-top:5px}.social-app textarea{min-height:90px}.social-app option{background:#17202d;color:#fff}.social-app h1{color:#ffb26e;font-size:26px}.social-app nav{display:flex;flex-wrap:wrap;gap:4px}.social-card{border:1px solid #514637;border-radius:14px;padding:16px;margin:12px 0;background:#111923}.social-card p,.social-message p{white-space:pre-wrap;overflow-wrap:anywhere}.social-comments{border-top:1px solid #3e4146;margin-top:16px;padding-top:16px}.social-message{padding:12px;border-bottom:1px solid #3e4146}.social-app small{color:#b5becb;overflow-wrap:anywhere}.social-app [role=status]{min-height:24px;color:#ffb26e}.social-media img,.social-media video{display:block;max-width:100%;max-height:420px}.social-media pre{white-space:pre-wrap;max-height:420px;overflow:auto}.social-video-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.social-message-receipt{display:inline-block;margin:4px 8px;color:#9bb1c9;font-size:18px;font-weight:600}.social-message-receipt[data-delivery="read"]{letter-spacing:-6px;padding-right:6px;color:#66d0ff}.social-video-grid video{width:100%;max-height:400px;background:#000}.social-app [hidden]{display:none!important}@media(max-width:540px){.social-app{padding:10px}.social-card{padding:12px}}</style><header><small>PANTHORIUM / SOCIAL MEDIA</small><h1>' +
       specs.find((s) => s[0] === module)[1] +
       '</h1></header><nav data-social-nav></nav><p role="status" aria-live="polite"></p><div data-social-incoming></div><section data-social-rtc hidden></section><div data-social-content></div></div>';
     if (typeof window.createWindow !== "function")
