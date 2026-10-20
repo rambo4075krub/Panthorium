@@ -59,7 +59,7 @@ function createSocialRouter(auth, service) {
     "/collections/:kind",
     reads,
     route((req) =>
-      service.collections({ user: req.user, kind: req.params.kind }),
+      service.collections({ user: req.user, kind: req.params.kind, scope: req.query.scope, before: req.query.before }),
     ),
   );
   r.get(

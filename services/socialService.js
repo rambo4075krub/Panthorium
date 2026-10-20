@@ -1,6 +1,7 @@
 "use strict";
 const { SocialNotifications, noticeId } = require("./socialNotifications");
 const { moduleFor } = require("./socialContent");
+const { expiresAt, expired, expiredResult } = require("./socialRetention");
 const { randomUUID, createHash, createHmac } = require("node:crypto");
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -55,6 +56,14 @@ class SocialService {
   }
   async init() {
     await this.repo.init();
+    if (this.repo.pool || this.repo.memory) await this.purgeExpiredMessages();
+  }
+  async purgeExpiredMessages({ force = true } = {}) {
+    if (this.retentionBusy) return this.retentionBusy;
+    if (!force && Date.now() - (this.retentionAt || 0) < 60000) return;
+    this.retentionBusy = this.repo.transaction(repo => repo.purgeExpiredMessages());
+    try { const result = await this.retentionBusy; this.retentionAt = Date.now(); return result; }
+    finally { this.retentionBusy = null; }
   }
   async support({ user }) {
     const uid = account(user);
@@ -129,8 +138,10 @@ class SocialService {
       record.kind === "comment" ||
       record.kind === "message" ||
       record.kind === "live-chat"
-    )
-      return this.allowed(repo, userId, await repo.get(record.parentId));
+    ) {
+      const parent = await repo.get(record.parentId);
+      return !expired(record, parent) && this.allowed(repo, userId, parent);
+    }
     if (record.kind === "thread") {
       if (!record.members.includes(userId) || record.blocked) return false;
       if (record.context === "support") {
@@ -204,6 +215,7 @@ class SocialService {
   } = {}) {
     const uid = account(user);
     if (!MODULES.includes(module)) fail("social_invalid_module");
+    await this.purgeExpiredMessages({ force: false });
     query = str(query, 200).toLowerCase();
     if (recordId) {
       const r = await this.requireRecord(this.repo, uid, recordId);
@@ -256,7 +268,8 @@ class SocialService {
       !(await this.repo.get("connect:" + uid))?.enabled
     )
       return { ok: true, items: [], optInRequired: true };
-    const candidates = await this.repo.list({
+    const threads = module === "talk" || connectChats;
+    const candidates = threads ? await this.repo.threadPage({ member: uid, connect: connectChats, before }) : await this.repo.list({
       ...(["watch", "short"].includes(module) ? { kinds: ["watch", "short", "community"] } : { kind }),
       ...(module === "talk" || connectChats ? { member: uid } : {}),
       before,
@@ -267,7 +280,7 @@ class SocialService {
       if (r.kind === "thread" && (r.context === "connect") !== connectChats) continue;
       if (
         !(await this.allowed(this.repo, uid, r)) ||
-        (query &&
+        (!threads && query &&
           ![r.title, r.text, r.name, r.bio]
             .join(" ")
             .toLowerCase()
@@ -294,12 +307,14 @@ class SocialService {
           continue;
         if (await this.repo.get("pass:" + key(uid, r.ownerId))) continue;
       }
-      items.push(await this.decorate(r, uid));
+      const decorated = await this.decorate(r, uid);
+      if (threads && query && ![decorated.peer?.name, decorated.lastMessage?.text].join(" ").toLowerCase().includes(query)) continue;
+      items.push(decorated);
     }
     return {
       ok: true,
       items,
-      nextCursor: candidates.length === 100 ? candidates.at(-1).id : null,
+      nextCursor: candidates.length === 100 ? threads ? Buffer.from(JSON.stringify({ at: candidates.at(-1)._activityAt, id: candidates.at(-1).id })).toString("base64url") : candidates.at(-1).id : null,
     };
   }
   async decorate(r, uid) {
@@ -309,6 +324,15 @@ class SocialService {
     if (r.kind === "message") return this.messageView(r, await this.repo.get(r.parentId));
     const p = await this.repo.get("profile:" + r.ownerId);
     const out = { ...r, module: moduleFor(r), author: this.publicProfile(p) };
+    delete out._latestMessage; delete out._activityAt;
+    if (r.kind === "thread") {
+      const other = r.members.find(id => id !== uid);
+      out.peer = { id: other, ...(await this.messageView({ ownerId: other }, r)).author };
+      const latest = Object.hasOwn(r, "_latestMessage") ? r._latestMessage : await this.repo.latestMessage(r);
+      out.lastMessage = latest && await this.allowed(this.repo, uid, latest)
+        ? { id: latest.id, text: latest.text?.slice(0, 160) || "", ownerId: latest.ownerId, createdAt: latest.createdAt, attachmentCount: latest.files?.length || 0 }
+        : null;
+    }
     if (["watch", "short", "community", "listing", "live"].includes(r.kind)) out.commentCount = await this.repo.commentCount(r.id, uid, r.kind === "live" ? "live-chat" : "comment");
     if (r.kind === "thread" && r.context === "connect") out.author = (await this.messageView({ ownerId: r.ownerId }, r)).author;
     if (r.kind === "thread" && r.context === "support") {
@@ -447,6 +471,7 @@ class SocialService {
   }
   async write({ user, action, input = {}, requestId } = {}) {
     const uid = account(user);
+    await this.purgeExpiredMessages({ force: false });
     if (!input || typeof input !== "object" || Array.isArray(input))
       fail("social_invalid_input");
     const prepared = [
@@ -469,6 +494,9 @@ class SocialService {
         if (old) {
           if (old.fingerprint !== fingerprint)
             fail("social_request_conflict", 409);
+          if (expired(old.result?.record, await repo.get(old.result?.record?.parentId || ""))) {
+            old.result = expiredResult(old.result.record); await repo.put(old);
+          }
           return old.result;
         }
       }
@@ -751,6 +779,7 @@ class SocialService {
       const text = str(a.text || "", 8000);
       if (!text && !files.length) fail("social_empty_post");
       record = row("message", uid, { text, files }, thread.id);
+      if (thread.context !== "connect") record.expiresAt = expiresAt(record);
     } else if (action === "order") {
       const product = await this.requireRecord(
         repo,
@@ -1122,19 +1151,20 @@ class SocialService {
       ? this.files.download(r.ownerId, fileId, uid)
       : this.files.preview(r.ownerId, fileId);
   }
-  async collections({ user, kind }) {
+  async collections({ user, kind, scope, before }) {
     const uid = account(user);
     if (!["group", "playlist", "block"].includes(kind))
       fail("social_invalid_collection");
     const records = await this.repo.list({
       kind,
-      ...(kind === "group" ? {} : { owner: uid }),
+      ...(kind === "group" ? scope === "mine" ? { member: uid } : {} : { owner: uid }),
+      before,
       limit: 100,
     });
     const items = [];
     for (const record of records) if (await this.allowed(this.repo, uid, record))
       items.push(kind === "group" ? await this.groupView(this.repo, record, uid) : record);
-    return { ok: true, items };
+    return { ok: true, items, nextCursor: records.length === 100 ? records.at(-1).id : null };
   }
   async reports({ user }) {
     account(user);

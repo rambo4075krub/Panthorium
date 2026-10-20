@@ -1,5 +1,6 @@
 "use strict";
 const { getDatabasePool } = require("./databasePool");
+const { TALK_MESSAGE_TTL, expired, expiredResult } = require("./socialRetention");
 const copy = (x) => (x == null ? null : JSON.parse(JSON.stringify(x)));
 class SocialRepository {
   constructor({
@@ -22,7 +23,7 @@ class SocialRepository {
   async init() {
     if (this.pool)
       await this.pool.query(
-        `CREATE TABLE IF NOT EXISTS panthorium_social_records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,owner_id TEXT NOT NULL,parent_id TEXT NOT NULL DEFAULT '',members JSONB NOT NULL DEFAULT '[]',data JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());CREATE INDEX IF NOT EXISTS social_kind_date ON panthorium_social_records(kind,created_at DESC,id);CREATE INDEX IF NOT EXISTS social_parent ON panthorium_social_records(parent_id,kind);CREATE INDEX IF NOT EXISTS social_owner ON panthorium_social_records(owner_id,kind);CREATE INDEX IF NOT EXISTS social_notifications_owner_date ON panthorium_social_records(owner_id,(data->>'createdAt') DESC,id DESC) WHERE kind='notification';CREATE INDEX IF NOT EXISTS social_members ON panthorium_social_records USING GIN(members);`,
+        `CREATE TABLE IF NOT EXISTS panthorium_social_records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,owner_id TEXT NOT NULL,parent_id TEXT NOT NULL DEFAULT '',members JSONB NOT NULL DEFAULT '[]',data JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());CREATE INDEX IF NOT EXISTS social_kind_date ON panthorium_social_records(kind,created_at DESC,id);CREATE INDEX IF NOT EXISTS social_parent ON panthorium_social_records(parent_id,kind);CREATE INDEX IF NOT EXISTS social_owner ON panthorium_social_records(owner_id,kind);CREATE INDEX IF NOT EXISTS social_notifications_owner_date ON panthorium_social_records(owner_id,(data->>'createdAt') DESC,id DESC) WHERE kind='notification';CREATE INDEX IF NOT EXISTS social_message_activity ON panthorium_social_records(parent_id,(data->>'createdAt') DESC,id DESC) WHERE kind='message';CREATE INDEX IF NOT EXISTS social_members ON panthorium_social_records USING GIN(members);`,
       );
   }
   require() {
@@ -93,6 +94,71 @@ class SocialRepository {
       AND NOT EXISTS (SELECT 1 FROM panthorium_social_records b WHERE b.kind='block'
         AND ((b.owner_id=$2 AND b.data->>'targetId'=c.owner_id) OR (b.owner_id=c.owner_id AND b.data->>'targetId'=$2)))`, [parent, viewer, kind]);
     return result.rows[0].count;
+  }
+  async latestMessage(thread, now = Date.now()) {
+    this.require();
+    if (!this.pool) return copy([...this.memory.values()].filter(m => m.kind === "message" && m.parentId === thread.id && !m.deleted && !m.hidden && !expired(m, thread, now))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))[0]);
+    return copy((await this.pool.query(`SELECT data FROM panthorium_social_records WHERE kind='message' AND parent_id=$1
+      AND COALESCE(data->>'deleted','false')<>'true' AND COALESCE(data->>'hidden','false')<>'true'
+      AND ($2::boolean OR data->>'createdAt'>$3) ORDER BY data->>'createdAt' DESC,id DESC LIMIT 1`,
+    [thread.id, thread.context === "connect", new Date(now - TALK_MESSAGE_TTL).toISOString()])).rows[0]?.data);
+  }
+  async threadPage({ member, connect = false, before, limit = 100, now = Date.now() }) {
+    this.require();
+    let cursor;
+    if (before) {
+      try { cursor = JSON.parse(Buffer.from(before, "base64url").toString()); } catch (_) { /* Invalid cursors rejected below. */ }
+      if (!cursor || typeof cursor.at !== "string" || typeof cursor.id !== "string" || !Number.isFinite(Date.parse(cursor.at)))
+        throw Object.assign(Error("social_invalid_cursor"), { status: 400 });
+    }
+    if (!this.pool) {
+      const rows = [];
+      for (const t of this.memory.values()) if (t.kind === "thread" && t.members.includes(member) && (t.context === "connect") === connect) {
+        const latest = await this.latestMessage(t, now);
+        rows.push({ ...copy(t), _latestMessage: latest, _activityAt: latest?.createdAt || t.createdAt });
+      }
+      return rows.filter(t => !cursor || t._activityAt < cursor.at || (t._activityAt === cursor.at && t.id < cursor.id))
+        .sort((a, b) => b._activityAt.localeCompare(a._activityAt) || b.id.localeCompare(a.id)).slice(0, limit);
+    }
+    const values = [JSON.stringify([member]), connect, new Date(now - TALK_MESSAGE_TTL).toISOString()];
+    const activity = "COALESCE(m.data->>'createdAt',t.data->>'createdAt')";
+    let paging = "";
+    if (cursor) { values.push(cursor.at, cursor.id); paging = ` AND (${activity},t.id)<($4::text,$5::text)`; }
+    values.push(limit);
+    return (await this.pool.query(`SELECT t.data,m.data AS latest,${activity} AS activity FROM panthorium_social_records t
+      LEFT JOIN LATERAL (SELECT data FROM panthorium_social_records WHERE kind='message' AND parent_id=t.id
+        AND COALESCE(data->>'deleted','false')<>'true' AND COALESCE(data->>'hidden','false')<>'true'
+        AND ($2::boolean OR data->>'createdAt'>$3) ORDER BY data->>'createdAt' DESC,id DESC LIMIT 1) m ON true
+      WHERE t.kind='thread' AND t.members @> $1::jsonb AND (COALESCE(t.data->>'context','social')='connect')=$2 ${paging}
+      ORDER BY ${activity} DESC,t.id DESC LIMIT $${values.length}`, values)).rows.map(r => ({ ...copy(r.data), _latestMessage: copy(r.latest), _activityAt: r.activity }));
+  }
+  // Called inside the existing social transaction lock; receipts retain only the idempotency tombstone.
+  async purgeExpiredMessages(now = Date.now()) {
+    this.require();
+    if (!this.pool) {
+      const ids = new Set();
+      for (const m of this.memory.values()) if (expired(m, this.memory.get(m.parentId), now)) ids.add(m.id);
+      for (const [id, r] of this.memory) {
+        if (ids.has(id) || (r.kind === "notification" && (ids.has(r.targetId) || ids.has(r.sourceId)))) this.memory.delete(id);
+        else if (r.kind === "receipt" && expired(r.result?.record, this.memory.get(r.result?.record?.parentId), now))
+          this.memory.set(id, { ...r, result: expiredResult(r.result.record) });
+      }
+      return { deletedMessages: ids.size };
+    }
+    const cutoff = new Date(now - TALK_MESSAGE_TTL).toISOString();
+    await this.pool.query(`UPDATE panthorium_social_records r SET data=jsonb_set(r.data,'{result}',
+      jsonb_build_object('ok',true,'expired',true,'record',jsonb_build_object('id',r.data#>>'{result,record,id}','kind','message','deleted',true)))
+      FROM panthorium_social_records t WHERE r.kind='receipt' AND r.data#>>'{result,record,kind}'='message'
+      AND t.id=r.data#>>'{result,record,parentId}' AND t.kind='thread' AND COALESCE(t.data->>'context','social')<>'connect'
+      AND r.data#>>'{result,record,createdAt}'<=$1`, [cutoff]);
+    const result = await this.pool.query(`WITH expired AS (SELECT m.id FROM panthorium_social_records m
+      JOIN panthorium_social_records t ON t.id=m.parent_id WHERE m.kind='message' AND t.kind='thread'
+      AND COALESCE(t.data->>'context','social')<>'connect' AND m.data->>'createdAt'<=$1),
+      notices AS (DELETE FROM panthorium_social_records WHERE kind='notification'
+        AND (data->>'targetId' IN (SELECT id FROM expired) OR data->>'sourceId' IN (SELECT id FROM expired)))
+      DELETE FROM panthorium_social_records WHERE id IN (SELECT id FROM expired) RETURNING id`, [cutoff]);
+    return { deletedMessages: result.rowCount };
   }
   async notificationPage({ owner, before, unread = false, limit = 100 }) {
     this.require();

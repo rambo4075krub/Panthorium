@@ -9,7 +9,7 @@ const fs = require("node:fs");
     assert.equal(r.status, 200);
     const html = await r.text();
     assert(html.includes("window.PanthoriumSocial?.renderMenu?.()"), path + " missing Social menu rebuild hook");
-    assert(html.includes("social-ui.js?v=social-feed-controls-20261020"), path + " missing Watch cache version");
+    assert(html.includes("social-ui.js?v=social-navigation-talk-20261020"), path + " missing Watch cache version");
     for (const file of ["social-ui.js", "social-rtc.js", "contact-ui.js"])
       assert(html.includes(file), path + " missing " + file);
   }
