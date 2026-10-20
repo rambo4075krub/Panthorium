@@ -18,7 +18,14 @@ class SocialNotifications {
       return this.emit(repo, "like", { id: "like:" + hash(uid, target.id) }, uid, target.ownerId, target.id);
     }
     if (!r) return;
-    if (action === "thread") {
+    if (action === "group-join" && result.groupRequest) {
+      await this.emit(repo, "group-request", { id: result.groupRequest.eventId }, uid, r.ownerId, r.id);
+    } else if (action === "group-review") {
+      await this.emit(repo, "group-" + result.groupRequest.status, { id: result.groupRequest.eventId }, uid, result.groupRequest.ownerId, r.id);
+    } else if (action === "group-message") {
+      const group = await repo.get(r.parentId);
+      for (const member of group.members) await this.emit(repo, "group-message", r, uid, member);
+    } else if (action === "thread") {
       if (r.status === "pending") await this.emit(repo, "thread-request", r, r.ownerId, r.members.find(x => x !== r.ownerId));
     } else if (action === "accept-thread") {
       await this.emit(repo, "thread-" + r.status, r, uid, r.ownerId);
@@ -82,9 +89,18 @@ class SocialNotifications {
       if (r.ownerId !== uid || (type === "moderation-hidden") !== !!r.hidden) return null;
     } else {
       if (!await s.allowed(repo, uid, r)) return null;
-      if (r.kind === "message" || r.kind === "comment") target = await repo.get(r.parentId);
+      if (r.kind === "message" || r.kind === "comment" || r.kind === "group-message") target = await repo.get(r.parentId);
       if (r.kind === "message") { thread = target; readAt ||= r.readAt || null; }
+      if (r.kind === "group-message") readAt ||= r.readBy?.[uid] || null;
       if (r.kind === "thread") thread = r;
+    }
+    if (["group-request", "group-accepted", "group-declined"].includes(type)) {
+      if (r.kind !== "group") return null;
+      const applicant = type === "group-request" ? n.actorId : uid;
+      const request = await repo.get("group-request:" + hash(r.id, applicant));
+      const status = type === "group-request" ? "pending" : type === "group-accepted" ? "accepted" : "declined";
+      if (request?.status !== status || request.eventId !== n.sourceId || (type === "group-request" && r.ownerId !== uid)) return null;
+      if (type === "group-accepted" && !r.members.includes(uid)) return null;
     }
     if (type === "thread-request" && r.status !== "pending") return null;
     if (type === "follow" && !await repo.get(n.sourceId)) return null;
@@ -94,6 +110,8 @@ class SocialNotifications {
     const name = moderation ? "ระบบดูแลชุมชน" : (await s.messageView({ ownerId: n.actorId }, { context }, names[context])).author.name;
     const labels = {
       "thread-request": "ส่งคำขอสนทนาถึงคุณ", "thread-accepted": "ตอบรับคำขอสนทนาของคุณแล้ว", "thread-declined": "ปฏิเสธคำขอสนทนาของคุณ",
+      "group-request": "ขอเข้าร่วมกลุ่ม “" + r.title + "”", "group-accepted": "อนุมัติให้คุณเข้าร่วมกลุ่ม “" + r.title + "” แล้ว",
+      "group-declined": "ไม่อนุมัติคำขอเข้าร่วมกลุ่ม “" + r.title + "”", "group-message": "ส่งข้อความใหม่ในกลุ่ม “" + target.title + "”",
       message: "ส่งข้อความใหม่ถึงคุณ", call: r.video ? "กำลังวิดีโอคอลหาคุณ" : "กำลังโทรหาคุณ", "call-missed": "สายที่ไม่ได้รับ",
       comment: "แสดงความคิดเห็นในโพสต์ของคุณ", like: "ถูกใจโพสต์ของคุณ", follow: "เริ่มติดตามคุณ",
       "order-requested": "ส่งคำขอสั่งซื้อใหม่", "order-accepted": "ยืนยันคำสั่งซื้อแล้ว", "order-fulfilled": "ดำเนินการคำสั่งซื้อเสร็จแล้ว", "order-cancelled": "ยกเลิกคำสั่งซื้อแล้ว",
