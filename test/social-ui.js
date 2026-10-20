@@ -57,9 +57,26 @@ const { SocialRepository } = require("../services/socialRepository");
       w.OS.windows.set(id, { el: n, onClose: opts.onClose });
     };
     w.focusWindow = () => {};
+    let watchFixture = false, reportCount = 0;
+    w.URL.createObjectURL = () => "blob:watch-fixture";
+    w.URL.revokeObjectURL = () => {};
     w.fetch = async (url, opts = {}) => {
       const p = new URL(url);
       let out;
+      if (watchFixture && p.pathname === "/api/social/feed/watch")
+        return { ok: true, json: async () => ({ ok: true, items: [{
+          id: "watch-fixture", kind: "watch", ownerId: "another-member", title: "Watch preview",
+          text: "Inline post text", files: [{id:"video",name:"clip.mp4"},{id:"image",name:"photo.png"},{id:"text",name:"note.txt"}]
+        }] }) };
+      if (watchFixture && p.pathname.includes("/files/")) {
+        const id = p.pathname.split("/").pop();
+        return { ok: true, blob: async () => new Blob(["<script>plain text</script>"],
+          {type: id === "video" ? "video/mp4" : id === "image" ? "image/png" : "text/plain"}) };
+      }
+      if (watchFixture && p.pathname === "/api/social/actions") {
+        const action = JSON.parse(opts.body);
+        if (action.action === "report") { reportCount++; return {ok:true,json:async()=>({ok:true})}; }
+      }
       try {
         if (p.pathname.startsWith("/api/social/feed/"))
           out = await service.read({
@@ -147,6 +164,30 @@ const { SocialRepository } = require("../services/socialRepository");
         (x) => x.text === "created from real UI",
       ),
     );
+    watchFixture = true;
+    const watchRoot = await w.PanthoriumSocial.open("watch");
+    [...watchRoot.querySelectorAll('button')].find(b => b.textContent === 'รีเฟรช').click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const watch = w.document.querySelector('[data-record-id="watch-fixture"]');
+    assert(watch.querySelector('video[controls][playsinline]'));
+    assert(!watch.querySelector('video').autoplay);
+    assert(watch.querySelector('img[alt="photo.png"]'));
+    assert.equal(watch.querySelector('pre').textContent, '<script>plain text</script>');
+    assert.equal(watch.querySelector('script'), null);
+    assert(!watch.textContent.includes('เปิดไฟล์ / ดูตัวอย่าง'));
+    const report = [...watch.querySelectorAll('button')].find(b => b.textContent === 'รายงาน');
+    const reason = watch.querySelector('textarea');
+    assert(reason.parentElement.parentElement.hidden);
+    report.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert(!reason.parentElement.parentElement.hidden);
+    assert.equal(w.document.activeElement, reason);
+    assert.equal(reportCount, 0, 'opening report form does not send a report');
+    reason.value = 'Test report reason';
+    [...watch.querySelectorAll('button')].find(b => b.textContent === 'ส่งรายงาน').click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(reportCount, 1);
+    assert(reason.parentElement.parentElement.hidden);
     w.OS.state.user = { sub: "guest:new", roles: ["guest"] };
     w.dispatchEvent(new w.Event("panthorium:auth-changed"));
     assert.equal(w.document.querySelector('[data-start-group="social"]'), null);

@@ -243,36 +243,38 @@
   async function media(v, record, container) {
     for (const file of record.files || []) {
       const item = el("div", null, { class: "social-media" });
-      item.append(
-        el("small", file.name),
-        button(v, "เปิดไฟล์ / ดูตัวอย่าง", async () => {
-          const blob = await api(
-            v,
-            "/api/social/records/" +
-              encodeURIComponent(record.id) +
-              "/files/" +
-              file.id,
-            {},
-            true,
-          );
-          if (!current(v)) return;
+      item.append(el("small", file.name));
+      const preview = el("div");
+      item.append(preview);
+      container.append(item);
+      const show = async () => {
+        const blob = await api(v, "/api/social/records/" +
+          encodeURIComponent(record.id) + "/files/" + encodeURIComponent(file.id), {}, true);
+        if (!current(v) || !item.isConnected) return;
+        let view;
+        if (/^image\/(png|jpeg|webp|gif)$/.test(blob.type) || /^(video|audio)\//.test(blob.type)) {
           const url = URL.createObjectURL(blob);
           v.urls.add(url);
-          let view;
-          if (/^image\/(png|jpeg|webp|gif)$/.test(blob.type))
-            view = el("img", null, { alt: file.name, src: url });
-          else if (/^(video|audio)\//.test(blob.type)) {
-            view = el(blob.type.startsWith("video") ? "video" : "audio", null, {
-              src: url,
-              controls: "",
-              playsinline: "",
-            });
-          } else {
-            view = el("pre", await blob.text());
-          }
-          item.append(view);
-        }),
-      );
+          view = blob.type.startsWith("image")
+            ? el("img", null, { alt: file.name, src: url })
+            : el(blob.type.startsWith("video") ? "video" : "audio", null,
+                { src: url, controls: "", playsinline: "", preload: "metadata" });
+        } else {
+          view = el("pre", await blob.text());
+          if (!current(v) || !item.isConnected) return;
+        }
+        preview.replaceChildren(view);
+      };
+      if (record.kind === "watch") {
+        preview.textContent = "กำลังโหลดสื่อ…";
+        // Load independently so a slow attachment never blocks the feed or its controls.
+        show().catch(() => {
+          if (!current(v) || !item.isConnected) return;
+          preview.replaceChildren(el("p", "โหลดสื่อไม่สำเร็จ"), button(v, "ลองโหลดอีกครั้ง", show));
+        });
+      } else {
+        preview.append(button(v, "เปิดไฟล์ / ดูตัวอย่าง", show));
+      }
       item.append(
         button(v, "ดาวน์โหลดต้นฉบับ", async () => {
           const blob = await api(
@@ -596,14 +598,31 @@
           await feed(v);
         }),
       );
-      const reason = input(c, "เหตุผลที่รายงาน");
-      c.append(
-        button(v, "รายงาน", async () => {
-          if (!reason.value.trim()) return;
-          await write(v, "report", { recordId: r.id, reason: reason.value });
+      const reportForm = el("div");
+      reportForm.hidden = true;
+      const reason = input(reportForm, "เหตุผลที่รายงาน", "textarea");
+      const reportButton = button(v, "รายงาน", () => {
+        reportForm.hidden = false;
+        reportButton.setAttribute("aria-expanded", "true");
+        reason.focus();
+      });
+      reportButton.setAttribute("aria-expanded", "false");
+      const closeReport = () => {
+        reportForm.hidden = true;
+        reportButton.setAttribute("aria-expanded", "false");
+        reportButton.focus();
+      };
+      reportForm.append(
+        button(v, "ส่งรายงาน", async () => {
+          if (!reason.value.trim()) { reason.focus(); return; }
+          await write(v, "report", { recordId: r.id, reason: reason.value.trim() });
+          reason.value = "";
+          closeReport();
           status(v, "ส่งรายงานให้ผู้ดูแลแล้ว");
         }),
+        button(v, "ยกเลิก", closeReport),
       );
+      c.append(reportButton, reportForm);
     }
     c.append(
       button(v, "นำไปใช้กับ Sentinel", async () => {
