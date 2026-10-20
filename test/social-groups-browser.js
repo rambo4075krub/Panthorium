@@ -52,13 +52,21 @@ async function until(check, label) { const end = Date.now() + 16000; while (Date
       await page.goto("http://127.0.0.1:" + server.address().port);
       await page.evaluate(() => PanthoriumSocial.open("community"));
     }
-    await creator.bringToFront(); await creator.getByRole("button", { name: "กลุ่ม", exact: true }).click();
+    await creator.bringToFront(); await creator.locator("[data-social-toolbar]").getByRole("button", { name: "สร้างกลุ่ม", exact: true }).click();
     await creator.getByLabel("ชื่อ", { exact: true }).fill("ทีมทดสอบกลุ่มปิด");
     await creator.getByLabel("ประเภทกลุ่ม").selectOption("closed");
     await creator.getByLabel("คำอธิบายกลุ่ม").fill("แชตและแชร์ไฟล์สำหรับสมาชิก");
-    await creator.getByRole("button", { name: "สร้างกลุ่ม", exact: true }).click();
+    await creator.locator("#social-community-panel form").getByRole("button", { name: "สร้างกลุ่ม", exact: true }).click();
     await creator.locator("[data-group-composer]").waitFor();
     const group = (await social.collections({ user: owner, kind: "group" })).items[0];
+    const readerToolbar = reader.locator("[data-social-toolbar]");
+    assert.equal(await readerToolbar.getByRole("button", { name: "กลุ่มของฉัน", exact: true }).getAttribute("aria-expanded"), "true");
+    assert.equal(await reader.locator("[data-group-id]").count(), 0);
+    await readerToolbar.getByRole("button", { name: "กลุ่มทั้งหมด", exact: true }).click();
+    await reader.locator('[data-group-id="'+group.id+'"]').waitFor();
+    assert.equal(await reader.locator(".window").count(), 1);
+    await readerToolbar.getByRole("button", { name: "กลุ่มของฉัน", exact: true }).click();
+    await reader.getByText("คุณยังไม่ได้เข้าร่วมกลุ่ม เลือกกลุ่มทั้งหมดเพื่อค้นหากลุ่ม หรือสร้างกลุ่มของคุณ", { exact: true }).waitFor();
     for (const page of [reader, visitor]) await page.evaluate(id => PanthoriumSocial.open("community", { recordId: id }), group.id);
     assert.equal(await reader.locator("[data-group-composer]").count(), 0);
     await reader.getByRole("button", { name: "ขอเข้าร่วมกลุ่ม", exact: true }).click();
@@ -111,9 +119,9 @@ async function until(check, label) { const end = Date.now() + 16000; while (Date
       const res = await fetch("/api/social/records/" + id + "/files/" + fileId, { headers: { Authorization: "Bearer " + OS.config.accessToken } }); return res.status;
     }, { id: sent.id, fileId: sent.files[0].id });
     assert.equal(denied, 404, "leaving revokes file access over HTTP");
-    await creator.getByRole("button", { name: "กลุ่ม", exact: true }).click();
+    await creator.locator("[data-social-toolbar]").getByRole("button", { name: "สร้างกลุ่ม", exact: true }).click();
     await creator.getByLabel("ชื่อ", { exact: true }).fill("ทีมเปิด");
-    await creator.getByRole("button", { name: "สร้างกลุ่ม", exact: true }).click();
+    await creator.locator("#social-community-panel form").getByRole("button", { name: "สร้างกลุ่ม", exact: true }).click();
     await creator.getByRole("heading", { name: "ทีมเปิด", exact: true }).waitFor();
     const open = (await social.collections({ user: owner, kind: "group" })).items.find(x => x.title === "ทีมเปิด");
     await visitor.evaluate(id => PanthoriumSocial.open("community", { recordId: id }), open.id);
@@ -130,7 +138,10 @@ async function until(check, label) { const end = Date.now() + 16000; while (Date
     await visitor.getByText("ข้อความระหว่างพิมพ์", { exact: true }).waitFor();
     assert.equal(await visitor.getByRole("textbox", { name: "ข้อความในกลุ่ม", exact: true }).inputValue(), "ร่างที่ยังไม่ส่ง", "polling preserves drafts");
     await visitor.getByText("ประวัติ 0", { exact: true }).waitFor();
-    await visitor.reload(); await visitor.evaluate(id => PanthoriumSocial.open("community", { recordId: id }), open.id);
+    await visitor.reload(); await visitor.evaluate(() => PanthoriumSocial.open("community"));
+    await visitor.locator('[data-group-id="'+open.id+'"]').waitFor();
+    assert.equal(await visitor.locator('[data-group-id="'+group.id+'"]').count(), 0, "default shows joined groups only");
+    await visitor.locator('[data-group-id="'+open.id+'"]').getByRole("button", { name: "เปิด", exact: true }).click();
     await visitor.locator("[data-group-composer]").waitFor();
     assert.deepEqual(errors, []);
     console.log("Community group browser: open/closed creation, approval, named applicants, chat/image/video/file upload+download, quota reuse, receipts, leave, mobile layout, history and drafts passed");

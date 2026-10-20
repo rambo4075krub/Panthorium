@@ -247,9 +247,10 @@ app.use(requestContext(audit));
 if (config.mcpEnabled) app.use(require('./routes/mcp').createMcpRouter({ oauth: mcpOAuth, toolService: mcpTools, authService, config, audit }));
 app.use('/internal/jobs', createInternalJobsRouter({ scheduler: { tick: async () => {
   await voiceSessions.purgeExpired();
+  const socialRetention = await social.purgeExpiredMessages();
   const scheduled = await agentScheduler.tick();
   const studio = await creativeStudio.tick();
-  return { ...scheduled, studio };
+  return { ...scheduled, studio, socialRetention };
 } } }));
 
 app.get("/health", async (req, res) => {

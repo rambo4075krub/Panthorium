@@ -170,6 +170,9 @@
     v.groupCursor = null;
     v.detail = null;
     v.refreshFriends = null;
+    v.refreshThreads = null;
+    if (v.blockedBack) v.blockedBack.hidden = true;
+    for (const b of v.communityButtons || []) b.setAttribute("aria-expanded", "false");
     v.liveComments = new Map();
     for (const url of v.urls) URL.revokeObjectURL(url);
     v.urls.clear();
@@ -467,6 +470,11 @@
     const cancel = button(v, "ยกเลิก", () => { if (!submit.disabled) return feed(v); });
     actions.append(submit, cancel); form.append(actions);
   }
+  function backActions(v, form, submit) {
+    const actions = el("div", null, { class: "social-compose-actions" });
+    actions.append(submit, button(v, "กลับ", () => { if (!submit.disabled) return feed(v); }));
+    form.append(actions);
+  }
   function friendActions(v, person, parent, reload) {
     const relation = person.friendship;
     if (relation?.status === "accepted") {
@@ -611,6 +619,15 @@
       "data-record-id": r.id,
     });
     parent.append(c);
+    if (r.kind === "thread") {
+      const latest = r.lastMessage;
+      c.append(el("h3", r.peer?.name || "สมาชิก"),
+        el("p", latest ? (latest.ownerId === v.uid ? "คุณ: " : "") + (latest.text || "ไฟล์แนบ " + latest.attachmentCount + " ไฟล์")
+          : r.status === "pending" ? "รอรับคำขอสนทนา" : r.status === "declined" ? "คำขอสนทนาถูกปฏิเสธ" : "เริ่มสนทนา", { class: "social-chat-preview" }));
+      if (latest) c.append(el("small", new Date(latest.createdAt).toLocaleString("th-TH")));
+      c.append(button(v, "เปิดบทสนทนา", () => detail(v, r.id)));
+      return;
+    }
     const compact = feedPost(v, r);
     let commentToggle;
     const actions = compact ? el("div", null, { class: "social-post-actions" }) : c;
@@ -619,13 +636,6 @@
       ...(["watch", "short"].includes(r.module || v.module) && !r.title ? [] : [el("h3", r.title || r.name || (r.kind === "thread" ? "Talk" : r.module === "short" || r.kind === "short" ? "วิดีโอ" : "โพสต์"))]),
       el("p", r.text || r.bio || ""),
     );
-    if (r.kind === "thread") {
-      c.append(
-        el("p", r.status === "pending" ? "รอรับคำขอสนทนา" : r.status),
-        button(v, "เปิดบทสนทนา", () => detail(v, r.id)),
-      );
-      return;
-    }
     if (r.kind === "connect") {
       await media(v, r, c);
       c.append(
@@ -843,7 +853,7 @@
       await window.PanthoriumSocial.renderCard(v, r, v.content, data);
       return;
     }
-    const card = section(v, r.title || "บทสนทนา");
+    const card = section(v, r.kind === "thread" ? r.peer?.name || "บทสนทนา" : r.title || "บทสนทนา");
     if (r.kind === "thread" && r.status === "pending") {
       card.append(el("p", "คำขอสนทนา • ยังส่งข้อความหรือโทรไม่ได้"));
       if (r.ownerId !== v.uid)
@@ -857,6 +867,7 @@
             await feed(v);
           }),
         );
+      card.append(button(v, "กลับ", () => feed(v)));
       return;
     }
     if (r.kind === "group") return groupDetail(v, data, card);
@@ -881,6 +892,10 @@
         button(v, "วิดีโอคอล", () => call(v, r, true)),
       );
     const log = el("div", null, { "data-social-messages": id });
+    if (r.kind === "thread" && v.module === "talk") {
+      log.className = "social-thread-log";
+      card.append(el("p", "ข้อความใน Talk จะลบอัตโนมัติหลัง 3 วัน"));
+    }
     card.append(log);
     if (["thread", "live"].includes(r.kind)) {
       v.messageLog = log;
@@ -900,7 +915,7 @@
         );
       card.append(f);
       const getFiles = r.kind === "thread" ? await attachments(v, f) : () => [];
-      bindForm(
+      const submit = bindForm(
         v,
         f,
         r.kind === "thread"
@@ -918,6 +933,7 @@
           await renderMessages(v, fresh.items, log);
         },
       );
+      if (r.kind === "thread") backActions(v, f, submit);
     }
   }
   const messageFingerprint = items => JSON.stringify(items.map(x => [x.id, x.deleted, x.readAt, x.readCount, x.author?.name]));
@@ -1072,7 +1088,7 @@
     if (!current(v) || !log.isConnected) return;
     const version = v.messageRender = (v.messageRender || 0) + 1;
     v.readObserver?.disconnect();
-    const previous = v.groupState && v.messageLog === log ? new Map([...log.children].map(node => [node.dataset.messageId, node])) : null;
+    const previous = v.messageLog === log ? new Map([...log.children].map(node => [node.dataset.messageId, node])) : null;
     if (!previous) log.replaceChildren();
     const rendered = [];
     const revoke = node => {
@@ -1087,6 +1103,7 @@
       c.dataset.messageSignature = signature;
       rendered.push(c);
       const chat = ["message", "group-message"].includes(msg.kind);
+      if (v.module === "talk" && msg.kind === "message") c.dataset.direction = msg.ownerId === v.uid ? "outgoing" : "incoming";
       if (chat && msg.ownerId !== v.uid && !msg.readAt) c.dataset.incoming = "true";
       else delete c.dataset.incoming;
       if (!reuse) c.append(
@@ -1117,7 +1134,7 @@
       if (reuse) continue;
       await media(v, msg, c);
       if (!current(v) || !log.isConnected || v.messageRender !== version) return;
-      if (msg.ownerId === v.uid && chat)
+      if (msg.ownerId === v.uid && chat && !(v.module === "talk" && msg.kind === "message"))
         c.append(
           button(v, "ลบข้อความ", async () => {
             await write(v, "delete", { recordId: msg.id });
@@ -1190,7 +1207,7 @@
     f.append(el("p", "เพศและความสนใจในการค้นหาเป็นการตั้งค่าส่วนตัว ใช้จับคู่ชาย–ชาย ชาย–หญิง หญิง–หญิง หรือความสนใจที่เลือก ข้อมูลจากโปรไฟล์จะแชร์ใน Connect เมื่อคุณเปิดใช้และยินยอมเท่านั้น"));
     const getFiles = await attachments(v, f, (old?.files || []).map(file => file.id));
     fileFields = f.lastElementChild; syncFields();
-    bindForm(
+    const submit = bindForm(
       v,
       f,
       "connect",
@@ -1206,6 +1223,7 @@
       }),
       () => feed(v),
     );
+    backActions(v, f, submit);
     card.append(
       button(v, "ปิด Connect และหยุดการค้นพบ/สนทนา", async () => {
         await write(v, "connect", { enabled: false });
@@ -1213,37 +1231,60 @@
       }),
     );
   }
+  async function community(v, mode = "mine", before) {
+    if (!before) {
+      clear(v); v.communityMode = mode;
+      for (const b of v.communityButtons || []) b.setAttribute("aria-expanded", String(b.dataset.groupMenu === mode));
+      v.communityPanel = section(v, { mine: "กลุ่มของฉัน", all: "กลุ่มทั้งหมด", create: "สร้างกลุ่ม" }[mode]);
+      v.communityPanel.id = "social-community-panel";
+    }
+    const panel = v.communityPanel, version = v.renderVersion;
+    if (mode === "create") {
+      const form = el("form"), title = input(form, "ชื่อ"); panel.append(form);
+      title.required = true; title.maxLength = 120;
+      const privacy = select(form, "ประเภทกลุ่ม", [["open", "แบบเปิด — เข้าร่วมได้ทันที"], ["closed", "แบบปิด — ผู้สร้างอนุมัติคำขอ"]], "open");
+      const description = input(form, "คำอธิบายกลุ่ม", "textarea"); description.maxLength = 2000;
+      bindForm(v, form, "group-create", () => ({ title: title.value, privacy: privacy.value, text: description.value }), out => detail(v, out.record.id));
+      return;
+    }
+    const data = await api(v, "/api/social/collections/group?scope=" + mode + (before ? "&before=" + encodeURIComponent(before) : ""));
+    if (!current(v) || version !== v.renderVersion || !panel.isConnected) return;
+    if (!data.items.length && !before) panel.append(el("p", mode === "mine" ? "คุณยังไม่ได้เข้าร่วมกลุ่ม เลือกกลุ่มทั้งหมดเพื่อค้นหากลุ่ม หรือสร้างกลุ่มของคุณ" : "ยังไม่มีกลุ่ม"));
+    for (const r of data.items) {
+      const c = el("article", null, { class: "social-card", "data-group-id": r.id });
+      c.append(el("h4", r.title), el("p", groupSummary(r)),
+        el("small", r.membership === "member" ? "เป็นสมาชิกแล้ว" : r.membership === "pending" ? "รออนุมัติคำขอ" : ""),
+        button(v, "เปิด", () => detail(v, r.id)));
+      panel.append(c);
+    }
+    if (data.nextCursor) {
+      const more = button(v, "โหลดกลุ่มเพิ่มเติม", async () => { await community(v, mode, data.nextCursor); more.remove(); });
+      panel.append(more);
+    }
+  }
   async function collections(v, kind, targetId) {
+    if (kind === "group") return community(v);
     clear(v);
-    const data = await api(v, "/api/social/collections/" + kind),
-      card = section(
-        v,
-        kind === "group"
-          ? "กลุ่มชุมชน"
-          : kind === "block"
-            ? "บัญชีที่บล็อก"
-            : "เพลย์ลิสต์ส่วนตัว",
-      );
+    if (kind === "block" && v.blockedBack) v.blockedBack.hidden = false;
+    const version = v.renderVersion, data = await api(v, "/api/social/collections/" + kind);
+    if (!current(v) || version !== v.renderVersion) return;
+    const card = section(v, kind === "block" ? "บัญชีที่บล็อก" : "เพลย์ลิสต์ส่วนตัว");
     if (kind !== "block") {
       const f = el("form"),
         title = input(f, "ชื่อ");
       card.append(f);
       title.maxLength = 120; title.required = true;
-      const privacy = kind === "group" ? select(f, "ประเภทกลุ่ม", [["open", "แบบเปิด — เข้าร่วมได้ทันที"], ["closed", "แบบปิด — ผู้สร้างอนุมัติคำขอ"]], "open") : null;
-      const description = kind === "group" ? input(f, "คำอธิบายกลุ่ม", "textarea") : null;
-      if (description) description.maxLength = 2000;
       bindForm(
         v,
         f,
-        kind === "group" ? "group-create" : "playlist-create",
-        () => ({ title: title.value, ...(privacy ? { privacy: privacy.value, text: description.value } : {}) }),
-        out => kind === "group" ? detail(v, out.record.id) : collections(v, kind, targetId),
+        "playlist-create",
+        () => ({ title: title.value }),
+        () => collections(v, kind, targetId),
       );
     }
     for (const r of data.items) {
       const c = el("article", null, { class: "social-card" });
       c.append(el("h4", r.title || r.targetId));
-      if (kind === "group") c.append(el("p", groupSummary(r)), el("small", r.membership === "member" ? "เป็นสมาชิกแล้ว" : r.membership === "pending" ? "รออนุมัติคำขอ" : ""));
       if (kind === "block")
         c.append(
           button(v, "เลิกบล็อก", async () => {
@@ -1416,6 +1457,7 @@
             await startRTC(v, c);
         }
       }
+      if (!v.root.hidden && !v.detail) await v.refreshThreads?.();
       if (!v.root.hidden && v.detail && (v.messageLog?.isConnected || v.groupState)) {
         const detailId = v.detail, messageLog = v.messageLog;
         if (v.groupState) groupDetailId = detailId;
@@ -1448,7 +1490,7 @@
     }
   }
   async function feed(v, before, mode) {
-    if (v.module === "community") return collections(v, "group");
+    if (v.module === "community") return community(v);
     if (v.module === "profile") return profile(v);
     if (v.module === "friends") return people(v);
     if (mode) v.feedMode = mode;
@@ -1489,6 +1531,24 @@
           await feed(v, data.nextCursor);
         }),
       );
+    if (v.module === "talk" && !before) {
+      let signature = JSON.stringify(data);
+      const query = v.search.value;
+      v.refreshThreads = async () => {
+        const latest = await api(v, "/api/social/feed/talk?query=" + encodeURIComponent(query));
+        if (!current(v) || v.renderVersion !== version || v.detail || v.search.value !== query) return;
+        if (JSON.stringify(latest) === signature) return;
+        signature = JSON.stringify(latest);
+        const focused = document.activeElement?.closest("[data-record-id]")?.dataset.recordId;
+        const scroll = v.root.scrollTop;
+        v.content.replaceChildren();
+        for (const r of latest.items) await card(v, r, v.content);
+        if (!latest.items.length) section(v, "ยังไม่มีรายการ");
+        if (latest.nextCursor) v.content.append(button(v, "โหลดรายการก่อนหน้า", () => feed(v, latest.nextCursor)));
+        if (focused) [...v.content.querySelectorAll("[data-record-id]")].find(c => c.dataset.recordId === focused)?.querySelector("button")?.focus({ preventScroll: true });
+        v.root.scrollTop = scroll;
+      };
+    } else if (before) v.refreshThreads = null;
   }
   async function support(v) {
     clear(v);
@@ -1531,6 +1591,7 @@
       .social-post-menu-items{position:absolute;right:0;top:calc(100% + 5px);z-index:20;width:250px;max-width:calc(100vw - 48px);max-height:280px;overflow:auto;padding:6px;background:#152332;border:1px solid #496779;border-radius:12px;box-shadow:0 12px 28px #0009}.social-post-menu-items button{display:block;width:100%;text-align:left;margin:0;padding:10px;border:0;background:transparent}.social-post-menu-items button:hover{background:#263343}
       .social-compose-actions,.social-comment-actions{display:flex;align-items:center;gap:8px}.social-compose-actions>button:last-child{margin-left:auto}
       .social-comments{border-top:1px solid #304252;margin-top:16px;padding-top:12px}.social-message{padding:12px;border-bottom:1px solid #304252}.social-app small{color:#acbfce;overflow-wrap:anywhere}.social-app [role=status]{color:#ffb26e}.social-app [role=status]:empty{display:none}
+      .social-thread-log{display:flex;flex-direction:column;gap:10px;margin:16px 0}.social-thread-log .social-message{border:1px solid #304252;border-radius:14px;max-width:85%;min-width:0;align-self:flex-start;background:#172634}.social-thread-log .social-message[data-direction=outgoing]{align-self:flex-end;background:#203e55;border-color:#3d647f}.social-thread-log .social-message p{margin:8px 0}.social-chat-preview{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.social-toolbar [data-group-menu]::after{content:' ▾'}.social-toolbar [data-group-menu][aria-expanded=true]{border-color:#ee984e;background:#263343}.social-toolbar .social-back{margin-left:auto}
       .social-media{margin:10px 0}.social-media img,.social-media video{display:block;max-width:100%;max-height:560px;border-radius:10px}.social-media audio{max-width:100%}.social-media pre{white-space:pre-wrap;max-height:420px;overflow:auto}
       .social-video-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.social-video-grid video{width:100%;max-height:400px;background:#000}
       .social-message-receipt{display:inline-block;margin:4px 8px;color:#9bb1c9;font-size:18px;font-weight:600}.social-message-receipt[data-delivery=read]{letter-spacing:-6px;padding-right:6px;color:#66d0ff}
@@ -1585,16 +1646,25 @@
       form.onsubmit = event => { event.preventDefault(); feed(v).catch(error => status(v, friendly(error))); }; toolbar.append(form);
     }
     if (["watch", "short", "market"].includes(v.module)) toolbar.append(button(v, v.module === "market" ? "ลงสินค้า" : v.module === "short" ? "โพสต์วิดีโอ" : "สร้างโพสต์", () => compose(v)));
-    if (["watch", "short", "live", "market", "talk"].includes(v.module)) toolbar.append(button(v, "รายการทั้งหมด", () => feed(v)));
+    if (["live", "market", "talk"].includes(v.module)) toolbar.append(button(v, "รายการทั้งหมด", () => feed(v)));
     if (v.module === "short") toolbar.append(button(v, "เพลย์ลิสต์", () => collections(v, "playlist")));
-    if (v.module === "community") toolbar.append(button(v, "กลุ่ม", () => collections(v, "group")));
+    if (v.module === "community") {
+      v.communityButtons = ["mine", "all", "create"].map((mode, i) => {
+        const b = button(v, ["กลุ่มของฉัน", "กลุ่มทั้งหมด", "สร้างกลุ่ม"][i], () => {
+          if (b.getAttribute("aria-expanded") === "true") { clear(v); return; }
+          return community(v, mode);
+        });
+        b.dataset.groupMenu = mode; b.setAttribute("aria-label", b.textContent); b.setAttribute("aria-expanded", "false"); b.setAttribute("aria-controls", "social-community-panel");
+        toolbar.append(b); return b;
+      });
+    }
     if (v.module === "talk") toolbar.append(button(v, "ค้นหาเพื่อน", () => open("friends")));
     if (v.module === "market") toolbar.append(button(v, "รายการซื้อขาย", () => orders(v)));
     if (v.module === "connect") {
       toolbar.append(button(v, "ตั้งค่า Connect", () => connectSettings(v)), button(v, "ค้นหาคู่", () => feed(v, null, "discover")), button(v, "บทสนทนา Connect", () => feed(v, null, "chats")));
     }
-    if (["profile", "friends"].includes(v.module)) toolbar.append(button(v, "บัญชีที่บล็อก", () => collections(v, "block")));
     if (v.module === "friends") toolbar.append(button(v, "ค้นหาเพื่อน", () => people(v)));
+    if (["profile", "friends"].includes(v.module)) toolbar.append(button(v, "บัญชีที่บล็อก", () => collections(v, "block")));
     if (v.module === "live") toolbar.append(button(v, "เริ่มไลฟ์", async () => {
       clear(v); const form = el("form"), title = input(form, "ชื่อไลฟ์");
       section(v, "เริ่มถ่ายทอดสด • ผู้ชมพร้อมกันสูงสุด 8 คน").append(form);
@@ -1603,11 +1673,9 @@
       const submit = bindForm(v, form, "live-start", () => ({ title: title.value }), async out => { await startRTC(v, out.record); await detail(v, out.record.id); });
       submit.textContent = "เริ่มถ่ายทอดสด"; composeActions(v, form, submit);
     }));
-    if (["watch", "short", "market", "profile"].includes(v.module)) {
-      const tools = el("details", null, { class: "social-tools" }); tools.append(el("summary", "เครื่องมือที่เชื่อมงาน"));
-      const body = el("div"); tools.append(body); toolbar.append(tools);
-      const apps = select(body, "เปิดเครื่องมือ Panthorium", [["", "เลือกเครื่องมือ"], ...(window.PanthoriumWindowCatalog?.apps || []).filter(a => !a.virtual && !a.native && !a.id.startsWith("social-") && window.PanthoriumWindowCatalog.allowed(a, os().state.user)).map(a => [a.key, a.label])]);
-      apps.onchange = () => { if (apps.value) window.PanthoriumVoiceCommands?.windowAction("open_" + apps.value); apps.value = ""; };
+    if (v.module === "profile") {
+      v.blockedBack = button(v, "กลับ", () => profile(v));
+      v.blockedBack.className = "social-back"; v.blockedBack.hidden = true; toolbar.append(v.blockedBack);
     }
   }
   async function refreshView(v) {
@@ -1615,7 +1683,7 @@
     if (v.detail) await detail(v, v.detail);
     else if (v.module === "profile") await profile(v);
     else if (v.module === "friends") await people(v);
-    else if (v.module === "community") await collections(v, "group");
+    else if (v.module === "community") await community(v, v.communityMode || "mine");
     else await feed(v);
     await refreshNotifications();
   }

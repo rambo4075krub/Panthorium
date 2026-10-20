@@ -46,6 +46,24 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
       assert.equal(await sender.locator(".window").count(),1);
       assert.equal(await sender.locator("[data-social]:visible").count(),1);
     }
+    for (const id of ["watch", "short", "market"]) {
+      const bar = sender.locator('[data-social="'+id+'"] .social-toolbar');
+      assert.equal(await bar.getByText("เครื่องมือที่เชื่อมงาน", { exact: true }).count(), 0);
+      assert.equal(await bar.getByRole("button", { name: "รายการทั้งหมด", exact: true, includeHidden: true }).count(), id === "market" ? 1 : 0);
+    }
+    const community = sender.locator('[data-social="community"]');
+    assert.equal(await community.locator('[data-group-menu="mine"]').getAttribute("aria-expanded"), "true");
+    assert.deepEqual(await community.locator(".social-toolbar button").allTextContents(), ["กลุ่มของฉัน", "กลุ่มทั้งหมด", "สร้างกลุ่ม"]);
+    await sender.evaluate(()=>PanthoriumSocial.open("profile"));
+    const profile = sender.locator('[data-social="profile"]');
+    await profile.getByRole("button", { name: "บัญชีที่บล็อก", exact: true }).click();
+    await profile.getByRole("heading", { name: "บัญชีที่บล็อก", exact: true }).waitFor();
+    const blocked = await profile.getByRole("button", { name: "บัญชีที่บล็อก", exact: true }).boundingBox(), profileBack = await profile.getByRole("button", { name: "กลับ", exact: true }).boundingBox();
+    assert(Math.abs(blocked.y-profileBack.y)<2 && profileBack.x>blocked.x);
+    await profile.getByRole("button", { name: "กลับ", exact: true }).click();
+    await profile.getByLabel("ชื่อที่แสดง", { exact: true }).waitFor();
+    assert.equal(await profile.getByRole("button", { name: "กลับ", exact: true }).isVisible(), false);
+    assert.deepEqual(await sender.locator('[data-social="friends"] .social-toolbar button').allTextContents(), ["ค้นหาเพื่อน", "บัญชีที่บล็อก"]);
     await sender.locator('[data-social-tab="watch"]').click();
     assert.equal(await watch.getByLabel("รายละเอียด",{exact:true}).inputValue(),"ร่างที่ยังไม่ได้เผยแพร่");
     // The shared window catalog must select the requested tab, including via voice navigation.
@@ -99,6 +117,11 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
     assert.equal(await sender.locator('[data-social-tab="friends"] [data-social-module-count]').textContent(),"1");
     await sender.evaluate(()=>PanthoriumSocial.open("connect"));
     const connect=sender.locator('[data-social="connect"]');await connect.getByRole("button",{name:"ตั้งค่า Connect",exact:true}).click();
+    const saveBox = await connect.getByRole("button", { name: "บันทึก", exact: true }).boundingBox(), backBox = await connect.getByRole("button", { name: "กลับ", exact: true }).boundingBox();
+    assert(Math.abs(saveBox.y-backBox.y)<2 && backBox.x>saveBox.x);
+    await connect.getByRole("button", { name: "กลับ", exact: true }).click();
+    await connect.getByRole("button", { name: "ตั้งค่า Connect 18+", exact: true }).waitFor();
+    await connect.getByRole("button", { name: "ตั้งค่า Connect", exact: true }).click();
     await connect.getByLabel("เพศของฉัน",{exact:true}).selectOption("male");await connect.getByLabel("สนใจทำความรู้จัก",{exact:true}).selectOption("male");
     const sync=connect.getByLabel("ใช้ชื่อ รูป และคำแนะนำจากโปรไฟล์ของฉันใน Connect",{exact:true});assert(await sync.isChecked());
     assert(await connect.getByLabel("ชื่อใน Connect",{exact:true}).isDisabled());
@@ -114,7 +137,7 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
       assert(await sender.locator('.social-tabs').evaluate(n=>n.scrollWidth>n.clientWidth&&getComputedStyle(n).overflowX==='auto'),"horizontal tab scrolling");
       await sender.locator('.social-tabs button').last().scrollIntoViewIfNeeded();assert(await sender.getByRole('button',{name:'Refresh',exact:true}).isVisible());
     }
-    await sender.evaluate(()=>PanthoriumSocial.open("watch"));await watch.getByRole("button",{name:"รายการทั้งหมด",exact:true}).click();
+    await sender.evaluate(()=>PanthoriumSocial.open("watch"));await sender.getByRole("button",{name:"Refresh",exact:true}).click();
     await watch.locator('[data-record-id="'+post.id+'"] img').waitFor();
     if(process.env.SOCIAL_REDESIGN_SCREENSHOT){await sender.screenshot({path:process.env.SOCIAL_REDESIGN_SCREENSHOT+"-mobile.png"});await sender.setViewportSize({width:1280,height:850});await sender.screenshot({path:process.env.SOCIAL_REDESIGN_SCREENSHOT+"-desktop.png"});}
     await sender.evaluate(()=>{OS.state.user={sub:'guest:test',roles:['guest'],permissions:[]};window.dispatchEvent(new Event('panthorium:auth-changed'));});
