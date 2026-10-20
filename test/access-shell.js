@@ -53,7 +53,7 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
       const lateLauncher = w.document.createElement('button'); lateLauncher.id = 'phase6-automation-launcher'; lateLauncher.textContent = 'Agent Automation';
       w.document.getElementById('sm-apps').appendChild(lateLauncher);
       await new Promise(resolve => w.setTimeout(resolve, 40));
-      const expectedMenu = role === 'user' ? ['Sentinel AI', 'ลงทะเบียน', 'เครื่องคิดเลข', 'บันทึก', 'ไฟล์'] : ['Sentinel AI', 'ลงทะเบียน'];
+      const expectedMenu = role === 'user' ? ['Sentinel AI', 'เครื่องคิดเลข', 'บันทึก', 'ไฟล์'] : ['Sentinel AI', 'ลงทะเบียน'];
       assert.deepEqual([...w.document.querySelectorAll('#sm-apps > *')].map(el => el.querySelector('span')?.textContent.trim() || el.textContent.trim()), expectedMenu, 'non-staff Start Menu keeps authorized apps and removes late privileged injection');
     }
     if (role === 'admin') {

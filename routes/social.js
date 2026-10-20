@@ -39,6 +39,7 @@ function createSocialRouter(auth, service) {
       next(e);
     }
   };
+  r.post("/support", writes, route(req => service.support({ user: req.user })));
   r.get(
     "/profile",
     reads,
