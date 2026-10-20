@@ -150,6 +150,10 @@
   function keepPinnedLast(list) {
     if (!list) return;
     const children = Array.from(list.children), pinned = [...pinnedLast].map(id => children.find(child => child.dataset?.appId === id)).filter(Boolean);
+    // Keep the public contact entry immediately beside Privacy/Policy, even after extensions append apps.
+    const contact = children.find(child => child.dataset?.appId === "contact");
+    const policyIndex = pinned.findIndex(child => child.dataset?.appId === "privacy-policy");
+    if (contact && policyIndex >= 0) pinned.splice(policyIndex, 0, contact);
     const tail = children.slice(children.length - pinned.length);
     if (pinned.some((item, index) => tail[index] !== item)) for (const item of pinned) list.appendChild(item);
   }

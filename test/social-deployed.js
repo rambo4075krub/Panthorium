@@ -9,10 +9,13 @@ const fs = require("node:fs");
     assert.equal(r.status, 200);
     const html = await r.text();
     assert(html.includes("window.PanthoriumSocial?.renderMenu?.()"), path + " missing Social menu rebuild hook");
-    for (const file of ["social-ui.js", "social-rtc.js"])
+    for (const file of ["social-ui.js", "social-rtc.js", "contact-ui.js"])
       assert(html.includes(file), path + " missing " + file);
   }
   for (const file of [
+    "contact-ui.js",
+    "start-menu-ui.js",
+    "access-shell-ui.js",
     "social-ui.js",
     "social-rtc.js",
     "voice-window-catalog.js",
@@ -37,6 +40,7 @@ const fs = require("node:fs");
       401,
       path + " must require authentication",
     );
+  assert.equal((await fetch(base + "/api/social/support", { method: "POST" })).status, 401, "support chat requires authentication");
   assert.equal((await fetch(base + "/api/social/records/unavailable/read", { method: "POST" })).status, 401, "read receipts require authentication");
   assert.equal((await fetch(base + "/api/social/notifications/read", { method: "POST" })).status, 401, "notification acknowledgements require authentication");
   console.log(
