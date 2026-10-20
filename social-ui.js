@@ -1666,16 +1666,19 @@
   }
   const moduleBadge = module => el("span", "", { class: "social-notification-badge", "data-social-module-count": module, hidden: "" });
   const notificationBadge = () => el("span", "", { class: "social-notification-badge", "data-social-notification-count": "", hidden: "" });
-  // Owner-requested tab markers: keep exactly 1 until explicitly removed in a later update.
+  // Owner-requested tab and Start Menu markers: keep exactly 1 until explicitly removed in a later update.
   // These do not mark real activity as read or change server notification totals.
-  const pinnedTabNotifications = Object.freeze({ watch: 1, profile: 1 });
+  const pinnedNotifications = Object.freeze({ watch: 1, profile: 1 });
   function notificationBadges() {
     const data = notificationState?.data || {};
+    const pinnedTotal = allowed() ? Object.values(pinnedNotifications).reduce((sum, count) => sum + count, 0) : 0;
     for (const node of document.querySelectorAll("[data-social-notification-count],[data-social-module-count]")) {
-      const pinned = allowed() ? pinnedTabNotifications[node.closest("[data-social-tab]")?.dataset.socialTab] : undefined;
-      const count = pinned ?? (node.hasAttribute("data-social-module-count") ? data.counts?.[node.dataset.socialModuleCount] || 0 : data.unreadCount || 0);
+      const launcher = node.closest("[data-social-tab], #sm-apps [data-app-id]");
+      const pinned = allowed() && launcher ? pinnedNotifications[node.dataset.socialModuleCount] : undefined;
+      const aggregate = node.hasAttribute("data-social-notification-count");
+      const count = pinned ?? (aggregate ? (data.unreadCount || 0) + pinnedTotal : data.counts?.[node.dataset.socialModuleCount] || 0);
       node.textContent = count > 99 ? "99+" : String(count); node.hidden = count === 0;
-      node.setAttribute("aria-label", count + (pinned === undefined ? " การแจ้งเตือนยังไม่อ่าน" : " การแจ้งเตือนปักหมุด"));
+      node.setAttribute("aria-label", count + (pinned !== undefined ? " การแจ้งเตือนปักหมุด" : aggregate && pinnedTotal ? " การแจ้งเตือน รวมรายการปักหมุด" : " การแจ้งเตือนยังไม่อ่าน"));
     }
   }
   async function readNotifications(v, ids) {
