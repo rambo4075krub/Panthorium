@@ -45,14 +45,19 @@ async function until(check, message) { const end = Date.now() + 16000; while (Da
       assert.equal(await page.locator('[data-social="talk"] .social-activity').count(), 1);
       assert.equal(await page.locator('#social-notification-bell,[data-social-open-notifications],#social-notification-center').count(), 0, "no global notification button or panel");
       const badge = page.locator('[data-social-tab="talk"] [data-social-module-count]');
-      assert.equal(await badge.textContent(), await count(page).textContent());
+      assert.equal(Number(await badge.textContent()) + 2, Number(await count(page).textContent()));
     };
     assert.equal(await reader.locator('#social-notification-bell').count(), 0);
     const thread = (await write(a, "thread", { userId: b.id })).record;
-    await until(async () => (await count(reader).textContent()) === "1", "request visible without opening any Social app");
+    await until(async () => (await count(reader).textContent()) === "3", "request visible without opening any Social app");
     assert.equal(await reader.locator("[data-social]").count(), 0);
     assert.equal(await reader.locator('[data-app-id="social-talk"] [data-social-module-count]').textContent(), "1");
-    assert.equal(await reader.locator('[data-start-group="social"] .sm-group-label [data-social-notification-count]').textContent(), "1");
+    assert.equal(await reader.locator('[data-start-group="social"] .sm-group-label [data-social-notification-count]').textContent(), "3");
+    for (const module of ["watch", "profile"]) {
+      const marker = reader.locator('[data-app-id="social-' + module + '"] [data-social-module-count]');
+      assert.equal(await marker.textContent(), "1");
+      assert.equal(await marker.getAttribute("hidden"), null);
+    }
     await openAlerts(reader);
     const panel = reader.locator('[data-social="talk"] [data-activity-items]');
     await panel.getByText("ปานเทพ <img src=x onerror=alert(1)> • ส่งคำขอสนทนาถึงคุณ", { exact: true }).waitFor();
@@ -61,7 +66,7 @@ async function until(check, message) { const end = Date.now() + 16000; while (Da
     await panel.getByRole("button", { name: "เปิดรายการ", exact: true }).click();
     await reader.getByRole("button", { name: "รับคำขอ", exact: true }).click();
     await until(async () => (await repo.get(thread.id)).status === "accepted", "request accepted from notification");
-    await until(async () => (await count(sender).textContent()) === "1", "sender notified of acceptance");
+    await until(async () => (await count(sender).textContent()) === "3", "sender notified of acceptance");
     await sender.bringToFront(); await openAlerts(sender);
     await sender.getByText("เพื่อน • ตอบรับคำขอสนทนาของคุณแล้ว", { exact: true }).waitFor();
     await sender.locator('[data-social="talk"] [data-activity-items]').getByRole("button", { name: "เปิดรายการ", exact: true }).click();
@@ -69,14 +74,14 @@ async function until(check, message) { const end = Date.now() + 16000; while (Da
     await sender.getByLabel("ข้อความ", { exact: true }).fill("ทดสอบข้อความใหม่");
     await sender.getByRole("button", { name: "ส่ง", exact: true }).click();
     const message = (await service.read({ user: a, recordId: thread.id })).items[0];
-    await until(async () => (await count(reader).textContent()) === "1", "new message alerts when Talk is closed");
+    await until(async () => (await count(reader).textContent()) === "3", "new message alerts when Talk is closed");
     assert.equal((await repo.get(message.id)).readAt, undefined);
     await openAlerts(reader);
     await panel.getByRole("button", { name: "อ่านทั้งหมดในหน้านี้", exact: true }).click();
-    await until(async () => (await count(reader).textContent()) === "0", "reading alerts clears badge");
+    await until(async () => (await count(reader).textContent()) === "2", "reading alerts leaves only the two pinned markers");
     assert.equal((await repo.get(message.id)).readAt, undefined, "notification read is separate from chat read");
     await reader.reload(); await reader.evaluate(() => PanthoriumSocial.refreshNotifications());
-    assert((await count(reader).textContent()) === "0", "read state survives reload");
+    assert((await count(reader).textContent()) === "2", "read state and pinned markers survive reload");
     await reader.bringToFront(); await openAlerts(reader);
     const messageRow = panel.locator("article").filter({ hasText: "ส่งข้อความใหม่ถึงคุณ" });
     await messageRow.getByRole("button", { name: "เปิดรายการ", exact: true }).click();
