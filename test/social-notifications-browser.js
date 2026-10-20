@@ -38,12 +38,23 @@ async function until(check, message) { const end = Date.now() + 16000; while (Da
       await page.goto("http://127.0.0.1:" + server.address().port);
       await page.evaluate(() => PanthoriumSocial.refreshNotifications());
     }
+    const count = page => page.locator('[data-start-group="social"] .sm-group-label [data-social-notification-count]');
+    const openAlerts = async page => {
+      await page.evaluate(() => PanthoriumSocial.open("talk"));
+      await page.locator('[data-social="talk"] [data-social-open-notifications]').click();
+      assert.equal(await page.locator('[data-social="talk"] #social-notification-center').count(), 1, "center is inside Social Media");
+      assert.equal(await page.locator('#social-notification-bell').count(), 0, "no desktop notification button");
+      const badge = page.locator('[data-social="talk"] [data-social-open-notifications] [data-social-notification-count]');
+      assert.equal(await badge.textContent(), await count(page).textContent(), "in-app button shows the unread total");
+      if (await badge.textContent() !== "0") assert(await badge.isVisible(), "unread number is visible on the button");
+    };
+    assert.equal(await reader.locator('#social-notification-bell').count(), 0);
     const thread = (await write(a, "thread", { userId: b.id })).record;
-    await until(async () => (await reader.locator("#social-notification-bell").getAttribute("aria-label")).includes("1 รายการ"), "request visible without opening any Social app");
+    await until(async () => (await count(reader).textContent()) === "1", "request visible without opening any Social app");
     assert.equal(await reader.locator("[data-social]").count(), 0);
     assert.equal(await reader.locator('[data-app-id="social-talk"] [data-social-module-count]').textContent(), "1");
     assert.equal(await reader.locator('[data-start-group="social"] .sm-group-label [data-social-notification-count]').textContent(), "1");
-    await reader.locator("#social-notification-bell").click();
+    await openAlerts(reader);
     const panel = reader.locator("#social-notification-center");
     await panel.getByText("ปานเทพ <img src=x onerror=alert(1)> • ส่งคำขอสนทนาถึงคุณ", { exact: true }).waitFor();
     assert.equal(await panel.locator("img").count(), 0, "sender name is safe text");
@@ -51,42 +62,42 @@ async function until(check, message) { const end = Date.now() + 16000; while (Da
     await panel.getByRole("button", { name: "เปิดรายการ", exact: true }).click();
     await reader.getByRole("button", { name: "รับคำขอ", exact: true }).click();
     await until(async () => (await repo.get(thread.id)).status === "accepted", "request accepted from notification");
-    await until(async () => (await sender.locator("#social-notification-bell").getAttribute("aria-label")).includes("1 รายการ"), "sender notified of acceptance");
-    await sender.bringToFront(); await sender.locator("#social-notification-bell").click();
+    await until(async () => (await count(sender).textContent()) === "1", "sender notified of acceptance");
+    await sender.bringToFront(); await openAlerts(sender);
     await sender.getByText("เพื่อน • ตอบรับคำขอสนทนาของคุณแล้ว", { exact: true }).waitFor();
     await sender.locator("#social-notification-center").getByRole("button", { name: "เปิดรายการ", exact: true }).click();
     await reader.evaluate(() => { const win=OS.windows.get('social-talk');win.onClose();win.el.remove();OS.windows.delete('social-talk'); });
     await sender.getByLabel("ข้อความ", { exact: true }).fill("ทดสอบข้อความใหม่");
     await sender.getByRole("button", { name: "ส่ง", exact: true }).click();
     const message = (await service.read({ user: a, recordId: thread.id })).items[0];
-    await until(async () => (await reader.locator("#social-notification-bell").getAttribute("aria-label")).includes("1 รายการ"), "new message alerts when Talk is closed");
+    await until(async () => (await count(reader).textContent()) === "1", "new message alerts when Talk is closed");
     assert.equal((await repo.get(message.id)).readAt, undefined);
-    await reader.locator("#social-notification-bell").click();
+    await openAlerts(reader);
     await panel.getByRole("button", { name: "อ่านทั้งหมดในหน้านี้", exact: true }).click();
-    await until(async () => (await reader.locator("#social-notification-bell").getAttribute("aria-label")).includes("0 รายการ"), "reading alerts clears badge");
+    await until(async () => (await count(reader).textContent()) === "0", "reading alerts clears badge");
     assert.equal((await repo.get(message.id)).readAt, undefined, "notification read is separate from chat read");
     await reader.reload(); await reader.evaluate(() => PanthoriumSocial.refreshNotifications());
-    assert((await reader.locator("#social-notification-bell").getAttribute("aria-label")).includes("0 รายการ"), "read state survives reload");
-    await reader.bringToFront(); await reader.locator("#social-notification-bell").click();
+    assert((await count(reader).textContent()) === "0", "read state survives reload");
+    await reader.bringToFront(); await openAlerts(reader);
     const messageRow = panel.locator("article").filter({ hasText: "ส่งข้อความใหม่ถึงคุณ" });
     await messageRow.getByRole("button", { name: "เปิดรายการ", exact: true }).click();
     await reader.locator('[data-message-id="' + message.id + '"]').evaluate(node => node.scrollIntoView({ block: "center" }));
     await until(async () => !!(await repo.get(message.id)).readAt, "opening and viewing chat sets read receipt");
-    await reader.locator("#social-notification-bell").click();
+    await openAlerts(reader);
     for (const width of [390, 320]) {
       await reader.setViewportSize({ width, height: 700 });
       const box = await panel.boundingBox(); assert(box.x >= 0 && box.x + box.width <= width, "notification panel fits mobile width " + width);
     }
     if (process.env.SOCIAL_NOTIFICATION_SCREENSHOT) await reader.screenshot({ path: process.env.SOCIAL_NOTIFICATION_SCREENSHOT });
     await reader.keyboard.press("Escape"); assert.equal(await panel.count(), 0);
-    assert.equal(await reader.evaluate(() => document.activeElement.id), "social-notification-bell");
-    await reader.locator("#social-notification-bell").click();
+    assert.equal(await reader.evaluate(() => document.activeElement.hasAttribute("data-social-open-notifications")), true);
+    await openAlerts(reader);
     await reader.evaluate(() => { OS.state.user={sub:'guest:test',roles:['guest'],permissions:[]}; window.dispatchEvent(new Event('panthorium:auth-changed')); });
     assert.equal(await reader.locator("#social-notification-bell").count(), 0);
     assert.equal(await panel.count(), 0);
     assert.doesNotMatch(await reader.locator("body").textContent(), /ทดสอบข้อความใหม่|ปานเทพ/);
     assert.deepEqual(errors, []);
-    console.log("Social notifications browser: global polling, request/acceptance navigation, Start badges, closed Talk, durable reads, safe names, mobile panel and logout cleanup passed");
+    console.log("Social notifications browser: no desktop bell, in-app center, request/acceptance navigation, Start badges, closed Talk, durable reads, safe names, mobile panel and logout cleanup passed");
   } finally {
     if (browser) await browser.close(); server.closeAllConnections(); await new Promise(r => server.close(r));
   }
