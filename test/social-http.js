@@ -111,6 +111,22 @@ const { createSocialRouter } = require("../routes/social");
     assert.equal(receipt.status, 200);
     assert.match(receipt.headers.get("cache-control"), /no-store/);
     assert((await (await req("/records/" + thread.id)).json()).items[0].readAt);
+    const group = (await (await req("/actions", { action: "group-create", input: { title: "HTTP group", privacy: "closed" } })).json()).record;
+    const groupMessage = (await (await req("/actions", { action: "group-message", input: { recordId: group.id, text: "members only" } })).json()).record;
+    const groupPath = "/records/" + group.id;
+    assert.deepEqual((await (await req(groupPath, null, other)).json()).record.members, []);
+    assert.equal((await req("/records/" + groupMessage.id, null, other)).status, 404);
+    assert.equal((await req("/actions", { action: "group-message", input: { recordId: group.id, text: "bypass" } }, other)).status, 403);
+    const join = await req("/actions", { action: "group-join", input: { recordId: group.id } }, other);
+    assert.equal((await join.json()).record.membership, "pending");
+    assert.equal((await req("/actions", { action: "group-review", input: { recordId: group.id, userId: other.id, accept: true } }, other)).status, 403);
+    assert.equal((await req("/actions", { action: "group-review", input: { recordId: group.id, userId: other.id, accept: true } })).status, 200);
+    const memberHistory = await req(groupPath, null, other);
+    assert.match(memberHistory.headers.get("cache-control"), /no-store/);
+    assert.equal((await memberHistory.json()).items[0].text, "members only");
+    assert.equal((await req(groupPath + "/read", { messageIds: [groupMessage.id] }, other)).status, 200);
+    await req("/actions", { action: "group-leave", input: { recordId: group.id } }, other);
+    assert.equal((await req("/records/" + groupMessage.id, null, other)).status, 404);
     console.log(
       "Social HTTP: authentication, guest denial, private records, no-store and idempotent writes passed",
     );

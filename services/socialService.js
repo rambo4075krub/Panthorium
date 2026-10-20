@@ -16,6 +16,7 @@ const str = (v, n = 4000) => {
   return v.trim();
 };
 const key = (...p) => createHash("sha256").update(p.join(":")).digest("hex");
+const groupRequestId = (groupId, userId) => "group-request:" + key(groupId, userId);
 const id = () => String(Date.now()).padStart(16, "0") + "-" + randomUUID();
 function account(user) {
   if (!UUID.test(user?.sub || "") || user.roles?.includes("guest"))
@@ -100,6 +101,13 @@ class SocialService {
       );
     }
     if (record.kind === "group") return true;
+    if (record.kind === "group-message" || record.kind === "group-request") {
+      const group = await repo.get(record.parentId);
+      if (!group || !(await this.allowed(repo, userId, group))) return false;
+      return record.kind === "group-message"
+        ? group.members.includes(userId)
+        : group.ownerId === userId || record.ownerId === userId;
+    }
     if (record.kind === "playlist") return record.ownerId === userId;
     if (record.audience === "group") {
       const group = await repo.get(record.parentId);
@@ -194,16 +202,13 @@ class SocialService {
     query = str(query, 200).toLowerCase();
     if (recordId) {
       const r = await this.requireRecord(this.repo, uid, recordId);
+      if (r.kind === "group") return this.readGroup(uid, r, before);
       const childKind =
         r.kind === "thread"
           ? "message"
           : r.kind === "live"
             ? "live-chat"
-            : r.kind === "group"
-              ? "community"
-              : "comment";
-      if (r.kind === "group" && !r.members.includes(uid))
-        return { ok: true, record: r, items: [] };
+            : "comment";
       if (r.kind === "playlist") {
         const items = [];
         for (const savedId of r.recordIds || []) {
@@ -290,6 +295,8 @@ class SocialService {
     };
   }
   async decorate(r, uid) {
+    if (r.kind === "group") return this.groupView(this.repo, r, uid);
+    if (r.kind === "group-message") return this.groupMessageView(r, await this.repo.get(r.parentId), uid);
     if (r.kind === "message") return this.messageView(r, await this.repo.get(r.parentId));
     const p = await this.repo.get("profile:" + r.ownerId);
     const out = { ...r, author: this.publicProfile(p) };
@@ -341,25 +348,70 @@ class SocialService {
     }
     return { ...message, author: { name: names.get(message.ownerId) } };
   }
+  async groupView(repo, group, uid) {
+    const member = group.members.includes(uid);
+    const request = member ? null : await repo.get(groupRequestId(group.id, uid));
+    return { ...group, privacy: group.privacy || "open", memberCount: group.members.length,
+      members: member ? group.members : [], membership: member ? "member" : ["pending", "declined"].includes(request?.status) ? request.status : "none" };
+  }
+  async groupMessageView(message, group, uid, names) {
+    const out = await this.messageView(message, group, names);
+    const readers = Object.entries(message.readBy || {}).filter(([id]) => id !== message.ownerId && group.members.includes(id));
+    delete out.readBy;
+    out.readCount = readers.length;
+    out.readAt = message.ownerId === uid ? readers[0]?.[1] || null : message.readBy?.[uid] || null;
+    return out;
+  }
+  async readGroup(uid, group, before) {
+    const record = await this.groupView(this.repo, group, uid);
+    if (!group.members.includes(uid)) return { ok: true, record, items: [], posts: [], requests: [], nextCursor: null };
+    const source = await this.repo.list({ kind: "group-message", parent: group.id, limit: 100, before });
+    const items = [], posts = [], requests = [], names = new Map();
+    for (const message of source)
+      if (await this.allowed(this.repo, uid, message)) items.push(await this.groupMessageView(message, group, uid, names));
+    if (!before) {
+      for (const post of await this.repo.list({ kind: "community", parent: group.id, limit: 100 }))
+        if (await this.allowed(this.repo, uid, post)) posts.push(await this.decorate(post, uid));
+      if (group.ownerId === uid) {
+        let cursor;
+        do {
+          const page = await this.repo.list({ kind: "group-request", parent: group.id, limit: 200, before: cursor });
+          for (const request of page) if (request.status === "pending" && !(await this.blocked(this.repo, uid, request.ownerId)))
+            requests.push({ id: request.id, userId: request.ownerId, requestedAt: request.requestedAt,
+              name: (await this.messageView(request, group, names)).author.name });
+          cursor = page.length === 200 ? page.at(-1).id : null;
+        } while (cursor);
+      }
+    }
+    return { ok: true, record, items: items.reverse(), posts, requests, nextCursor: source.length === 100 ? source.at(-1).id : null };
+  }
   async markRead({ user, recordId, messageIds } = {}) {
     const uid = account(user);
     if (!Array.isArray(messageIds) || !messageIds.length || messageIds.length > 100 ||
         messageIds.some(value => typeof value !== "string" || !/^\d{16}-[0-9a-f-]{36}$/i.test(value)))
       fail("social_invalid_messages");
     return this.repo.transaction(async repo => {
-      const thread = await this.requireRecord(repo, uid, recordId, "thread");
-      await this.threadAllowed(repo, uid, thread);
+      const thread = await this.requireRecord(repo, uid, recordId);
+      const group = thread.kind === "group";
+      if (group) {
+        if (!thread.members.includes(uid)) fail("social_not_found", 404);
+      } else {
+        if (thread.kind !== "thread") fail("social_not_found", 404);
+        await this.threadAllowed(repo, uid, thread);
+      }
       const messages = [];
       for (const messageId of new Set(messageIds)) {
-        const message = await this.requireRecord(repo, uid, messageId, "message");
-        if (message.parentId !== thread.id || message.ownerId === uid || !thread.members.includes(message.ownerId))
+        const message = await this.requireRecord(repo, uid, messageId, group ? "group-message" : "message");
+        if (message.parentId !== thread.id || message.ownerId === uid || (!group && !thread.members.includes(message.ownerId)))
           fail("social_invalid_messages", 403);
         messages.push(message);
       }
       const readAt = new Date().toISOString();
       for (const message of messages) {
-        if (!message.readAt) await repo.put({ ...message, readAt });
-        const notice = await repo.get(noticeId("message", message.id, uid));
+        if (group) {
+          if (!message.readBy?.[uid]) await repo.put({ ...message, readBy: { ...message.readBy, [uid]: readAt } });
+        } else if (!message.readAt) await repo.put({ ...message, readAt });
+        const notice = await repo.get(noticeId(group ? "group-message" : "message", message.id, uid));
         if (notice && !notice.readAt) await repo.put({ ...notice, readAt });
       }
       return { ok: true };
@@ -372,6 +424,7 @@ class SocialService {
     const prepared = [
       "publish",
       "message",
+      "group-message",
       "listing",
       "profile",
       "connect",
@@ -489,23 +542,57 @@ class SocialService {
     } else if (action === "group-create") {
       const title = str(a.title, 120);
       if (!title) fail("social_empty_post");
+      const privacy = a.privacy ?? "open";
+      if (!["open", "closed"].includes(privacy)) fail("social_invalid_group_privacy");
       record = row(
         "group",
         uid,
-        { title, text: str(a.text || "", 2000), audience: "public" },
+        { title, text: str(a.text || "", 2000), audience: "public", privacy },
         "",
         [uid],
       );
     } else if (action === "group-join" || action === "group-leave") {
       record = await this.requireRecord(repo, uid, a.recordId, "group");
       if (action === "group-join") {
+        if (record.members.includes(uid)) return { ok: true, record: await this.groupView(repo, record, uid) };
         if (record.members.length >= 200 && !record.members.includes(uid))
           fail("social_group_capacity");
-        if (!record.members.includes(uid)) record.members.push(uid);
+        if (record.privacy === "closed") {
+          const rid = groupRequestId(record.id, uid), old = await repo.get(rid);
+          const request = old?.status === "pending" ? old : row("group-request", uid, {
+            id: rid, status: "pending", eventId: id(), requestedAt: new Date().toISOString(),
+          }, record.id);
+          await repo.put(request);
+          return { ok: true, record: await this.groupView(repo, record, uid), groupRequest: request };
+        }
+        record.members.push(uid);
       } else {
         if (record.ownerId === uid) fail("social_group_owner_required");
         record.members = record.members.filter((x) => x !== uid);
       }
+    } else if (action === "group-review" || action === "group-cancel-request") {
+      record = await this.requireRecord(repo, uid, a.recordId, "group");
+      if (action === "group-review" && record.ownerId !== uid) fail("social_forbidden", 403);
+      if (action === "group-review" && (typeof a.accept !== "boolean" || !UUID.test(a.userId))) fail("social_invalid_input");
+      const applicant = action === "group-review" ? a.userId : uid;
+      const request = await repo.get(groupRequestId(record.id, applicant));
+      if (!request || request.status !== "pending") fail("social_group_request_not_pending", 409);
+      if (action === "group-review" && a.accept) {
+        if (await this.blocked(repo, uid, applicant)) fail("social_not_found", 404);
+        if (record.members.length >= 200 && !record.members.includes(applicant)) fail("social_group_capacity");
+        if (!record.members.includes(applicant)) record.members.push(applicant);
+      }
+      request.status = action === "group-cancel-request" ? "cancelled" : a.accept ? "accepted" : "declined";
+      request.reviewedAt = new Date().toISOString();
+      await repo.put(request);
+      await repo.put(record);
+      return { ok: true, record: await this.groupView(repo, record, uid), groupRequest: request };
+    } else if (action === "group-message") {
+      const group = await this.requireRecord(repo, uid, a.recordId, "group");
+      if (!group.members.includes(uid)) fail("social_join_required", 403);
+      const text = str(a.text || "", 8000);
+      if (!text && !files.length) fail("social_empty_post");
+      record = row("group-message", uid, { text, files }, group.id);
     } else if (action === "playlist-create") {
       record = row("playlist", uid, {
         title: str(a.title, 120),
@@ -822,7 +909,7 @@ class SocialService {
       if (
         !record ||
         record.ownerId !== uid ||
-        !["watch", "community", "listing", "comment", "message"].includes(
+        !["watch", "community", "listing", "comment", "message", "group-message"].includes(
           record.kind,
         )
       )
@@ -865,7 +952,7 @@ class SocialService {
       };
     } else fail("social_unknown_action");
     await repo.put(record);
-    return { ok: true, record };
+    return { ok: true, record: record.kind === "group" ? await this.groupView(repo, record, uid) : record };
   }
   async threadAllowed(repo, uid, t) {
     if (t.status !== "accepted") fail("social_thread_not_accepted", 403);
@@ -975,7 +1062,10 @@ class SocialService {
       ...(kind === "group" ? {} : { owner: uid }),
       limit: 100,
     });
-    return { ok: true, items: records.filter((r) => !r.hidden && !r.deleted) };
+    const items = [];
+    for (const record of records) if (await this.allowed(this.repo, uid, record))
+      items.push(kind === "group" ? await this.groupView(this.repo, record, uid) : record);
+    return { ok: true, items };
   }
   async reports({ user }) {
     account(user);
