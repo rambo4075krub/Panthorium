@@ -34,6 +34,11 @@
     social_support_unavailable: "แชทแอดมินยังไม่พร้อมใช้งาน กรุณาติดต่อ account@panthorium.net",
     social_support_blocked: "ไม่สามารถเปิดแชทนี้ได้ กรุณาตรวจบัญชีที่บล็อกหรือติดต่อ account@panthorium.net",
     social_thread_not_accepted: "รออีกฝ่ายรับคำขอสนทนาก่อน",
+    social_join_required: "กรุณาเข้าร่วมกลุ่มก่อนส่งข้อความหรือไฟล์",
+    social_group_capacity: "กลุ่มนี้มีสมาชิกครบ 200 คนแล้ว",
+    social_group_owner_required: "ผู้สร้างกลุ่มต้องอยู่ในกลุ่มเพื่อดูแลสมาชิก",
+    social_group_request_not_pending: "คำขอนี้ได้รับการจัดการแล้ว กรุณารีเฟรชกลุ่ม",
+    social_invalid_group_privacy: "กรุณาเลือกกลุ่มแบบเปิดหรือแบบปิด",
     social_match_required: "ต้องสนใจตรงกันก่อนเริ่มคุย",
     social_not_found: "ไม่พบรายการหรือไม่มีสิทธิ์เข้าถึง",
     files_quota_exceeded: "พื้นที่คลาวด์เต็ม กรุณาจัดการไฟล์หรือแพ็กเกจ",
@@ -143,6 +148,9 @@
     v.messageRender = (v.messageRender || 0) + 1;
     v.lastMessages = null;
     v.messageLog = null;
+    v.groupState = null;
+    v.groupItems = null;
+    v.groupCursor = null;
     v.detail = null;
     for (const url of v.urls) URL.revokeObjectURL(url);
     v.urls.clear();
@@ -154,8 +162,8 @@
     return fn();
   }
   function bindForm(v, form, action, data, after) {
-    const sending = ["message", "live-chat", "comment"].includes(action);
-    const submit = el("button", sending ? "ส่ง" : "บันทึก", { type: "submit" });
+    const sending = ["message", "group-message", "live-chat", "comment"].includes(action);
+    const submit = el("button", sending ? "ส่ง" : action === "group-create" ? "สร้างกลุ่ม" : "บันทึก", { type: "submit" });
     form.append(submit);
     let requestId = crypto.randomUUID();
     form.addEventListener("input", () => {
@@ -243,7 +251,13 @@
         });
       }
     });
-    return () => [...selected];
+    const getFiles = () => [...selected];
+    getFiles.reset = () => {
+      selected.clear();
+      list.querySelectorAll('input[type="checkbox"]').forEach(node => { node.checked = false; });
+      upload.value = "";
+    };
+    return getFiles;
   }
   async function media(v, record, container) {
     for (const file of record.files || []) {
@@ -270,7 +284,7 @@
         }
         preview.replaceChildren(view);
       };
-      if (record.kind === "watch") {
+      if (record.kind === "watch" || (record.kind === "group-message" && /^(image\/(png|jpeg|webp|gif)|video\/|audio\/)/.test(file.contentType))) {
         preview.textContent = "กำลังโหลดสื่อ…";
         // Load independently so a slow attachment never blocks the feed or its controls.
         show().catch(() => {
@@ -721,7 +735,7 @@
     if (reset) clear(v);
     v.detail = id;
     const data = await api(v, "/api/social/records/" + encodeURIComponent(id));
-    if (!current(v)) return;
+    if (!current(v) || v.detail !== id) return;
     const r = data.record;
     if (["watch", "community", "listing"].includes(r.kind)) {
       await window.PanthoriumSocial.renderCard(v, r, v.content, data);
@@ -743,32 +757,7 @@
         );
       return;
     }
-    if (r.kind === "group") {
-      card.append(
-        button(
-          v,
-          r.members.includes(v.uid) ? "ออกจากกลุ่ม" : "เข้าร่วมกลุ่ม",
-          async () => {
-            await write(
-              v,
-              r.members.includes(v.uid) ? "group-leave" : "group-join",
-              { recordId: r.id },
-            );
-            await detail(v, r.id);
-          },
-        ),
-      );
-      if (r.members.includes(v.uid))
-        card.append(
-          button(v, "โพสต์ในกลุ่ม", async () => {
-            v.groupId = r.id;
-            await compose(v);
-          }),
-        );
-      for (const post of data.items)
-        await window.PanthoriumSocial.renderCard(v, post, card);
-      return;
-    }
+    if (r.kind === "group") return groupDetail(v, data, card);
     if (r.kind === "playlist") {
       for (const post of data.items) {
         await window.PanthoriumSocial.renderCard(v, post, card);
@@ -829,6 +818,108 @@
       );
     }
   }
+  const messageFingerprint = items => JSON.stringify(items.map(x => [x.id, x.deleted, x.readAt, x.readCount, x.author?.name]));
+  function groupRequests(v, requests) {
+    const panel = v.groupState?.requests;
+    if (!panel?.isConnected) return;
+    const signature = JSON.stringify(requests);
+    if (v.groupState.requestSignature === signature) return;
+    v.groupState.requestSignature = signature;
+    const groupId = v.detail;
+    panel.replaceChildren(el("h4", "คำขอเข้าร่วมกลุ่ม (" + requests.length + ")"));
+    if (!requests.length) panel.append(el("p", "ยังไม่มีคำขอรออนุมัติ"));
+    for (const request of requests) {
+      const row = el("article", null, { class: "social-card", "data-group-request": request.userId });
+      row.append(el("strong", request.name), el("p", new Date(request.requestedAt).toLocaleString("th-TH")));
+      for (const [label, accept] of [["อนุมัติ", true], ["ไม่อนุมัติ", false]])
+        row.append(button(v, label, async () => {
+          await write(v, "group-review", { recordId: groupId, userId: request.userId, accept });
+          if (v.groupState?.requests !== panel) return;
+          const fresh = await api(v, "/api/social/records/" + encodeURIComponent(groupId));
+          if (v.groupState?.requests !== panel) return;
+          groupRequests(v, fresh.requests || []);
+          v.groupState.summary.textContent = groupSummary(fresh.record);
+        }));
+      panel.append(row);
+    }
+  }
+  const groupSummary = r => (r.privacy === "closed" ? "กลุ่มปิด • ผู้สร้างอนุมัติการเข้าร่วม" : "กลุ่มเปิด • เข้าร่วมได้ทันที") + " • สมาชิก " + r.memberCount + " คน";
+  async function groupMessages(v, data, older = false) {
+    const log = v.messageLog;
+    if (!current(v) || !v.groupState || !log?.isConnected) return;
+    if (!v.groupItems) v.groupItems = new Map();
+    // Keep older loaded history, but replace the refreshed page so removed/blocked messages disappear.
+    if (!older) {
+      const first = data.items[0]?.id;
+      for (const id of v.groupItems.keys()) if (!first || id >= first) v.groupItems.delete(id);
+    }
+    for (const item of data.items) v.groupItems.set(item.id, item);
+    if (older || !v.groupState.historyLoaded) v.groupCursor = data.nextCursor;
+    if (older) v.groupState.historyLoaded = true;
+    const items = [...v.groupItems.values()].sort((a, b) => a.id.localeCompare(b.id));
+    const fingerprint = messageFingerprint(items);
+    if (v.lastMessages !== fingerprint) {
+      v.lastMessages = fingerprint;
+      await renderMessages(v, items, log);
+    }
+    if (!current(v) || v.messageLog !== log || !v.groupState) return;
+    v.groupState.older.hidden = !v.groupCursor;
+    v.groupState.empty.hidden = !!items.length;
+    scheduleRead(v);
+  }
+  async function groupDetail(v, data, card) {
+    const r = data.record;
+    const summary = el("p", groupSummary(r));
+    card.append(summary, el("p", r.text || ""));
+    v.groupState = { membership: r.membership, summary };
+    card.append(button(v, "กลับไปกลุ่มทั้งหมด", () => collections(v, "group")));
+    if (r.membership !== "member") {
+      card.append(el("p", r.membership === "pending" ? "ส่งคำขอแล้ว รอผู้สร้างกลุ่มอนุมัติ" :
+        r.membership === "declined" ? "คำขอก่อนหน้ายังไม่ได้รับอนุมัติ คุณสามารถส่งคำขอใหม่ได้" :
+        "เข้าร่วมกลุ่มเพื่ออ่านแชตและแชร์ข้อความ รูปภาพ วิดีโอ และไฟล์"));
+      card.append(button(v, r.membership === "pending" ? "ยกเลิกคำขอ" : r.privacy === "closed" ? "ขอเข้าร่วมกลุ่ม" : "เข้าร่วมกลุ่ม", async () => {
+        await write(v, r.membership === "pending" ? "group-cancel-request" : "group-join", { recordId: r.id });
+        await detail(v, r.id);
+      }));
+      return;
+    }
+    if (r.ownerId === v.uid) {
+      card.append(el("p", "คุณเป็นผู้สร้างกลุ่ม"));
+      const requests = el("section", null, { "data-group-requests": "" });
+      card.append(requests);
+      v.groupState.requests = requests;
+      groupRequests(v, data.requests || []);
+    } else card.append(button(v, "ออกจากกลุ่ม", async () => {
+      await write(v, "group-leave", { recordId: r.id });
+      await detail(v, r.id);
+    }));
+    card.append(el("h4", "แชตกลุ่ม"));
+    const older = button(v, "โหลดข้อความก่อนหน้า", async () => {
+      const log = v.messageLog, id = r.id;
+      const previous = await api(v, "/api/social/records/" + encodeURIComponent(id) + "?before=" + encodeURIComponent(v.groupCursor));
+      if (v.detail === id && v.messageLog === log) await groupMessages(v, previous, true);
+    });
+    const empty = el("p", "ยังไม่มีข้อความ เริ่มสนทนาในกลุ่มได้เลย");
+    const log = el("div", null, { "data-social-messages": r.id, "aria-label": "ข้อความในกลุ่ม" });
+    card.append(older, empty, log);
+    Object.assign(v.groupState, { older, empty });
+    v.messageLog = log;
+    await groupMessages(v, data);
+    const form = el("form", null, { "data-group-composer": "" });
+    card.append(form);
+    const text = input(form, "ข้อความในกลุ่ม", "textarea"); text.maxLength = 8000;
+    const getFiles = await attachments(v, form);
+    bindForm(v, form, "group-message", () => ({ recordId: r.id, text: text.value, fileIds: getFiles() }), async () => {
+      if (v.detail !== r.id || v.messageLog !== log) return;
+      text.value = ""; getFiles.reset();
+      const fresh = await api(v, "/api/social/records/" + encodeURIComponent(r.id));
+      if (v.detail === r.id && v.messageLog === log) await groupMessages(v, fresh);
+    });
+    // Existing group posts stay available alongside the new conversation.
+    const posts = el("details"); posts.append(el("summary", "โพสต์ในกลุ่ม (" + (data.posts || []).length + ")")); card.append(posts);
+    posts.append(button(v, "โพสต์ในกลุ่ม", async () => { v.groupId = r.id; await compose(v); }));
+    for (const post of data.posts || []) await window.PanthoriumSocial.renderCard(v, post, posts);
+  }
   function messageVisible(v, node) {
     if (!current(v) || document.visibilityState !== "visible" || !document.hasFocus() ||
         !v.messageLog?.contains(node) || !v.root.contains(v.messageLog)) return false;
@@ -878,12 +969,24 @@
     if (!current(v) || !log.isConnected) return;
     const version = v.messageRender = (v.messageRender || 0) + 1;
     v.readObserver?.disconnect();
-    log.replaceChildren();
+    const previous = v.groupState && v.messageLog === log ? new Map([...log.children].map(node => [node.dataset.messageId, node])) : null;
+    if (!previous) log.replaceChildren();
+    const rendered = [];
+    const revoke = node => {
+      for (const media of node.querySelectorAll('[src^="blob:"]')) { URL.revokeObjectURL(media.src); v.urls.delete(media.src); }
+    };
     for (const msg of items) {
       if (!current(v) || !log.isConnected || v.messageRender !== version) return;
-      const c = el("article", null, { class: "social-message", "data-message-id": msg.id });
-      if (msg.kind === "message" && msg.ownerId !== v.uid && !msg.readAt) c.dataset.incoming = "true";
-      c.append(
+      const signature = JSON.stringify([msg.text, msg.files, msg.author, msg.createdAt]);
+      const old = previous?.get(msg.id);
+      const reuse = old?.dataset.messageSignature === signature;
+      const c = reuse ? old : el("article", null, { class: "social-message", "data-message-id": msg.id });
+      c.dataset.messageSignature = signature;
+      rendered.push(c);
+      const chat = ["message", "group-message"].includes(msg.kind);
+      if (chat && msg.ownerId !== v.uid && !msg.readAt) c.dataset.incoming = "true";
+      else delete c.dataset.incoming;
+      if (!reuse) c.append(
         el(
           "small",
           (msg.ownerId === v.uid ? "คุณ" : msg.author?.name || "สมาชิก") +
@@ -892,24 +995,40 @@
         ),
         el("p", msg.text),
       );
-      if (msg.kind === "message" && msg.ownerId === v.uid) {
-        const label = msg.readAt ? "อ่านแล้ว" : "ส่งแล้ว";
-        const receipt = el("span", msg.readAt ? "✓✓" : "✓", {
+      if (chat && msg.ownerId === v.uid) {
+        const label = msg.readAt ? msg.kind === "group-message" ? "อ่านแล้ว " + msg.readCount + " คน" : "อ่านแล้ว" : "ส่งแล้ว";
+        const receipt = c.querySelector(".social-message-receipt") || el("span", null, {
           class: "social-message-receipt", "data-delivery": msg.readAt ? "read" : "sent",
           "aria-label": label, title: label,
         });
-        c.append(receipt);
+        receipt.textContent = msg.readAt ? "✓✓" : "✓";
+        receipt.dataset.delivery = msg.readAt ? "read" : "sent";
+        receipt.setAttribute("aria-label", label); receipt.title = label;
+        if (!receipt.isConnected) c.append(receipt);
+        if (msg.kind === "group-message") {
+          const count = c.querySelector("[data-group-read-count]") || el("small", null, { "data-group-read-count": "" });
+          count.textContent = msg.readCount ? label : "";
+          if (!count.isConnected) c.append(count);
+        }
       }
+      if (reuse) continue;
       await media(v, msg, c);
       if (!current(v) || !log.isConnected || v.messageRender !== version) return;
-      if (msg.ownerId === v.uid && msg.kind === "message")
+      if (msg.ownerId === v.uid && chat)
         c.append(
           button(v, "ลบข้อความ", async () => {
             await write(v, "delete", { recordId: msg.id });
+            v.groupItems?.delete(msg.id);
             c.remove();
           }),
         );
-      log.append(c);
+      if (old) { revoke(old); old.replaceWith(c); }
+      else log.append(c);
+    }
+    if (previous) {
+      const keep = new Set(rendered);
+      for (const node of [...log.children]) if (!keep.has(node)) { revoke(node); node.remove(); }
+      rendered.forEach((node, index) => { if (log.children[index] !== node) log.insertBefore(node, log.children[index] || null); });
     }
     if (current(v) && v.messageLog === log && log.isConnected) {
       if (window.IntersectionObserver) {
@@ -994,17 +1113,22 @@
       const f = el("form"),
         title = input(f, "ชื่อ");
       card.append(f);
+      title.maxLength = 120; title.required = true;
+      const privacy = kind === "group" ? select(f, "ประเภทกลุ่ม", [["open", "แบบเปิด — เข้าร่วมได้ทันที"], ["closed", "แบบปิด — ผู้สร้างอนุมัติคำขอ"]], "open") : null;
+      const description = kind === "group" ? input(f, "คำอธิบายกลุ่ม", "textarea") : null;
+      if (description) description.maxLength = 2000;
       bindForm(
         v,
         f,
         kind === "group" ? "group-create" : "playlist-create",
-        () => ({ title: title.value }),
-        () => collections(v, kind, targetId),
+        () => ({ title: title.value, ...(privacy ? { privacy: privacy.value, text: description.value } : {}) }),
+        out => kind === "group" ? detail(v, out.record.id) : collections(v, kind, targetId),
       );
     }
     for (const r of data.items) {
       const c = el("article", null, { class: "social-card" });
       c.append(el("h4", r.title || r.targetId));
+      if (kind === "group") c.append(el("p", groupSummary(r)), el("small", r.membership === "member" ? "เป็นสมาชิกแล้ว" : r.membership === "pending" ? "รออนุมัติคำขอ" : ""));
       if (kind === "block")
         c.append(
           button(v, "เลิกบล็อก", async () => {
@@ -1143,6 +1267,7 @@
   }
   async function poll(v) {
     if (!current(v)) return;
+    let groupDetailId;
     try {
       if (v.module === "talk") {
         const data = await api(v, "/api/social/inbox");
@@ -1176,13 +1301,21 @@
             await startRTC(v, c);
         }
       }
-      if (v.detail && v.messageLog?.isConnected) {
+      if (v.detail && (v.messageLog?.isConnected || v.groupState)) {
         const detailId = v.detail, messageLog = v.messageLog;
+        if (v.groupState) groupDetailId = detailId;
         const latest = await api(
           v,
           "/api/social/records/" + encodeURIComponent(detailId),
         );
         if (!current(v) || v.detail !== detailId || v.messageLog !== messageLog) return;
+        if (v.groupState) {
+          if (latest.record.membership !== v.groupState.membership) { await detail(v, detailId); return; }
+          v.groupState.summary.textContent = groupSummary(latest.record);
+          groupRequests(v, latest.requests || []);
+          if (latest.record.membership === "member") await groupMessages(v, latest);
+          return;
+        }
         const fingerprint = JSON.stringify(
           latest.items.map((x) => [x.id, x.deleted, x.readAt, x.author?.name]),
         );
@@ -1193,6 +1326,7 @@
         scheduleRead(v);
       }
     } catch (e) {
+      if (v.groupState && v.detail === groupDetailId && e.message === "social_not_found") clear(v);
       status(v, friendly(e));
     } finally {
       if (current(v)) v.timer = setTimeout(() => poll(v), 4000);
@@ -1383,7 +1517,7 @@
     } catch (error) {
       status(v, friendly(error));
     }
-    if (["talk", "live"].includes(module)) poll(v);
+    if (["talk", "live", "community"].includes(module)) poll(v);
     return root;
   }
   let notificationState;

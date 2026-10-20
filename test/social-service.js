@@ -130,7 +130,7 @@ async function suite(repository) {
     })
   ).record;
   assert.equal(
-    (await service.read({ user: a, recordId: group.id })).items.length,
+    (await service.read({ user: a, recordId: group.id })).posts.length,
     1,
   );
   await assert.rejects(
