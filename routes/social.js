@@ -65,6 +65,8 @@ function createSocialRouter(auth, service) {
     reads,
     route((req) => service.inbox({ user: req.user })),
   );
+  r.get("/notifications", reads, route(req => service.notifications.list(account(req.user), req.query.before)));
+  r.post("/notifications/read", writes, route(req => service.notifications.read(account(req.user), req.body?.ids)));
   r.get(
     "/reports",
     reads,

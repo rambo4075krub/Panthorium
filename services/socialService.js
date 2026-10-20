@@ -1,4 +1,5 @@
 "use strict";
+const { SocialNotifications, noticeId } = require("./socialNotifications");
 const { randomUUID, createHash, createHmac } = require("node:crypto");
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -43,6 +44,7 @@ class SocialService {
     this.repo = repository;
     this.files = files;
     this.accounts = accounts;
+    this.notifications = new SocialNotifications(this);
     this.turnUrls = turnUrls;
     this.turnSecret = turnSecret;
   }
@@ -324,6 +326,8 @@ class SocialService {
       const readAt = new Date().toISOString();
       for (const message of messages) {
         if (!message.readAt) await repo.put({ ...message, readAt });
+        const notice = await repo.get(noticeId("message", message.id, uid));
+        if (notice && !notice.readAt) await repo.put({ ...notice, readAt });
       }
       return { ok: true };
     });
@@ -362,6 +366,7 @@ class SocialService {
         prepared,
         user,
       );
+      await this.notifications.record(repo, uid, action, result, input);
       if (receiptId)
         await repo.put(
           row("receipt", uid, {
@@ -908,7 +913,7 @@ class SocialService {
           c.members.find((x) => x !== uid),
         ))
       )
-        safe.push(c);
+        safe.push({ ...c, author: (await this.messageView(c, t)).author });
     }
     return {
       ok: true,

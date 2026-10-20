@@ -85,12 +85,15 @@
       throw Error(data.error || "social_request_failed");
     return data;
   }
-  const write = (v, action, input, requestId = crypto.randomUUID()) =>
-    api(v, "/api/social/actions", {
+  const write = async (v, action, input, requestId = crypto.randomUUID()) => {
+    const result = await api(v, "/api/social/actions", {
       method: "POST",
       headers: { "Idempotency-Key": requestId },
       body: JSON.stringify({ action, input }),
     });
+    if (!["signal", "live-heartbeat", "call-heartbeat"].includes(action)) refreshNotifications();
+    return result;
+  };
   function button(v, text, fn) {
     const b = el("button", text, { type: "button" });
     b.addEventListener("click", async () => {
@@ -468,7 +471,59 @@
       }
     };
   }
-  async function card(v, r, parent) {
+  function inlineComments(v, record, parent, initial) {
+    const section = el("section", null, {
+      class: "social-comments", "data-social-comments": record.id,
+      "aria-label": "ความคิดเห็นใต้โพสต์",
+    });
+    const log = el("div", "กำลังโหลดความคิดเห็น…", { "data-social-messages": record.id });
+    const form = el("form", null, { "data-social-comment-form": record.id });
+    const text = input(form, "เขียนความคิดเห็น", "textarea");
+    text.setAttribute("data-social-comment-input", "");
+    text.required = true;
+    text.maxLength = 2000;
+    section.append(el("h4", "ความคิดเห็น"), log, form);
+    parent.append(section);
+    let version = 0, items = [];
+    const active = () => current(v) && section.isConnected;
+    const render = (data, older = false) => {
+      if (!active()) return;
+      items = older ? [...data.items, ...items] : data.items;
+      log.replaceChildren();
+      if (data.nextCursor)
+        log.append(button(v, "ดูความคิดเห็นก่อนหน้า", () => load(data.nextCursor)));
+      if (!items.length) log.append(el("p", "ยังไม่มีความคิดเห็น"));
+      for (const comment of items) {
+        const row = el("article", null, { class: "social-message", "data-comment-id": comment.id });
+        row.append(
+          el("small", (comment.ownerId === v.uid ? "คุณ" : comment.author?.name || "สมาชิก") +
+            " • " + new Date(comment.createdAt).toLocaleString("th-TH")),
+          el("p", comment.text),
+        );
+        log.append(row);
+      }
+    };
+    const load = async (before) => {
+      const request = ++version;
+      try {
+        const data = await api(v, "/api/social/records/" + encodeURIComponent(record.id) +
+          (before ? "?before=" + encodeURIComponent(before) : ""));
+        if (active() && request === version) render(data, !!before);
+      } catch (error) {
+        if (!active() || request !== version) return;
+        log.replaceChildren(el("p", "โหลดความคิดเห็นไม่สำเร็จ: " + friendly(error)),
+          button(v, "ลองโหลดความคิดเห็นอีกครั้ง", () => load()));
+      }
+    };
+    bindForm(v, form, "comment", () => ({ recordId: record.id, text: text.value }), async () => {
+      if (!active()) return;
+      text.value = "";
+      await load();
+    });
+    if (initial) render(initial);
+    else load();
+  }
+  async function card(v, r, parent, commentData) {
     const c = el("article", null, {
       class: "social-card",
       "data-record-id": r.id,
@@ -560,7 +615,7 @@
             await feed(v);
           },
         ),
-        button(v, "ความคิดเห็น", () => detail(v, r.id)),
+        button(v, "ความคิดเห็น", () => c.querySelector("[data-social-comment-input]")?.focus()),
       );
     }
     if (r.kind === "watch")
@@ -657,6 +712,8 @@
         }),
       ),
     );
+    if (["watch", "community", "listing"].includes(r.kind))
+      inlineComments(v, r, c, commentData);
   }
   async function detail(v, id, reset = true) {
     if (reset) clear(v);
@@ -664,6 +721,10 @@
     const data = await api(v, "/api/social/records/" + encodeURIComponent(id));
     if (!current(v)) return;
     const r = data.record;
+    if (["watch", "community", "listing"].includes(r.kind)) {
+      await window.PanthoriumSocial.renderCard(v, r, v.content, data);
+      return;
+    }
     const card = section(v, r.title || "บทสนทนา");
     if (r.kind === "thread" && r.status === "pending") {
       card.append(el("p", "คำขอสนทนา • ยังส่งข้อความหรือโทรไม่ได้"));
@@ -728,7 +789,10 @@
       );
     const log = el("div", null, { "data-social-messages": id });
     card.append(log);
-    if (["thread", "live"].includes(r.kind)) v.messageLog = log;
+    if (["thread", "live"].includes(r.kind)) {
+      v.messageLog = log;
+      v.lastMessages = JSON.stringify(data.items.map(x => [x.id, x.deleted, x.readAt, x.author?.name]));
+    }
     await renderMessages(v, data.items, log);
     if (
       r.kind === "thread" ||
@@ -802,6 +866,7 @@
       if (current(v) && v.messageLog === log) {
         v.readSeen ||= new Set();
         for (const id of ids) v.readSeen.add(id);
+        refreshNotifications();
       }
     } catch (_) {
       // Retry visible messages on the next poll; never claim an unconfirmed read.
@@ -987,7 +1052,16 @@
       () => feed(v),
     );
   }
-  async function orders(v) {
+  async function personDetail(v, personId) {
+    clear(v);
+    const data = await api(v, "/api/social/records/" + encodeURIComponent("profile:" + personId));
+    const p = data.record, box = section(v, p.name || "สมาชิก");
+    box.append(el("p", p.bio || ""), button(v, "ขอสนทนา", async () => {
+      const out = await write(v, "thread", { userId: personId });
+      await open("talk", { recordId: out.record.id });
+    }));
+  }
+  async function orders(v, selectedId) {
     clear(v);
     const data = await api(v, "/api/social/inbox"),
       sectionNode = section(v, "รายการซื้อขาย");
@@ -1028,6 +1102,7 @@
         );
       }
       sectionNode.append(c);
+      if (r.id === selectedId) { c.dataset.selectedOrder = "true"; c.style.borderColor = "#ff9f43"; c.scrollIntoView?.({ block: "nearest" }); }
     }
   }
   async function startRTC(v, r) {
@@ -1077,7 +1152,7 @@
             box.append(
               el(
                 "p",
-                (c.video ? "วิดีโอคอล" : "สายโทรเข้า") + " จาก " + c.ownerId,
+                (c.video ? "วิดีโอคอล" : "สายโทรเข้า") + " จาก " + (c.author?.name || "สมาชิก"),
               ),
               button(v, "รับสาย", async () => {
                 const result = await write(v, "call-answer", {
@@ -1162,7 +1237,9 @@
     let v = views.get(module);
     if (v && current(v)) {
       window.focusWindow?.(key);
-      if (options.recordId) await detail(v, options.recordId);
+      if (options.orders) await orders(v, options.recordId);
+      else if (options.personId) await personDetail(v, options.personId);
+      else if (options.recordId) await detail(v, options.recordId);
       if (options.sourceFileIds) {
         v.sourceFileIds = options.sourceFileIds;
         await compose(v);
@@ -1172,7 +1249,7 @@
     const markup =
       '<div class="social-app" data-social="' +
       module +
-      '"><style>.social-app{height:100%;overflow:auto;padding:20px;color:var(--text,#edf2f7);background:linear-gradient(145deg,#10151f,#191710);box-sizing:border-box}.social-app *{box-sizing:border-box}.social-app button,.social-app input,.social-app select,.social-app textarea{font:inherit;color:inherit;background:#17202d;border:1px solid #66503d;border-radius:9px;padding:9px;max-width:100%}.social-app button{cursor:pointer;margin:4px;min-height:40px}.social-app button:hover{border-color:#ff912e}.social-app button:disabled{opacity:.5}.social-app label{display:block;margin:10px 0}.social-app label input:not([type=checkbox]),.social-app textarea,.social-app select{display:block;width:100%;margin-top:5px}.social-app textarea{min-height:90px}.social-app option{background:#17202d;color:#fff}.social-app h1{color:#ffb26e;font-size:26px}.social-app nav{display:flex;flex-wrap:wrap;gap:4px}.social-card{border:1px solid #514637;border-radius:14px;padding:16px;margin:12px 0;background:#111923}.social-card p,.social-message p{white-space:pre-wrap;overflow-wrap:anywhere}.social-message{padding:12px;border-bottom:1px solid #3e4146}.social-app small{color:#b5becb;overflow-wrap:anywhere}.social-app [role=status]{min-height:24px;color:#ffb26e}.social-media img,.social-media video{display:block;max-width:100%;max-height:420px}.social-media pre{white-space:pre-wrap;max-height:420px;overflow:auto}.social-video-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.social-message-receipt{display:inline-block;margin:4px 8px;color:#9bb1c9;font-size:18px;font-weight:600}.social-message-receipt[data-delivery="read"]{letter-spacing:-6px;padding-right:6px;color:#66d0ff}.social-video-grid video{width:100%;max-height:400px;background:#000}.social-app [hidden]{display:none!important}@media(max-width:540px){.social-app{padding:10px}.social-card{padding:12px}}</style><header><small>PANTHORIUM / SOCIAL MEDIA</small><h1>' +
+      '"><style>.social-app{height:100%;overflow:auto;padding:20px;color:var(--text,#edf2f7);background:linear-gradient(145deg,#10151f,#191710);box-sizing:border-box}.social-app *{box-sizing:border-box}.social-app button,.social-app input,.social-app select,.social-app textarea{font:inherit;color:inherit;background:#17202d;border:1px solid #66503d;border-radius:9px;padding:9px;max-width:100%}.social-app button{cursor:pointer;margin:4px;min-height:40px}.social-app button:hover{border-color:#ff912e}.social-app button:disabled{opacity:.5}.social-app label{display:block;margin:10px 0}.social-app label input:not([type=checkbox]),.social-app textarea,.social-app select{display:block;width:100%;margin-top:5px}.social-app textarea{min-height:90px}.social-app option{background:#17202d;color:#fff}.social-app h1{color:#ffb26e;font-size:26px}.social-app nav{display:flex;flex-wrap:wrap;gap:4px}.social-card{border:1px solid #514637;border-radius:14px;padding:16px;margin:12px 0;background:#111923}.social-card p,.social-message p{white-space:pre-wrap;overflow-wrap:anywhere}.social-comments{border-top:1px solid #3e4146;margin-top:16px;padding-top:16px}.social-message{padding:12px;border-bottom:1px solid #3e4146}.social-app small{color:#b5becb;overflow-wrap:anywhere}.social-app [role=status]{min-height:24px;color:#ffb26e}.social-media img,.social-media video{display:block;max-width:100%;max-height:420px}.social-media pre{white-space:pre-wrap;max-height:420px;overflow:auto}.social-video-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.social-message-receipt{display:inline-block;margin:4px 8px;color:#9bb1c9;font-size:18px;font-weight:600}.social-message-receipt[data-delivery="read"]{letter-spacing:-6px;padding-right:6px;color:#66d0ff}.social-video-grid video{width:100%;max-height:400px;background:#000}.social-app [hidden]{display:none!important}@media(max-width:540px){.social-app{padding:10px}.social-card{padding:12px}}</style><header><small>PANTHORIUM / SOCIAL MEDIA</small><h1>' +
       specs.find((s) => s[0] === module)[1] +
       '</h1></header><nav data-social-nav></nav><p role="status" aria-live="polite"></p><div data-social-incoming></div><section data-social-rtc hidden></section><div data-social-content></div></div>';
     if (typeof window.createWindow !== "function")
@@ -1222,6 +1299,8 @@
     const nav = root.querySelector("nav");
     for (const [id, label] of specs)
       nav.append(button(v, label, () => open(id)));
+    const alerts = button(v, "การแจ้งเตือน", showNotifications);
+    alerts.append(notificationBadge()); nav.append(alerts); notificationBadges();
     nav.append(
       button(v, "โปรไฟล์", () => profile(v)),
       button(v, "ค้นหาคน", () => people(v)),
@@ -1281,7 +1360,9 @@
       apps.value = "";
     };
     try {
-      if (options.recordId) await detail(v, options.recordId);
+      if (options.orders) await orders(v, options.recordId);
+      else if (options.personId) await personDetail(v, options.personId);
+      else if (options.recordId) await detail(v, options.recordId);
       else if (v.sourceFileIds.length) await compose(v);
       else await feed(v);
     } catch (error) {
@@ -1290,7 +1371,169 @@
     if (["talk", "live"].includes(module)) poll(v);
     return root;
   }
+  let notificationState;
+  function notificationStyles() {
+    if (document.getElementById("social-notification-style")) return;
+    const style = el("style", `
+      #social-notification-bell{position:fixed;right:max(14px,env(safe-area-inset-right,0px));bottom:calc(var(--taskbar-h,52px) + env(safe-area-inset-bottom,0px) + 24px);z-index:10040;width:44px;height:44px;border:1px solid #42647a;border-radius:14px;background:#102331;color:#e6f4ff;cursor:pointer;box-shadow:0 4px 16px #0008;font:inherit}
+      .social-notification-badge{display:inline-block;min-width:19px;padding:1px 5px;margin-left:6px;border-radius:20px;background:#ff9f43;color:#101820;font:700 11px/18px system-ui;text-align:center}
+      #social-notification-bell .social-notification-badge{position:absolute;right:-6px;top:-7px;margin:0}
+      #social-notification-center{position:fixed;right:max(12px,env(safe-area-inset-right,0px));bottom:calc(var(--taskbar-h,52px) + env(safe-area-inset-bottom,0px) + 76px);z-index:10041;width:min(410px,calc(100vw - 24px));max-height:min(70dvh,620px);overflow:auto;box-sizing:border-box;padding:16px;border:1px solid #42647a;border-radius:18px;background:#0d1926;color:#edf4ff;box-shadow:0 14px 48px #0009;font:14px/1.5 system-ui}
+      #social-notification-center header{display:flex;align-items:center;justify-content:space-between;gap:12px}#social-notification-center h2{font-size:18px;margin:0}
+      #social-notification-center button,.social-notification-menu{font:inherit;color:inherit;background:#163044;border:1px solid #42647a;border-radius:9px;min-height:40px;padding:8px;cursor:pointer}#social-notification-center button:disabled{opacity:.5}
+      #social-notification-center button:focus-visible,#social-notification-bell:focus-visible{outline:2px solid #66d0ff;outline-offset:2px}
+      #social-notification-center article{padding:12px 0;border-bottom:1px solid #314354;overflow-wrap:anywhere}#social-notification-center article[data-unread=true]{border-left:3px solid #ff9f43;padding-left:10px}
+      #social-notification-center p{margin:4px 0}#social-notification-center small{color:#b5c7d8}#social-notification-center .social-notification-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+      .social-notification-menu{display:block;width:100%;text-align:left;margin:4px 0}#social-notification-center [hidden],.social-notification-badge[hidden]{display:none!important}
+    `, { id: "social-notification-style" });
+    document.head.append(style);
+  }
+  function notificationBadges() {
+    const data = notificationState?.data || {};
+    for (const node of document.querySelectorAll("[data-social-notification-count]")) {
+      const count = data.unreadCount || 0;
+      node.textContent = count > 99 ? "99+" : String(count);
+      node.hidden = count === 0;
+      node.setAttribute("aria-label", count + " การแจ้งเตือนยังไม่อ่าน");
+    }
+    for (const node of document.querySelectorAll("[data-social-module-count]")) {
+      const count = data.counts?.[node.dataset.socialModuleCount] || 0;
+      node.textContent = count > 99 ? "99+" : String(count);
+      node.hidden = count === 0;
+    }
+    notificationState?.bell?.setAttribute("aria-label", "การแจ้งเตือน Social Media • ยังไม่อ่าน " + (data.unreadCount || 0) + " รายการ");
+  }
+  const notificationBadge = () => el("span", "", { class: "social-notification-badge", "data-social-notification-count": "", hidden: "" });
+  function closeNotifications() {
+    const n = notificationState;
+    if (!n?.panel) return;
+    n.panel.remove(); n.panel = null;
+    n.bell.setAttribute("aria-expanded", "false");
+    if (n.returnFocus?.isConnected) n.returnFocus.focus();
+  }
+  async function readNotifications(n, ids) {
+    if (!ids.length) return;
+    await api(n, "/api/social/notifications/read", { method: "POST", body: JSON.stringify({ ids }) });
+    await refreshNotifications();
+  }
+  async function navigateNotification(n, item) {
+    if (!item.readAt) await readNotifications(n, [item.id]);
+    if (!current(n)) return;
+    closeNotifications();
+    if (item.target) await open(item.target.module, item.target);
+  }
+  function drawNotifications(n) {
+    if (!current(n) || !n.panel) return;
+    const panel = n.panel;
+    const focusId = panel.contains(document.activeElement) ? document.activeElement.dataset.notificationFocus : null;
+    panel.replaceChildren();
+    const header = el("header"), title = el("h2", "การแจ้งเตือน Social Media");
+    const close = button(n, "ปิด", closeNotifications); close.dataset.notificationFocus = "close";
+    header.append(title, close); panel.append(header);
+    panel.append(el("p", "ยังไม่อ่าน " + (n.data?.unreadCount || 0) + " รายการ"));
+    n.status = el("p", n.error || "", { role: "status", "aria-live": "polite" }); panel.append(n.status);
+    const toolbar = el("div", null, { class: "social-notification-actions" });
+    const refresh = button(n, "รีเฟรช", () => refreshNotifications()); refresh.dataset.notificationFocus = "refresh";
+    toolbar.append(refresh);
+    const items = n.pageItems || n.data?.items || [];
+    const ids = items.filter(x => !x.readAt).map(x => x.id);
+    if (ids.length) {
+      const all = button(n, "อ่านทั้งหมดในหน้านี้", () => readNotifications(n, ids.slice(0, 100)));
+      all.dataset.notificationFocus = "read-page"; toolbar.append(all);
+    }
+    panel.append(toolbar);
+    if (!items.length) panel.append(el("p", n.error ? "โหลดรายการไม่สำเร็จ กรุณาลองอีกครั้ง" : "ยังไม่มีการแจ้งเตือน"));
+    for (const item of items) {
+      const row = el("article", null, { "data-notification-id": item.id, "data-unread": String(!item.readAt) });
+      row.append(el("p", item.name + " • " + item.text), el("small", new Date(item.createdAt).toLocaleString("th-TH")));
+      if (item.reason) row.append(el("p", item.reason));
+      const actions = el("div", null, { class: "social-notification-actions" });
+      if (item.target) {
+        const go = button(n, "เปิดรายการ", () => navigateNotification(n, item));
+        go.dataset.notificationFocus = item.id; actions.append(go);
+      }
+      if (!item.readAt) {
+        const read = button(n, "อ่านแล้ว", () => readNotifications(n, [item.id]));
+        read.dataset.notificationFocus = "read:" + item.id; actions.append(read);
+      }
+      row.append(actions); panel.append(row);
+    }
+    if (n.pageCursor) {
+      panel.append(button(n, "รายการล่าสุด", async () => { n.pageCursor = null; n.pageItems = null; await refreshNotifications(); }));
+    }
+    const cursor = n.pageCursor ? n.nextCursor : n.data?.nextCursor;
+    if (cursor) panel.append(button(n, "รายการก่อนหน้า", async () => {
+      const data = await api(n, "/api/social/notifications?before=" + encodeURIComponent(cursor));
+      n.pageCursor = cursor; n.nextCursor = data.nextCursor; n.pageItems = data.items; drawNotifications(n);
+    }));
+    if (focusId) [...panel.querySelectorAll("[data-notification-focus]")].find(x => x.dataset.notificationFocus === focusId)?.focus({ preventScroll: true });
+  }
+  async function refreshNotifications() {
+    const n = notificationState;
+    if (!n || !current(n)) return;
+    if (n.polling) return n.polling;
+    clearTimeout(n.timer);
+    n.polling = (async () => {
+      try {
+        const data = await api(n, "/api/social/notifications");
+        if (!current(n) || n !== notificationState) return;
+        const newItems = (data.items || []).filter(x => !x.readAt && !n.seen.has(x.id));
+        if (n.initialized && newItems.length && document.visibilityState === "visible" && typeof toast === "function")
+          toast("มีการแจ้งเตือน Social Media ใหม่ " + newItems.length + " รายการ • กดกระดิ่งเพื่อดู", 5000);
+        for (const item of data.items || []) n.seen.add(item.id);
+        // Bound the in-memory deduplication cache; the server stores read state.
+        if (n.seen.size > 1000) n.seen = new Set((data.items || []).map(x => x.id));
+        const changed = JSON.stringify(n.data) !== JSON.stringify(data) || n.error;
+        n.data = data; n.error = ""; n.initialized = true;
+        notificationBadges();
+        if (n.pageCursor && n.panel) {
+          const page = await api(n, "/api/social/notifications?before=" + encodeURIComponent(n.pageCursor));
+          n.pageItems = page.items; n.nextCursor = page.nextCursor; drawNotifications(n);
+        } else if (changed) drawNotifications(n);
+      } catch (e) {
+        if (current(n)) { n.error = "เชื่อมต่อการแจ้งเตือนไม่สำเร็จ จะลองใหม่อัตโนมัติ"; drawNotifications(n); }
+      } finally {
+        n.polling = null;
+        if (current(n) && n === notificationState) n.timer = setTimeout(refreshNotifications, n.error ? 30000 : document.visibilityState === "hidden" ? 30000 : 5000);
+      }
+    })();
+    return n.polling;
+  }
+  async function showNotifications() {
+    syncNotifications();
+    const n = notificationState;
+    if (!n || !current(n)) return;
+    if (!n.panel) {
+      n.returnFocus = document.activeElement;
+      n.panel = el("section", null, { id: "social-notification-center", role: "dialog", "aria-label": "การแจ้งเตือน Social Media", tabindex: "-1" });
+      document.body.append(n.panel); n.bell.setAttribute("aria-expanded", "true");
+      drawNotifications(n); n.panel.focus();
+    }
+    await refreshNotifications();
+  }
+  function syncNotifications() {
+    if (notificationState && !current(notificationState)) {
+      const old = notificationState; old.controller.abort(); clearTimeout(old.timer);
+      old.panel?.remove(); old.bell.remove(); notificationState = null;
+      notificationBadges();
+    }
+    if (!allowed() || notificationState) return;
+    notificationStyles();
+    const n = notificationState = { uid: uid(), root: document.body, controller: new AbortController(), seen: new Set(), data: { items: [], unreadCount: 0, counts: {} } };
+    const bell = n.bell = el("button", null, { id: "social-notification-bell", type: "button", "aria-haspopup": "dialog", "aria-expanded": "false", "aria-label": "การแจ้งเตือน Social Media" });
+    // A vector bell remains legible on devices without emoji fonts.
+    bell.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM9 21h6"/></svg>';
+    bell.append(notificationBadge()); document.body.append(bell);
+    bell.onclick = () => n.panel ? closeNotifications() : showNotifications();
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && n.panel) closeNotifications(); }, { signal: n.controller.signal });
+    document.addEventListener("pointerdown", e => { if (n.panel && !n.panel.contains(e.target) && !bell.contains(e.target)) closeNotifications(); }, { signal: n.controller.signal });
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshNotifications(); }, { signal: n.controller.signal });
+    window.addEventListener("online", refreshNotifications, { signal: n.controller.signal });
+    refreshNotifications();
+  }
+
   function menu() {
+    syncNotifications();
     const target = document.getElementById("sm-apps");
     if (!target) return;
     if (!allowed()) {
@@ -1303,6 +1546,12 @@
       target,
     );
     if (!g) return;
+    if (!g.querySelector(".social-notification-menu")) {
+      const entry = el("button", "การแจ้งเตือน", { type: "button", class: "social-notification-menu" });
+      entry.append(notificationBadge()); entry.onclick = () => { showNotifications(); document.getElementById("start-menu")?.classList.remove("open"); };
+      window.PanthoriumStartMenuUI.groupItems(g).append(entry);
+      g.querySelector(".sm-group-label")?.append(notificationBadge());
+    }
     for (const [id, name, thai, icon] of specs) {
       if (g.querySelector('[data-app-id="social-' + id + '"]')) continue;
       const b = el("button", icon + " " + name + " · " + thai, {
@@ -1311,6 +1560,7 @@
         "data-app-id": "social-" + id,
         "data-search-text": "social โซเชียล " + name + " " + thai,
       });
+      b.append(el("span", "", { class: "social-notification-badge", "data-social-module-count": id, hidden: "" }));
       b.onclick = () => {
         open(id).catch((e) => {
           if (typeof toast === "function") toast(friendly(e));
@@ -1319,6 +1569,7 @@
       };
       window.PanthoriumStartMenuUI.groupItems(g).append(b);
     }
+    notificationBadges();
   }
   function cleanup() {
     for (const v of views.values()) {
@@ -1337,6 +1588,8 @@
   window.PanthoriumSocial = {
     open,
     renderMenu: menu,
+    showNotifications,
+    refreshNotifications,
     renderCard: card,
     refresh: () =>
       Promise.all([...views.values()].filter(current).map((v) => feed(v))),
