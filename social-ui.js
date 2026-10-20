@@ -1233,6 +1233,7 @@
   }
   window.PanthoriumSocial = {
     open,
+    renderMenu: menu,
     renderCard: card,
     refresh: () =>
       Promise.all([...views.values()].filter(current).map((v) => feed(v))),
