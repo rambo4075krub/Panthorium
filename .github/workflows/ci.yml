@@ -48,6 +48,7 @@ jobs:
         run: |
           npx playwright install --with-deps --only-shell chromium
           node test/social-rtc-browser.js
+          node test/social-messages-browser.js
           node test/office-suite-browser.js
       - name: Real PostgreSQL foundation and organization integration
         run: npm run test:postgres

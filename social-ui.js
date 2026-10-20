@@ -132,6 +132,13 @@
     return n;
   }
   function clear(v) {
+    v.readObserver?.disconnect();
+    clearTimeout(v.readTimer);
+    v.readSeen = new Set();
+    v.messageRender = (v.messageRender || 0) + 1;
+    v.lastMessages = null;
+    v.messageLog = null;
+    v.detail = null;
     for (const url of v.urls) URL.revokeObjectURL(url);
     v.urls.clear();
     v.content.replaceChildren();
@@ -142,7 +149,8 @@
     return fn();
   }
   function bindForm(v, form, action, data, after) {
-    const submit = el("button", "บันทึก", { type: "submit" });
+    const sending = ["message", "live-chat", "comment"].includes(action);
+    const submit = el("button", sending ? "ส่ง" : "บันทึก", { type: "submit" });
     form.append(submit);
     let requestId = crypto.randomUUID();
     form.addEventListener("input", () => {
@@ -154,7 +162,7 @@
       submit.disabled = true;
       try {
         const out = await write(v, action, await data(), requestId);
-        status(v, "บันทึกแล้ว");
+        status(v, sending ? "ส่งแล้ว" : "บันทึกแล้ว");
         requestId = crypto.randomUUID();
         if (after) await after(out);
       } catch (e) {
@@ -701,6 +709,7 @@
       );
     const log = el("div", null, { "data-social-messages": id });
     card.append(log);
+    if (["thread", "live"].includes(r.kind)) v.messageLog = log;
     await renderMessages(v, data.items, log);
     if (
       r.kind === "thread" ||
@@ -734,23 +743,79 @@
         },
       );
     }
-    if (["thread", "live"].includes(r.kind)) v.messageLog = log;
+  }
+  function messageVisible(v, node) {
+    if (!current(v) || document.visibilityState !== "visible" || !document.hasFocus() ||
+        !v.messageLog?.contains(node) || !v.root.contains(v.messageLog)) return false;
+    const win = v.root.closest(".window");
+    const z = Number(getComputedStyle(win).zIndex) || 0;
+    for (const other of document.querySelectorAll(".window"))
+      if (other !== win && other.getClientRects().length && (Number(getComputedStyle(other).zIndex) || 0) > z) return false;
+    const rect = node.getBoundingClientRect();
+    let left = Math.max(0, rect.left), top = Math.max(0, rect.top),
+      right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom);
+    for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+      const style = getComputedStyle(parent), bounds = parent.getBoundingClientRect();
+      if (style.display === "none" || style.visibility !== "visible" || Number(style.opacity) === 0) return false;
+      if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) { left = Math.max(left, bounds.left); right = Math.min(right, bounds.right); }
+      if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) { top = Math.max(top, bounds.top); bottom = Math.min(bottom, bounds.bottom); }
+    }
+    if (rect.height <= 0 || rect.width <= 0 || bottom - top < Math.min(24, rect.height) || right - left < Math.min(80, rect.width)) return false;
+    const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+    return !!hit && node.contains(hit);
+  }
+  function scheduleRead(v) {
+    clearTimeout(v.readTimer);
+    v.readTimer = setTimeout(() => acknowledgeVisible(v), 150);
+  }
+  async function acknowledgeVisible(v) {
+    if (v.readBusy || !current(v) || !v.messageLog?.isConnected || !v.detail) return;
+    const log = v.messageLog, threadId = v.detail;
+    const ids = [...log.querySelectorAll('[data-incoming="true"]')]
+      .filter(node => !v.readSeen?.has(node.dataset.messageId) && messageVisible(v, node))
+      .map(node => node.dataset.messageId).slice(0, 100);
+    if (!ids.length) return;
+    v.readBusy = true;
+    try {
+      await api(v, "/api/social/records/" + encodeURIComponent(threadId) + "/read", {
+        method: "POST", body: JSON.stringify({ messageIds: ids }),
+      });
+      if (current(v) && v.messageLog === log) {
+        v.readSeen ||= new Set();
+        for (const id of ids) v.readSeen.add(id);
+      }
+    } catch (_) {
+      // Retry visible messages on the next poll; never claim an unconfirmed read.
+    } finally { v.readBusy = false; }
   }
   async function renderMessages(v, items, log) {
     if (!current(v) || !log.isConnected) return;
+    const version = v.messageRender = (v.messageRender || 0) + 1;
+    v.readObserver?.disconnect();
     log.replaceChildren();
     for (const msg of items) {
-      const c = el("article", null, { class: "social-message" });
+      if (!current(v) || !log.isConnected || v.messageRender !== version) return;
+      const c = el("article", null, { class: "social-message", "data-message-id": msg.id });
+      if (msg.kind === "message" && msg.ownerId !== v.uid && !msg.readAt) c.dataset.incoming = "true";
       c.append(
         el(
           "small",
-          (msg.ownerId === v.uid ? "คุณ" : msg.ownerId) +
+          (msg.ownerId === v.uid ? "คุณ" : msg.author?.name || "สมาชิก") +
             " • " +
             new Date(msg.createdAt).toLocaleString("th-TH"),
         ),
         el("p", msg.text),
       );
+      if (msg.kind === "message" && msg.ownerId === v.uid) {
+        const label = msg.readAt ? "อ่านแล้ว" : "ส่งแล้ว";
+        const receipt = el("span", msg.readAt ? "✓✓" : "✓", {
+          class: "social-message-receipt", "data-delivery": msg.readAt ? "read" : "sent",
+          "aria-label": label, title: label,
+        });
+        c.append(receipt);
+      }
       await media(v, msg, c);
+      if (!current(v) || !log.isConnected || v.messageRender !== version) return;
       if (msg.ownerId === v.uid && msg.kind === "message")
         c.append(
           button(v, "ลบข้อความ", async () => {
@@ -759,6 +824,13 @@
           }),
         );
       log.append(c);
+    }
+    if (current(v) && v.messageLog === log && log.isConnected) {
+      if (window.IntersectionObserver) {
+        v.readObserver = new IntersectionObserver(() => scheduleRead(v), { threshold: [0, 0.5, 1] });
+        log.querySelectorAll('[data-incoming="true"]').forEach(node => v.readObserver.observe(node));
+      }
+      scheduleRead(v);
     }
   }
   async function connectSettings(v) {
@@ -1009,22 +1081,26 @@
         }
       }
       if (v.detail && v.messageLog?.isConnected) {
+        const detailId = v.detail, messageLog = v.messageLog;
         const latest = await api(
           v,
-          "/api/social/records/" + encodeURIComponent(v.detail),
+          "/api/social/records/" + encodeURIComponent(detailId),
         );
+        if (!current(v) || v.detail !== detailId || v.messageLog !== messageLog) return;
         const fingerprint = JSON.stringify(
-          latest.items.map((x) => [x.id, x.deleted]),
+          latest.items.map((x) => [x.id, x.deleted, x.readAt, x.author?.name]),
         );
         if (fingerprint !== v.lastMessages) {
           v.lastMessages = fingerprint;
           await renderMessages(v, latest.items, v.messageLog);
         }
+        scheduleRead(v);
       }
     } catch (e) {
       status(v, friendly(e));
+    } finally {
+      if (current(v)) v.timer = setTimeout(() => poll(v), 4000);
     }
-    if (current(v)) v.timer = setTimeout(() => poll(v), 4000);
   }
   async function feed(v, before) {
     if (!before) {
@@ -1077,7 +1153,7 @@
     const markup =
       '<div class="social-app" data-social="' +
       module +
-      '"><style>.social-app{height:100%;overflow:auto;padding:20px;color:var(--text,#edf2f7);background:linear-gradient(145deg,#10151f,#191710);box-sizing:border-box}.social-app *{box-sizing:border-box}.social-app button,.social-app input,.social-app select,.social-app textarea{font:inherit;color:inherit;background:#17202d;border:1px solid #66503d;border-radius:9px;padding:9px;max-width:100%}.social-app button{cursor:pointer;margin:4px;min-height:40px}.social-app button:hover{border-color:#ff912e}.social-app button:disabled{opacity:.5}.social-app label{display:block;margin:10px 0}.social-app label input:not([type=checkbox]),.social-app textarea,.social-app select{display:block;width:100%;margin-top:5px}.social-app textarea{min-height:90px}.social-app option{background:#17202d;color:#fff}.social-app h1{color:#ffb26e;font-size:26px}.social-app nav{display:flex;flex-wrap:wrap;gap:4px}.social-card{border:1px solid #514637;border-radius:14px;padding:16px;margin:12px 0;background:#111923}.social-card p,.social-message p{white-space:pre-wrap;overflow-wrap:anywhere}.social-message{padding:12px;border-bottom:1px solid #3e4146}.social-app small{color:#b5becb;overflow-wrap:anywhere}.social-app [role=status]{min-height:24px;color:#ffb26e}.social-media img,.social-media video{display:block;max-width:100%;max-height:420px}.social-media pre{white-space:pre-wrap;max-height:420px;overflow:auto}.social-video-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.social-video-grid video{width:100%;max-height:400px;background:#000}.social-app [hidden]{display:none!important}@media(max-width:540px){.social-app{padding:10px}.social-card{padding:12px}}</style><header><small>PANTHORIUM / SOCIAL MEDIA</small><h1>' +
+      '"><style>.social-app{height:100%;overflow:auto;padding:20px;color:var(--text,#edf2f7);background:linear-gradient(145deg,#10151f,#191710);box-sizing:border-box}.social-app *{box-sizing:border-box}.social-app button,.social-app input,.social-app select,.social-app textarea{font:inherit;color:inherit;background:#17202d;border:1px solid #66503d;border-radius:9px;padding:9px;max-width:100%}.social-app button{cursor:pointer;margin:4px;min-height:40px}.social-app button:hover{border-color:#ff912e}.social-app button:disabled{opacity:.5}.social-app label{display:block;margin:10px 0}.social-app label input:not([type=checkbox]),.social-app textarea,.social-app select{display:block;width:100%;margin-top:5px}.social-app textarea{min-height:90px}.social-app option{background:#17202d;color:#fff}.social-app h1{color:#ffb26e;font-size:26px}.social-app nav{display:flex;flex-wrap:wrap;gap:4px}.social-card{border:1px solid #514637;border-radius:14px;padding:16px;margin:12px 0;background:#111923}.social-card p,.social-message p{white-space:pre-wrap;overflow-wrap:anywhere}.social-message{padding:12px;border-bottom:1px solid #3e4146}.social-app small{color:#b5becb;overflow-wrap:anywhere}.social-app [role=status]{min-height:24px;color:#ffb26e}.social-media img,.social-media video{display:block;max-width:100%;max-height:420px}.social-media pre{white-space:pre-wrap;max-height:420px;overflow:auto}.social-video-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.social-message-receipt{display:inline-block;margin:4px 8px;color:#9bb1c9;font-size:18px;font-weight:600}.social-message-receipt[data-delivery="read"]{letter-spacing:-6px;padding-right:6px;color:#66d0ff}.social-video-grid video{width:100%;max-height:400px;background:#000}.social-app [hidden]{display:none!important}@media(max-width:540px){.social-app{padding:10px}.social-card{padding:12px}}</style><header><small>PANTHORIUM / SOCIAL MEDIA</small><h1>' +
       specs.find((s) => s[0] === module)[1] +
       '</h1></header><nav data-social-nav></nav><p role="status" aria-live="polite"></p><div data-social-incoming></div><section data-social-rtc hidden></section><div data-social-content></div></div>';
     if (typeof window.createWindow !== "function")
@@ -1095,6 +1171,8 @@
             if (old.sessionId) window.PanthoriumSocialRTC?.stop();
             old.controller.abort();
             clearTimeout(old.timer);
+            clearTimeout(old.readTimer);
+            old.readObserver?.disconnect();
             for (const url of old.urls) URL.revokeObjectURL(url);
             views.delete(module);
           }
@@ -1118,6 +1196,10 @@
       rtc: root.querySelector("[data-social-rtc]"),
     };
     views.set(module, v);
+    root.addEventListener("scroll", () => scheduleRead(v), { capture: true, signal: v.controller.signal });
+    root.addEventListener("pointerup", () => scheduleRead(v), { signal: v.controller.signal });
+    window.addEventListener("focus", () => scheduleRead(v), { signal: v.controller.signal });
+    document.addEventListener("visibilitychange", () => scheduleRead(v), { signal: v.controller.signal });
     const nav = root.querySelector("nav");
     for (const [id, label] of specs)
       nav.append(button(v, label, () => open(id)));
@@ -1224,6 +1306,8 @@
       if (!current(v)) {
         v.controller.abort();
         clearTimeout(v.timer);
+        clearTimeout(v.readTimer);
+        v.readObserver?.disconnect();
         for (const url of v.urls) URL.revokeObjectURL(url);
         v.root.replaceChildren();
         views.delete(v.module);
@@ -1263,6 +1347,8 @@
       if (!v.root.isConnected) {
         v.controller.abort();
         clearTimeout(v.timer);
+        clearTimeout(v.readTimer);
+        v.readObserver?.disconnect();
         for (const url of v.urls) URL.revokeObjectURL(url);
         if (v.sessionId) window.PanthoriumSocialRTC?.stop();
         views.delete(id);

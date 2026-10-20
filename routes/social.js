@@ -120,6 +120,11 @@ function createSocialRouter(auth, service) {
     }
   });
   r.post(
+    "/records/:id/read",
+    writes,
+    route(req => service.markRead({ user: req.user, recordId: req.params.id, messageIds: req.body?.messageIds })),
+  );
+  r.post(
     "/actions",
     (req, res, next) =>
       (req.body?.action === "signal" ? signals : writes)(req, res, next),
