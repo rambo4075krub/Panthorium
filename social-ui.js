@@ -134,7 +134,10 @@
       n = el(type === "textarea" ? "textarea" : "input");
     if (type !== "textarea") n.type = type;
     n.value = value;
-    wrap.append(n);
+    if (type === "checkbox") {
+      wrap.className = "social-checkbox";
+      wrap.replaceChildren(n, el("span", label));
+    } else wrap.append(n);
     form.append(wrap);
     return n;
   }
@@ -1420,6 +1423,9 @@
       .social-toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 8px}.social-toolbar form{display:flex;gap:5px;align-items:center}.social-toolbar form label{margin:0}.social-toolbar input{min-width:100px;width:230px!important;margin:0!important}.social-toolbar form button{margin:0}.social-toolbar .social-tools{margin-left:auto}
       .social-tools{position:relative}.social-tools summary,.social-activity summary{cursor:pointer;padding:9px 12px;border-radius:9px;background:#142433;color:#c2d4e3;min-height:40px}.social-tools>div{padding:10px;max-width:360px}
       .social-app label{display:block;margin:10px 0}.social-app label input:not([type=checkbox]),.social-app textarea,.social-app select{display:block;width:100%;margin-top:5px}.social-app textarea{min-height:90px;resize:vertical}.social-app option{background:#152332;color:#fff}
+      .social-app label.social-checkbox{display:flex;align-items:flex-start;gap:12px;min-height:36px;padding:4px 0;cursor:pointer}
+      .social-app label.social-checkbox input[type=checkbox]{flex:0 0 20px;width:20px;height:20px;min-width:20px;margin:3px 0 0;padding:0;accent-color:#ff9f43;cursor:pointer}
+      .social-app label.social-checkbox span{min-width:0;line-height:1.65;overflow-wrap:anywhere}
       .social-card{border:1px solid #2b4052;border-radius:14px;padding:16px;margin:12px 0;background:#101c28;min-width:0}.social-card h3,.social-card h4{margin:0 0 10px;overflow-wrap:anywhere}.social-card p,.social-message p{white-space:pre-wrap;overflow-wrap:anywhere}.social-card strong{overflow-wrap:anywhere}
       .social-record-tools{margin-top:12px}.social-record-tools summary{cursor:pointer;color:#acbfce;padding:6px 0}
       .social-comments{border-top:1px solid #304252;margin-top:16px;padding-top:12px}.social-message{padding:12px;border-bottom:1px solid #304252}.social-app small{color:#acbfce;overflow-wrap:anywhere}.social-app [role=status]{color:#ffb26e}.social-app [role=status]:empty{display:none}
