@@ -36,11 +36,13 @@ class SocialService {
   constructor({
     repository,
     files,
+    accounts,
     turnUrls = process.env.SOCIAL_TURN_URLS,
     turnSecret = process.env.SOCIAL_TURN_SECRET,
   } = {}) {
     this.repo = repository;
     this.files = files;
+    this.accounts = accounts;
     this.turnUrls = turnUrls;
     this.turnSecret = turnSecret;
   }
@@ -189,8 +191,10 @@ class SocialService {
         limit: 100,
       });
       const children = [];
+      const names = new Map();
       for (const child of source)
-        if (await this.allowed(this.repo, uid, child)) children.push(child);
+        if (await this.allowed(this.repo, uid, child))
+          children.push(child.kind === "message" ? await this.messageView(child, r, names) : await this.decorate(child, uid));
       return {
         ok: true,
         record: await this.decorate(r, uid),
@@ -257,6 +261,7 @@ class SocialService {
     };
   }
   async decorate(r, uid) {
+    if (r.kind === "message") return this.messageView(r, await this.repo.get(r.parentId));
     const p = await this.repo.get("profile:" + r.ownerId);
     const out = { ...r, author: this.publicProfile(p) };
     if (r.kind === "connect") {
@@ -285,6 +290,43 @@ class SocialService {
         items.push(this.publicProfile(p));
     }
     return { ok: true, items: items.slice(0, 30) };
+  }
+  async messageView(message, thread, names = new Map()) {
+    if (!names.has(message.ownerId)) {
+      const connect = thread?.context === "connect";
+      const profile = await this.repo.get((connect ? "connect:" : "profile:") + message.ownerId);
+      let name = profile?.name;
+      if (!name && !connect && this.accounts) {
+        const registered = await this.accounts.findUserById(message.ownerId);
+        const candidate = registered?.username || "";
+        // Email signups have generated account IDs, not public display names.
+        if (!candidate.includes("@") && !/^account_[a-f0-9]+$/i.test(candidate) && !UUID.test(candidate)) name = candidate;
+      }
+      names.set(message.ownerId, name || (connect ? "สมาชิก Connect" : "สมาชิก"));
+    }
+    return { ...message, author: { name: names.get(message.ownerId) } };
+  }
+  async markRead({ user, recordId, messageIds } = {}) {
+    const uid = account(user);
+    if (!Array.isArray(messageIds) || !messageIds.length || messageIds.length > 100 ||
+        messageIds.some(value => typeof value !== "string" || !/^\d{16}-[0-9a-f-]{36}$/i.test(value)))
+      fail("social_invalid_messages");
+    return this.repo.transaction(async repo => {
+      const thread = await this.requireRecord(repo, uid, recordId, "thread");
+      await this.threadAllowed(repo, uid, thread);
+      const messages = [];
+      for (const messageId of new Set(messageIds)) {
+        const message = await this.requireRecord(repo, uid, messageId, "message");
+        if (message.parentId !== thread.id || message.ownerId === uid || !thread.members.includes(message.ownerId))
+          fail("social_invalid_messages", 403);
+        messages.push(message);
+      }
+      const readAt = new Date().toISOString();
+      for (const message of messages) {
+        if (!message.readAt) await repo.put({ ...message, readAt });
+      }
+      return { ok: true };
+    });
   }
   async write({ user, action, input = {}, requestId } = {}) {
     const uid = account(user);

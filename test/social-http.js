@@ -87,6 +87,20 @@ const { createSocialRouter } = require("../routes/social");
     assert.match(own.headers.get("cache-control"), /no-store/);
     assert.equal((await own.json()).record.text, "private text");
     assert.equal((await req("/reports")).status, 403);
+    await req("/actions", { action: "profile", input: { name: "Reader", discoverable: true } }, other);
+    const thread = (await (await req("/actions", { action: "thread", input: { userId: other.id } })).json()).record;
+    await req("/actions", { action: "accept-thread", input: { recordId: thread.id, accept: true } }, other);
+    const message = (await (await req("/actions", { action: "message", input: { recordId: thread.id, text: "receipt" } })).json()).record;
+    const receiptPath = "/records/" + thread.id + "/read", receiptBody = { messageIds: [message.id] };
+    assert.equal((await fetch(base + "/api/social" + receiptPath, { method: "POST" })).status, 401);
+    assert.equal((await req(receiptPath, receiptBody, { ...other, roles: ["guest"] })).status, 403);
+    assert.equal((await req(receiptPath, receiptBody, { ...other, permissions: [] })).status, 403);
+    assert.equal((await req(receiptPath, receiptBody)).status, 403, "sender cannot mark their own message read");
+    assert.equal((await req(receiptPath, receiptBody, { ...other, id: randomUUID() })).status, 404);
+    const receipt = await req(receiptPath, receiptBody, other);
+    assert.equal(receipt.status, 200);
+    assert.match(receipt.headers.get("cache-control"), /no-store/);
+    assert((await (await req("/records/" + thread.id)).json()).items[0].readAt);
     console.log(
       "Social HTTP: authentication, guest denial, private records, no-store and idempotent writes passed",
     );
