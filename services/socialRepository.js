@@ -44,7 +44,7 @@ class SocialRepository {
         )
       : copy(this.memory.get(id));
   }
-  async list({ kind, owner, parent, member, limit = 100, before } = {}) {
+  async list({ kind, kinds, owner, parent, member, limit = 100, before } = {}) {
     this.require();
     limit = Math.min(200, Math.max(1, Number(limit) || 100));
     if (!this.pool)
@@ -52,6 +52,7 @@ class SocialRepository {
         .filter(
           (x) =>
             (!kind || x.kind === kind) &&
+            (!kinds || kinds.includes(x.kind)) &&
             (!owner || x.ownerId === owner) &&
             (parent === undefined || x.parentId === parent) &&
             (!member || x.members?.includes(member)) &&
@@ -67,6 +68,7 @@ class SocialRepository {
       where.push(sql.replace("?", `$${values.length}`));
     };
     if (kind) add("kind=?", kind);
+    if (kinds) add("kind=ANY(?::text[])", kinds);
     if (owner) add("owner_id=?", owner);
     if (parent !== undefined) add("parent_id=?", parent);
     if (member) add("members @> ?::jsonb", JSON.stringify([member]));

@@ -92,13 +92,13 @@ async function suite(repository) {
   assert.equal(reads, 0);
   const watch = (
     await write(a, "publish", {
-      module: "watch",
+      module: "short",
       title: "movie",
       fileIds: [video],
     })
   ).record;
   assert.equal(
-    (await service.read({ user: b, module: "watch" })).items.length,
+    (await service.read({ user: b, module: "short" })).items.length,
     1,
   );
   await service.media({
