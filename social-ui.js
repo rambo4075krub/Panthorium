@@ -712,7 +712,7 @@
       const dropdown = el("details", null, { class: "social-post-menu" });
       const trigger = el("summary", "⋯", { role: "button", "aria-label": "ตัวเลือกโพสต์", "aria-expanded": "false" });
       extra = el("div", null, { class: "social-post-menu-items" }); dropdown.append(trigger, extra); actions.append(dropdown);
-      const close = focus => { dropdown.open = false; if (focus) trigger.focus({ preventScroll: true }); };
+      const close = focus => { dropdown.open = false; trigger.setAttribute("aria-expanded", "false"); if (focus) trigger.focus({ preventScroll: true }); };
       dropdown.addEventListener("toggle", () => {
         trigger.setAttribute("aria-expanded", String(dropdown.open));
         if (dropdown.open) v.root.querySelectorAll(".social-post-menu[open]").forEach(other => { if (other !== dropdown) other.open = false; });
