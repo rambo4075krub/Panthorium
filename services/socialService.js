@@ -38,18 +38,41 @@ class SocialService {
     repository,
     files,
     accounts,
+    supportAdminUsername,
     turnUrls = process.env.SOCIAL_TURN_URLS,
     turnSecret = process.env.SOCIAL_TURN_SECRET,
   } = {}) {
     this.repo = repository;
     this.files = files;
     this.accounts = accounts;
+    this.supportAdminUsername = supportAdminUsername;
     this.notifications = new SocialNotifications(this);
     this.turnUrls = turnUrls;
     this.turnSecret = turnSecret;
   }
   async init() {
     await this.repo.init();
+  }
+  async support({ user }) {
+    const uid = account(user);
+    const admin = this.supportAdminUsername && await this.accounts?.findUserByUsername(this.supportAdminUsername);
+    if (!UUID.test(admin?.id || "") || !admin.roles?.includes("administrator") || !admin.permissions?.includes("chat"))
+      fail("social_support_unavailable", 503);
+    if (uid === admin.id) return { ok: true, inbox: true };
+    return this.repo.transaction(async repo => {
+      if (await this.blocked(repo, uid, admin.id)) fail("social_support_blocked", 403);
+      const rid = "thread:" + key(uid, admin.id, "support");
+      const existing = await repo.get(rid);
+      if (existing) {
+        if (!await this.allowed(repo, uid, existing)) fail("social_not_found", 404);
+        return { ok: true, record: existing };
+      }
+      const record = row("thread", uid, {
+        id: rid, title: "ติดต่อ Panthorium", context: "support", status: "accepted", supportAdminId: admin.id,
+      }, "", [uid, admin.id]);
+      await repo.put(record);
+      return { ok: true, record };
+    });
   }
   async profile(user) {
     return this.repo.get("profile:" + account(user));
@@ -97,6 +120,10 @@ class SocialService {
       return this.allowed(repo, userId, await repo.get(record.parentId));
     if (record.kind === "thread") {
       if (!record.members.includes(userId) || record.blocked) return false;
+      if (record.context === "support") {
+        const admin = await this.accounts?.findUserById(record.supportAdminId);
+        if (!admin?.roles?.includes("administrator") || !admin.permissions?.includes("chat")) return false;
+      }
       for (const member of record.members) {
         if (await this.blocked(repo, userId, member)) return false;
         if (
@@ -266,6 +293,10 @@ class SocialService {
     if (r.kind === "message") return this.messageView(r, await this.repo.get(r.parentId));
     const p = await this.repo.get("profile:" + r.ownerId);
     const out = { ...r, author: this.publicProfile(p) };
+    if (r.kind === "thread" && r.context === "support") {
+      out.author = (await this.messageView({ ownerId: r.ownerId }, r)).author;
+      if (uid === r.supportAdminId) out.title = "ติดต่อสอบถาม · " + out.author.name;
+    }
     if (r.kind === "connect") {
       delete out.preferences;
       out.matched =
@@ -294,6 +325,8 @@ class SocialService {
     return { ok: true, items: items.slice(0, 30) };
   }
   async messageView(message, thread, names = new Map()) {
+    if (thread?.context === "support" && message.ownerId === thread.supportAdminId)
+      return { ...message, author: { name: "แอดมิน Panthorium" } };
     if (!names.has(message.ownerId)) {
       const connect = thread?.context === "connect";
       const profile = await this.repo.get((connect ? "connect:" : "profile:") + message.ownerId);

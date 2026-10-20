@@ -141,6 +141,7 @@ jobs:
           STUDIO_SMOKE_URL="$URL" node test/creative-studio-deployed.js
           STUDIO_SMOKE_URL="https://panthorium-backend-staging-124818950958.asia-southeast1.run.app" node test/creative-studio-deployed.js
           SOCIAL_SMOKE_URL="$URL" node test/social-deployed.js
+          SOCIAL_SMOKE_URL="https://panthorium-backend-staging-124818950958.asia-southeast1.run.app" node test/social-deployed.js
           # Exercise private object reads using disposable Free accounts on staging.
           FILES_SMOKE_ADMIN_PASSWORD=$(gcloud secrets versions access latest --secret=panthorium-staging-admin-password --project="$PROJECT")
           echo "::add-mask::$FILES_SMOKE_ADMIN_PASSWORD"

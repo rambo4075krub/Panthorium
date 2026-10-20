@@ -31,6 +31,8 @@
     social_profile_required: "กรุณาบันทึกโปรไฟล์ก่อน",
     social_adult_consent_required:
       "Connect ต้องยืนยันอายุ 18 ปีขึ้นไปและสมัครใจเปิดใช้",
+    social_support_unavailable: "แชทแอดมินยังไม่พร้อมใช้งาน กรุณาติดต่อ account@panthorium.net",
+    social_support_blocked: "ไม่สามารถเปิดแชทนี้ได้ กรุณาตรวจบัญชีที่บล็อกหรือติดต่อ account@panthorium.net",
     social_thread_not_accepted: "รออีกฝ่ายรับคำขอสนทนาก่อน",
     social_match_required: "ต้องสนใจตรงกันก่อนเริ่มคุย",
     social_not_found: "ไม่พบรายการหรือไม่มีสิทธิ์เข้าถึง",
@@ -1229,6 +1231,14 @@
         }),
       );
   }
+  async function support(v) {
+    clear(v);
+    status(v, "กำลังเปิดแชทกับแอดมิน…");
+    const result = await api(v, "/api/social/support", { method: "POST" });
+    if (result.inbox) await feed(v);
+    else await detail(v, result.record.id);
+    status(v, "");
+  }
   async function open(module = "community", options = {}) {
     if (!allowed()) throw Error("account_required");
     if (!specs.some((s) => s[0] === module))
@@ -1237,7 +1247,8 @@
     let v = views.get(module);
     if (v && current(v)) {
       window.focusWindow?.(key);
-      if (options.orders) await orders(v, options.recordId);
+      if (options.support) await support(v);
+      else if (options.orders) await orders(v, options.recordId);
       else if (options.personId) await personDetail(v, options.personId);
       else if (options.recordId) await detail(v, options.recordId);
       if (options.sourceFileIds) {
@@ -1363,7 +1374,8 @@
       apps.value = "";
     };
     try {
-      if (options.orders) await orders(v, options.recordId);
+      if (options.support) await support(v);
+      else if (options.orders) await orders(v, options.recordId);
       else if (options.personId) await personDetail(v, options.personId);
       else if (options.recordId) await detail(v, options.recordId);
       else if (v.sourceFileIds.length) await compose(v);
