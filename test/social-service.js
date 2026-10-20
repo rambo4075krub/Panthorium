@@ -228,6 +228,44 @@ async function suite(repository) {
     (await service.read({ user: b, recordId: thread.id })).items.length,
     1,
   );
+  const received = (await service.read({ user: b, recordId: thread.id })).items[0];
+  assert.equal(received.author.name, "Person " + a.sub, "messages use the saved profile name");
+  assert.equal(received.createdAt, msg.createdAt, "message time is unchanged");
+  assert.equal(received.readAt, undefined, "fetching messages does not mark them read");
+  const mark = (user, messageIds = [msg.id], recordId = thread.id) => service.markRead({ user, recordId, messageIds });
+  await assert.rejects(() => mark(c), /social_not_found/);
+  await assert.rejects(() => mark(a), /social_invalid_messages/);
+  await assert.rejects(() => mark({ ...b, roles: ["guest"] }), /account_required/);
+  await assert.rejects(() => mark(b, []), /social_invalid_messages/);
+  await assert.rejects(() => mark(b, Array(101).fill(msg.id)), /social_invalid_messages/);
+  const nextMessage = (await write(a, "message", { recordId: thread.id, text: "still offscreen" })).record;
+  const otherThread = (await write(a, "thread", { userId: c.sub })).record;
+  await write(c, "accept-thread", { recordId: otherThread.id, accept: true });
+  const otherMessage = (await write(a, "message", { recordId: otherThread.id, text: "another conversation" })).record;
+  await assert.rejects(() => mark(b, [msg.id, otherMessage.id]), /social_not_found/);
+  assert.equal((await repository.get(msg.id)).readAt, undefined, "invalid batches never partially acknowledge");
+  await assert.rejects(() => mark(b, [msg.id], otherThread.id), /social_not_found/);
+  await write(a, "block", { userId: b.sub });
+  await assert.rejects(() => mark(b), /social_not_found/);
+  await write(a, "block", { userId: b.sub, enabled: false });
+  await Promise.all([mark(b), mark(b)]);
+  const seen = await repository.get(msg.id);
+  assert(Number.isFinite(Date.parse(seen.readAt)), "read receipts persist on the message");
+  await mark(b);
+  assert.equal((await repository.get(msg.id)).readAt, seen.readAt, "retry does not change first read time");
+  assert.equal((await repository.get(nextMessage.id)).readAt, undefined, "only the displayed IDs become read");
+  assert.equal((await service.read({ user: a, recordId: thread.id })).items.find(x => x.id === msg.id).readAt, seen.readAt);
+  // Existing messages also resolve current names; no stored UUID or account email is displayed.
+  const accountService = new SocialService({ repository, files, accounts: { findUserById: async () => ({ username: "RegisteredName", email: "private@test.invalid", passwordHash: "secret" }) } });
+  const savedProfile = await repository.get("profile:" + a.sub);
+  await repository.remove(savedProfile.id);
+  const fallback = (await accountService.read({ user: b, recordId: thread.id })).items.find(x => x.id === msg.id);
+  assert.deepEqual(fallback.author, { name: "RegisteredName" });
+  accountService.accounts.findUserById = async () => ({ username: "private@test.invalid" });
+  assert.equal((await accountService.read({ user: b, recordId: msg.id })).record.author.name, "สมาชิก");
+  await repository.put(savedProfile);
+  const privateAlias = await accountService.messageView(msg, { context: "connect" });
+  assert.equal(privateAlias.author.name, "สมาชิก Connect", "Connect never leaks the account/social identity");
   const call = (await write(a, "call", { recordId: thread.id, video: true }))
     .record;
   await assert.rejects(

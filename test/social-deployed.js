@@ -36,6 +36,7 @@ const fs = require("node:fs");
       401,
       path + " must require authentication",
     );
+  assert.equal((await fetch(base + "/api/social/records/unavailable/read", { method: "POST" })).status, 401, "read receipts require authentication");
   console.log(
     "Deployed Social: both shells, exact six-app/RTC assets and protected APIs passed. Public posts and real user messages were not created.",
   );

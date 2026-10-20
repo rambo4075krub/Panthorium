@@ -157,7 +157,7 @@ const organizationResources = new OrganizationResourceService({ organizations,
     ? createCloudAppCompletion({ entitlements: liveEntitlements, usageLedger, gate: sentinel.gateway.concurrencyGate }) : null });
 const organizationGovernance = new OrganizationGovernanceService({ organizations });
 const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET, entitlements:liveEntitlements });
-const social = new (require('./services/socialService').SocialService)({ repository: new (require('./services/socialRepository').SocialRepository)({...cloudStoreOptions,allowMemory:!config.isProduction&&!config.databaseUrl}), files:cloudFiles });
+const social = new (require('./services/socialService').SocialService)({ repository: new (require('./services/socialRepository').SocialRepository)({...cloudStoreOptions,allowMemory:!config.isProduction&&!config.databaseUrl}), files:cloudFiles, accounts:authRepository });
 const mediaStudio = new MediaStudioService({ files: cloudFiles, providers: sentinel.providers, gateway: sentinel.gateway, audit, jobSecret: config.jwtSecret });
 const creativeStudio = new CreativeStudioService({
   repository: createCreativeStudioRepository({ ...cloudStoreOptions, allowMemory: !config.isProduction && !config.databaseUrl }),
