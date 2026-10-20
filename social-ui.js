@@ -1299,7 +1299,10 @@
     const nav = root.querySelector("nav");
     for (const [id, label] of specs)
       nav.append(button(v, label, () => open(id)));
-    const alerts = button(v, "การแจ้งเตือน", showNotifications);
+    const alerts = button(v, "การแจ้งเตือน", () => showNotifications(v));
+    alerts.dataset.socialOpenNotifications = "";
+    alerts.setAttribute("aria-expanded", "false");
+    alerts.setAttribute("aria-controls", "social-notification-center");
     alerts.append(notificationBadge()); nav.append(alerts); notificationBadges();
     nav.append(
       button(v, "โปรไฟล์", () => profile(v)),
@@ -1375,13 +1378,11 @@
   function notificationStyles() {
     if (document.getElementById("social-notification-style")) return;
     const style = el("style", `
-      #social-notification-bell{position:fixed;right:max(14px,env(safe-area-inset-right,0px));bottom:calc(var(--taskbar-h,52px) + env(safe-area-inset-bottom,0px) + 24px);z-index:10040;width:44px;height:44px;border:1px solid #42647a;border-radius:14px;background:#102331;color:#e6f4ff;cursor:pointer;box-shadow:0 4px 16px #0008;font:inherit}
       .social-notification-badge{display:inline-block;min-width:19px;padding:1px 5px;margin-left:6px;border-radius:20px;background:#ff9f43;color:#101820;font:700 11px/18px system-ui;text-align:center}
-      #social-notification-bell .social-notification-badge{position:absolute;right:-6px;top:-7px;margin:0}
-      #social-notification-center{position:fixed;right:max(12px,env(safe-area-inset-right,0px));bottom:calc(var(--taskbar-h,52px) + env(safe-area-inset-bottom,0px) + 76px);z-index:10041;width:min(410px,calc(100vw - 24px));max-height:min(70dvh,620px);overflow:auto;box-sizing:border-box;padding:16px;border:1px solid #42647a;border-radius:18px;background:#0d1926;color:#edf4ff;box-shadow:0 14px 48px #0009;font:14px/1.5 system-ui}
+      #social-notification-center{position:relative;width:100%;margin:16px 0;max-height:min(60dvh,620px);overflow:auto;box-sizing:border-box;padding:16px;border:1px solid #42647a;border-radius:18px;background:#0d1926;color:#edf4ff;box-shadow:0 14px 48px #0009;font:14px/1.5 system-ui}
       #social-notification-center header{display:flex;align-items:center;justify-content:space-between;gap:12px}#social-notification-center h2{font-size:18px;margin:0}
       #social-notification-center button,.social-notification-menu{font:inherit;color:inherit;background:#163044;border:1px solid #42647a;border-radius:9px;min-height:40px;padding:8px;cursor:pointer}#social-notification-center button:disabled{opacity:.5}
-      #social-notification-center button:focus-visible,#social-notification-bell:focus-visible{outline:2px solid #66d0ff;outline-offset:2px}
+      #social-notification-center button:focus-visible{outline:2px solid #66d0ff;outline-offset:2px}
       #social-notification-center article{padding:12px 0;border-bottom:1px solid #314354;overflow-wrap:anywhere}#social-notification-center article[data-unread=true]{border-left:3px solid #ff9f43;padding-left:10px}
       #social-notification-center p{margin:4px 0}#social-notification-center small{color:#b5c7d8}#social-notification-center .social-notification-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
       .social-notification-menu{display:block;width:100%;text-align:left;margin:4px 0}#social-notification-center [hidden],.social-notification-badge[hidden]{display:none!important}
@@ -1401,14 +1402,15 @@
       node.textContent = count > 99 ? "99+" : String(count);
       node.hidden = count === 0;
     }
-    notificationState?.bell?.setAttribute("aria-label", "การแจ้งเตือน Social Media • ยังไม่อ่าน " + (data.unreadCount || 0) + " รายการ");
+    for (const trigger of document.querySelectorAll("[data-social-open-notifications]"))
+      trigger.setAttribute("aria-label", "การแจ้งเตือน Social Media • ยังไม่อ่าน " + (data.unreadCount || 0) + " รายการ");
   }
   const notificationBadge = () => el("span", "", { class: "social-notification-badge", "data-social-notification-count": "", hidden: "" });
   function closeNotifications() {
     const n = notificationState;
     if (!n?.panel) return;
     n.panel.remove(); n.panel = null;
-    n.bell.setAttribute("aria-expanded", "false");
+    n.trigger?.setAttribute("aria-expanded", "false");
     if (n.returnFocus?.isConnected) n.returnFocus.focus();
   }
   async function readNotifications(n, ids) {
@@ -1423,7 +1425,7 @@
     if (item.target) await open(item.target.module, item.target);
   }
   function drawNotifications(n) {
-    if (!current(n) || !n.panel) return;
+    if (!current(n) || !n.panel?.isConnected) return;
     const panel = n.panel;
     const focusId = panel.contains(document.activeElement) ? document.activeElement.dataset.notificationFocus : null;
     panel.replaceChildren();
@@ -1479,14 +1481,14 @@
         if (!current(n) || n !== notificationState) return;
         const newItems = (data.items || []).filter(x => !x.readAt && !n.seen.has(x.id));
         if (n.initialized && newItems.length && document.visibilityState === "visible" && typeof toast === "function")
-          toast("มีการแจ้งเตือน Social Media ใหม่ " + newItems.length + " รายการ • กดกระดิ่งเพื่อดู", 5000);
+          toast("มีการแจ้งเตือน Social Media ใหม่ " + newItems.length + " รายการ • เปิดการแจ้งเตือนใน Social Media", 5000);
         for (const item of data.items || []) n.seen.add(item.id);
         // Bound the in-memory deduplication cache; the server stores read state.
         if (n.seen.size > 1000) n.seen = new Set((data.items || []).map(x => x.id));
         const changed = JSON.stringify(n.data) !== JSON.stringify(data) || n.error;
         n.data = data; n.error = ""; n.initialized = true;
         notificationBadges();
-        if (n.pageCursor && n.panel) {
+        if (n.pageCursor && n.panel?.isConnected) {
           const page = await api(n, "/api/social/notifications?before=" + encodeURIComponent(n.pageCursor));
           n.pageItems = page.items; n.nextCursor = page.nextCursor; drawNotifications(n);
         } else if (changed) drawNotifications(n);
@@ -1499,34 +1501,40 @@
     })();
     return n.polling;
   }
-  async function showNotifications() {
+  async function showNotifications(v) {
     syncNotifications();
     const n = notificationState;
     if (!n || !current(n)) return;
-    if (!n.panel) {
-      n.returnFocus = document.activeElement;
-      n.panel = el("section", null, { id: "social-notification-center", role: "dialog", "aria-label": "การแจ้งเตือน Social Media", tabindex: "-1" });
-      document.body.append(n.panel); n.bell.setAttribute("aria-expanded", "true");
-      drawNotifications(n); n.panel.focus();
+    if (!v || !current(v)) {
+      await open("talk");
+      v = views.get("talk");
     }
+    if (!v || !current(v) || !current(n)) return;
+    if (n.panel && (!n.panel.isConnected || n.host !== v.root)) closeNotifications();
+    if (!n.panel) {
+      n.host = v.root;
+      n.trigger = v.root.querySelector("[data-social-open-notifications]");
+      n.returnFocus = n.trigger;
+      n.panel = el("section", null, { id: "social-notification-center", role: "region", "aria-label": "การแจ้งเตือน Social Media", tabindex: "-1" });
+      v.root.querySelector("nav").after(n.panel);
+      n.trigger?.setAttribute("aria-expanded", "true");
+      drawNotifications(n);
+    }
+    n.panel.scrollIntoView?.({ block: "nearest" });
+    n.panel.focus({ preventScroll: true });
     await refreshNotifications();
   }
   function syncNotifications() {
     if (notificationState && !current(notificationState)) {
       const old = notificationState; old.controller.abort(); clearTimeout(old.timer);
-      old.panel?.remove(); old.bell.remove(); notificationState = null;
+      old.panel?.remove(); notificationState = null;
       notificationBadges();
     }
     if (!allowed() || notificationState) return;
     notificationStyles();
     const n = notificationState = { uid: uid(), root: document.body, controller: new AbortController(), seen: new Set(), data: { items: [], unreadCount: 0, counts: {} } };
-    const bell = n.bell = el("button", null, { id: "social-notification-bell", type: "button", "aria-haspopup": "dialog", "aria-expanded": "false", "aria-label": "การแจ้งเตือน Social Media" });
-    // A vector bell remains legible on devices without emoji fonts.
-    bell.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM9 21h6"/></svg>';
-    bell.append(notificationBadge()); document.body.append(bell);
-    bell.onclick = () => n.panel ? closeNotifications() : showNotifications();
     document.addEventListener("keydown", e => { if (e.key === "Escape" && n.panel) closeNotifications(); }, { signal: n.controller.signal });
-    document.addEventListener("pointerdown", e => { if (n.panel && !n.panel.contains(e.target) && !bell.contains(e.target)) closeNotifications(); }, { signal: n.controller.signal });
+    document.addEventListener("pointerdown", e => { if (n.panel && !n.panel.contains(e.target) && !e.target.closest("[data-social-open-notifications]")) closeNotifications(); }, { signal: n.controller.signal });
     document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshNotifications(); }, { signal: n.controller.signal });
     window.addEventListener("online", refreshNotifications, { signal: n.controller.signal });
     refreshNotifications();
