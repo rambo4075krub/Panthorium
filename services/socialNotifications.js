@@ -67,7 +67,7 @@ class SocialNotifications {
         if (thread.status === "accepted") {
           // Match the existing chat history window; do not resurrect read messages.
           const messages = await repo.list({ kind: "message", parent: thread.id, limit: 100 });
-          for (const message of messages) if (!message.readAt && !message.deleted)
+          for (const message of messages) if (!message.readAt && await this.service.allowed(repo, uid, message))
             await this.emit(repo, "message", message, message.ownerId, uid);
         }
       }
@@ -135,6 +135,7 @@ class SocialNotifications {
       ...(moderation ? { reason: r.moderation?.reason || "" } : {}), module };
   }
   async list(uid, before, module) {
+    await this.service.purgeExpiredMessages({ force: false });
     if (module && !["watch", "short", "live", "market", "community", "talk", "connect", "profile", "friends"].includes(module))
       throw Object.assign(Error("social_invalid_module"), { status: 400 });
     const repo = this.service.repo;

@@ -26,6 +26,7 @@ const { suite } = require("./social-service");
     await require("./social-groups").suite(new SocialRepository({ pool }));
     await require("./contact-support").suite(new SocialRepository({ pool }));
     await require("./social-notifications").suite(new SocialRepository({ pool }));
+    await require("./social-navigation").suite(new SocialRepository({ pool }));
   } finally {
     if (pool) await pool.end();
     await admin.query("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
