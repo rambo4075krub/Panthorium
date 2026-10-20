@@ -89,7 +89,13 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
     await activities.getByText("เพื่อนทดสอบ • แสดงความคิดเห็นในโพสต์ของคุณ",{exact:true}).waitFor();
     assert(!await activities.getByText(/ตอบรับคำขอเป็นเพื่อน/).count());
     await activities.getByRole("button",{name:"อ่านทั้งหมดในหน้านี้",exact:true}).click();
-    await until(async()=> (await sender.locator('[data-social-tab="watch"] [data-social-module-count]').textContent())==="0","Watch notice acknowledged");
+    await until(async()=> ((await social.notifications.list(a.sub,undefined,"watch")).counts.watch || 0)===0,"Watch activity acknowledged on server");
+    await sender.evaluate(()=>PanthoriumSocial.refreshNotifications());
+    for (const module of ["watch", "profile"]) {
+      const badge=sender.locator('[data-social-tab="'+module+'"] [data-social-module-count]');
+      assert.equal(await badge.textContent(),"1","owner-requested tab marker stays pinned after reading");
+      assert(await badge.isVisible());
+    }
     assert.equal(await sender.locator('[data-social-tab="friends"] [data-social-module-count]').textContent(),"1");
     await sender.evaluate(()=>PanthoriumSocial.open("connect"));
     const connect=sender.locator('[data-social="connect"]');await connect.getByRole("button",{name:"ตั้งค่า Connect",exact:true}).click();
