@@ -37,7 +37,7 @@ function createBrowserSecurity({ app, session, trustedOrigin, edition }) {
     });
     // Screen/device access is a different permission from camera/microphone.
     ses.setDevicePermissionHandler(() => false);
-    ses.setDisplayMediaRequestHandler((_request, callback) => callback({}));
+    ses.setDisplayMediaRequestHandler((_request, callback) => callback(null));
   }
 
   function destroyGuests(ownerId) {

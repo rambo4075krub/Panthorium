@@ -47,8 +47,18 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Syntax checks
         run: npm run check
+      - name: Real PostgreSQL foundation and organization integration
+        run: npm run test:postgres
+        env:
+          TEST_DATABASE_URL: postgres://postgres:panthorium_ci_only@127.0.0.1:5432/panthorium_ci
       - name: Install media test dependency
-        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y ffmpeg
+          fi
+          ffmpeg -version
       - name: Run tests including security regressions
         run: npm test
       - name: Social media real browser audio and video
@@ -62,10 +72,6 @@ jobs:
           node test/social-redesign-browser.js
           node test/social-watch-browser.js
           node test/office-suite-browser.js
-      - name: Real PostgreSQL foundation and organization integration
-        run: npm run test:postgres
-        env:
-          TEST_DATABASE_URL: postgres://postgres:panthorium_ci_only@127.0.0.1:5432/panthorium_ci
       - name: Speaker service contract tests
         run: |
           python3 -m pip install --user numpy==1.26.4

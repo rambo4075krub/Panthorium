@@ -27,7 +27,7 @@ const guest=new Contents(2,bSession,'https://external.example/');app.emit('web-c
 assert(!bSession.check(guest,'media',origin,main));
 let answer;bSession.request(guest,'media',v=>answer=v,{...main,mediaTypes:['audio']});assert.equal(answer,false);
 assert.equal(bSession.device({origin}),false);
-let streams;bSession.display({},v=>streams=v);assert.deepEqual(streams,{});
+let streams;bSession.display({},v=>streams=v);assert.equal(streams,null);
 function attach(params,prefs={}){let prevented=false;shell.emit('will-attach-webview',{preventDefault(){prevented=true;}},prefs,params);return {prevented,prefs};}
 const secure=attach({partition:a.partitions.browser,src:'https://external.example/'},{preload:'/evil.cjs',preloadURL:'file:///evil.cjs',nodeIntegration:true,nodeIntegrationInSubFrames:true,sandbox:false,contextIsolation:false,webSecurity:false,additionalArguments:['--anything']});
 assert(!secure.prevented);assert.equal(secure.prefs.preload,undefined);assert.equal(secure.prefs.preloadURL,undefined);assert.equal(secure.prefs.nodeIntegration,false);assert.equal(secure.prefs.nodeIntegrationInSubFrames,false);assert.equal(secure.prefs.sandbox,true);assert.equal(secure.prefs.contextIsolation,true);assert.equal(secure.prefs.webSecurity,true);assert.equal(secure.prefs.webviewTag,false);
