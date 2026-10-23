@@ -21,7 +21,7 @@ RUN mkdir -p /rootfs/var/lib/dpkg \
       libc6_libs libgcc-s1_libs libstdc++6_libs libgomp1_libs openssl_config python3.12_standard \
  && zstd --decompress --stdout /rootfs/var/lib/chisel/manifest.wall > /rootfs/var/lib/chisel/manifest.jsonl
 COPY speaker-service/experimental/verify-runtime.py /rootfs/usr/local/share/panthorium/experimental/verify-runtime.py
-RUN python3 /rootfs/usr/local/share/panthorium/experimental/verify-runtime.py /rootfs \
+RUN python3 /rootfs/usr/local/share/panthorium/experimental/verify-runtime.py --generate-ownership /rootfs \
  && mkdir -p /rootfs/tmp \
  && chmod 1777 /rootfs/tmp
 

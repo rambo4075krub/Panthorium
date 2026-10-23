@@ -38,8 +38,9 @@ def package_records(text):
     return packages
 
 
-def verify(root):
+def verify(root, generate_ownership=False):
     root = Path(root).resolve()
+    require(not generate_ownership or root != Path("/"), "ownership_generation_requires_explicit_build_root")
     wall_path = root / "var/lib/chisel/manifest.wall"
     jsonl_path = root / "var/lib/chisel/manifest.jsonl"
     status_path = root / "var/lib/dpkg/status"
@@ -50,6 +51,8 @@ def verify(root):
     package_entries = [entry for entry in records[1:] if entry.get("kind") == "package"]
     packages = {}
     for entry in package_entries:
+        require(re.fullmatch(r"[a-z0-9][a-z0-9+.-]*", entry["name"]), "invalid_package_name")
+        require(re.fullmatch(r"[a-z0-9][a-z0-9-]*", entry["arch"]), "invalid_package_architecture")
         require(entry["name"] not in packages, "duplicate_manifest_package")
         require(re.fullmatch(r"[a-f0-9]{64}", entry["sha256"]), "invalid_archive_digest")
         packages[entry["name"]] = (entry["version"], entry["arch"])
@@ -65,6 +68,7 @@ def verify(root):
     require(zlib and int(zlib[1]) >= 3, "vendor_zlib_update_required")
     paths = set()
     regular_files = 0
+    ownership = {name: {} for name in packages}
     for entry in records[1:]:
         if entry.get("kind") != "path":
             continue
@@ -78,15 +82,22 @@ def verify(root):
         if "link" in entry:
             require(stat.S_ISLNK(mode) and os.readlink(target) == entry["link"], "manifest_link_changed: " + name)
         elif stat.S_ISREG(mode):
-            regular_files += 1
             if name == "/var/lib/chisel/manifest.wall":
                 continue  # The manifest intentionally has no self-hash.
+            regular_files += 1
             expected = entry.get("final_sha256", entry.get("sha256"))
-            require(expected and digest(target.read_bytes()) == expected, "manifest_file_changed: " + name)
+            contents = target.read_bytes()
+            require(expected and digest(contents) == expected, "manifest_file_changed: " + name)
             # Chisel's uint64 size field uses omitempty for empty files.
             expected_size = entry.get("size", 0)
             require(type(expected_size) is int and expected_size >= 0, "invalid_manifest_file_size: " + name)
             require(target.stat().st_size == expected_size, "manifest_file_size_changed: " + name)
+            # MD5 is dpkg's ownership format; SHA-256 above is the integrity check.
+            require(entry.get("slices"), "missing_file_owner: " + name)
+            for slice_name in entry["slices"]:
+                package = slice_name.split("_", 1)[0]
+                require(package in packages, "unknown_file_owner: " + name)
+                ownership[package][name.lstrip("/")] = hashlib.md5(contents, usedforsecurity=False).hexdigest()
         else:
             require(stat.S_ISDIR(mode), "unexpected_manifest_file_type: " + name)
         try:
@@ -100,8 +111,33 @@ def verify(root):
             require(not os.path.lexists(root / directory / command), "unexpected_command_present: " + command)
     generated = {"/var/lib/dpkg/status", "/var/lib/chisel/manifest.jsonl",
                  "/usr/local/share/panthorium/experimental/verify-runtime.py"}
+    ownership_files = {}
+    for package, files in sorted(ownership.items()):
+        architecture = packages[package][1]
+        suffix = "" if architecture == "all" else ":" + architecture
+        name = "/var/lib/dpkg/info/" + package + suffix + ".md5sums"
+        ownership_files[name] = "".join(checksum + "  " + path + "\n" for path, checksum in sorted(files.items()))
+    if generate_ownership:
+        info_directory = root / "var/lib/dpkg/info"
+        info_directory.mkdir(parents=True, exist_ok=True)
+        require(stat.S_ISDIR(info_directory.lstat().st_mode), "invalid_ownership_directory")
+        for name, contents in ownership_files.items():
+            target = root / name.lstrip("/")
+            if not os.path.lexists(target):
+                target.write_text(contents)
+                target.chmod(0o644)
+    for name, contents in ownership_files.items():
+        target = root / name.lstrip("/")
+        mode = target.lstat().st_mode
+        require(stat.S_ISREG(mode) and stat.S_IMODE(mode) == 0o644, "invalid_ownership_metadata_type: " + name)
+        require(target.read_text() == contents, "ownership_metadata_mismatch: " + name)
+        generated.add(name)
     if root == Path("/"):
         generated.update({"/.dockerenv", "/etc/hosts", "/etc/hostname", "/etc/resolv.conf"})
+        # Docker injects this exact link at container startup, not at build time.
+        mtab = root / "etc/mtab"
+        require(mtab.is_symlink() and os.readlink(mtab) == "/proc/mounts", "unexpected_runtime_mtab")
+        generated.add("/etc/mtab")
     def inaccessible(error):
         raise error
     for directory, subdirs, names in os.walk(root, followlinks=False, onerror=inaccessible):
@@ -128,9 +164,13 @@ def verify(root):
             "regularFilesVerified": regular_files, "libcVersion": packages["libc6"][0], "zlibVersion": packages["zlib1g"][0],
             "manifestSha256": digest(wall_path.read_bytes()), "decodedManifestSha256": digest(jsonl_path.read_bytes()),
             "dpkgStatusSha256": digest(status_path.read_bytes()), "packages": sorted(packages),
+            "ownershipFileCount": len(ownership_files), "ownedRegularFileCount": sum(len(files) for files in ownership.values()),
+            "dpkgOwnershipSha256": digest("".join(name + "\0" + contents for name, contents in ownership_files.items()).encode()),
             "limitations": ["No application, model or custom native media libraries are included.", "Complete vulnerability scan is required; no findings are suppressed."]}
 
 
 if __name__ == "__main__":
-    require(len(sys.argv) in (1, 2), "usage: verify-runtime.py [ROOT]")
-    print(json.dumps(verify(sys.argv[1] if len(sys.argv) == 2 else "/"), sort_keys=True))
+    generate = len(sys.argv) == 3 and sys.argv[1] == "--generate-ownership"
+    require(generate or len(sys.argv) in (1, 2), "usage: verify-runtime.py [ROOT] | --generate-ownership ROOT")
+    root = sys.argv[2] if generate else (sys.argv[1] if len(sys.argv) == 2 else "/")
+    print(json.dumps(verify(root, generate_ownership=generate), sort_keys=True))
