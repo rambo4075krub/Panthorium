@@ -53,12 +53,23 @@ jobs:
           container_id=$(docker create "$IMAGE_ID")
           trap 'docker rm "$container_id" >/dev/null' EXIT
           docker cp "$container_id:/var/lib/dpkg/status" "$EVIDENCE_DIR/dpkg-status.txt"
-          docker cp "$container_id:/var/lib/dpkg/info" "$EVIDENCE_DIR/dpkg-info"
+          docker cp "$container_id:/var/lib/dpkg/info" - > "$EVIDENCE_DIR/dpkg-info.tar"
           docker cp "$container_id:/var/lib/chisel" "$EVIDENCE_DIR/chisel"
           test -s "$EVIDENCE_DIR/dpkg-status.txt"
           zstd --decompress --stdout "$EVIDENCE_DIR/chisel/manifest.wall" | cmp - "$EVIDENCE_DIR/chisel/manifest.jsonl"
           printf 'ignore: []\nmatch-upstream-kernel-headers: true\n' > "$EVIDENCE_DIR/grype.yaml"
-      - name: Check Python under restricted runtime settings
+      - name: Inspect complete filesystem without permitting writes
+        env:
+          IMAGE_ID: ${{ steps.image.outputs.id }}
+        run: |
+          set -euo pipefail
+          # Root is only a separate read-only inspector for protected directories.
+          # Application-like smoke below must run as the non-root image user.
+          docker run --rm --network none --read-only --cap-drop ALL --cap-add DAC_OVERRIDE \
+            --security-opt no-new-privileges --user 0 "$IMAGE_ID" \
+            /usr/local/share/panthorium/experimental/verify-runtime.py --verify-image-root \
+            | tee "$EVIDENCE_DIR/filesystem-proof.json"
+      - name: Check Python under restricted non-root runtime settings
         env:
           IMAGE_ID: ${{ steps.image.outputs.id }}
         run: |
@@ -66,11 +77,6 @@ jobs:
           docker run --rm --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges --user 10001:10001 "$IMAGE_ID" \
             | tee "$EVIDENCE_DIR/runtime-proof.json"
-          docker run --rm --network none --read-only --cap-drop ALL \
-            --security-opt no-new-privileges --user 10001:10001 \
-            --entrypoint /usr/bin/python3.12 "$IMAGE_ID" -I -c \
-            'import ctypes, hashlib, json, math, sqlite3, ssl, sys, zlib; assert sys.version_info[:2] == (3,12); assert zlib.decompress(zlib.compress(b"runtime-check")) == b"runtime-check"; print(json.dumps({"python":sys.version.split()[0],"zlib":zlib.ZLIB_RUNTIME_VERSION,"openssl":ssl.OPENSSL_VERSION,"sqlite":sqlite3.sqlite_version,"status":"PASS"}))' \
-            | tee "$EVIDENCE_DIR/python-smoke.log"
       - name: Inventory all candidate image packages
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:

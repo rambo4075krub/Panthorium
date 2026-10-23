@@ -38,9 +38,10 @@ def package_records(text):
     return packages
 
 
-def verify(root, generate_ownership=False):
+def verify(root, generate_ownership=False, inspect_image=False):
     root = Path(root).resolve()
     require(not generate_ownership or root != Path("/"), "ownership_generation_requires_explicit_build_root")
+    require(not inspect_image or (root == Path("/") and os.getuid() == 0), "image_inspection_requires_root")
     wall_path = root / "var/lib/chisel/manifest.wall"
     jsonl_path = root / "var/lib/chisel/manifest.jsonl"
     status_path = root / "var/lib/dpkg/status"
@@ -150,16 +151,8 @@ def verify(root, generate_ownership=False):
             if stat.S_ISREG(mode) or stat.S_ISLNK(mode):
                 relative = "/" + target.relative_to(root).as_posix()
                 require(relative in paths or relative in generated, "uninventoried_file_present: " + relative)
-    if root == Path("/"):
-        require(os.getuid() == 10001 and os.getgid() == 10001, "unexpected_runtime_identity")
-        import ctypes
-        import ssl
-        import sqlite3
-        import zlib as zlib_module
-        require(zlib_module.decompress(zlib_module.compress(b"standard roundtrip")) == b"standard roundtrip", "zlib_roundtrip_failed")
-        require(ssl.create_default_context().get_ca_certs(), "missing_ca_certificates")
-        require(sqlite3.connect(":memory:").execute("select 1").fetchone() == (1,), "sqlite_roundtrip_failed")
-        require(ctypes.CDLL("libgomp.so.1") and ctypes.CDLL("libstdc++.so.6"), "missing_numerical_runtime")
+    if root == Path("/") and not inspect_image:
+        runtime_smoke()
     return {"status": "PASS", "scope": "experimental dependency-only candidate", "packageCount": len(packages),
             "regularFilesVerified": regular_files, "libcVersion": packages["libc6"][0], "zlibVersion": packages["zlib1g"][0],
             "manifestSha256": digest(wall_path.read_bytes()), "decodedManifestSha256": digest(jsonl_path.read_bytes()),
@@ -169,7 +162,32 @@ def verify(root, generate_ownership=False):
             "limitations": ["No application, model or custom native media libraries are included.", "Complete vulnerability scan is required; no findings are suppressed."]}
 
 
+def runtime_smoke():
+    require(os.getuid() == 10001 and os.getgid() == 10001, "unexpected_runtime_identity")
+    require(sys.version_info[:2] == (3, 12), "unexpected_python_runtime")
+    process_status = Path("/proc/self/status").read_text()
+    require(re.search(r"^NoNewPrivs:\s+1$", process_status, re.M), "no_new_privileges_required")
+    require(re.search(r"^CapEff:\s+0+$", process_status, re.M), "runtime_capabilities_forbidden")
+    import ctypes
+    import ssl
+    import sqlite3
+    import zlib
+    require(zlib.decompress(zlib.compress(b"standard roundtrip")) == b"standard roundtrip", "zlib_roundtrip_failed")
+    require(ssl.create_default_context().get_ca_certs(), "missing_ca_certificates")
+    require(sqlite3.connect(":memory:").execute("select 1").fetchone() == (1,), "sqlite_roundtrip_failed")
+    require(ctypes.CDLL("libgomp.so.1") and ctypes.CDLL("libstdc++.so.6"), "missing_numerical_runtime")
+    return {"status": "PASS", "uid": os.getuid(), "gid": os.getgid(),
+            "python": sys.version.split()[0], "zlib": zlib.ZLIB_RUNTIME_VERSION,
+            "openssl": ssl.OPENSSL_VERSION, "sqlite": sqlite3.sqlite_version}
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--smoke"]:
+        print(json.dumps(runtime_smoke(), sort_keys=True))
+        raise SystemExit(0)
+    if sys.argv[1:] == ["--verify-image-root"]:
+        print(json.dumps(verify("/", inspect_image=True), sort_keys=True))
+        raise SystemExit(0)
     generate = len(sys.argv) == 3 and sys.argv[1] == "--generate-ownership"
     require(generate or len(sys.argv) in (1, 2), "usage: verify-runtime.py [ROOT] | --generate-ownership ROOT")
     root = sys.argv[2] if generate else (sys.argv[1] if len(sys.argv) == 2 else "/")

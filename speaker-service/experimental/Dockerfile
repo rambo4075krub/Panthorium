@@ -30,4 +30,4 @@ COPY --from=candidate-builder /rootfs/ /
 USER 10001:10001
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 ENTRYPOINT ["/usr/bin/python3.12"]
-CMD ["/usr/local/share/panthorium/experimental/verify-runtime.py"]
+CMD ["/usr/local/share/panthorium/experimental/verify-runtime.py", "--smoke"]

@@ -114,6 +114,10 @@ class RuntimeInventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "ownership_generation_requires_explicit_build_root"):
             inventory.verify("/", generate_ownership=True)
 
+    def test_image_inspector_never_accepts_a_build_root(self):
+        with self.assertRaisesRegex(RuntimeError, "image_inspection_requires_root"):
+            inventory.verify(self.root, inspect_image=True)
+
 
 if __name__ == "__main__":
     unittest.main()

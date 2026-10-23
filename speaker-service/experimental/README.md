@@ -20,6 +20,11 @@ and evaluation status can differ. Unresolved findings still require review.
 CI retains the complete SBOM, raw report, manifest, package records, ownership
 records, and immutable image identity. Python and native-library smoke checks run
 as UID/GID 10001 with no network, capabilities, or new privileges and a read-only
-filesystem. A full migration still requires coherent native media builds, all
+filesystem. A separate read-only root inspector checks all filesystem paths,
+including protected directories; it does not start the application. Ownership
+records are archived intact so their standard colon-containing names can be
+retained by the artifact service.
+
+A full migration still requires coherent native media builds, all
 application dependencies, exact-image scans, decoder/model tests, and staging
 validation before production release.
