@@ -182,6 +182,18 @@ class CloudReadinessTests(unittest.TestCase):
         reader, _ = self.reader(data)
         self.assertEqual(cloud.check_readiness(reader)["checks"]["backend_env_BIOMETRIC_TEMPLATE_KEY_present"], "blocked")
 
+    def test_omitted_empty_env_projection_is_valid_but_not_proof_of_backend_prerequisites(self):
+        data = fixtures()
+        del data["speaker_service"]["spec"]["template"]["spec"]["containers"]
+        reader, _ = self.reader(data)
+        self.assertTrue(cloud.check_readiness(reader)["checksPassed"])
+        del data["backend_service"]["spec"]["template"]["spec"]["containers"]
+        reader, _ = self.reader(data)
+        report = cloud.check_readiness(reader)
+        self.assertEqual(report["reads"]["backend_service"], "read")
+        self.assertEqual(report["checks"]["backend_env_BIOMETRIC_SPEAKER_URL_present"], "blocked")
+        self.assertFalse(report["checksPassed"])
+
     def test_malformed_or_unprojected_data_never_proves_safety_or_leaks(self):
         cases = [("project_policy", {}), ("speaker_policy", {"etag": "x", "bindings": "canary-raw-policy"})]
         data = fixtures()["backend_service"]

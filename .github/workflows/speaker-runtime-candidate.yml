@@ -53,6 +53,7 @@ jobs:
           docker cp "$container_id:/var/lib/dpkg/status" "$EVIDENCE_DIR/dpkg-status.txt"
           docker cp "$container_id:/var/lib/chisel" "$EVIDENCE_DIR/chisel"
           test -s "$EVIDENCE_DIR/dpkg-status.txt"
+          zstd --decompress --stdout "$EVIDENCE_DIR/chisel/manifest.wall" | cmp - "$EVIDENCE_DIR/chisel/manifest.jsonl"
           printf 'ignore: []\nmatch-upstream-kernel-headers: true\n' > "$EVIDENCE_DIR/grype.yaml"
       - name: Check Python under restricted runtime settings
         env:
@@ -81,15 +82,19 @@ jobs:
           IMAGE_ID: ${{ steps.image.outputs.id }}
         run: |
           python3 - <<'PY'
-          import email.parser, json, os, pathlib
+          import email.parser, json, os, pathlib, re
           root = pathlib.Path(os.environ['EVIDENCE_DIR'])
           sbom = json.loads((root / 'candidate-sbom.syft.json').read_text())
           assert sbom['source']['metadata']['imageID'] == os.environ['IMAGE_ID'], 'SBOM image differs'
           assert sbom['distro']['id'] == 'ubuntu' and sbom['distro']['versionID'] == '24.04', 'Unexpected distribution'
           controls = [email.parser.Parser().parsestr(part) for part in (root / 'dpkg-status.txt').read_text().strip().split('\n\n')]
-          expected = {(p['Package'], p['Version'], p['Architecture']) for p in controls}
+          def identity(p):
+              source = re.fullmatch(r'([^ ]+)(?: \(([^)]+)\))?', p['Source'] or p['Package'])
+              assert source, 'Invalid source package metadata'
+              return (p['Package'], p['Version'], p['Architecture'], source[1], source[2] or p['Version'])
+          expected = {identity(p) for p in controls}
           assert expected and all(all(row) for row in expected), 'Incomplete package metadata'
-          actual = {(p['name'], p['version'], p['metadata']['architecture']) for p in sbom['artifacts'] if p['type'] == 'deb'}
+          actual = {(p['name'], p['version'], p['metadata']['architecture'], p['metadata'].get('source') or p['name'], p['metadata'].get('sourceVersion') or p['version']) for p in sbom['artifacts'] if p['type'] == 'deb'}
           assert expected == actual, 'Scanner inventory differs from retained package metadata'
           print(json.dumps({'imageID':os.environ['IMAGE_ID'], 'retainedPackages':len(expected), 'status':'PASS'}))
           PY

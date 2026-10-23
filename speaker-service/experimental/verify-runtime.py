@@ -83,7 +83,10 @@ def verify(root):
                 continue  # The manifest intentionally has no self-hash.
             expected = entry.get("final_sha256", entry.get("sha256"))
             require(expected and digest(target.read_bytes()) == expected, "manifest_file_changed: " + name)
-            require(target.stat().st_size == entry["size"], "manifest_file_size_changed: " + name)
+            # Chisel's uint64 size field uses omitempty for empty files.
+            expected_size = entry.get("size", 0)
+            require(type(expected_size) is int and expected_size >= 0, "invalid_manifest_file_size: " + name)
+            require(target.stat().st_size == expected_size, "manifest_file_size_changed: " + name)
         else:
             require(stat.S_ISDIR(mode), "unexpected_manifest_file_type: " + name)
         try:
@@ -95,6 +98,22 @@ def verify(root):
     for command in ("sh", "bash", "mount", "nsenter", "infocmp", "perl", "getfacl", "setfacl", "chacl"):
         for directory in ("bin", "sbin", "usr/bin", "usr/sbin"):
             require(not os.path.lexists(root / directory / command), "unexpected_command_present: " + command)
+    generated = {"/var/lib/dpkg/status", "/var/lib/chisel/manifest.jsonl",
+                 "/usr/local/share/panthorium/experimental/verify-runtime.py"}
+    if root == Path("/"):
+        generated.update({"/.dockerenv", "/etc/hosts", "/etc/hostname", "/etc/resolv.conf"})
+    def inaccessible(error):
+        raise error
+    for directory, subdirs, names in os.walk(root, followlinks=False, onerror=inaccessible):
+        parent = Path(directory)
+        if root == Path("/") and parent == root:
+            subdirs[:] = [name for name in subdirs if name not in {"dev", "proc", "sys"}]
+        for name in [*subdirs, *names]:
+            target = parent / name
+            mode = target.lstat().st_mode
+            if stat.S_ISREG(mode) or stat.S_ISLNK(mode):
+                relative = "/" + target.relative_to(root).as_posix()
+                require(relative in paths or relative in generated, "uninventoried_file_present: " + relative)
     if root == Path("/"):
         require(os.getuid() == 10001 and os.getgid() == 10001, "unexpected_runtime_identity")
         import ctypes

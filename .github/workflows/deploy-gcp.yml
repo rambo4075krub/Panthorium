@@ -32,10 +32,15 @@ jobs:
   security:
     if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/security-scan.yml
+  speaker:
+    if: github.ref == 'refs/heads/main'
+    needs: security
+    uses: ./.github/workflows/deploy-speaker-production.yml
+    secrets: inherit
   deploy:
     name: Build & Deploy to Cloud Run
     if: github.ref == 'refs/heads/main'
-    needs: security
+    needs: [security, speaker]
     runs-on: ubuntu-latest
     timeout-minutes: 75
 

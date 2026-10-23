@@ -115,9 +115,11 @@ def service_state(document, expected_name):
     disabled = annotations.get(INVOKER_ANNOTATION, "false")
     if disabled not in ("true", "false", True, False):
         raise ValueError("Invalid invoker state")
-    containers = spec["containers"]
-    if not isinstance(containers, list) or not containers:
-        raise ValueError("Missing container metadata")
+    # gcloud may omit this projection when no explicit environment entries exist.
+    # Backend prerequisites below still fail if their names are absent.
+    containers = spec.get("containers", [])
+    if not isinstance(containers, list):
+        raise ValueError("Invalid container metadata")
     names = set()
     for container in containers:
         if not isinstance(container, dict):
