@@ -8,6 +8,7 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const { _internals, OfficeArtifactError } = require('./officeArtifactService');
+const { xmlMatches, xmlReplace, xmlWithoutAttributes, validateOfficeXmlEntries } = _internals;
 const { sanitizeFilename } = require('./cloudFilesService');
 const { runProcess } = require('./mediaStudioService');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -21,7 +22,7 @@ const decode = value => String(value).replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[0
 });
 const attr = (xml, key) => decode(xml.split('>')[0].match(new RegExp('(?:^|\\s)' + key + '=["\x27]([^"\x27]*)["\x27]'))?.[1] || '');
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
-const textOf = (xml, tag) => [...xml.matchAll(new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)</' + tag + '>', 'g'))].map(m=>decode(m[1])).join('');
+const textOf = (xml, tag) => xmlMatches(xml,tag,true).map(m=>decode(m[1])).join('');
 function typeOf(file) {
   return ({docx:'document',xlsx:'spreadsheet',pptx:'presentation',png:'image',jpg:'image',jpeg:'image',webp:'image',mp4:'video',webm:'video'})[String(file.name).split('.').pop().toLowerCase()] || null;
 }
@@ -44,12 +45,12 @@ function validateEdit(value) {
 function column(ref) { return [...ref.match(/^[A-Z]+/)[0]].reduce((n,c)=>n*26+c.charCodeAt(0)-64,0); }
 function addressedSheet(xml) {
   let row=0;
-  return xml.replace(/<row\b[^>]*(?:\/>|>[\s\S]*?<\/row>)/g,r=>{
+  return xmlReplace(xml,'row',r=>{
     row=attr(r,'r')?Number(attr(r,'r')):row+1;
     if(!Number.isInteger(row)||row<1||row>1048576)fail('editor_office_unsupported',422);
     if(!attr(r,'r'))r=r.replace('<row',()=>'<row r="'+row+'"');
     let col=0;
-    return r.replace(/<c\b[^>]*(?:\/>|>[\s\S]*?<\/c>)/g,c=>{
+    return xmlReplace(r,'c',c=>{
       const ref=attr(c,'r');if(ref){if(!/^[A-Z]{1,3}[1-9]\d*$/.test(ref))fail('editor_office_unsupported',422);col=column(ref);return c;}
       col++;let n=col,label='';for(;n;n=Math.floor((n-1)/26))label=String.fromCharCode(65+(n-1)%26)+label;
       return c.replace('<c',()=>'<c r="'+label+row+'"');
@@ -58,22 +59,22 @@ function addressedSheet(xml) {
 }
 function relationships(entries, base, filename) {
   const xml=entries[filename]?.toString() || '';
-  return Object.fromEntries([...xml.matchAll(/<Relationship\s[^>]*\/?\s*>/g)].filter(m=>!attr(m[0],'TargetMode')).map(m=>[attr(m[0],'Id'),path.posix.normalize(base+'/'+attr(m[0],'Target'))]));
+  return Object.fromEntries(xmlMatches(xml,'Relationship').filter(m=>!attr(m[0],'TargetMode')).map(m=>[attr(m[0],'Id'),path.posix.normalize(base+'/'+attr(m[0],'Target'))]));
 }
 function officeModel(entries, pluginId) {
-  for (const [name,bytes] of Object.entries(entries)) if (/\.(xml|rels)$/.test(name) && /<!DOCTYPE|<!ENTITY/i.test(bytes.toString())) fail('invalid_office_source');
+  validateOfficeXmlEntries(entries);
   if (pluginId === 'spreadsheet') {
     const workbook=entries['xl/workbook.xml']?.toString() || '', rels=relationships(entries,'xl','xl/_rels/workbook.xml.rels');
-    const shared=[...(entries['xl/sharedStrings.xml']?.toString() || '').matchAll(/<si(?:\s[^>]*)?>([\s\S]*?)<\/si>/g)].map(m=>textOf(m[1],'t'));
-    const sheets=[...workbook.matchAll(/<sheet\s[^>]*\/?\s*>/g)].map(m=>{
+    const shared=xmlMatches(entries['xl/sharedStrings.xml']?.toString() || '','si',true).map(m=>textOf(m[1],'t'));
+    const sheets=xmlMatches(workbook,'sheet').map(m=>{
       const file=rels[attr(m[0],'r:id')], xml=entries[file]?.toString();
       if (!xml || !file.startsWith('xl/worksheets/')) fail('editor_office_unsupported',422);
       const cells=[];
-      for (const match of addressedSheet(xml).matchAll(/<c\b[^>]*(?:\/>|>[\s\S]*?<\/c>)/g)) {
+      for (const match of xmlMatches(addressedSheet(xml),'c')) {
         const cell=attr(match[0],'r'), type=attr(match[0],'t'); if (!/^[A-Z]{1,3}[1-9]\d*$/.test(cell)) fail('editor_office_unsupported',422);
-        const raw=textOf(match[0],'v'), formula=/<f\b/.test(match[0]);
+        const raw=textOf(match[0],'v'), formula=xmlMatches(match[0],'f').length>0;
         const value=type==='b' ? raw==='1' : type==='s' ? shared[Number(raw)] ?? '' : type==='inlineStr' ? textOf(match[0],'t') : raw && !type && Number.isFinite(Number(raw)) ? Number(raw) : raw;
-        const f=match[0].match(/<f\b[^>]*>([\s\S]*?)<\/f>/);
+        const f=xmlMatches(match[0],'f',true)[0];
         cells.push({cell,value,...(type==='e'?{cellError:raw}:{}),...(formula?{formula:true,formulaText:f&&!/\bt=/.test(f[0].split('>')[0])?'='+decode(f[1]):null}:{})});
       }
       if(cells.length>10000) fail('editor_file_too_complex',413);
@@ -86,14 +87,14 @@ function officeModel(entries, pluginId) {
   let files = pluginId==='document' ? ['word/document.xml'] : [];
   if(pluginId==='presentation') {
     const rels=relationships(entries,'ppt','ppt/_rels/presentation.xml.rels');
-    files=[...(entries['ppt/presentation.xml']?.toString() || '').matchAll(/<p:sldId\s[^>]*\/?\s*>/g)].map(m=>rels[attr(m[0],'r:id')]);
+    files=xmlMatches(entries['ppt/presentation.xml']?.toString() || '','p:sldId').map(m=>rels[attr(m[0],'r:id')]);
   }
   if(!files.length || files.length>100) fail('editor_office_unsupported',422);
   const prefix=pluginId==='document'?'w':'a';
   files.forEach((file,page)=>{
     if(!entries[file]) fail('editor_office_unsupported',422);
     let ordinal=0;
-    for(const match of entries[file].toString().matchAll(new RegExp('<'+prefix+':p(?:\\s[^>]*)?>[\\s\\S]*?</'+prefix+':p>','g'))) {
+    for(const match of xmlMatches(entries[file].toString(),prefix+':p',true)) {
       const text=textOf(match[0],prefix+':t');
       if(text) blocks.push({index:blocks.length,page:page+1,file,ordinal,text});
       ordinal++;
@@ -111,41 +112,41 @@ function patchOffice(entries, pluginId, operations) {
     if(['set_cell','set_formula'].includes(op.type) && pluginId==='spreadsheet') {
       const sheet=model.sheets[op.sheet]; if(!sheet || column(op.cell)>40 || Number(op.cell.match(/\d+/)[0])>1000) fail('editor_cell_out_of_range');
       let xml=addressedSheet(entries[sheet.file].toString()); const row=Number(op.cell.match(/\d+/)[0]);
-      let old=''; xml.replace(/<c\b[^>]*(?:\/>|>[\s\S]*?<\/c>)/g,m=>{if(attr(m,'r')===op.cell) old=m;return m;});
-      if(op.type==='set_cell' && old && /<f\b/.test(old)) fail('editor_formula_cell_readonly',409);
-      if(op.type==='set_formula' && old && /<f\b[^>]*\bt=/.test(old))fail('editor_formula_shared_readonly',409);
+      const old=xmlMatches(xml,'c').find(m=>attr(m[0],'r')===op.cell)?.[0]||'';
+      if(op.type==='set_cell' && old && xmlMatches(old,'f').length) fail('editor_formula_cell_readonly',409);
+      if(op.type==='set_formula' && old && xmlMatches(old,'f').some(m=>Object.hasOwn(m.node.attributes,'t')))fail('editor_formula_shared_readonly',409);
       const style=old ? attr(old,'s') : '', value=op.type==='set_formula'?`<f>${escape(op.value.slice(1))}</f>`:typeof op.value==='number'?`<v>${op.value}</v>`:`<is><t xml:space="preserve">${escape(op.value)}</t></is>`;
       const cell=`<c r="${op.cell}"${style?` s="${escape(style)}"`:''}${op.type==='set_formula'||typeof op.value==='number'?'':' t="inlineStr"'}>${value}</c>`;
       if(old) xml=xml.replace(old,()=>cell);
       else {
         let found=false;
-        xml=xml.replace(/<row\b[^>]*(?:\/>|>[\s\S]*?<\/row>)/g,m=>{
+        xml=xmlReplace(xml,'row',m=>{
           if(Number(attr(m,'r'))!==row)return m; found=true;
           if(m.endsWith('/>'))return m.slice(0,-2)+'>'+cell+'</row>';
           let inserted=false;
-          m=m.replace(/<c\b[^>]*(?:\/>|>[\s\S]*?<\/c>)/g,c=>{if(!inserted && column(attr(c,'r'))>column(op.cell)){inserted=true;return cell+c;}return c;});
+          m=xmlReplace(m,'c',c=>{if(!inserted && column(attr(c,'r'))>column(op.cell)){inserted=true;return cell+c;}return c;});
           return inserted?m:m.replace('</row>',()=>cell+'</row>');
         });
         if(!found) {
           const rowXml=`<row r="${row}">${cell}</row>`; let inserted=false;
-          xml=xml.replace(/<row\b[^>]*(?:\/>|>[\s\S]*?<\/row>)/g,m=>{if(!inserted && Number(attr(m,'r'))>row){inserted=true;return rowXml+m;}return m;});
+          xml=xmlReplace(xml,'row',m=>{if(!inserted && Number(attr(m,'r'))>row){inserted=true;return rowXml+m;}return m;});
           if(!inserted) xml=/<sheetData\s*\/>/.test(xml) ? xml.replace(/<sheetData\s*\/>/,()=>'<sheetData>'+rowXml+'</sheetData>') : xml.replace('</sheetData>',()=>rowXml+'</sheetData>');
         }
         // Dimension is optional. Let Office recompute it, including newly added cells.
-        xml=xml.replace(/<dimension\b[^>]*\/>/g,'');
+        xml=xmlReplace(xml,'dimension','');
       }
       entries[sheet.file]=Buffer.from(xml);
     } else if(op.type==='set_text' && model.blocks) {
       const block=model.blocks[op.index]; if(!block)fail('editor_text_not_found');
       const prefix=pluginId==='document'?'w':'a'; let index=0;
-      const xml=entries[block.file].toString().replace(new RegExp('<'+prefix+':p(?:\\s[^>]*)?>[\\s\\S]*?</'+prefix+':p>','g'),p=>{
+      const xml=xmlReplace(entries[block.file].toString(),prefix+':p',p=>{
         if(index++!==block.ordinal)return p; let first=true;
-        return p.replace(new RegExp('<'+prefix+':t(?:\\s[^>]*)?>[\\s\\S]*?</'+prefix+':t>','g'),()=>{const v=first?escape(op.value):'';first=false;return `<${prefix}:t xml:space="preserve">${v}</${prefix}:t>`;});
-      }); entries[block.file]=Buffer.from(xml);
+        return xmlReplace(p,prefix+':t',()=>{const v=first?escape(op.value):'';first=false;return `<${prefix}:t xml:space="preserve">${v}</${prefix}:t>`;},{pairedOnly:true});
+      },{pairedOnly:true}); entries[block.file]=Buffer.from(xml);
     } else if(op.type==='append_paragraph' && pluginId==='document') {
       let xml=entries['word/document.xml'].toString();
       const p='<w:p><w:r><w:t xml:space="preserve">'+escape(op.value)+'</w:t></w:r></w:p>';
-      const section=[...xml.matchAll(/<w:sectPr\b[^>]*(?:\/>|>[\s\S]*?<\/w:sectPr>)/g)].at(-1);
+      const section=xmlMatches(xml,'w:sectPr').at(-1);
       if(section && /^\s*<\/w:body>/.test(xml.slice(section.index+section[0].length)))xml=xml.slice(0,section.index)+p+xml.slice(section.index);
       else xml=xml.replace('</w:body>',()=>p+'</w:body>');entries['word/document.xml']=Buffer.from(xml);
     } else fail('editor_operation_type_mismatch');
@@ -155,10 +156,10 @@ function patchOffice(entries, pluginId, operations) {
     for(const [si,sheet]of updated.sheets.entries()) {
       const byCell=new Map(calculated[si].cells.filter(c=>c.formula).map(c=>[c.cell,c]));
       if(!byCell.size)continue;
-      entries[sheet.file]=Buffer.from(addressedSheet(entries[sheet.file].toString()).replace(/<c\b[^>]*(?:\/>|>[\s\S]*?<\/c>)/g,c=>{
+      entries[sheet.file]=Buffer.from(xmlReplace(addressedSheet(entries[sheet.file].toString()),'c',c=>{
         const item=byCell.get(attr(c,'r'));if(!item)return c;
         // Unsupported/shared formula caches must not look current after edits.
-        c=c.replace(/<v\b[^>]*>[\s\S]*?<\/v>/g,'').replace(/\s+t=["'](?:str|b|e)["']/g,'');
+        c=xmlReplace(c,'v','');if(['str','b','e'].includes(attr(c,'t')))c=xmlWithoutAttributes(c,['t']);
         if(item.calculationError)return c;
         const value=item.calculated,type=typeof value==='boolean'?'b':typeof value==='string'?'str':'';
         if(type)c=c.replace('<c','<c t="'+type+'"');return c.replace('</c>',()=>'<v>'+escape(typeof value==='boolean'?+value:value)+'</v></c>');
@@ -166,11 +167,11 @@ function patchOffice(entries, pluginId, operations) {
     }
     if(updated.sheets.some(s=>s.cells.some(c=>c.formula))) {
     // Recalculate also in external Office engines, including unsupported formulas.
-    let workbook=entries['xl/workbook.xml'].toString();workbook=workbook.replace(/<calcPr\b[^>]*(?:\/>|>[\s\S]*?<\/calcPr>)/g,'').replace('</workbook>','<calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>');entries['xl/workbook.xml']=Buffer.from(workbook);
+    let workbook=entries['xl/workbook.xml'].toString();workbook=xmlReplace(workbook,'calcPr','').replace('</workbook>','<calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>');entries['xl/workbook.xml']=Buffer.from(workbook);
     // A stale dependency chain is invalid after changing formulas.
     delete entries['xl/calcChain.xml'];
-    if(entries['xl/_rels/workbook.xml.rels'])entries['xl/_rels/workbook.xml.rels']=Buffer.from(entries['xl/_rels/workbook.xml.rels'].toString().replace(/<Relationship\b[^>]*Type=["'][^"']*\/calcChain["'][^>]*\/>/g,''));
-    entries['[Content_Types].xml']=Buffer.from(entries['[Content_Types].xml'].toString().replace(/<Override\b[^>]*PartName=["']\/xl\/calcChain.xml["'][^>]*\/>/g,''));
+    if(entries['xl/_rels/workbook.xml.rels'])entries['xl/_rels/workbook.xml.rels']=Buffer.from(xmlReplace(entries['xl/_rels/workbook.xml.rels'].toString(),'Relationship',m=>attr(m,'Type').endsWith('/calcChain')?'':m));
+    entries['[Content_Types].xml']=Buffer.from(xmlReplace(entries['[Content_Types].xml'].toString(),'Override',m=>attr(m,'PartName')==='/xl/calcChain.xml'?'':m));
   }
   }
   return entries;

@@ -58,7 +58,7 @@ const catalog = require('../voice-window-catalog');
     throw new Error('unexpected gateway session');
   } };
   const runner = async (binary, args) => {
-    if (binary === 'ffprobe-test') return { stdout: '5' };
+    if (binary === 'ffprobe-test') return { stdout: JSON.stringify({ format: { duration: '5', format_name: 'mov,mp4,m4a,3gp,3g2,mj2' }, streams: [{ codec_type: 'video', width: 640, height: 360, avg_frame_rate: '30/1' }, { codec_type: 'audio', channels: 2, sample_rate: '48000' }] }) };
     await fs.writeFile(args.at(-1), Buffer.from(args.includes('libopus') ? 'ogg-audio' : 'rendered-mp4'));
     return { stdout: '', stderr: '' };
   };

@@ -10,6 +10,24 @@ const MAX_TRANSCRIPTION_SECONDS = 180;
 const MAX_SRT_BYTES = 100 * 1024;
 const MAX_AI_INSTRUCTION_CHARS = 2400;
 const MAX_AI_TRANSCRIPT_CHARS = 12000;
+const MAX_VIDEO_PIXELS = 16777216;
+const MAX_SOURCE_SECONDS = 24 * 60 * 60;
+// Uploaded MIME types and extensions are labels, not format validation. Limit
+// every probe/decode to self-contained containers; never enable playlists,
+// concat, image sequences, network protocols, or QuickTime external tracks.
+function localVideoInputArgs(format = 'probe') {
+  return [
+    '-max_alloc', '67108864', '-protocol_whitelist', 'file',
+    '-format_whitelist', 'mov,matroska,webm,mpeg,mpegts,ogg',
+    // ffprobe can apply these when MOV is detected. ffmpeg rejects unused
+    // demuxer-private options, so decode only receives them for verified MOV.
+    ...(format === 'probe' || format === 'mov' ? ['-enable_drefs', '0', '-use_absolute_path', '0'] : []),
+    ...(format === 'probe' ? [] : ['-f', format]),
+    '-probesize', '5000000', '-analyzeduration', '5000000',
+    '-max_streams', '16', '-max_probe_packets', '2500',
+    '-max_pixels', String(MAX_VIDEO_PIXELS), '-threads', '1'
+  ];
+}
 const VEO_MODELS = new Set([
   'veo-3.1-generate-001', 'veo-3.1-fast-generate-001',
   'veo-3.0-generate-001', 'veo-3.0-fast-generate-001'
@@ -189,7 +207,7 @@ class MediaStudioService {
   async source(userId, fileId, directory) {
     const file = await (this.files.readOwned || this.files.download).call(this.files, userId, String(fileId || ''));
     if (!isVideoFile(file)) throw new MediaStudioError(415, 'video_file_required');
-    if (!file.body?.length || file.body.length > MAX_FILE_BYTES) throw new MediaStudioError(413, 'video_file_too_large');
+    if (!Buffer.isBuffer(file.body) || !file.body.length || file.body.length > MAX_FILE_BYTES) throw new MediaStudioError(413, 'video_file_too_large');
     const contentType = String(file.contentType || '').toLowerCase();
     const extension = EXTENSIONS[contentType] || path.extname(file.name || '').slice(1).toLowerCase() || 'mp4';
     const inputPath = path.join(directory, 'source.' + extension.replace(/[^a-z0-9]/g, '').slice(0, 8));
@@ -197,13 +215,39 @@ class MediaStudioService {
     return { file, inputPath };
   }
 
-  async durationSeconds(inputPath) {
+  async inspectVideo(inputPath) {
     const { stdout } = await this.runner(this.ffprobe, [
-      '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', inputPath
-    ], { timeoutMs: 20000, maxOutputBytes: 512 });
-    const duration = Number(stdout);
-    if (!Number.isFinite(duration) || duration <= 0) throw new MediaStudioError(422, 'invalid_video');
-    return duration;
+      '-v', 'error', ...localVideoInputArgs(), '-show_entries',
+      'format=duration,format_name:stream=codec_type,width,height,avg_frame_rate,sample_rate,channels', '-of', 'json', inputPath
+    ], { timeoutMs: 20000, maxOutputBytes: 16384 });
+    let metadata;
+    try { metadata = JSON.parse(stdout); } catch (_) { throw new MediaStudioError(422, 'invalid_video'); }
+    const duration = Number(metadata?.format?.duration);
+    const names = String(metadata?.format?.format_name || '').split(',');
+    const format = ['mov', 'matroska', 'mpeg', 'mpegts', 'ogg'].find(name => names.includes(name));
+    const streams = metadata?.streams;
+    if (!format || !Number.isFinite(duration) || duration <= 0 || duration > MAX_SOURCE_SECONDS || !Array.isArray(streams) ||
+        !streams.length || streams.length > 16 || !streams.some(stream => stream.codec_type === 'video')) {
+      throw new MediaStudioError(422, 'invalid_video');
+    }
+    for (const stream of streams) {
+      if (stream.codec_type === 'video') {
+        const width = Number(stream.width), height = Number(stream.height);
+        const [numerator, denominator = '1'] = String(stream.avg_frame_rate || '0/1').split('/');
+        const fps = Number(numerator) / Number(denominator);
+        if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 ||
+            width > 8192 || height > 8192 || width * height > MAX_VIDEO_PIXELS ||
+            (Number.isFinite(fps) && (fps < 0 || fps > 240))) throw new MediaStudioError(413, 'video_dimensions_too_large');
+      } else if (stream.codec_type === 'audio' &&
+          (Number(stream.channels) > 8 || Number(stream.sample_rate) > 192000)) {
+        throw new MediaStudioError(413, 'video_audio_parameters_too_large');
+      }
+    }
+    return { duration, format };
+  }
+
+  async durationSeconds(inputPath) {
+    return (await this.inspectVideo(inputPath)).duration;
   }
 
   async planEdit({ user, fileId, instruction, transcript = '' } = {}) {
@@ -433,13 +477,15 @@ class MediaStudioService {
     try {
       directory = await fs.mkdtemp(path.join(this.tempRoot, 'panthorium-media-'));
       const { file, inputPath } = await this.source(userId, fileId, directory);
-      const duration = await this.durationSeconds(inputPath);
+      const { duration, format } = await this.inspectVideo(inputPath);
       if (duration > MAX_TRANSCRIPTION_SECONDS) throw new MediaStudioError(413, 'transcription_clip_too_long');
       const audioPath = path.join(directory, 'speech.ogg');
       await this.runner(this.ffmpeg, [
-        '-hide_banner', '-loglevel', 'error', '-i', inputPath, '-t', String(MAX_TRANSCRIPTION_SECONDS),
-        '-map', '0:a:0', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '32k', '-f', 'ogg', audioPath
+        '-hide_banner', '-loglevel', 'error', ...localVideoInputArgs(format), '-i', inputPath, '-t', String(MAX_TRANSCRIPTION_SECONDS),
+        '-map', '0:a:0', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '32k',
+        '-fs', String(2 * 1024 * 1024 + 1), '-f', 'ogg', audioPath
       ], { timeoutMs: 45000 });
+      if ((await fs.stat(audioPath)).size > 2 * 1024 * 1024) throw new MediaStudioError(413, 'audio_payload_too_large');
       const audio = await fs.readFile(audioPath);
       if (!audio.length || audio.length > 2 * 1024 * 1024) throw new MediaStudioError(413, 'audio_payload_too_large');
       if (typeof this.providers?.transcribeAudio !== 'function') throw new MediaStudioError(503, 'transcription_unavailable');
@@ -478,13 +524,13 @@ class MediaStudioService {
     try {
       directory = await fs.mkdtemp(path.join(this.tempRoot, 'panthorium-media-'));
       const { file, inputPath } = await this.source(userId, fileId, directory);
-      const sourceDuration = await this.durationSeconds(inputPath);
+      const { duration: sourceDuration, format } = await this.inspectVideo(inputPath);
       if (end > sourceDuration + 0.1) throw new MediaStudioError(400, 'clip_range_exceeds_video');
       const clipSeconds = end - start;
       const normalizedSrt = normalizeSrt(captionsSrt, clipSeconds);
       const outputPath = path.join(directory, 'rendered.mp4');
       const args = [
-        '-hide_banner', '-loglevel', 'error', '-ss', start.toFixed(3), '-i', inputPath,
+        '-hide_banner', '-loglevel', 'error', ...localVideoInputArgs(format), '-ss', start.toFixed(3), '-i', inputPath,
         '-t', clipSeconds.toFixed(3), '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn'
       ];
       const filters = [];
@@ -499,10 +545,11 @@ class MediaStudioService {
       }
       if (filters.length) args.push('-vf', filters.join(','));
       args.push(
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '25', '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-f', 'mp4', outputPath
+        '-filter_threads', '1', '-threads', '2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '25', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-fs', String(MAX_FILE_BYTES + 1), '-f', 'mp4', outputPath
       );
       await this.runner(this.ffmpeg, args, { timeoutMs: 180000 });
+      if ((await fs.stat(outputPath)).size > MAX_FILE_BYTES) throw new MediaStudioError(413, 'render_too_large');
       const output = await fs.readFile(outputPath);
       if (!output.length) throw new MediaStudioError(422, 'empty_render');
       if (output.length > MAX_FILE_BYTES) throw new MediaStudioError(413, 'render_too_large');

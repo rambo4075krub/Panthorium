@@ -1,5 +1,13 @@
-FROM node:24.22.1-alpine
-RUN apk add --no-cache ffmpeg
+FROM node:24.22.1-alpine AS media-build
+RUN apk add --no-cache build-base pkgconf nasm patch x264-dev opus-dev libass-dev zlib-dev
+COPY build/media/ /build/media/
+RUN node /build/media/build-ffmpeg.mjs
+
+FROM node:24.22.1-alpine AS runtime
+# Only the libraries used by the reviewed CPU/local-file build, plus captions.
+RUN apk add --no-cache x264-libs opus libass zlib font-dejavu font-noto-thai
+COPY --from=media-build /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
+COPY --from=media-build /opt/ffmpeg/share/panthorium/ /usr/local/share/panthorium/
 WORKDIR /app
 COPY package*.json ./
 # Package managers are build tools; the runtime starts Node directly.

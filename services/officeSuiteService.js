@@ -1,16 +1,16 @@
 'use strict';
 // Original Panthorium OOXML operations. Existing package parts are retained.
 const {OfficeArtifactError,_internals}=require('./officeArtifactService');
+const {xmlMatches,xmlReplace,xmlWithoutAttributes,xmlInsertChild,validateOfficeXmlEntries}=_internals;
 const path=require('node:path');
 const core=require('../office-suite-core');
 const fail=code=>{throw new OfficeArtifactError(400,code);};
 const escape=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 const attr=(s,k)=>s.split('>')[0].match(new RegExp('(?:^|\\s)'+k+'=["\x27]([^"\x27]*)["\x27]'))?.[1]||'';
-const tags=(s,t)=>[...s.matchAll(new RegExp('<'+t+'\\b[^>]*(?:/>|>[\\s\\S]*?</'+t+'>)','g'))].map(m=>m[0]);
-const replaceTag=(s,tag,value)=>s.replace(new RegExp('<'+tag+'\\b[^>]*(?:/>|>[\\s\\S]*?</'+tag+'>)','g'),'').replace(/<\/[^>]+>$/,end=>value+end);
+const tags=(s,t)=>xmlMatches(s,t).map(m=>m[0]);
+const replaceTag=(s,tag,value)=>xmlInsertChild(xmlReplace(s,tag,''),value);
 const prop=(s,tag,value)=>{
-  const re=new RegExp('<'+tag+'\\b[^>]*(?:/>|>[\\s\\S]*?</'+tag+'>)');
-  return re.test(s)?s.replace(re,()=>value):s.replace(/>/,()=>'>'+value);
+  return xmlMatches(s,tag).length?xmlReplace(s,tag,value,{first:true}):xmlInsertChild(s,value,true);
 };
 const tagval=(s,t,k='w:val')=>attr(tags(s,t)[0]||'',k);
 const TYPES=['add_slide','reorder_slide','set_formula','format_text','format_cell','move_text','slide_background','insert_table','add_slide_text'];
@@ -45,26 +45,26 @@ function textStyle(p,prefix){
   const r=tags(p,'a:rPr')[0]||'';return {bold:attr(r,'b')==='1',italic:attr(r,'i')==='1',underline:attr(r,'u')==='sng',fontSize:Number(attr(r,'sz'))/100||24,color:tagval(r,'a:srgbClr','val')||'20252C',align:({l:'left',ctr:'center',r:'right',just:'justify'})[attr(tags(p,'a:pPr')[0]||'','algn')]||'left'};
 }
 function shapeFor(xml,ordinal){
-  const paragraph=[...xml.matchAll(/<a:p(?:\s[^>]*)?>[\s\S]*?<\/a:p>/g)][ordinal];if(!paragraph)return null;
-  let index=0;for(const m of xml.matchAll(/<p:sp\b[^>]*>[\s\S]*?<\/p:sp>/g)){if(paragraph.index>=m.index&&paragraph.index<m.index+m[0].length)return {index,shape:m[0]};index++;}return null;
+  const paragraph=xmlMatches(xml,'a:p',true)[ordinal];if(!paragraph)return null;
+  let index=0;for(const m of xmlMatches(xml,'p:sp',true)){if(paragraph.index>=m.index&&paragraph.index<m.index+m[0].length)return {index,shape:m[0]};index++;}return null;
 }
 function visualContent(entries,kind,model){
   model.media=[];let bytesUsed=0;
   const files=kind==='document'?['word/document.xml']:model.slideFiles;
   for(const [page,file]of files.entries()){
-    const xml=entries[file].toString(),paragraphs=[...xml.matchAll(new RegExp('<'+(kind==='document'?'w':'a')+':p(?:\\s[^>]*)?>[\\s\\S]*?</'+(kind==='document'?'w':'a')+':p>','g'))];
+    const xml=entries[file].toString(),paragraphs=xmlMatches(xml,(kind==='document'?'w':'a')+':p',true);
     const rels=tags(entries[file.replace(/\/([^/]+)$/,'/_rels/$1.rels')]?.toString()||'','Relationship');
     if(kind==='document'){
-      let tableIndex=0;for(const table of xml.matchAll(/<w:tbl\b[^>]*>[\s\S]*?<\/w:tbl>/g)){
-        if((table[0].match(/<w:tbl\b/g)||[]).length!==1)continue;
-        let row=0;for(const tr of table[0].matchAll(/<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g)){let column=0;
-          for(const tc of tr[0].matchAll(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)){const start=table.index+tr.index+tc.index,end=start+tc[0].length;
+      let tableIndex=0;for(const table of xmlMatches(xml,'w:tbl',true)){
+        if(xmlMatches(table[0],'w:tbl').length!==1)continue;
+        let row=0;for(const tr of xmlMatches(table[0],'w:tr',true)){let column=0;
+          for(const tc of xmlMatches(tr[0],'w:tc',true)){const start=table.index+tr.index+tc.index,end=start+tc[0].length;
             for(const b of model.blocks)if(b.file===file&&paragraphs[b.ordinal]?.index>=start&&paragraphs[b.ordinal].index<end)b.table={index:tableIndex,row,column};column++;
           }row++;
         }tableIndex++;
       }
     }
-    const pictures=kind==='document'?[...xml.matchAll(/<w:drawing\b[^>]*>[\s\S]*?<\/w:drawing>/g)]:[...xml.matchAll(/<p:pic\b[^>]*>[\s\S]*?<\/p:pic>/g)];
+    const pictures=xmlMatches(xml,kind==='document'?'w:drawing':'p:pic',true);
     for(const pic of pictures){
       if(model.media.length>=16||bytesUsed>=4*1024*1024){model.mediaOmitted=true;break;}
       const rid=attr(tags(pic[0],'a:blip')[0]||'','r:embed'),rel=rels.find(r=>attr(r,'Id')===rid&&!attr(r,'TargetMode'));if(!rel)continue;
@@ -83,6 +83,7 @@ function visualContent(entries,kind,model){
   }
 }
 function enrich(entries,kind,model){
+  validateOfficeXmlEntries(entries);
   if(kind==='spreadsheet'){
     const styles=entries['xl/styles.xml']?.toString()||'',fonts=tags(tags(styles,'fonts')[0]||'','font'),xfs=tags(tags(styles,'cellXfs')[0]||'','xf');
     for(const s of model.sheets){const cellMap=new Map(tags(entries[s.file].toString(),'c').map((x,i)=>[attr(x,'r')||s.cells[i]?.cell,x]));for(const c of s.cells){const xml=cellMap.get(c.cell),xf=xfs[Number(attr(xml||'','s'))]||'',font=fonts[Number(attr(xf,'fontId'))]||'';
@@ -91,7 +92,8 @@ function enrich(entries,kind,model){
   }
   const prefix=kind==='document'?'w':'a';
   const presentation=entries['ppt/presentation.xml']?.toString()||'',size=tags(presentation,'p:sldSz')[0]||'',width=Number(attr(size,'cx'))||12192000,height=Number(attr(size,'cy'))||6858000;
-  for(const b of model.blocks){const xml=entries[b.file].toString(),p=tags(xml,prefix+':p')[b.ordinal]||'';const inherited=kind==='document'?tags(entries['word/styles.xml']?.toString()||'','w:style').find(t=>attr(t,'w:styleId')===tagval(p,'w:pStyle'))||'':'';b.style=textStyle(p+inherited,prefix);
+  const documents=new Map(),paragraphs=new Map(),styles=kind==='document'?tags(entries['word/styles.xml']?.toString()||'','w:style'):[];
+  for(const b of model.blocks){if(!documents.has(b.file)){const xml=entries[b.file].toString();documents.set(b.file,xml);paragraphs.set(b.file,tags(xml,prefix+':p'));}const xml=documents.get(b.file),p=paragraphs.get(b.file)[b.ordinal]||'';const inherited=kind==='document'?styles.find(t=>attr(t,'w:styleId')===tagval(p,'w:pStyle'))||'':'';b.style=textStyle(p+inherited,prefix);
     if(kind==='presentation'){
       const shape=shapeFor(xml,b.ordinal);if(shape){const transform=tags(tags(shape.shape,'p:spPr')[0]||'','a:xfrm')[0]||'',off=tags(transform,'a:off')[0]||'',ext=tags(transform,'a:ext')[0]||'';
         b.shapeIndex=shape.index;b.geometry=transform&&!/<p:grpSp\b/.test(xml)?{x:Number(attr(off,'x'))/width*100,y:Number(attr(off,'y'))/height*100,width:Number(attr(ext,'cx'))/width*100,height:Number(attr(ext,'cy'))/height*100}:null;
@@ -104,14 +106,14 @@ function enrich(entries,kind,model){
 function formatParagraph(p,style,prefix){
   if(prefix==='w'){
     if(style.align){let pr=tags(p,'w:pPr')[0]||'<w:pPr></w:pPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></w:pPr>';pr=replaceTag(pr,'w:jc','<w:jc w:val="'+style.align+'"/>');p=prop(p,'w:pPr',pr);}
-    return p.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g,r=>{let pr=tags(r,'w:rPr')[0]||'<w:rPr></w:rPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></w:rPr>';
+    return xmlReplace(p,'w:r',r=>{let pr=tags(r,'w:rPr')[0]||'<w:rPr></w:rPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></w:rPr>';
       for(const [k,t]of [['bold','w:b'],['italic','w:i'],['underline','w:u'],['fontSize','w:sz'],['color','w:color']])if(style[k]!=null)pr=replaceTag(pr,t,`<${t} w:val="${k==='fontSize'?style[k]*2:k==='underline'?(style[k]?'single':'none'):typeof style[k]==='boolean'?+style[k]:style[k]}"/>`);
       if(style.fontSize)pr=replaceTag(pr,'w:szCs','<w:szCs w:val="'+style.fontSize*2+'"/>');return prop(r,'w:rPr',pr);
     });
   }
-  if(style.align){let pr=tags(p,'a:pPr')[0]||'<a:pPr/>';pr=pr.replace(/\s+algn="[^"]*"/g,'').replace('<a:pPr','<a:pPr algn="'+({left:'l',center:'ctr',right:'r',justify:'just'})[style.align]+'"');p=prop(p,'a:pPr',pr);}
-  return p.replace(/<a:r\b[^>]*>[\s\S]*?<\/a:r>/g,r=>{let pr=tags(r,'a:rPr')[0]||'<a:rPr></a:rPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></a:rPr>';
-    for(const [k,a]of [['bold','b'],['italic','i'],['underline','u'],['fontSize','sz']])if(style[k]!=null)pr=pr.replace(new RegExp('\\s+'+a+'="[^"]*"','g'),'').replace('<a:rPr',`<a:rPr ${a}="${k==='fontSize'?style[k]*100:k==='underline'?(style[k]?'sng':'none'):+style[k]}"`);
+  if(style.align){let pr=tags(p,'a:pPr')[0]||'<a:pPr/>';pr=xmlWithoutAttributes(pr,['algn']).replace('<a:pPr','<a:pPr algn="'+({left:'l',center:'ctr',right:'r',justify:'just'})[style.align]+'"');p=prop(p,'a:pPr',pr);}
+  return xmlReplace(p,'a:r',r=>{let pr=tags(r,'a:rPr')[0]||'<a:rPr></a:rPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></a:rPr>';
+    for(const [k,a]of [['bold','b'],['italic','i'],['underline','u'],['fontSize','sz']])if(style[k]!=null)pr=xmlWithoutAttributes(pr,[a]).replace('<a:rPr',`<a:rPr ${a}="${k==='fontSize'?style[k]*100:k==='underline'?(style[k]?'sng':'none'):+style[k]}"`);
     if(style.color)pr=replaceTag(pr,'a:solidFill','<a:solidFill><a:srgbClr val="'+style.color+'"/></a:solidFill>');return prop(r,'a:rPr',pr);
   });
 }
@@ -121,11 +123,11 @@ function formatCell(entries,op,sheet){
   const fonts=tags(tags(styles,'fonts')[0]||'','font'),xfs=tags(tags(styles,'cellXfs')[0]||'','xf');if(!fonts.length||!xfs.length||fonts.length>4000||xfs.length>4000)fail('editor_styles_unsupported');
   let xf=xfs[Number(attr(old,'s'))||0],font=fonts[Number(attr(xf,'fontId'))||0];if(!xf||!font)fail('editor_styles_unsupported');if(font.endsWith('/>'))font='<font></font>';
   for(const [k,t]of [['bold','b'],['italic','i'],['underline','u'],['fontSize','sz'],['color','color']])if(op.style[k]!=null)font=replaceTag(font,t,typeof op.style[k]==='boolean'?(op.style[k]?'<'+t+'/>':''):`<${t} ${k==='color'?'rgb':'val'}="${k==='color'?'FF'+op.style[k]:op.style[k]}"/>`);
-  const fontId=fonts.length;xf=xf.replace(/\s+(?:fontId|applyFont)="[^"]*"/g,'').replace('<xf',`<xf fontId="${fontId}" applyFont="1"`);
-  if(op.style.numberFormat)xf=xf.replace(/\s+(?:numFmtId|applyNumberFormat)="[^"]*"/g,'').replace('<xf',`<xf numFmtId="${({general:0,integer:1,decimal:2,percent:10})[op.style.numberFormat]}" applyNumberFormat="1"`);
-  if(op.style.align){if(xf.endsWith('/>'))xf=xf.slice(0,-2)+'></xf>';let align=tags(xf,'alignment')[0]||'<alignment/>';align=align.replace(/\s+horizontal="[^"]*"/g,'').replace('<alignment','<alignment horizontal="'+op.style.align+'"');xf=prop(xf,'alignment',align).replace(/\s+applyAlignment="[^"]*"/g,'').replace('<xf','<xf applyAlignment="1"');}
-  for(const [tag,content,count]of [['fonts',font,fontId+1],['cellXfs',xf,xfs.length+1]])styles=styles.replace(new RegExp('<'+tag+'\\b[^>]*>[\\s\\S]*?</'+tag+'>'),part=>part.replace(/\s+count="[^"]*"/,'').replace('<'+tag,'<'+tag+' count="'+count+'"').replace('</'+tag+'>',()=>content+'</'+tag+'>'));
-  entries['xl/styles.xml']=Buffer.from(styles);xml=xml.replace(old,()=>old.replace(/\s+s="[^"]*"/,'').replace('<c','<c s="'+xfs.length+'"'));entries[sheet.file]=Buffer.from(xml);
+  const fontId=fonts.length;xf=xmlWithoutAttributes(xf,['fontId','applyFont']).replace('<xf',`<xf fontId="${fontId}" applyFont="1"`);
+  if(op.style.numberFormat)xf=xmlWithoutAttributes(xf,['numFmtId','applyNumberFormat']).replace('<xf',`<xf numFmtId="${({general:0,integer:1,decimal:2,percent:10})[op.style.numberFormat]}" applyNumberFormat="1"`);
+  if(op.style.align){if(xf.endsWith('/>'))xf=xf.slice(0,-2)+'></xf>';let align=tags(xf,'alignment')[0]||'<alignment/>';align=xmlWithoutAttributes(align,['horizontal']).replace('<alignment','<alignment horizontal="'+op.style.align+'"');xf=xmlWithoutAttributes(prop(xf,'alignment',align),['applyAlignment']).replace('<xf','<xf applyAlignment="1"');}
+  for(const [tag,content,count]of [['fonts',font,fontId+1],['cellXfs',xf,xfs.length+1]])styles=xmlReplace(styles,tag,part=>xmlWithoutAttributes(part,['count']).replace('<'+tag,'<'+tag+' count="'+count+'"').replace('</'+tag+'>',()=>content+'</'+tag+'>'),{first:true});
+  entries['xl/styles.xml']=Buffer.from(styles);xml=xml.replace(old,()=>xmlWithoutAttributes(old,['s']).replace('<c','<c s="'+xfs.length+'"'));entries[sheet.file]=Buffer.from(xml);
 }
 function apply(entries,kind,op,model){
   if(!validateOperation(op))return false;
@@ -133,21 +135,21 @@ function apply(entries,kind,op,model){
   if(op.type==='format_cell'){if(kind!=='spreadsheet'||!model.sheets[op.sheet])fail('editor_operation_type_mismatch');formatCell(entries,op,model.sheets[op.sheet]);return true;}
   if(['format_text','move_text'].includes(op.type)){
     const b=model.blocks?.[op.index];if(!b)fail('editor_text_not_found');let xml=entries[b.file].toString();
-    if(op.type==='format_text'){const prefix=kind==='document'?'w':'a';let index=0;xml=xml.replace(new RegExp('<'+prefix+':p(?:\\s[^>]*)?>[\\s\\S]*?</'+prefix+':p>','g'),p=>index++===b.ordinal?formatParagraph(p,op.style,prefix):p);}
-    else {if(kind!=='presentation')fail('editor_operation_type_mismatch');const info=shapeFor(xml,b.ordinal);if(!info||/<p:grpSp\b/.test(xml)||!tags(info.shape,'a:xfrm').length)fail('editor_geometry_unsupported');const size=model.slideSize,off=`<a:off x="${Math.round(op.x/100*size.width)}" y="${Math.round(op.y/100*size.height)}"/>`,ext=`<a:ext cx="${Math.round(op.width/100*size.width)}" cy="${Math.round(op.height/100*size.height)}"/>`;let i=0;xml=xml.replace(/<p:sp\b[^>]*>[\s\S]*?<\/p:sp>/g,s=>i++===info.index?s.replace(/<a:xfrm\b[^>]*>[\s\S]*?<\/a:xfrm>/,()=>'<a:xfrm>'+off+ext+'</a:xfrm>'):s);}
+    if(op.type==='format_text'){const prefix=kind==='document'?'w':'a';let index=0;xml=xmlReplace(xml,prefix+':p',p=>index++===b.ordinal?formatParagraph(p,op.style,prefix):p,{pairedOnly:true});}
+    else {if(kind!=='presentation')fail('editor_operation_type_mismatch');const info=shapeFor(xml,b.ordinal);if(!info||/<p:grpSp\b/.test(xml)||!tags(info.shape,'a:xfrm').length)fail('editor_geometry_unsupported');const size=model.slideSize,off=`<a:off x="${Math.round(op.x/100*size.width)}" y="${Math.round(op.y/100*size.height)}"/>`,ext=`<a:ext cx="${Math.round(op.width/100*size.width)}" cy="${Math.round(op.height/100*size.height)}"/>`;let i=0;xml=xmlReplace(xml,'p:sp',s=>i++===info.index?xmlReplace(s,'a:xfrm','<a:xfrm>'+off+ext+'</a:xfrm>',{first:true}):s);}
     entries[b.file]=Buffer.from(xml);return true;
   }
   if(op.type==='insert_table'){
     if(kind!=='document')fail('editor_operation_type_mismatch');let xml=entries['word/document.xml'].toString();const borders=['top','left','bottom','right','insideH','insideV'].map(x=>'<w:'+x+' w:val="single" w:sz="4" w:color="CBD5E1"/>').join('');
     const table='<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders>'+borders+'</w:tblBorders></w:tblPr><w:tblGrid>'+op.rows[0].map(()=>'<w:gridCol w:w="1800"/>').join('')+'</w:tblGrid>'+op.rows.map(row=>'<w:tr>'+row.map(value=>'<w:tc><w:tcPr><w:tcW w:w="1800" w:type="dxa"/></w:tcPr><w:p><w:r><w:t xml:space="preserve">'+escape(value)+'</w:t></w:r></w:p></w:tc>').join('')+'</w:tr>').join('')+'</w:tbl>';
-    const section=[...xml.matchAll(/<w:sectPr\b[^>]*(?:\/>|>[\s\S]*?<\/w:sectPr>)/g)].at(-1);xml=section&&/^\s*<\/w:body>/.test(xml.slice(section.index+section[0].length))?xml.slice(0,section.index)+table+xml.slice(section.index):xml.replace('</w:body>',()=>table+'</w:body>');entries['word/document.xml']=Buffer.from(xml);return true;
+    const section=xmlMatches(xml,'w:sectPr').at(-1);xml=section&&/^\s*<\/w:body>/.test(xml.slice(section.index+section[0].length))?xml.slice(0,section.index)+table+xml.slice(section.index):xml.replace('</w:body>',()=>table+'</w:body>');entries['word/document.xml']=Buffer.from(xml);return true;
   }
   if(op.type==='add_slide'||op.type==='reorder_slide'){
     if(kind!=='presentation')fail('editor_operation_type_mismatch');
     let presentation=entries['ppt/presentation.xml'].toString(),items=tags(presentation,'p:sldId');
     if(op.type==='reorder_slide'){
       if(!items[op.page-1]||!items[op.toPage-1])fail('editor_page_not_found');const [item]=items.splice(op.page-1,1);items.splice(op.toPage-1,0,item);
-      presentation=presentation.replace(/<p:sldIdLst\b[^>]*>[\s\S]*?<\/p:sldIdLst>/,()=>'<p:sldIdLst>'+items.join('')+'</p:sldIdLst>');entries['ppt/presentation.xml']=Buffer.from(presentation);return true;
+      presentation=xmlReplace(presentation,'p:sldIdLst','<p:sldIdLst>'+items.join('')+'</p:sldIdLst>',{first:true});entries['ppt/presentation.xml']=Buffer.from(presentation);return true;
     }
     if(items.length>=100)fail('editor_slide_limit');
     let serial=1;while(entries['ppt/slides/panthorium'+serial+'.xml'])serial++;
@@ -164,7 +166,7 @@ function apply(entries,kind,op,model){
     entries['[Content_Types].xml']=Buffer.from(entries['[Content_Types].xml'].toString().replace('</Types>',()=>`<Override PartName="/${filename}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`));return true;
   }
   if(kind!=='presentation')fail('editor_operation_type_mismatch');const file=model.slideFiles?.[op.page-1];if(!file)fail('editor_page_not_found');let xml=entries[file].toString();
-  if(op.type==='slide_background'){const bg='<p:bg><p:bgPr><a:solidFill><a:srgbClr val="'+op.color+'"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>';xml=/<p:bg\b/.test(xml)?xml.replace(/<p:bg\b[^>]*>[\s\S]*?<\/p:bg>/,()=>bg):xml.replace(/<p:cSld\b[^>]*>/,s=>s+bg);}
+  if(op.type==='slide_background'){const bg='<p:bg><p:bgPr><a:solidFill><a:srgbClr val="'+op.color+'"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>';if(xmlMatches(xml,'p:bg').length)xml=xmlReplace(xml,'p:bg',bg,{first:true});else{const parent=xmlMatches(xml,'p:cSld')[0]?.node;if(!parent||parent.selfClosing)fail('editor_office_unsupported');xml=xml.slice(0,parent.openEnd)+bg+xml.slice(parent.openEnd);}}
   if(op.type==='add_slide_text'){
     const id=Math.max(1,...tags(xml,'p:cNvPr').map(t=>Number(attr(t,'id'))||0))+1;const shape=`<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Panthorium text ${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="609600" y="609600"/><a:ext cx="5486400" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="2400"/><a:t>${escape(op.value)}</a:t></a:r></a:p></p:txBody></p:sp>`;xml=xml.replace('</p:spTree>',()=>shape+'</p:spTree>');
   }entries[file]=Buffer.from(xml);return true;

@@ -1,0 +1,52 @@
+{
+  "origin": "Synthetic testsrc2 and440Hz sine generated locally with UbuntuFFmpeg6.1.1; no external media or user data.",
+  "durationSeconds": 1,
+  "width": 128,
+  "height": 96,
+  "files": {
+    "3gpp-h264-aac.3gp": {
+      "sha256": "88f9f698fba4a0e4a2f818706169adefc3db9ecd8482fbbf76cf7adc4a79cc73",
+      "bytes": 24626
+    },
+    "h264-aac.mkv": {
+      "sha256": "b13a95ef528a99bf6da3348691a184892c549c13f7ed2f3935e2a463aacab91b",
+      "bytes": 26416
+    },
+    "h264-aac.mp4": {
+      "sha256": "c0ad54ea238fed8378939beaacc475cc2077cf2a05ca0a77362daa44dc9ec459",
+      "bytes": 26965
+    },
+    "mpeg2-mp2.mpg": {
+      "sha256": "7b9b7088deb6edeee37226f9fc701141efa6e6006888da846913873f2f1307d5",
+      "bytes": 100352
+    },
+    "pattern.jpg": {
+      "sha256": "a4fa404d7b480ba9f59c656bf2d777e50a9131ccfa5950788e766cab658410dd",
+      "bytes": 3960
+    },
+    "pattern.png": {
+      "sha256": "369817e9590c48d048667c4df0c0931ea99a2e70c404c9604be4f365f986778b",
+      "bytes": 2198
+    },
+    "pattern.webp": {
+      "sha256": "0310df6e2d4633139fb54494246b9265ab0574b06ee049fbe4cfcd95b1e35dfe",
+      "bytes": 2086
+    },
+    "prores-pcm.mov": {
+      "sha256": "e23e7e4fd603d6b37fed0d7b17afe266f91ef41d9683a3dee65aa625d873b4b9",
+      "bytes": 113289
+    },
+    "theora-vorbis.ogv": {
+      "sha256": "acfe239402543e30efb0f8c70b9924ee6b5a34c74f61bd6424d1ae68b6f936ce",
+      "bytes": 47025
+    },
+    "vp8-opus.webm": {
+      "sha256": "ed5ef9dd733f30d3f758a24dc06f6851307ed994241673e7d0235df771914a37",
+      "bytes": 25098
+    },
+    "vp9-opus.webm": {
+      "sha256": "3ab0498a36f12a48a54da5c82a2f0b418ff1792efb1b0b5ee9264c2f838cb167",
+      "bytes": 20893
+    }
+  }
+}

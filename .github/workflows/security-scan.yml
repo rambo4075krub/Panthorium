@@ -11,6 +11,10 @@ on:
         description: Container build directory (backend or speaker service)
         type: string
         default: .
+      image-target:
+        description: Optional speaker dependency stage (excludes downloaded model assets)
+        type: string
+        default: ''
       audit-node:
         description: Audit the backend, browser and Android lockfiles
         type: boolean
@@ -48,27 +52,100 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.22.1
+      - name: Initialize scan evidence directory
+        run: echo "EVIDENCE_DIR=$RUNNER_TEMP/panthorium-container-evidence" >> "$GITHUB_ENV"
+      - name: Validate image context and cache scope
+        id: build-context
+        env:
+          BUILD_CONTEXT: ${{ inputs.image-context }}
+          BUILD_TARGET: ${{ inputs.image-target }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          [[ "$BUILD_CONTEXT" == "." || "$BUILD_CONTEXT" == "speaker-service" ]]
+          if [ -n "$BUILD_TARGET" ]; then
+            [[ "$BUILD_CONTEXT" == "speaker-service" && "$BUILD_TARGET" == "runtime-dependencies" ]]
+          fi
+          image_name=backend
+          if [ "$BUILD_CONTEXT" == "speaker-service" ]; then image_name=speaker; fi
+          echo "cache-scope=panthorium-security-$image_name-${BUILD_TARGET:-runtime}" >> "$GITHUB_OUTPUT"
+      - name: Set up isolated image builder
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Build image for security inspection
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
+        with:
+          context: ${{ inputs.image-context }}
+          target: ${{ inputs.image-target }}
+          tags: panthorium-security:${{ github.sha }}
+          pull: true
+          load: true
+          push: false
+          cache-from: type=gha,scope=${{ steps.build-context.outputs.cache-scope }}
+          # Cache export is optional; all build, smoke and security failures remain fatal.
+          cache-to: type=gha,mode=max,scope=${{ steps.build-context.outputs.cache-scope }},ignore-error=true,timeout=3m
+      - name: Record inspected image identity
+        run: |
+          set -euo pipefail
+          docker image inspect "panthorium-security:$GITHUB_SHA" > "$EVIDENCE_DIR/image-inspect.json"
+      - name: Test actual backend media binaries without network access
+        if: inputs.image-context == '.'
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
+            --entrypoint node "panthorium-security:$GITHUB_SHA" test/container-media-smoke.js \
+            2>&1 | tee "$EVIDENCE_DIR/media-smoke.log"
+          container_id="$(docker create "panthorium-security:$GITHUB_SHA")"
+          trap 'docker rm "$container_id" >/dev/null' EXIT
+          docker cp "$container_id:/usr/local/share/panthorium/ffmpeg-source.json" "$EVIDENCE_DIR/ffmpeg-source.json"
+          docker cp "$container_id:/usr/local/bin/ffmpeg" "$EVIDENCE_DIR/ffmpeg"
+          docker cp "$container_id:/usr/local/bin/ffprobe" "$EVIDENCE_DIR/ffprobe"
+      - name: Inventory the complete image with Syft
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: panthorium-security:${{ github.sha }}
+          format: json
+          output-file: ${{ env.EVIDENCE_DIR }}/container-sbom.raw.syft.json
+          upload-artifact: false
+          upload-release-assets: false
+          dependency-snapshot: false
+      - name: Preserve verified source FFmpeg identity in the complete SBOM
         env:
           BUILD_CONTEXT: ${{ inputs.image-context }}
         run: |
           set -euo pipefail
-          [[ "$BUILD_CONTEXT" == "." || "$BUILD_CONTEXT" == "speaker-service" ]]
-          docker build --pull --tag "panthorium-security:$GITHUB_SHA" "$BUILD_CONTEXT"
-      - name: Scan image for high and critical vulnerabilities
+          if [ "$BUILD_CONTEXT" == "." ]; then
+            node scripts/verify-container-sbom.js \
+              "$EVIDENCE_DIR/container-sbom.raw.syft.json" "$EVIDENCE_DIR/ffmpeg-source.json" \
+              "$EVIDENCE_DIR" "$EVIDENCE_DIR/image-inspect.json" build/media/ffmpeg-source.lock.json \
+              "$EVIDENCE_DIR/container-sbom.syft.json" "$EVIDENCE_DIR/ffmpeg-proof.json"
+          else
+            cp "$EVIDENCE_DIR/container-sbom.raw.syft.json" "$EVIDENCE_DIR/container-sbom.syft.json"
+          fi
+          # Do not auto-load repository ignore rules or lower the severity gate.
+          printf 'ignore: []\n' > "$EVIDENCE_DIR/grype.yaml"
+      - name: Scan all image packages and explicit source packages
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
-          image: panthorium-security:${{ github.sha }}
+          sbom: ${{ env.EVIDENCE_DIR }}/container-sbom.syft.json
+          config: ${{ env.EVIDENCE_DIR }}/grype.yaml
           fail-build: true
           severity-cutoff: high
           only-fixed: false
           output-format: json
-          output-file: ${{ runner.temp }}/container-vulnerabilities.json
-      - name: Preserve image vulnerability report
+          output-file: ${{ env.EVIDENCE_DIR }}/container-vulnerabilities.json
+      - name: Preserve image inventories, provenance, smoke results and vulnerability report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: container-security-${{ github.job }}
-          path: ${{ runner.temp }}/container-vulnerabilities.json
+          name: container-security-${{ inputs.image-context == '.' && 'backend' || 'speaker' }}-${{ inputs.image-target || 'runtime' }}
+          path: |
+            ${{ env.EVIDENCE_DIR }}/*.json
+            ${{ env.EVIDENCE_DIR }}/*.log
+            ${{ env.EVIDENCE_DIR }}/*.yaml
           if-no-files-found: ignore
           retention-days: 14
