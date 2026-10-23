@@ -184,7 +184,10 @@ async function main() {
     assert.equal((await jobs.list('commit-owner'))[0].jobId,`schedule:${uncertain.scheduleId}:1`);
     assert.equal((await automations.materializeDueJobs(jobs)).length,0,'Retry after a committed-but-unacknowledged transaction must not duplicate the occurrence');
     const jobClaims=await Promise.all([jobs.claimDue('worker-a',20),jobs.claimDue('worker-b',20)]);
-    const claimedJobs=jobClaims.flat();assert.equal(claimedJobs.length,2);assert.equal(new Set(claimedJobs.map(x=>x.jobId)).size,2);
+    const claimedJobs=jobClaims.flat();
+    const expectedJobIds=[`schedule:${legacyLast.scheduleId}:100`,`schedule:${schedule.scheduleId}:1`,`schedule:${uncertain.scheduleId}:1`];
+    assert.equal(claimedJobs.length,expectedJobIds.length,'Each materialized job must be claimed by exactly one worker');
+    assert.deepEqual(new Set(claimedJobs.map(x=>x.jobId)),new Set(expectedJobIds),'Claims must include the bounded legacy occurrence and both transaction fixtures');
 
     const reminders=new ReminderRepository({requireDatabase:true});reminders.pool=pool;await reminders.init();
     const reminder=await reminders.create({userId:'reminder-owner',kind:'study',title:'review',dueAt:originalDue,timeZone:'Asia/Bangkok',accountVersion:3});
