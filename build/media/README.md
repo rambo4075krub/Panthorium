@@ -43,6 +43,32 @@ the image tests and full image scan again. If a generic CPE match still flags th
 backported RTSP fix, preserve the finding and prepare image-digest-specific
 evidence for review; do not change the version or suppress other findings.
 
+The speaker image uses `ffmpeg-speaker-source.lock.json`, with the same release,
+source hashes, upstream patch and unchanged FFmpeg CPE. Its Debian/glibc builder
+produces executables that need only libc and libm. It retains native input codecs,
+allows only pipe I/O, disables network/devices/hardware acceleration and emits
+only float PCM audio. It does not copy the backend's musl executables into Debian.
+The speaker profile is LGPL-2.1-or-later; no GPL external codec library is enabled.
+
+Build the speaker image from the repository root:
+
+```sh
+docker build --pull -f speaker-service/Dockerfile --target runtime-dependencies \
+  -t panthorium-speaker-dependencies .
+docker run --rm --network none --cap-drop ALL \
+  --security-opt no-new-privileges --entrypoint python \
+  panthorium-speaker-dependencies /app/test/container-speaker-media-smoke.py
+```
+
+This target checks CPU dependency imports and nine real audio formats without
+downloading or executing the speaker model. It also checks the eighteen-second
+decoded-audio bound, exact executable/source provenance and pipe-only access.
+The full runtime adds the hash-verified model download and remains subject to a
+separate full-image scan. SoundFile uses its hash-pinned official pure-Python
+wheel and the explicitly installed Debian `libsndfile1`, so the native library
+remains visible to the distro scanner. Existing unresolved libsndfile/base-image
+advisories are not removed or treated as fixed by the FFmpeg replacement.
+
 Upstream evidence:
 
 - https://api.github.com/repos/FFmpeg/FFmpeg/git/tags/ce8f11b9fac4cd7ccfb41ca7c01bc17f5cda8cc3

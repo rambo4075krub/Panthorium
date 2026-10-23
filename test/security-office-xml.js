@@ -4,12 +4,61 @@ const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
 const { randomUUID, createHash } = require("node:crypto");
 const { extractOfficeText, LIMITS, _internals: core } = require("../services/officeArtifactService");
-const { StudioEditorService } = require("../services/studioEditorService");
+const { StudioEditorService, officeModel, patchOffice } = require("../services/studioEditorService");
 const suite = require("../services/officeSuiteService");
 const { CloudFilesService } = require("../services/cloudFilesService");
 const { SocialService } = require("../services/socialService");
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const rejected = error => ["invalid_office_source", "office_source_too_large"].includes(error.code);
+
+async function nestedTextBoxes() {
+  const inner = '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:i w:val="1"/><w:sz w:val="36"/></w:rPr><w:t>Inner</w:t></w:r></w:p>';
+  const source = '<w:document><w:body><w:p><w:r><w:t>Outer</w:t><w:drawing><w:txbxContent>' + inner + '</w:txbxContent></w:drawing></w:r></w:p><w:p/><w:p><w:r><w:t>After</w:t></w:r></w:p></w:body></w:document>';
+  const makeEntries = () => ({ 'word/document.xml': Buffer.from(source) });
+  const expected = ['Outer', 'Inner', 'After'];
+  const original = officeModel(makeEntries(), 'document');
+  assert.deepEqual(original.blocks.map(block => block.text), expected, 'nested text belongs only to its nearest paragraph');
+  assert.deepEqual(original.blocks.map(block => block.ordinal), [0, 1, 2], 'empty self-closing paragraphs do not shift editable ordinals');
+  assert.deepEqual(original.blocks.map(block => block.style.italic), [false, true, false], 'inner formatting does not leak into its containing paragraph');
+  assert.equal(extractOfficeText(core.zip(makeEntries())), 'Outer\nInner\nAfter\n', 'preview supports valid nested textboxes in document order');
+
+  for (const index of [0, 1, 2]) {
+    for (const type of ['set_text', 'format_text']) {
+      const selected = core.xmlMatches(source, 'w:p', true)[index];
+      const operation = type === 'set_text' ? { type, index, value: 'Changed ' + expected[index] } : { type, index, style: { bold: true, align: 'right' } };
+      const entries = patchOffice(makeEntries(), 'document', [operation]);
+      const changed = entries['word/document.xml'].toString();
+      assert.ok(changed.startsWith(source.slice(0, selected.index)), `${type} ${index}: preceding XML must remain unchanged`);
+      assert.ok(changed.endsWith(source.slice(selected.node.end)), `${type} ${index}: following XML must remain unchanged`);
+      if (index === 0) assert.ok(changed.includes(inner), `${type}: changing Outer must preserve the nested Inner paragraph byte-for-byte`);
+      const blocks = officeModel(entries, 'document').blocks;
+      assert.deepEqual(blocks.map(block => block.text), expected.map((text, position) => type === 'set_text' && position === index ? 'Changed ' + text : text));
+      if (type === 'format_text') {
+        assert.deepEqual(blocks.map(block => block.style.bold), expected.map((_, position) => position === index), 'only the selected logical paragraph is formatted');
+        assert.equal(blocks[index].style.align, 'right');
+      }
+    }
+  }
+
+  // The public editor model omits internal ordinals. Its block indexes must
+  // still address the same nested paragraphs throughout one batch of edits.
+  const user = { sub: randomUUID() }, body = core.zip(makeEntries());
+  const file = { id: randomUUID(), name: 'textboxes.docx', contentType: 'application/octet-stream', body };
+  let saved;
+  const editor = new StudioEditorService({ files: { readOwned: async () => file, upload: async (_owner, name, contentType, bytes) => { saved = bytes; return { id: randomUUID(), name, contentType }; } } });
+  const model = await editor.read(user, file.id);
+  assert.deepEqual(model.blocks.map(block => block.text), expected);
+  await editor.apply({ user, pluginId: 'document', input: { edit: { fileId: file.id, revision: model.revision, operations: [
+    { type: 'set_text', index: 0, value: '' },
+    { type: 'format_text', index: 1, style: { bold: true } },
+    { type: 'set_text', index: 1, value: 'Edited Inner' },
+    { type: 'set_text', index: 2, value: 'Edited After' }
+  ] } } });
+  const final = officeModel(core.unzip(saved), 'document');
+  assert.deepEqual(final.blocks.map(block => block.text), ['Edited Inner', 'Edited After']);
+  assert.deepEqual(final.blocks.map(block => block.style.bold), [true, false]);
+  assert.equal(extractOfficeText(saved), '\nEdited Inner\nEdited After\n');
+}
 
 async function boundedCases() {
   const user = { sub: randomUUID(), roles: ["user"] };
@@ -71,6 +120,7 @@ async function boundedCases() {
 
 async function main() {
   if (process.argv.includes("--bounded-cases")) { await boundedCases(); return; }
+  await nestedTextBoxes();
   // A hard subprocess deadline catches event-loop blocking. The old parser
   // takes many seconds for the first case alone; no unsafe fixture runs live.
   const output = execFileSync(process.execPath, [__filename, "--bounded-cases"], { timeout: 8000, encoding: "utf8" });

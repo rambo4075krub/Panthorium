@@ -11,13 +11,15 @@ const provenanceFields = ['schemaVersion', 'name', 'version', 'license', 'purl',
 
 // Enrich the complete image inventory; never replace or filter its packages.
 // The upstream version/CPE stays intact even when a patch was backported.
-function enrichSbom(sbom, manifest, lock, binaries, image) {
+function enrichSbom(sbom, manifest, lock, binaries, image, profile = 'backend') {
   assert.match(sbom?.schema?.version || '', /^16\./, 'Unsupported Syft schema');
   assert.equal(sbom?.source?.type, 'image', 'A complete image SBOM is required');
   assert.ok(Array.isArray(sbom.artifacts) && sbom.artifacts.length, 'Image SBOM has no packages');
   assert.match(image?.Id || '', /^sha256:[a-f0-9]{64}$/, 'Missing Docker image identity');
   assert.equal(sbom.source.metadata?.imageID, image.Id, 'SBOM describes a different image');
-  assert.equal(sbom.distro?.id, 'alpine', 'Expected the Alpine backend runtime');
+  const expectedDistro = { backend: 'alpine', speaker: 'debian' }[profile];
+  assert.ok(expectedDistro, 'Unknown image profile');
+  assert.equal(sbom.distro?.id, expectedDistro, 'Unexpected image distribution for profile');
 
   for (const field of provenanceFields) {
     assert.notEqual(lock[field], undefined, `Source lock omits ${field}`);
@@ -67,6 +69,7 @@ function enrichSbom(sbom, manifest, lock, binaries, image) {
     sbom: result,
     proof: {
       schemaVersion: 1,
+      profile,
       imageId: image.Id,
       sourceManifestSha256: sha256(Buffer.from(JSON.stringify(manifest))),
       source: manifest.source,
@@ -83,15 +86,15 @@ function enrichSbom(sbom, manifest, lock, binaries, image) {
 }
 
 if (require.main === module) {
-  const [rawPath, manifestPath, binaryDirectory, inspectPath, lockPath, outputPath, proofPath] = process.argv.slice(2);
-  assert.ok(proofPath, 'Usage: verify-container-sbom.js RAW MANIFEST BINARY_DIR INSPECT LOCK OUTPUT PROOF');
+  const [rawPath, manifestPath, binaryDirectory, inspectPath, lockPath, outputPath, proofPath, profile = 'backend'] = process.argv.slice(2);
+  assert.ok(proofPath, 'Usage: verify-container-sbom.js RAW MANIFEST BINARY_DIR INSPECT LOCK OUTPUT PROOF [backend|speaker]');
   const readJson = filename => JSON.parse(fs.readFileSync(filename, 'utf8'));
   const images = readJson(inspectPath);
   assert.ok(Array.isArray(images) && images.length === 1, 'Expected exactly one inspected image');
   const { sbom, proof } = enrichSbom(readJson(rawPath), readJson(manifestPath), readJson(lockPath), {
     ffmpeg: fs.readFileSync(path.join(binaryDirectory, 'ffmpeg')),
     ffprobe: fs.readFileSync(path.join(binaryDirectory, 'ffprobe'))
-  }, images[0]);
+  }, images[0], profile);
   fs.writeFileSync(outputPath, JSON.stringify(sbom, null, 2) + '\n');
   fs.writeFileSync(proofPath, JSON.stringify(proof, null, 2) + '\n');
   console.log(`Preserved ${proof.originalPackageCount} image packages and added verified FFmpeg ${proof.cpe}`);

@@ -8,7 +8,7 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const { _internals, OfficeArtifactError } = require('./officeArtifactService');
-const { xmlMatches, xmlReplace, xmlWithoutAttributes, validateOfficeXmlEntries } = _internals;
+const { xmlMatches, xmlReplace, xmlReplaceSelected, xmlParagraphMatches, xmlWithoutAttributes, validateOfficeXmlEntries } = _internals;
 const { sanitizeFilename } = require('./cloudFilesService');
 const { runProcess } = require('./mediaStudioService');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -95,7 +95,7 @@ function officeModel(entries, pluginId) {
     if(!entries[file]) fail('editor_office_unsupported',422);
     let ordinal=0;
     for(const match of xmlMatches(entries[file].toString(),prefix+':p',true)) {
-      const text=textOf(match[0],prefix+':t');
+      const text=xmlParagraphMatches(match[0],prefix+':t',prefix).map(m=>decode(m[1])).join('');
       if(text) blocks.push({index:blocks.length,page:page+1,file,ordinal,text});
       ordinal++;
     }
@@ -138,11 +138,12 @@ function patchOffice(entries, pluginId, operations) {
       entries[sheet.file]=Buffer.from(xml);
     } else if(op.type==='set_text' && model.blocks) {
       const block=model.blocks[op.index]; if(!block)fail('editor_text_not_found');
-      const prefix=pluginId==='document'?'w':'a'; let index=0;
-      const xml=xmlReplace(entries[block.file].toString(),prefix+':p',p=>{
-        if(index++!==block.ordinal)return p; let first=true;
-        return xmlReplace(p,prefix+':t',()=>{const v=first?escape(op.value):'';first=false;return `<${prefix}:t xml:space="preserve">${v}</${prefix}:t>`;},{pairedOnly:true});
-      },{pairedOnly:true}); entries[block.file]=Buffer.from(xml);
+      const prefix=pluginId==='document'?'w':'a',source=entries[block.file].toString();
+      const paragraph=xmlMatches(source,prefix+':p',true)[block.ordinal];if(!paragraph)fail('editor_text_not_found');
+      const xml=xmlReplaceSelected(source,[paragraph],p=>{
+        let first=true;
+        return xmlReplaceSelected(p,xmlParagraphMatches(p,prefix+':t',prefix),()=>{const v=first?escape(op.value):'';first=false;return `<${prefix}:t xml:space="preserve">${v}</${prefix}:t>`;});
+      }); entries[block.file]=Buffer.from(xml);
     } else if(op.type==='append_paragraph' && pluginId==='document') {
       let xml=entries['word/document.xml'].toString();
       const p='<w:p><w:r><w:t xml:space="preserve">'+escape(op.value)+'</w:t></w:r></w:p>';

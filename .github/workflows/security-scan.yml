@@ -8,7 +8,7 @@ on:
         type: boolean
         default: true
       image-context:
-        description: Container build directory (backend or speaker service)
+        description: Image selector (. for backend or speaker-service)
         type: string
         default: .
       image-target:
@@ -70,8 +70,17 @@ jobs:
             [[ "$BUILD_CONTEXT" == "speaker-service" && "$BUILD_TARGET" == "runtime-dependencies" ]]
           fi
           image_name=backend
-          if [ "$BUILD_CONTEXT" == "speaker-service" ]; then image_name=speaker; fi
+          dockerfile=Dockerfile
+          source_lock=build/media/ffmpeg-source.lock.json
+          if [ "$BUILD_CONTEXT" == "speaker-service" ]; then
+            image_name=speaker
+            dockerfile=speaker-service/Dockerfile
+            source_lock=build/media/ffmpeg-speaker-source.lock.json
+          fi
           echo "cache-scope=panthorium-security-$image_name-${BUILD_TARGET:-runtime}" >> "$GITHUB_OUTPUT"
+          echo "dockerfile=$dockerfile" >> "$GITHUB_OUTPUT"
+          echo "source-lock=$source_lock" >> "$GITHUB_OUTPUT"
+          echo "profile=$image_name" >> "$GITHUB_OUTPUT"
       - name: Set up isolated image builder
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Build image for security inspection
@@ -79,7 +88,8 @@ jobs:
         env:
           DOCKER_BUILD_RECORD_UPLOAD: false
         with:
-          context: ${{ inputs.image-context }}
+          context: .
+          file: ${{ steps.build-context.outputs.dockerfile }}
           target: ${{ inputs.image-target }}
           tags: panthorium-security:${{ github.sha }}
           pull: true
@@ -99,6 +109,16 @@ jobs:
           docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
             --entrypoint node "panthorium-security:$GITHUB_SHA" test/container-media-smoke.js \
             2>&1 | tee "$EVIDENCE_DIR/media-smoke.log"
+      - name: Test actual speaker audio binaries and CPU imports without network access
+        if: inputs.image-context == 'speaker-service'
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
+            --entrypoint python "panthorium-security:$GITHUB_SHA" /app/test/container-speaker-media-smoke.py \
+            2>&1 | tee "$EVIDENCE_DIR/speaker-media-smoke.log"
+      - name: Extract source manifest and actual media executables
+        run: |
+          set -euo pipefail
           container_id="$(docker create "panthorium-security:$GITHUB_SHA")"
           trap 'docker rm "$container_id" >/dev/null' EXIT
           docker cp "$container_id:/usr/local/share/panthorium/ffmpeg-source.json" "$EVIDENCE_DIR/ffmpeg-source.json"
@@ -115,17 +135,14 @@ jobs:
           dependency-snapshot: false
       - name: Preserve verified source FFmpeg identity in the complete SBOM
         env:
-          BUILD_CONTEXT: ${{ inputs.image-context }}
+          SOURCE_LOCK: ${{ steps.build-context.outputs.source-lock }}
+          IMAGE_PROFILE: ${{ steps.build-context.outputs.profile }}
         run: |
           set -euo pipefail
-          if [ "$BUILD_CONTEXT" == "." ]; then
-            node scripts/verify-container-sbom.js \
-              "$EVIDENCE_DIR/container-sbom.raw.syft.json" "$EVIDENCE_DIR/ffmpeg-source.json" \
-              "$EVIDENCE_DIR" "$EVIDENCE_DIR/image-inspect.json" build/media/ffmpeg-source.lock.json \
-              "$EVIDENCE_DIR/container-sbom.syft.json" "$EVIDENCE_DIR/ffmpeg-proof.json"
-          else
-            cp "$EVIDENCE_DIR/container-sbom.raw.syft.json" "$EVIDENCE_DIR/container-sbom.syft.json"
-          fi
+          node scripts/verify-container-sbom.js \
+            "$EVIDENCE_DIR/container-sbom.raw.syft.json" "$EVIDENCE_DIR/ffmpeg-source.json" \
+            "$EVIDENCE_DIR" "$EVIDENCE_DIR/image-inspect.json" "$SOURCE_LOCK" \
+            "$EVIDENCE_DIR/container-sbom.syft.json" "$EVIDENCE_DIR/ffmpeg-proof.json" "$IMAGE_PROFILE"
           # Do not auto-load repository ignore rules or lower the severity gate.
           printf 'ignore: []\n' > "$EVIDENCE_DIR/grype.yaml"
       - name: Scan all image packages and explicit source packages

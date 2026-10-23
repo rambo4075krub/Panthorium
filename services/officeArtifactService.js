@@ -194,7 +194,7 @@ function walkOfficeXml(source, visitor, budget) {
     if (position !== contentEnd) fail('invalid_office_source');
     if (!stack.length && ++roots > 1 && !budget.fragments) fail('invalid_office_source');
     if (stack.length >= LIMITS.previewXmlDepth) fail('office_source_too_large', 413);
-    const node = { name, attributes, attributeRanges, selfClosing, index: start, openEnd: cursor, closeStart: cursor, end: cursor };
+    const node = { name, attributes, attributeRanges, selfClosing, parent: stack.at(-1) || null, index: start, openEnd: cursor, closeStart: cursor, end: cursor };
     visitor.open?.(node);
     if (selfClosing) visitor.close?.(node);
     else stack.push(node);
@@ -237,14 +237,31 @@ function xmlMatches(source, name, pairedOnly = false) {
   return entry.matches.get(key);
 }
 function xmlReplace(source, name, replacement, { first = false, pairedOnly = false } = {}) {
+  return xmlReplaceSelected(source, xmlMatches(source, name, pairedOnly), replacement, first);
+}
+function xmlReplaceSelected(source, matches, replacement, first = false) {
   const parts = []; let cursor = 0;
-  for (const match of xmlMatches(source, name, pairedOnly)) {
+  for (const match of matches) {
+    if (!match) fail('invalid_office_source');
     if (match.index < cursor) continue;
+    if (source.slice(match.index, match.index + match[0].length) !== match[0]) fail('invalid_office_source');
     parts.push(source.slice(cursor, match.index), typeof replacement === 'function' ? replacement(match[0], match.index) : replacement);
     cursor = match.index + match[0].length;
     if (first) break;
   }
   parts.push(source.slice(cursor)); return parts.join('');
+}
+function xmlDirectMatches(source, name) {
+  return xmlMatches(source, name).filter(match => match.node.parent && !match.node.parent.parent);
+}
+function xmlParagraphMatches(source, name, prefix) {
+  const paragraph = xmlMatches(source, prefix + ':p', true)[0]?.node;
+  if (!paragraph) return [];
+  return xmlMatches(source, name, true).filter(match => {
+    let parent = match.node.parent;
+    while (parent && parent.name !== prefix + ':p') parent = parent.parent;
+    return parent === paragraph;
+  });
 }
 function xmlWithoutAttributes(source, names) {
   if (Buffer.byteLength(source) > LIMITS.previewXmlBytes) fail('office_source_too_large', 413);
@@ -292,7 +309,8 @@ function extractOfficeText(bytes) {
   }
   for (const name of names) {
     const spreadsheet = name.startsWith('xl/');
-    let paragraph = null, row = null, cell = null;
+    let row = null, cell = null;
+    const paragraphStack = [], paragraphs = [];
     walkOfficeXml(entries[name].toString('utf8'), {
       open(node) {
         if (spreadsheet) {
@@ -300,8 +318,8 @@ function extractOfficeText(bytes) {
           if (node.name === 'c' && row) { if (cell) fail('invalid_office_source'); cell = { type: node.attributes.t, inline: [], value: '' }; }
           if (cell && (node.name === 't' || node.name === 'v')) node.parts = [];
         } else {
-          if (node.name === 'w:p' || node.name === 'a:p') { if (paragraph) fail('invalid_office_source'); paragraph = []; }
-          if (paragraph && (node.name === 'w:t' || node.name === 'a:t')) node.parts = [];
+          if (node.name === 'w:p' || node.name === 'a:p') { const paragraph = { parts: [], selfClosing: node.selfClosing }; paragraphStack.push(paragraph); paragraphs.push(paragraph); }
+          if (paragraphStack.length && (node.name === 'w:t' || node.name === 'a:t')) node.parts = [];
         }
       },
       text(value, node) { if (node.parts) node.parts.push(value); },
@@ -311,11 +329,12 @@ function extractOfficeText(bytes) {
           if (node.name === 'c' && cell) { row.push(cell.type === 's' ? shared[Number(cell.value)] || '' : cell.inline.join('') || cell.value); cell = null; }
           if (node.name === 'row' && row) { if (!node.selfClosing) append(row.join('\t') + '\n'); row = null; }
         } else {
-          if (node.parts) paragraph.push(node.parts.join(''));
-          if (node.name === 'w:p' || node.name === 'a:p') { if (!node.selfClosing) append(paragraph.join('') + '\n'); paragraph = null; }
+          if (node.parts) paragraphStack.at(-1).parts.push(node.parts.join(''));
+          if (node.name === 'w:p' || node.name === 'a:p') paragraphStack.pop();
         }
       }
     }, budget);
+    for (const paragraph of paragraphs) { if (!paragraph.selfClosing) append(paragraph.parts.join('') + '\n'); if (length >= LIMITS.sourceChars) break; }
     if (length >= LIMITS.sourceChars) break;
   }
   const output = parts.join('');
@@ -610,4 +629,4 @@ class OfficeArtifactService {
     return { files: uploaded, summary: `สร้าง ${EXT[pluginId].toUpperCase()} ที่แก้ไขได้ พร้อมเอกสาร HTML สำหรับพิมพ์หรือบันทึก PDF${source.images.length ? ` แนบภาพ ${source.images.length} ภาพ (ไม่มีการวิเคราะห์ภาพ)` : ''}` };
   }
 }
-module.exports = { OfficeArtifactService, OfficeArtifactError, validateContent, extractOfficeText, LIMITS, _internals: { zip, unzip, documentBuffer, spreadsheetBuffer, presentationBuffer, printHtml, presentationPages, imageInfo, parseTable, validateOfficeXmlEntries, xmlMatches, xmlReplace, xmlWithoutAttributes, xmlInsertChild, xmlCacheStats } };
+module.exports = { OfficeArtifactService, OfficeArtifactError, validateContent, extractOfficeText, LIMITS, _internals: { zip, unzip, documentBuffer, spreadsheetBuffer, presentationBuffer, printHtml, presentationPages, imageInfo, parseTable, validateOfficeXmlEntries, xmlMatches, xmlReplace, xmlReplaceSelected, xmlDirectMatches, xmlParagraphMatches, xmlWithoutAttributes, xmlInsertChild, xmlCacheStats } };

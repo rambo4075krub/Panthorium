@@ -1,16 +1,16 @@
 'use strict';
 // Original Panthorium OOXML operations. Existing package parts are retained.
 const {OfficeArtifactError,_internals}=require('./officeArtifactService');
-const {xmlMatches,xmlReplace,xmlWithoutAttributes,xmlInsertChild,validateOfficeXmlEntries}=_internals;
+const {xmlMatches,xmlReplace,xmlReplaceSelected,xmlDirectMatches,xmlParagraphMatches,xmlWithoutAttributes,xmlInsertChild,validateOfficeXmlEntries}=_internals;
 const path=require('node:path');
 const core=require('../office-suite-core');
 const fail=code=>{throw new OfficeArtifactError(400,code);};
 const escape=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 const attr=(s,k)=>s.split('>')[0].match(new RegExp('(?:^|\\s)'+k+'=["\x27]([^"\x27]*)["\x27]'))?.[1]||'';
 const tags=(s,t)=>xmlMatches(s,t).map(m=>m[0]);
-const replaceTag=(s,tag,value)=>xmlInsertChild(xmlReplace(s,tag,''),value);
+const replaceTag=(s,tag,value)=>xmlInsertChild(xmlReplaceSelected(s,xmlDirectMatches(s,tag),''),value);
 const prop=(s,tag,value)=>{
-  return xmlMatches(s,tag).length?xmlReplace(s,tag,value,{first:true}):xmlInsertChild(s,value,true);
+  const matches=xmlDirectMatches(s,tag);return matches.length?xmlReplaceSelected(s,matches,value,true):xmlInsertChild(s,value,true);
 };
 const tagval=(s,t,k='w:val')=>attr(tags(s,t)[0]||'',k);
 const TYPES=['add_slide','reorder_slide','set_formula','format_text','format_cell','move_text','slide_background','insert_table','add_slide_text'];
@@ -93,7 +93,7 @@ function enrich(entries,kind,model){
   const prefix=kind==='document'?'w':'a';
   const presentation=entries['ppt/presentation.xml']?.toString()||'',size=tags(presentation,'p:sldSz')[0]||'',width=Number(attr(size,'cx'))||12192000,height=Number(attr(size,'cy'))||6858000;
   const documents=new Map(),paragraphs=new Map(),styles=kind==='document'?tags(entries['word/styles.xml']?.toString()||'','w:style'):[];
-  for(const b of model.blocks){if(!documents.has(b.file)){const xml=entries[b.file].toString();documents.set(b.file,xml);paragraphs.set(b.file,tags(xml,prefix+':p'));}const xml=documents.get(b.file),p=paragraphs.get(b.file)[b.ordinal]||'';const inherited=kind==='document'?styles.find(t=>attr(t,'w:styleId')===tagval(p,'w:pStyle'))||'':'';b.style=textStyle(p+inherited,prefix);
+  for(const b of model.blocks){if(!documents.has(b.file)){const xml=entries[b.file].toString();documents.set(b.file,xml);paragraphs.set(b.file,xmlMatches(xml,prefix+':p',true).map(m=>m[0]));}const xml=documents.get(b.file),p=paragraphs.get(b.file)[b.ordinal]||'',own=xmlReplaceSelected(p,xmlMatches(p,prefix+':p',true).slice(1),'');const inherited=kind==='document'?styles.find(t=>attr(t,'w:styleId')===tagval(own,'w:pStyle'))||'':'';b.style=textStyle(own+inherited,prefix);
     if(kind==='presentation'){
       const shape=shapeFor(xml,b.ordinal);if(shape){const transform=tags(tags(shape.shape,'p:spPr')[0]||'','a:xfrm')[0]||'',off=tags(transform,'a:off')[0]||'',ext=tags(transform,'a:ext')[0]||'';
         b.shapeIndex=shape.index;b.geometry=transform&&!/<p:grpSp\b/.test(xml)?{x:Number(attr(off,'x'))/width*100,y:Number(attr(off,'y'))/height*100,width:Number(attr(ext,'cx'))/width*100,height:Number(attr(ext,'cy'))/height*100}:null;
@@ -105,14 +105,14 @@ function enrich(entries,kind,model){
 }
 function formatParagraph(p,style,prefix){
   if(prefix==='w'){
-    if(style.align){let pr=tags(p,'w:pPr')[0]||'<w:pPr></w:pPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></w:pPr>';pr=replaceTag(pr,'w:jc','<w:jc w:val="'+style.align+'"/>');p=prop(p,'w:pPr',pr);}
-    return xmlReplace(p,'w:r',r=>{let pr=tags(r,'w:rPr')[0]||'<w:rPr></w:rPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></w:rPr>';
+    if(style.align){let pr=xmlDirectMatches(p,'w:pPr')[0]?.[0]||'<w:pPr></w:pPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></w:pPr>';pr=replaceTag(pr,'w:jc','<w:jc w:val="'+style.align+'"/>');p=prop(p,'w:pPr',pr);}
+    return xmlReplaceSelected(p,xmlParagraphMatches(p,'w:r','w'),r=>{let pr=xmlDirectMatches(r,'w:rPr')[0]?.[0]||'<w:rPr></w:rPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></w:rPr>';
       for(const [k,t]of [['bold','w:b'],['italic','w:i'],['underline','w:u'],['fontSize','w:sz'],['color','w:color']])if(style[k]!=null)pr=replaceTag(pr,t,`<${t} w:val="${k==='fontSize'?style[k]*2:k==='underline'?(style[k]?'single':'none'):typeof style[k]==='boolean'?+style[k]:style[k]}"/>`);
       if(style.fontSize)pr=replaceTag(pr,'w:szCs','<w:szCs w:val="'+style.fontSize*2+'"/>');return prop(r,'w:rPr',pr);
     });
   }
-  if(style.align){let pr=tags(p,'a:pPr')[0]||'<a:pPr/>';pr=xmlWithoutAttributes(pr,['algn']).replace('<a:pPr','<a:pPr algn="'+({left:'l',center:'ctr',right:'r',justify:'just'})[style.align]+'"');p=prop(p,'a:pPr',pr);}
-  return xmlReplace(p,'a:r',r=>{let pr=tags(r,'a:rPr')[0]||'<a:rPr></a:rPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></a:rPr>';
+  if(style.align){let pr=xmlDirectMatches(p,'a:pPr')[0]?.[0]||'<a:pPr/>';pr=xmlWithoutAttributes(pr,['algn']).replace('<a:pPr','<a:pPr algn="'+({left:'l',center:'ctr',right:'r',justify:'just'})[style.align]+'"');p=prop(p,'a:pPr',pr);}
+  return xmlReplaceSelected(p,xmlParagraphMatches(p,'a:r','a'),r=>{let pr=xmlDirectMatches(r,'a:rPr')[0]?.[0]||'<a:rPr></a:rPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></a:rPr>';
     for(const [k,a]of [['bold','b'],['italic','i'],['underline','u'],['fontSize','sz']])if(style[k]!=null)pr=xmlWithoutAttributes(pr,[a]).replace('<a:rPr',`<a:rPr ${a}="${k==='fontSize'?style[k]*100:k==='underline'?(style[k]?'sng':'none'):+style[k]}"`);
     if(style.color)pr=replaceTag(pr,'a:solidFill','<a:solidFill><a:srgbClr val="'+style.color+'"/></a:solidFill>');return prop(r,'a:rPr',pr);
   });
@@ -135,7 +135,7 @@ function apply(entries,kind,op,model){
   if(op.type==='format_cell'){if(kind!=='spreadsheet'||!model.sheets[op.sheet])fail('editor_operation_type_mismatch');formatCell(entries,op,model.sheets[op.sheet]);return true;}
   if(['format_text','move_text'].includes(op.type)){
     const b=model.blocks?.[op.index];if(!b)fail('editor_text_not_found');let xml=entries[b.file].toString();
-    if(op.type==='format_text'){const prefix=kind==='document'?'w':'a';let index=0;xml=xmlReplace(xml,prefix+':p',p=>index++===b.ordinal?formatParagraph(p,op.style,prefix):p,{pairedOnly:true});}
+    if(op.type==='format_text'){const prefix=kind==='document'?'w':'a',paragraph=xmlMatches(xml,prefix+':p',true)[b.ordinal];if(!paragraph)fail('editor_text_not_found');xml=xmlReplaceSelected(xml,[paragraph],p=>formatParagraph(p,op.style,prefix));}
     else {if(kind!=='presentation')fail('editor_operation_type_mismatch');const info=shapeFor(xml,b.ordinal);if(!info||/<p:grpSp\b/.test(xml)||!tags(info.shape,'a:xfrm').length)fail('editor_geometry_unsupported');const size=model.slideSize,off=`<a:off x="${Math.round(op.x/100*size.width)}" y="${Math.round(op.y/100*size.height)}"/>`,ext=`<a:ext cx="${Math.round(op.width/100*size.width)}" cy="${Math.round(op.height/100*size.height)}"/>`;let i=0;xml=xmlReplace(xml,'p:sp',s=>i++===info.index?xmlReplace(s,'a:xfrm','<a:xfrm>'+off+ext+'</a:xfrm>',{first:true}):s);}
     entries[b.file]=Buffer.from(xml);return true;
   }

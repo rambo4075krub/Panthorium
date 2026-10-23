@@ -7,7 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
-const lock = JSON.parse(fs.readFileSync(path.join(directory, 'ffmpeg-source.lock.json')));
+const lockName = process.argv[2] || 'ffmpeg-source.lock.json';
+if (!['ffmpeg-source.lock.json', 'ffmpeg-speaker-source.lock.json'].includes(lockName)) {
+  throw new Error('Unexpected FFmpeg build profile');
+}
+const lock = JSON.parse(fs.readFileSync(path.join(directory, lockName)));
 const work = '/tmp/panthorium-ffmpeg-build';
 const installed = '/opt/ffmpeg';
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -78,7 +82,10 @@ manifest.buildConfiguration = execFileSync(path.join(installed, 'bin/ffmpeg'), [
   encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
 });
 fs.writeFileSync(path.join(share, 'ffmpeg-source.json'), JSON.stringify(manifest, null, 2) + '\n');
-fs.copyFileSync(path.join(source, 'COPYING.GPLv2'), path.join(share, 'ffmpeg-COPYING.GPLv2'));
+const licenseFile = lock.license === 'GPL-2.0-or-later' ? 'COPYING.GPLv2'
+  : lock.license === 'LGPL-2.1-or-later' ? 'COPYING.LGPLv2.1' : null;
+if (!licenseFile) throw new Error('Unexpected FFmpeg license');
+fs.copyFileSync(path.join(source, licenseFile), path.join(share, `ffmpeg-${licenseFile}`));
 for (const patch of lock.patches) {
   fs.copyFileSync(path.join(directory, patch.file), path.join(share, 'ffmpeg-patches', path.basename(patch.file)));
 }

@@ -4,6 +4,10 @@ on:
     branches: [staging]
     paths:
       - speaker-service/**
+      - build/media/**
+      - .gcloudignore
+      - .dockerignore
+      - .github/workflows/security-scan.yml
       - cloudbuild.speaker.staging.yaml
       - .github/workflows/deploy-speaker-staging.yml
   workflow_dispatch:
@@ -55,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="$REGION-docker.pkg.dev/$PROJECT/panthorium-staging/speaker:$GITHUB_SHA"
-          gcloud builds submit speaker-service --project="$PROJECT" --region="$REGION" \
+          gcloud builds submit . --project="$PROJECT" --region="$REGION" \
             --config=cloudbuild.speaker.staging.yaml \
             --service-account="projects/$PROJECT/serviceAccounts/124818950958-compute@developer.gserviceaccount.com" \
             --gcs-source-staging-dir="gs://${PROJECT}_cloudbuild/source" \

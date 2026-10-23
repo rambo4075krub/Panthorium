@@ -40,4 +40,9 @@ assert.throws(() => enrichSbom(raw, manifest, lock, binaries, { Id: `sha256:${'e
 assert.throws(() => enrichSbom({ ...raw, artifacts: [] }, manifest, lock, binaries, image), /no packages/);
 assert.throws(() => enrichSbom({ ...raw, source: { ...raw.source, type: 'directory' } }, manifest, lock, binaries, image), /complete image/);
 assert.throws(() => enrichSbom(sbom, manifest, lock, binaries, image), /already exists/);
+const speakerRaw = { ...raw, distro: { id: 'debian', versionID: '13' } };
+assert.throws(() => enrichSbom(speakerRaw, manifest, lock, binaries, image), /distribution/);
+assert.throws(() => enrichSbom(raw, manifest, lock, binaries, image, 'speaker'), /distribution/);
+assert.throws(() => enrichSbom(raw, manifest, lock, binaries, image, 'unknown'), /Unknown image profile/);
+assert.equal(enrichSbom(speakerRaw, manifest, lock, binaries, image, 'speaker').proof.profile, 'speaker');
 console.log('Container SBOM provenance, package preservation, and tamper rejection tests passed');
