@@ -1,0 +1,50 @@
+name: Browser native security
+
+on:
+  pull_request:
+    branches: [main, staging]
+    paths:
+      - "electron/**"
+      - "package.json"
+      - "package-lock.json"
+      - "test/electron-native-security.js"
+      - "panthorium-logo.svg"
+      - ".github/workflows/browser-native-security.yml"
+  workflow_dispatch:
+
+# Never use pull_request_target or attach release/cloud/signing credentials.
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-native-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-native:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Checkout reviewed changes
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.22.1
+          cache: npm
+      - name: Install locked dependencies and Electron runtime
+        run: npm ci
+      - name: Run real Electron main, preload, permissions and guest isolation
+        run: npx --no-install electron test/electron-native-security.js
+      - name: Render application icon
+        shell: bash
+        run: |
+          node -e "const fs=require('fs'); const {Resvg}=require('@resvg/resvg-js'); const png=new Resvg(fs.readFileSync('panthorium-logo.svg','utf8'),{fitTo:{mode:'width',value:512}}).render().asPng(); fs.mkdirSync('build',{recursive:true}); fs.writeFileSync('build/icon.png',png);"
+      - name: Package unsigned Windows application without publishing
+        run: npx --no-install electron-builder --win --x64 --dir --publish never
+      - name: Verify packaged security files
+        run: node test/electron-native-security.js --verify-package
