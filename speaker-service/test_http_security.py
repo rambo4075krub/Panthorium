@@ -111,8 +111,8 @@ class BoundaryTests(unittest.TestCase):
             def child_is_alive():
                 try:
                     return "State:\tZ" not in status.read_text()
-                except FileNotFoundError:
-                    # A reaped child can disappear between any two /proc reads.
+                except (FileNotFoundError, ProcessLookupError):
+                    # A reaped child can disappear before open or during read.
                     return False
 
             deadline = time.monotonic() + 1
