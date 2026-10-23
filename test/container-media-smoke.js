@@ -50,7 +50,11 @@ async function main() {
     }
     const config = spawnSync(ffmpeg, ['-buildconf'], { encoding: 'utf8' });
     assert.equal(config.status, 0);
-    for (const flag of lock.configure) assert((config.stdout + config.stderr).includes(flag), `Missing ${flag}`);
+    // FFmpeg shell-quotes configure values containing commas/spaces in -buildconf.
+    // Compare complete option lines after removing only those enclosing quotes.
+    const configFlags = (config.stdout + config.stderr).split('\n').map(line => line.trim())
+      .filter(line => line.startsWith('--')).map(line => line.replace(/^(--[^=]+=)(['"])(.*)\2$/, '$1$3'));
+    for (const flag of lock.configure) assert(configFlags.includes(flag), `Missing ${flag}`);
     const protocols = command(ffmpeg, ['-hide_banner', '-protocols'], { encoding: 'utf8' });
     const names = protocols.split('\n').map(line => line.trim()).filter(line => /^[a-z0-9_]+$/.test(line));
     assert(names.length > 0);
