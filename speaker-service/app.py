@@ -10,7 +10,9 @@ import json
 import math
 import os
 import subprocess
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from model_assets import verify_model
 
 MAX_BODY = 1_500_000
 MAX_AUDIO = 1_000_000
@@ -57,8 +59,12 @@ def decode_audio(data_url):
         raise ValueError("invalid_audio_size")
     try:
         result = subprocess.run(
-            ["ffmpeg", "-nostdin", "-v", "error", "-i", "pipe:0", "-ac", "1",
-             "-ar", "16000", "-f", "f32le", "pipe:1"],
+            ["ffmpeg", "-nostdin", "-v", "error", "-xerror",
+             "-protocol_whitelist", "pipe", "-i", "pipe:0", "-map", "0:a:0",
+             "-vn", "-sn", "-dn", "-ac", "1", "-ar", "16000",
+             # Bound decoded bytes before capture, while retaining one extra
+             # sample so overlong recordings are rejected rather than truncated.
+             "-t", str((MAX_SAMPLES + 1) / 16000), "-f", "f32le", "pipe:1"],
             input=raw, capture_output=True, timeout=12, check=True,
         )
     except (subprocess.SubprocessError, OSError) as exc:
@@ -80,14 +86,20 @@ def decode_audio(data_url):
 
 class SpeakerEncoder:
     def __init__(self):
+        # Reject changed checkpoints/YAML before SpeechBrain can deserialize them.
+        # The pinned YAML only references installed SpeechBrain classes; all its
+        # checkpoint paths are overridden to the verified local model directory.
+        model_dir = Path(os.environ.get("SPEAKER_MODEL_PATH", "/app/model")).resolve()
+        verify_model(model_dir)
         import torch
         from speechbrain.inference.classifiers import EncoderClassifier
 
         torch.set_num_threads(2)
         self.torch = torch
         self.model = EncoderClassifier.from_hparams(
-            source=os.environ.get("SPEAKER_MODEL_PATH", "/app/model"),
+            source=str(model_dir),
             savedir="/tmp/speaker-model",
+            overrides={"pretrained_path": str(model_dir)},
             run_opts={"device": "cpu"},
         )
 

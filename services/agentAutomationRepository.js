@@ -1,5 +1,6 @@
 const { getDatabasePool } = require('./databasePool');
 const { randomUUID } = require('crypto');
+const { AgentAutomationPolicyService } = require('./agentAutomationPolicyService');
 
 class AgentAutomationRepository {
   constructor({ databaseUrl = '', databaseSslMode = 'disable', requireDatabase = false } = {}) {
@@ -52,11 +53,52 @@ class AgentAutomationRepository {
     return { triggerId: row.triggerId || randomUUID(), userId: row.userId, userContext: row.userContext || {}, eventKey: String(row.eventKey || ''), request: String(row.request || '').slice(0,8000), provider: row.provider || null, enabled: row.enabled !== false, createdAt: row.createdAt || new Date().toISOString(), updatedAt: row.updatedAt || new Date().toISOString() };
   }
 
-  async createSchedule(input) { this.ensureStorage();
+  effectiveMaxRuns(schedule) {
+    // Old rows used NULL to mean unlimited. Apply the same finite tier default
+    // before creating an occurrence, including rows already past that limit.
+    const limits = new AgentAutomationPolicyService().profile({ ...schedule.userContext, sub: schedule.userId });
+    const fallback = limits.maxRuns || 100;
+    const configured = Number(schedule.maxRuns);
+    return schedule.maxRuns != null && Number.isInteger(configured) && configured > 0
+      ? Math.min(configured, 1000) : fallback;
+  }
+
+  // Reserve against every active row, not a paginated UI list. The per-user
+  // transaction lock also serializes creation across Cloud Run instances.
+  async reserveActive(kind, userId, maxActive, insert) {
+    if (!['schedule','trigger'].includes(kind) || !userId || !Number.isInteger(maxActive) || maxActive < 1 || maxActive > 100) throw new Error('automation_invalid_limit');
+    const denied = () => { throw new Error(`automation_${kind}_limit_reached`); };
+    if (!this.pool) {
+      const records = kind === 'schedule' ? this.schedules : this.triggers;
+      const count = [...records.values()].filter(item => item.userId === userId && item.enabled !== false).length;
+      if (count >= maxActive) return denied();
+      // insert mutates the Map synchronously before it returns a Promise.
+      // There is no await between counting and insertion in this path.
+      return insert(null);
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`automation:${kind}:${userId}`]);
+      const table = kind === 'schedule' ? 'panthorium_agent_schedules' : 'panthorium_agent_event_triggers';
+      const result = await client.query(`SELECT COUNT(*)::int AS count FROM ${table} WHERE user_id=$1 AND enabled=TRUE`, [userId]);
+      if (Number(result.rows[0].count) >= maxActive) denied();
+      const item = await insert(client);
+      await client.query('COMMIT');
+      return item;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async createSchedule(input, { maxActive = 100 } = {}) { this.ensureStorage();
     const item = this.normalizeSchedule(input);
-    if (!this.pool) { this.schedules.set(item.scheduleId,item); return item; }
-    const r = await this.pool.query(`INSERT INTO panthorium_agent_schedules(schedule_id,user_id,user_context,request,provider,every_minutes,next_run_at,max_runs,run_count,enabled,created_at,updated_at) VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING schedule_id AS "scheduleId",user_id AS "userId",user_context AS "userContext",request,provider,every_minutes AS "everyMinutes",next_run_at AS "nextRunAt",max_runs AS "maxRuns",run_count AS "runCount",enabled,created_at AS "createdAt",updated_at AS "updatedAt"`, [item.scheduleId,item.userId,JSON.stringify(item.userContext),item.request,item.provider,item.everyMinutes,item.nextRunAt,item.maxRuns,item.runCount,item.enabled,item.createdAt,item.updatedAt]);
+    return this.reserveActive('schedule', item.userId, maxActive, async client => {
+    if (!client) { this.schedules.set(item.scheduleId,item); return item; }
+    const r = await client.query(`INSERT INTO panthorium_agent_schedules(schedule_id,user_id,user_context,request,provider,every_minutes,next_run_at,max_runs,run_count,enabled,created_at,updated_at) VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING schedule_id AS "scheduleId",user_id AS "userId",user_context AS "userContext",request,provider,every_minutes AS "everyMinutes",next_run_at AS "nextRunAt",max_runs AS "maxRuns",run_count AS "runCount",enabled,created_at AS "createdAt",updated_at AS "updatedAt"`, [item.scheduleId,item.userId,JSON.stringify(item.userContext),item.request,item.provider,item.everyMinutes,item.nextRunAt,item.maxRuns,item.runCount,item.enabled,item.createdAt,item.updatedAt]);
     return this.normalizeSchedule(r.rows[0]);
+    });
   }
 
   async listSchedules(userId, limit = 30) { this.ensureStorage();
@@ -87,10 +129,15 @@ class AgentAutomationRepository {
         .sort((a,b)=>Date.parse(a.nextRunAt)-Date.parse(b.nextRunAt)).slice(0,safe);
       const made = [];
       for (const schedule of due) {
+        const maxRuns = this.effectiveMaxRuns(schedule);
+        if (schedule.runCount >= maxRuns) {
+          this.schedules.set(schedule.scheduleId, { ...schedule, maxRuns, enabled:false, updatedAt:new Date().toISOString() });
+          continue;
+        }
         const input = inputFor(schedule), previousJob = jobs.memory.get(input.jobId);
         if (previousJob && (previousJob.userId !== schedule.userId || previousJob.result?.scheduleId !== schedule.scheduleId || previousJob.result?.occurrence !== schedule.runCount+1)) throw new Error('automation_occurrence_conflict');
         const job = previousJob || jobs.normalize(input), count = schedule.runCount+1;
-        const next = { ...schedule,runCount:count,enabled:schedule.maxRuns==null || count<schedule.maxRuns,
+        const next = { ...schedule,maxRuns,runCount:count,enabled:count<maxRuns,
           nextRunAt:new Date(Date.parse(schedule.nextRunAt)+schedule.everyMinutes*60000).toISOString(),updatedAt:new Date().toISOString() };
         try { jobs.memory.set(job.jobId,job); this.schedules.set(schedule.scheduleId,next); }
         catch (error) {
@@ -111,7 +158,12 @@ class AgentAutomationRepository {
         ORDER BY next_run_at ASC LIMIT $1 FOR UPDATE SKIP LOCKED`,[safe]);
       const made = [];
       for (const row of due.rows) {
-        const schedule = this.normalizeSchedule(row), input = inputFor(schedule);
+        const schedule = this.normalizeSchedule(row), maxRuns = this.effectiveMaxRuns(schedule);
+        if (schedule.runCount >= maxRuns) {
+          await client.query('UPDATE panthorium_agent_schedules SET max_runs=$2,enabled=FALSE,updated_at=NOW() WHERE schedule_id=$1',[schedule.scheduleId,maxRuns]);
+          continue;
+        }
+        const input = inputFor(schedule);
         const inserted = await client.query(`INSERT INTO panthorium_agent_jobs
           (job_id,user_id,user_context,request,provider,run_at,status,result)
           VALUES($1,$2,$3::jsonb,$4,$5,$6,'scheduled',$7::jsonb) ON CONFLICT(job_id) DO NOTHING
@@ -125,8 +177,8 @@ class AgentAutomationRepository {
         }
         await client.query(`UPDATE panthorium_agent_schedules SET run_count=run_count+1,
           next_run_at=next_run_at+(every_minutes*INTERVAL '1 minute'),
-          enabled=CASE WHEN max_runs IS NULL THEN TRUE ELSE run_count+1<max_runs END,updated_at=NOW()
-          WHERE schedule_id=$1`,[schedule.scheduleId]);
+          max_runs=$2,enabled=run_count+1<$2,updated_at=NOW()
+          WHERE schedule_id=$1`,[schedule.scheduleId,maxRuns]);
         made.push(jobs.mapRow(job));
       }
       await client.query('COMMIT');
@@ -137,11 +189,13 @@ class AgentAutomationRepository {
     } finally { client.release(); }
   }
 
-  async createTrigger(input) { this.ensureStorage();
+  async createTrigger(input, { maxActive = 100 } = {}) { this.ensureStorage();
     const item=this.normalizeTrigger(input);
-    if(!this.pool){this.triggers.set(item.triggerId,item);return item;}
-    const r=await this.pool.query(`INSERT INTO panthorium_agent_event_triggers(trigger_id,user_id,user_context,event_key,request,provider,enabled,created_at,updated_at) VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9) RETURNING trigger_id AS "triggerId",user_id AS "userId",user_context AS "userContext",event_key AS "eventKey",request,provider,enabled,created_at AS "createdAt",updated_at AS "updatedAt"`,[item.triggerId,item.userId,JSON.stringify(item.userContext),item.eventKey,item.request,item.provider,item.enabled,item.createdAt,item.updatedAt]);
+    return this.reserveActive('trigger', item.userId, maxActive, async client => {
+    if(!client){this.triggers.set(item.triggerId,item);return item;}
+    const r=await client.query(`INSERT INTO panthorium_agent_event_triggers(trigger_id,user_id,user_context,event_key,request,provider,enabled,created_at,updated_at) VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9) RETURNING trigger_id AS "triggerId",user_id AS "userId",user_context AS "userContext",event_key AS "eventKey",request,provider,enabled,created_at AS "createdAt",updated_at AS "updatedAt"`,[item.triggerId,item.userId,JSON.stringify(item.userContext),item.eventKey,item.request,item.provider,item.enabled,item.createdAt,item.updatedAt]);
     return this.normalizeTrigger(r.rows[0]);
+    });
   }
 
   async listTriggers(userId, limit=30){ this.ensureStorage();const safe=Math.min(Math.max(Number(limit)||30,1),100);if(!this.pool)return[...this.triggers.values()].filter(x=>x.userId===userId).slice(0,safe);const r=await this.pool.query(`SELECT trigger_id AS "triggerId",user_id AS "userId",user_context AS "userContext",event_key AS "eventKey",request,provider,enabled,created_at AS "createdAt",updated_at AS "updatedAt" FROM panthorium_agent_event_triggers WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2`,[userId,safe]);return r.rows.map(x=>this.normalizeTrigger(x));}

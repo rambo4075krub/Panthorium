@@ -20,7 +20,7 @@ const catalog = require('../voice-window-catalog');
   const admin = { id: 'admin-test', roles: ['administrator'], permissions: ['chat', 'settings', 'system:read', 'sentinel:command'] };
   const excluded = ['developer-studio', 'user-management', 'admin-management', 'billing-admin', 'admin-mailbox', 'settings', 'security', 'ai-platform', 'sentinel-agent', 'agent-automation', 'memory-knowledge', 'multi-agent', 'integrations', 'training-lab', 'production', 'governance', 'sentinel-control'];
   const guestSessionId = '123e4567-e89b-42d3-a456-426614174000';
-  assert.equal(auth.guest({ guestSessionId }).principal.id, auth.guest({ guestSessionId }).principal.id, 'same tab session id maps to stable guest profile owner');
+  assert.notEqual(auth.guest({ guestSessionId }).principal.id, auth.guest({ guestSessionId }).principal.id, 'a public guest UUID cannot restore another session');
   assert.notEqual(auth.guest().principal.id, auth.guest().principal.id, 'missing guest session id remains random');
   const sentinel = { status: () => ({ ready: true }), providerCatalog: () => [], chat: async () => ({ ok: true, text: 'test reply' }) };
   const agent = new AgentService({ tools: new ToolRegistry({ sentinel }), audit });

@@ -44,6 +44,12 @@ class SpeakerServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid_audio"):
             decode_audio("not audio")
 
+    def test_decode_rejects_overlong_audio(self):
+        # The input is below the byte limit but exceeds the decoded duration.
+        with self.assertRaisesRegex(ValueError, "invalid_audio_duration"):
+            decode_audio(sample_audio(seconds=30))
+        self.assertEqual(len(decode_audio(sample_audio(seconds=18))), 16_000 * 18)
+
     def test_endpoint_never_calls_model_for_silence(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler_class(FakeEncoder()))
         thread = threading.Thread(target=server.serve_forever, daemon=True)

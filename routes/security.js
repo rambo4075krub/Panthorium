@@ -115,7 +115,7 @@ function createSecurityRouter(authService, repository, audit, securityResponse) 
   router.delete("/users/:id/sessions", async (req, res, next) => {
     try {
       founderAccount.assertFounderMutationAllowed(req.params.id,req.user.sub);
-      const count = await repository.revokeUserSessions(req.params.id);
+      const count = await authService.revokeAllSessions(req.params.id, req.user.sub);
       audit.record("security.user_sessions_revoked", { actorUserId: req.user.sub, targetUserId: req.params.id, count, requestId: req.requestId, ip: req.ip || null, userAgent: req.headers["user-agent"] || null });
       res.json({ ok: true, revoked: count });
     } catch (error) { if(error.message==="founder_account_protected")return res.status(403).json({ok:false,error:error.message});next(error); }

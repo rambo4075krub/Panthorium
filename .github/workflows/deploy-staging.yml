@@ -4,12 +4,19 @@ on:
     branches: [staging]
 permissions:
   contents: read
-  id-token: write
 concurrency:
   group: panthorium-staging
   cancel-in-progress: false
 jobs:
+  security:
+    if: github.ref == 'refs/heads/staging'
+    uses: ./.github/workflows/security-scan.yml
   staging:
+    if: github.ref == 'refs/heads/staging'
+    needs: security
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: staging
@@ -34,7 +41,9 @@ jobs:
       PANTHORIUM_FILES_BUCKET: ${{ vars.PANTHORIUM_STAGING_FILES_BUCKET || '' }}
       PANTHORIUM_PRODUCTION_FILES_BUCKET: ${{ vars.PANTHORIUM_PRODUCTION_FILES_BUCKET || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Check isolated staging configuration
         env:
           PRODUCTION_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
@@ -73,21 +82,22 @@ jobs:
             echo "::error::Configure the Vertex project and tuning job resource"
             exit 1
           fi
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm run check
       - name: Install media test dependency
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
-      - run: npm test
-      - uses: google-github-actions/auth@v2
+      - name: Run tests including security regressions
+        run: npm test
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOY_SA }}
           project_id: ${{ env.PROJECT }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
       - name: Verify optional staging email secret
         run: |
           set -euo pipefail

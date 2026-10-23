@@ -20,6 +20,22 @@ class JsonAuthRepository {
   async createUser(user) { const normalized = normalizeUser(user); this.store.update((data) => { data.users = data.users || []; if (normalized.email && data.users.some(existing => existing.email === normalized.email)) throw new Error('email_exists'); data.users.push(normalized); return data; }); return normalized; }
   async updateUserAccess(id, { roles, permissions }) { let updated = null; this.store.update((data) => { data.users = (data.users || []).map((user) => { if (user.id !== id) return user; updated = normalizeUser({ ...user, roles: roles || [], permissions: permissions || [] }); return updated; }); return data; }); return updated; }
   async updateUserPassword(id, passwordHash) { let updated = null; this.store.update((data) => { data.users = (data.users || []).map((user) => { if (user.id !== id) return user; updated = { ...user, passwordHash }; return updated; }); return data; }); return updated; }
+  async sessionPolicy(id) { const user = await this.findUserById(id); return { credentialVersion: user?.credentialVersion || 0, sessionsRevokedAt: user?.sessionsRevokedAt || null, suspended: false, expiresAt: null, weekdays: [0, 1, 2, 3, 4, 5, 6] }; }
+  async invalidateSessions(id, { passwordHash } = {}) {
+    let revokedSessions = 0;
+    this.store.update(data => {
+      const user = (data.users || []).find(item => item.id === id);
+      if (!user) throw new Error('user_not_found');
+      if (passwordHash) user.passwordHash = passwordHash;
+      user.credentialVersion = (user.credentialVersion || 0) + 1;
+      user.sessionsRevokedAt = new Date().toISOString();
+      const tokens = data.refreshTokens || [];
+      revokedSessions = tokens.filter(token => token.userId === id).length;
+      data.refreshTokens = tokens.filter(token => token.userId !== id);
+      return data;
+    });
+    return { revokedSessions };
+  }
   async deleteUser(id) { founderAccount.assertDeletable(id); let removed = false; this.store.update((data) => { const before = (data.users || []).length; data.users = (data.users || []).filter((user) => user.id !== id); data.refreshTokens = (data.refreshTokens || []).filter((token) => token.userId !== id); removed = data.users.length !== before; return data; }); return removed; }
   async storeRefreshToken(token) { this.store.update((data) => { data.refreshTokens = (data.refreshTokens || []).filter((t) => t.expiresAt > Date.now()); data.refreshTokens.push(token); return data; }); }
   async consumeRefreshToken(tokenHash) { let found = null; this.store.update((data) => { const now = Date.now(); const tokens = data.refreshTokens || []; found = tokens.find((t) => t.tokenHash === tokenHash && t.expiresAt > now) || null; data.refreshTokens = tokens.filter((t) => t.tokenHash !== tokenHash && t.expiresAt > now); return data; }); return found; }
@@ -56,6 +72,7 @@ class PostgresAuthRepository {
       );
       CREATE INDEX IF NOT EXISTS idx_panthorium_refresh_user ON panthorium_refresh_tokens(user_id);
       CREATE INDEX IF NOT EXISTS idx_panthorium_refresh_expiry ON panthorium_refresh_tokens(expires_at);
+      ALTER TABLE panthorium_refresh_tokens ADD COLUMN IF NOT EXISTS account_version INTEGER;
       ALTER TABLE panthorium_users ADD COLUMN IF NOT EXISTS email TEXT;
       ALTER TABLE panthorium_users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_panthorium_users_email ON panthorium_users(email) WHERE email IS NOT NULL;
@@ -87,8 +104,8 @@ class PostgresAuthRepository {
   }
   async updateUserPassword(id, passwordHash) { const { rows } = await this.pool.query("UPDATE panthorium_users SET password_hash = $2 WHERE id = $1 RETURNING *", [id, passwordHash]); return this.mapUser(rows[0]); }
   async deleteUser(id) { founderAccount.assertDeletable(id); const { rowCount } = await this.pool.query("DELETE FROM panthorium_users WHERE id = $1", [id]); return rowCount > 0; }
-  async storeRefreshToken(token) { await this.pool.query("DELETE FROM panthorium_refresh_tokens WHERE expires_at <= NOW()"); await this.pool.query(`INSERT INTO panthorium_refresh_tokens (id, user_id, token_hash, expires_at, created_at) VALUES ($1,$2,$3,$4,$5)`, [token.id, token.userId, token.tokenHash, new Date(token.expiresAt), token.createdAt]); }
-  async consumeRefreshToken(tokenHash) { const client = await this.pool.connect(); try { await client.query("BEGIN"); const { rows } = await client.query(`DELETE FROM panthorium_refresh_tokens WHERE token_hash = $1 AND expires_at > NOW() RETURNING id, user_id, token_hash, expires_at, created_at`, [tokenHash]); await client.query("COMMIT"); const row = rows[0]; if (!row) return null; return { id: row.id, userId: row.user_id, tokenHash: row.token_hash, expiresAt: new Date(row.expires_at).getTime(), createdAt: row.created_at }; } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); } }
+  async storeRefreshToken(token) { await this.pool.query("DELETE FROM panthorium_refresh_tokens WHERE expires_at <= NOW()"); await this.pool.query(`INSERT INTO panthorium_refresh_tokens (id, user_id, token_hash, expires_at, created_at, account_version) VALUES ($1,$2,$3,$4,$5,$6)`, [token.id, token.userId, token.tokenHash, new Date(token.expiresAt), token.createdAt, token.accountVersion ?? null]); }
+  async consumeRefreshToken(tokenHash) { const client = await this.pool.connect(); try { await client.query("BEGIN"); const { rows } = await client.query(`DELETE FROM panthorium_refresh_tokens WHERE token_hash = $1 AND expires_at > NOW() RETURNING id, user_id, token_hash, expires_at, created_at, account_version`, [tokenHash]); await client.query("COMMIT"); const row = rows[0]; if (!row) return null; return { id: row.id, userId: row.user_id, tokenHash: row.token_hash, expiresAt: new Date(row.expires_at).getTime(), createdAt: row.created_at, accountVersion: row.account_version }; } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); } }
   async revokeRefreshToken(tokenHash) { await this.pool.query("DELETE FROM panthorium_refresh_tokens WHERE token_hash = $1", [tokenHash]); }
   async listActiveSessions() {
     const { rows } = await this.pool.query(`SELECT t.id, t.user_id, u.username, t.created_at, t.expires_at FROM panthorium_refresh_tokens t JOIN panthorium_users u ON u.id = t.user_id WHERE t.expires_at > NOW() ORDER BY t.created_at DESC`);

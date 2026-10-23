@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const mainRequire = require('node:module').createRequire(path.join(__dirname, '../electron/main.cjs'));
 const source = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
 
 (async () => {
@@ -21,12 +22,18 @@ const source = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'ut
         return { ok: true, json: async () => ({ edition, version: remote, assets: { windows: asset, macos: asset, linux: asset } }) };
       } }
     };
-    const context = vm.createContext({ require: name => name === 'electron' ? electron : name === '../package.json' ? { panthoriumEdition: edition } : require(name), process: { platform, env: {} }, console: { warn() {} }, URL, Buffer, setTimeout, clearTimeout, setInterval });
+    const context = vm.createContext({ require: name => name === 'electron' ? electron : name === '../package.json' ? { panthoriumEdition: edition } : mainRequire(name), process: { platform, env: {} }, console: { warn() {} }, URL, Buffer, setTimeout, clearTimeout, setInterval });
     vm.runInContext(source, context);
     vm.runInContext('installVoiceBridge()', context);
     const check = handlers.get('panthorium:update-status');
     const event = { senderFrame: { url: origin + '/' } };
-    assert.equal((await check(event)).available, true);
+    const status = await check(event);
+    assert.equal(status.available, true);
+    assert.equal(status.installable, false);
+    assert.equal(status.verificationError, 'update_signature_unconfigured');
+    const manual = await handlers.get('panthorium:check-updates')(event);
+    assert.equal(manual.error, 'update_signature_unconfigured');
+    dialogs = 0;
     remote = '15.0.4';
     assert.equal((await check(event)).upToDate, true);
     remote = '15.0.3';

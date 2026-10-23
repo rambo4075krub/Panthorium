@@ -6,6 +6,13 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: panthorium-production
+  cancel-in-progress: false
+
 env:
   MAILBOX_SEND_ENABLED: ${{ vars.MAILBOX_SEND_ENABLED || '1' }}
   MAILBOX_WEBHOOK_SECRET: ${{ vars.RESEND_WEBHOOK_SECRET_NAME || '' }}
@@ -22,13 +29,21 @@ env:
   PANTHORIUM_STAGING_FILES_BUCKET: ${{ vars.PANTHORIUM_STAGING_FILES_BUCKET || '' }}
 
 jobs:
+  security:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/security-scan.yml
   deploy:
     name: Build & Deploy to Cloud Run
+    if: github.ref == 'refs/heads/main'
+    needs: security
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Require isolated Cloud Storage buckets
         run: |
@@ -48,27 +63,32 @@ jobs:
           fi
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24
+          node-version: 24.22.1
 
       - name: Install media test dependency
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
 
       - name: Install & Run Tests
         run: |
-          npm install
+          set -euo pipefail
+          npm ci --ignore-scripts
           npm run check
+          # npm test includes test:security; PostgreSQL tests run in CI separately.
           npm test
 
+      # Retained for compatibility until a restricted production WIF provider
+      # and deploy service account are provisioned. Rotate the existing key
+      # and scope its IAM permissions; do not grant it to pull-request jobs.
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Setup Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Verify production Voice Identity prerequisites
         env:

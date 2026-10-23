@@ -4,6 +4,7 @@
   const maxPageText = 6000;
   const os = () => { try { return typeof OS !== 'undefined' ? OS : null; } catch (_) { return null; } };
   const desktop = () => !!window.panthoriumDesktop?.isElectron;
+  const accountId = () => String(os()?.state?.user?.sub || os()?.state?.user?.id || '');
   const accountUser = () => {
     const user = os()?.state?.user;
     return !!user && !String(user.id || '').startsWith('guest:') && !(user.roles || []).includes('guest')
@@ -134,6 +135,7 @@
     clearPage(root);
     const view = root.querySelector('[data-browser-view]');
     if (view) { status(root, 'กำลังเปิดเว็บไซต์ใน Panthorium Browser…'); view.loadURL(url); }
+    else if (desktop()) { status(root, 'กำลังเตรียมพื้นที่เบราว์เซอร์ที่ปลอดภัย กรุณารอสักครู่', true); }
     else {
       window.open(url, '_blank', 'noopener,noreferrer');
       status(root, 'ส่งคำสั่งเปิดไปยังเบราว์เซอร์ที่ใช้อยู่แล้ว · หากไม่เห็นแท็บใหม่ ให้ตรวจการบล็อก popup');
@@ -146,12 +148,13 @@
     if (!accountUser() || !allowed()) { message('Panthorium Browser ใช้ได้สำหรับ Admin และ User ที่เข้าสู่ระบบ'); return false; }
     const existing = document.getElementById('panthorium-browser-dashboard');
     if (existing) { existing.focus(); return true; }
-    const userId = String(os()?.state?.user?.id || '').replace(/[^a-f0-9-]/gi, '').slice(0, 36);
+    const ownerId = accountId();
     const viewMarkup = desktop()
-      ? `<webview data-browser-view partition="persist:panthorium-browser-${userId}" webpreferences="contextIsolation=yes,sandbox=yes,nodeIntegration=no,webSecurity=yes" style="display:flex;flex:1;min-height:220px;border:1px solid #27364b;border-radius:10px;background:#fff"></webview>`
+      ? '<div data-browser-mount style="display:flex;flex:1;min-height:220px">กำลังเตรียมเบราว์เซอร์…</div>'
       : '<div data-browser-fallback style="flex:1;min-height:220px;display:grid;place-items:center;text-align:center;color:#9eb0c5;border:1px solid #27364b;border-radius:10px;padding:20px">เว็บไซต์จะเปิดในแท็บใหม่ของเบราว์เซอร์ที่กำลังใช้<br>ติดตั้ง Panthorium Browser เพื่อใช้การอ่านหน้าเว็บและสรุปด้วย Sentinel</div>';
     const root = document.createElement('section');
     root.id = 'panthorium-browser-dashboard';
+    root.dataset.browserOwner = ownerId;
     root.tabIndex = -1;
     root.style.cssText = 'position:fixed;inset:2%;z-index:10035;background:rgba(7,11,18,.99);border:1px solid #2e5663;border-radius:16px;color:#e2e8f0;padding:14px;display:flex;flex-direction:column;gap:9px;box-shadow:0 24px 80px #000;font-family:system-ui;overflow:hidden';
     root.innerHTML = `<header style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 style="margin:0">🌐 Panthorium Browser</h2><div data-browser-status role="status" style="font-size:11px;color:#93a9be">ใช้ WebView ของ Panthorium Browser · หน้าเว็บจะไม่ถูกส่งให้ AI อัตโนมัติ</div></div><button type="button" data-browser-close aria-label="ปิด">✕</button></header><form data-browser-form style="display:flex;gap:6px"><button type="button" data-back title="ย้อนกลับ" disabled>←</button><button type="button" data-forward title="ไปข้างหน้า" disabled>→</button><button type="button" data-reload title="โหลดใหม่">⟳</button><input data-browser-url type="text" inputmode="url" autocomplete="url" placeholder="https://example.com" style="flex:1;min-width:0;padding:9px;background:#101827;color:#e2e8f0;border:1px solid #334155;border-radius:8px"><button type="submit">เปิดเว็บ</button></form>${viewMarkup}<section style="flex:0 0 auto;max-height:35%;min-height:120px;display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr);gap:9px;overflow:auto"><div><div style="font-size:12px;margin-bottom:5px">ตัวอย่างข้อความก่อนส่งให้ Sentinel</div><div data-page-title style="font-size:11px;color:#91a4ba;margin-bottom:4px;overflow-wrap:anywhere"></div><textarea data-page-preview readonly aria-label="ตัวอย่างข้อความหน้าเว็บ" style="box-sizing:border-box;width:100%;height:100px;padding:8px;background:#101827;color:#dce7f5;border:1px solid #334155;border-radius:8px;resize:vertical"></textarea><div style="display:flex;gap:6px;margin-top:6px"><button type="button" data-read-page ${desktop() ? '' : 'disabled'}>อ่านหน้าปัจจุบัน</button><button type="button" data-send-summary disabled>ส่งให้ Sentinel สรุป</button></div></div><div><div style="font-size:12px;margin-bottom:5px">คำตอบจาก Sentinel</div><pre data-summary style="box-sizing:border-box;white-space:pre-wrap;overflow:auto;max-height:150px;margin:0;padding:8px;background:#101827;color:#dce7f5;border:1px solid #334155;border-radius:8px;font:12px/1.45 system-ui"></pre><button type="button" data-open-sentinel hidden style="margin-top:6px">เปิดบทสนทนาใน Sentinel</button></div></section>`;
@@ -165,7 +168,22 @@
     root.querySelector('[data-send-summary]').onclick = () => sendToSentinel(root);
     root.querySelector('[data-open-sentinel]').onclick = () => { close(root); if (typeof openSentinel === 'function') openSentinel(); };
     root.addEventListener('keydown', event => { if (event.key === 'Escape') close(root); });
-    if (desktop()) bindWebview(root);
+    if (desktop()) {
+      const prepare = window.panthoriumDesktop.setBrowserAccount;
+      if (typeof prepare !== 'function') status(root, 'กรุณาอัปเดต Panthorium Browser เพื่อเปิดเว็บอย่างปลอดภัย', true);
+      else prepare(ownerId).then(result => {
+        if (!root.isConnected || ownerId !== accountId()) return;
+        if (!result?.ok || !/^persist:panthorium-browser-v2-[a-f0-9]{64}$/.test(result.partitions?.browser || '')) throw Error('browser_session_unavailable');
+        const view = document.createElement('webview');
+        view.dataset.browserView = '';
+        view.setAttribute('partition', result.partitions.browser);
+        view.setAttribute('webpreferences', 'contextIsolation=yes,sandbox=yes,nodeIntegration=no,webSecurity=yes');
+        view.style.cssText = 'display:flex;flex:1;min-height:220px;border:1px solid #27364b;border-radius:10px;background:#fff';
+        root.querySelector('[data-browser-mount]').replaceChildren(view);
+        bindWebview(root);
+        status(root, 'Panthorium Browser พร้อมใช้งาน');
+      }).catch(() => { if (root.isConnected) status(root, 'เตรียมพื้นที่เบราว์เซอร์ไม่สำเร็จ กรุณาลองเปิดใหม่', true); });
+    }
     window.PanthoriumBrowser.root = root;
     root.focus({ preventScroll: true });
     return true;
@@ -193,7 +211,14 @@
   }
 
   window.PanthoriumBrowser = { open, close: () => { const root = document.getElementById('panthorium-browser-dashboard'); if (root) close(root); }, normalizeUrl };
-  const sync = () => requestAnimationFrame(installLauncher);
+  const sync = () => {
+    const root = document.getElementById('panthorium-browser-dashboard');
+    if (root && root.dataset.browserOwner !== accountId()) close(root);
+    if (desktop() && typeof window.panthoriumDesktop.setBrowserAccount === 'function') {
+      window.panthoriumDesktop.setBrowserAccount(accountId()).catch(() => {});
+    }
+    requestAnimationFrame(installLauncher);
+  };
   for (const event of ['panthorium:auth-changed', 'panthorium:apps-changed', 'panthorium:boot-complete']) window.addEventListener(event, sync);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', sync, { once: true }); else sync();
 })();

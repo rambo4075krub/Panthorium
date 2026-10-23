@@ -21,6 +21,18 @@ class AuthService {
     this.repository = repository;
     this.config = config;
     this.audit = audit;
+    if (repository?.sessionPolicy && repository?.invalidateSessions) {
+      this.accountPolicy = id => repository.sessionPolicy(id);
+      this.invalidateAccountSessions = (id, actor, options) => repository.invalidateSessions(id, options);
+      this.validateAccountPrincipal = async principal => {
+        const id = principal.sub || principal.id;
+        if (String(id).startsWith('guest:')) return principal;
+        const user = await repository.findUserById(id);
+        if (!user) throw Object.assign(new Error('account_not_found'), { status: 401 });
+        if ((principal.accountVersion || 0) !== (user.credentialVersion || 0)) throw Object.assign(new Error('account_session_revoked'), { status: 401 });
+        return { ...principal, roles: user.roles || [], permissions: normalizeSentinelPermissions(user.permissions) };
+      };
+    }
   }
 
   async init() {
@@ -117,9 +129,8 @@ class AuthService {
     const existing = await this.repository.findUserById(id);
     if (!existing) throw new Error("user_not_found");
     const passwordHash = await bcrypt.hash(password, 12);
-    const updated = await this.repository.updateUserPassword(id, passwordHash);
-    const revokedSessions = await this.repository.revokeUserSessions(id);
-    if(this.invalidateAccountSessions) await this.invalidateAccountSessions(id,actorId);
+    const revokedSessions = await this.replacePasswordAndRevoke(id, passwordHash, actorId);
+    const updated = await this.repository.findUserById(id);
     this.audit.record("auth.user_password_reset", { actorId, userId: id, revokedSessions });
     return this.publicUser(updated);
   }
@@ -143,9 +154,11 @@ class AuthService {
       username: principal.username,
       roles: principal.roles || [],
       permissions: normalizeSentinelPermissions(principal.permissions),
+      ...(String(principal.id).startsWith('guest:') ? { guestSessionVersion: 2 } : {}),
       ...(principal.accountVersion!=null?{accountVersion:principal.accountVersion}:{})
     }, this.config.jwtSecret, {
       expiresIn: this.config.accessTokenTtl,
+      algorithm: "HS256",
       issuer: "panthorium",
       audience: "panthorium-ui"
     });
@@ -158,6 +171,7 @@ class AuthService {
       id: crypto.randomUUID(),
       userId: principal.id,
       tokenHash: sha256(raw),
+      accountVersion: principal.accountVersion ?? null,
       expiresAt,
       createdAt: new Date().toISOString()
     });
@@ -166,7 +180,11 @@ class AuthService {
 
   async login(username, password, context = {}) {
     const identifier = String(username || '').trim();
-    const user = identifier.includes('@') ? await this.repository.findUserByEmail(identifier.toLowerCase()) : await this.repository.findUserByUsername(identifier);
+    let user = identifier.includes('@') ? await this.repository.findUserByEmail(identifier.toLowerCase()) : await this.repository.findUserByUsername(identifier);
+    // Read the generation before reloading the password. A concurrent reset
+    // cannot turn an old-password check into a session at the new generation.
+    const expectedVersion = user && this.accountPolicy ? (await this.accountPolicy(user.id)).credentialVersion || 0 : null;
+    if (user && this.accountPolicy) user = await this.repository.findUserById(user.id);
     const auditContext = {
       requestId: context.requestId || null,
       ip: context.ip || null,
@@ -177,7 +195,7 @@ class AuthService {
       return null;
     }
     this.audit.record("auth.login_success", { userId: user.id, username: user.username, ...auditContext });
-    return this.issueSession(user);
+    return this.issueSession(user, expectedVersion);
   }
 
   async createVoiceAccount(email, password, actorId) {
@@ -212,14 +230,41 @@ class AuthService {
 
   async resetVoiceAccountPassword(id, password) {
     if (typeof password !== "string" || password.length < 10 || password.length > 256) throw new Error("invalid_password");
-    await this.repository.updateUserPassword(id, await bcrypt.hash(password, 12));
-    await this.repository.revokeUserSessions(id);
+    if (!await this.repository.findUserById(id)) throw new Error('user_not_found');
+    await this.replacePasswordAndRevoke(id, await bcrypt.hash(password, 12), id);
     this.audit.record("auth.voice_password_reset", { userId: id });
   }
 
+  async replacePasswordAndRevoke(id, passwordHash, actorId) {
+    // Configured repositories change the password and generation in one commit.
+    if (this.invalidateAccountSessions) {
+      const result = await this.invalidateAccountSessions(id, actorId, { passwordHash });
+      return result.revokedSessions;
+    }
+    throw new Error('account_invalidation_not_configured');
+  }
+
+  async revokeAllSessions(id, actorId) {
+    founderAccount.assertFounderMutationAllowed(id, actorId);
+    if (!this.invalidateAccountSessions) throw new Error('account_invalidation_not_configured');
+    return (await this.invalidateAccountSessions(id, actorId)).revokedSessions;
+  }
+
+  verifyGuestResume(token) {
+    if (!token) return null;
+    try {
+      const proof = jwt.verify(token, this.config.jwtSecret, { algorithms: ['HS256'], issuer: 'panthorium', audience: 'panthorium-guest-resume-v2' });
+      if (!/^guest:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(proof.sub) || !Number.isFinite(proof.exp)) return null;
+      return { id: proof.sub.slice(6), expiresAt: proof.exp * 1000 };
+    } catch (_) { return null; }
+  }
+
   guest(context = {}) {
-    const requestedId = String(context.guestSessionId || '');
+    // Only the route may provide an identity after checking a signed cookie or
+    // a high-entropy registered device secret. A public UUID is never proof.
+    const requestedId = String(context.verifiedGuestId || '');
     const guestId = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestedId) ? requestedId.toLowerCase() : crypto.randomUUID();
+    const expiresAt = Math.floor((context.expiresAt || Date.now() + 86400000) / 1000) * 1000;
     const principal = {
       id: `guest:${guestId}`,
       username: "guest",
@@ -227,7 +272,8 @@ class AuthService {
       permissions: ["chat", "system:read"]
     };
     this.audit.record("auth.guest_session", { userId: principal.id, requestId: context.requestId || null, ip: context.ip || null, userAgent: context.userAgent || null });
-    return { principal, accessToken: this.signAccessToken(principal), refreshToken: null };
+    const resumeToken = jwt.sign({ sub: principal.id, exp: expiresAt / 1000 }, this.config.jwtSecret, { algorithm: 'HS256', issuer: 'panthorium', audience: 'panthorium-guest-resume-v2' });
+    return { principal, accessToken: this.signAccessToken(principal), refreshToken: null, resumeToken, expiresAt };
   }
 
   async issueSession(user, expectedVersion=null) {
@@ -256,7 +302,7 @@ class AuthService {
     const user = await this.repository.findUserById(stored.userId);
     if (!user) return null;
     let expectedVersion=null;
-    if(this.accountPolicy){const policy=await this.accountPolicy(user.id);expectedVersion=policy.credentialVersion||0;if(policy.sessionsRevokedAt&&(!stored.createdAt||new Date(stored.createdAt).getTime()<=new Date(policy.sessionsRevokedAt).getTime()))throw new Error("account_session_revoked");}
+    if(this.accountPolicy){const policy=await this.accountPolicy(user.id);expectedVersion=policy.credentialVersion||0;if(stored.accountVersion!=null ? stored.accountVersion!==expectedVersion : policy.sessionsRevokedAt&&(!stored.createdAt||new Date(stored.createdAt).getTime()<=new Date(policy.sessionsRevokedAt).getTime()))throw new Error("account_session_revoked");}
     this.audit.record("auth.refresh", { userId: user.id });
     return this.issueSession(user,expectedVersion);
   }
@@ -268,9 +314,11 @@ class AuthService {
 
   verifyAccessToken(token) {
     const principal = jwt.verify(token, this.config.jwtSecret, {
+      algorithms: ["HS256"],
       issuer: "panthorium",
       audience: "panthorium-ui"
     });
+    if (String(principal.sub).startsWith('guest:') && principal.guestSessionVersion !== 2) throw new Error('guest_session_revoked');
     principal.permissions = normalizeSentinelPermissions(principal.permissions);
     return principal;
   }

@@ -7,6 +7,9 @@ const { VoiceSessionRepository } = require('../services/voiceSessionRepository')
 const { CloudAppRepository } = require('../services/cloudAppRepository');
 const { AgentJobRepository } = require('../services/agentJobRepository');
 const { AgentAutomationRepository } = require('../services/agentAutomationRepository');
+const { AgentAutomationService } = require('../services/agentAutomationService');
+const { SentinelTrainingRepository } = require('../services/sentinelTrainingRepository');
+const { SentinelTrainingService } = require('../services/sentinelTrainingService');
 const { ReminderRepository } = require('../services/reminderRepository');
 const { AgentMemoryRepository } = require('../services/agentMemoryRepository');
 
@@ -107,6 +110,47 @@ async function main() {
 
     const jobs=new AgentJobRepository({requireDatabase:true}); jobs.pool=pool; await jobs.init();
     const automations=new AgentAutomationRepository({requireDatabase:true}); automations.pool=pool; await automations.init();
+    // Quota counts and inserts must serialize across distinct worker instances.
+    const quotaWorkerRepository=new AgentAutomationRepository({requireDatabase:true}); quotaWorkerRepository.pool=pool;
+    const quotaServices=[automations,quotaWorkerRepository].map(repository=>new AgentAutomationService({repository,jobs}));
+    const quotaUser={sub:'automation-quota-owner',roles:[],permissions:['chat']};
+    const quotaInput={user:quotaUser,request:'prepare a draft',everyMinutes:15,firstRunAt:new Date(Date.now()+600000).toISOString()};
+    const quotaRaces=await Promise.all(Array.from({length:24},(_,i)=>quotaServices[i%2].createSchedule(quotaInput)));
+    assert.equal(quotaRaces.filter(result=>result.ok).length,10,'PostgreSQL lock must admit only 10 concurrent schedules across workers');
+    assert(quotaRaces.filter(result=>result.ok).every(result=>result.schedule.maxRuns===100));
+    assert(quotaRaces.filter(result=>!result.ok).every(result=>result.error==='automation_schedule_limit_reached'));
+    await quotaServices[0].disableSchedule({user:quotaUser,scheduleId:quotaRaces.find(result=>result.ok).schedule.scheduleId});
+    for(let i=0;i<15;i++){
+      const created=await quotaServices[i%2].createSchedule(quotaInput); assert(created.ok);
+      await quotaServices[0].disableSchedule({user:quotaUser,scheduleId:created.schedule.scheduleId});
+    }
+    assert((await quotaServices[0].createSchedule(quotaInput)).ok);
+    assert.equal((await quotaServices[1].createSchedule(quotaInput)).error,'automation_schedule_limit_reached','Disabled history cannot hide older active schedules');
+    const triggerRaces=await Promise.all(Array.from({length:24},(_,i)=>quotaServices[i%2].createTrigger({user:quotaUser,eventKey:'audit.event',request:'prepare a draft'})));
+    assert.equal(triggerRaces.filter(result=>result.ok).length,10,'PostgreSQL lock must enforce concurrent trigger limit');
+    const legacyLast=await automations.createSchedule({userId:'legacy-schedule-owner',userContext:{sub:'legacy-schedule-owner',permissions:['chat']},request:'legacy bounded task',everyMinutes:15,nextRunAt:new Date(Date.now()-60000).toISOString(),maxRuns:null,runCount:99});
+    const legacyOverrun=await automations.createSchedule({userId:'legacy-schedule-owner',request:'legacy exhausted task',everyMinutes:15,nextRunAt:new Date(Date.now()-60000).toISOString(),maxRuns:null,runCount:150});
+    const legacyOccurrences=await Promise.all([automations.materializeDueJobs(jobs),quotaWorkerRepository.materializeDueJobs(jobs)]);
+    assert.equal(legacyOccurrences.flat().length,1,'Concurrent workers must stop legacy NULL schedules at the effective cap');
+    assert.equal(legacyOccurrences.flat()[0].result.occurrence,100);
+    const legacyRows=await automations.listSchedules('legacy-schedule-owner');
+    assert(legacyRows.every(row=>row.maxRuns===100&&row.enabled===false));
+    assert.equal(legacyRows.find(row=>row.scheduleId===legacyOverrun.scheduleId).runCount,150,'An exhausted legacy row must not create one extra job');
+    assert.equal(legacyRows.find(row=>row.scheduleId===legacyLast.scheduleId).runCount,100);
+
+    // Additive training privacy column must preserve existing records and reject
+    // private examples in both shared prompt retrieval and fine-tuning exports.
+    const trainingRepository=new SentinelTrainingRepository(); trainingRepository.pool=pool; await trainingRepository.init();
+    const trainingService=new SentinelTrainingService({repository:trainingRepository,providers:{available:()=>[]}});
+    const privateTraining=await trainingService.addExample({prompt:'Canary protected source',answer:'PRIVATE-SQL-CANARY should remain owner-scoped',source:'conversation:auto',user:{sub:'training-owner'}});
+    const curatedTraining=await trainingService.addExample({prompt:'Canary curated source',answer:'PUBLIC-SQL-CANARY is a reviewed educational answer',source:'human',user:{sub:'curator'}});
+    await trainingRepository.review(privateTraining.example.exampleId,'approved','reviewer');
+    await trainingRepository.review(curatedTraining.example.exampleId,'approved','reviewer');
+    assert.equal((await trainingRepository.getById(privateTraining.example.exampleId)).globalPublication,null);
+    for(const output of [await trainingService.contextFor('Canary'),await trainingService.exportJsonl()]){
+      assert(!output.includes('PRIVATE-SQL-CANARY'));assert(output.includes('PUBLIC-SQL-CANARY'));
+    }
+
     const originalDue=new Date(Date.now()-1000).toISOString();
     const schedule=await automations.createSchedule({userId:'automation-owner',userContext:{sub:'automation-owner',permissions:['chat']},request:'prepare a draft',everyMinutes:5,nextRunAt:originalDue,maxRuns:2});
     let failAdvance=true;

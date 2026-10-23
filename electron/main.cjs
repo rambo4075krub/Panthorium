@@ -5,6 +5,9 @@ const crypto=require('crypto');
 const {spawn}=require('child_process');
 const {app,BrowserWindow,session,ipcMain,net,dialog}=require('electron');
 const metadata=require('../package.json');
+const {createBrowserSecurity}=require('./browser-security.cjs');
+const {verifyManifest}=require('./update-signature.cjs');
+const updateTrust=require('./update-trust.json');
 const EDITION=metadata.panthoriumEdition==='admin'?'admin':'user';
 const PRODUCT_NAME='Panthorium Browser '+(EDITION==='admin'?'Admin':'User');
 const START_URL=process.env.PANTHORIUM_URL||('https://panthorium-backend-staging-124818950958.asia-southeast1.run.app'+(EDITION==='admin'?'/admin':'/'));
@@ -20,15 +23,7 @@ function trustedOrigin(value){
     return false;
   }
 }
-function safeWebviewUrl(value){
-  try{
-    const url=new URL(value);
-    const host=url.hostname.toLowerCase().replace(/\.$/,'');
-    return url.protocol==='https:'&&!url.username&&!url.password&&!!host
-      &&host!=='localhost'&&!host.endsWith('.localhost')&&!host.endsWith('.local')&&!host.endsWith('.internal')
-      &&require('node:net').isIP(host)===0;
-  }catch(_){return false;}
-}
+const browserSecurity=createBrowserSecurity({app,session,trustedOrigin,edition:EDITION});
 function postTranscription(payload){
   return new Promise((resolve,reject)=>{
     const body=Buffer.from(JSON.stringify(payload));
@@ -48,6 +43,10 @@ function postTranscription(payload){
   });
 }
 function installVoiceBridge(){
+  ipcMain.handle('panthorium:browser-account',(event,accountId)=>{
+    if(!browserSecurity.isTrustedShellEvent(event))return {ok:false,error:'untrusted_origin'};
+    return browserSecurity.setAccount(event.sender,accountId);
+  });
   ipcMain.handle('panthorium:window-control', async (event, action) => {
     if (!trustedOrigin(event.senderFrame?.url || event.sender.getURL())) return {ok:false,error:'untrusted_origin'};
     if (!['open','close','minimize','maximize','fullscreen','restore'].includes(action)) return {ok:false,error:'invalid_window_action'};
@@ -154,6 +153,9 @@ async function checkForUpdates(options={}){
     const response=await net.fetch(manifestUrl,{cache:'no-store'});
     if(!response.ok)throw new Error('manifest_http_'+response.status);
     const manifest=await response.json();
+    const signature=verifyManifest(manifest,updateTrust);
+    // A status check can report an unsigned version, but must never execute it.
+    if(!signature.ok&&!options.checkOnly)throw new Error(signature.error);
     if(manifest.edition!==EDITION)throw new Error('edition_mismatch');
     const current=app.getVersion();
     const remote=String(manifest.version||'');
@@ -168,7 +170,7 @@ async function checkForUpdates(options={}){
     if(!asset||!asset.url||!asset.sha256||!asset.name)throw new Error('manifest_missing_'+platform);
     if(!trustedUpdateUrl(asset.url))throw new Error('untrusted_update_url');
     // Rendering the Start Menu must never download an installer or open a dialog.
-    if(options.checkOnly)return {ok:true,upToDate:false,available:true,current,remote,platform};
+    if(options.checkOnly)return {ok:true,upToDate:false,available:true,current,remote,platform,installable:signature.ok,verificationError:signature.ok?null:signature.error};
     const binaryResponse=await net.fetch(asset.url,{cache:'no-store'});
     if(!binaryResponse.ok)throw new Error('update_http_'+binaryResponse.status);
     const expected=Number(binaryResponse.headers.get('content-length')||asset.size||0);
@@ -210,27 +212,16 @@ async function checkForUpdates(options={}){
         type:'warning',
         title:PRODUCT_NAME,
         message:'ตรวจสอบอัปเดตไม่สำเร็จ',
-        detail:String(error.message||error)
+        detail:String(error.message||error).startsWith('update_signature_') ? 'ยังไม่สามารถยืนยันผู้เผยแพร่อัปเดตได้ จึงหยุดการติดตั้งเพื่อความปลอดภัย กรุณารออัปเดตที่มีลายเซ็นถูกต้อง' : String(error.message||error)
       }).catch(()=>{});
     }
     return {ok:false,error:String(error.message||error)};
   }
 }
-function create(){const win=new BrowserWindow({width:1440,height:900,minWidth:960,minHeight:640,backgroundColor:'#050811',frame:false,title:PRODUCT_NAME,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,spellcheck:false,backgroundThrottling:false}});win.removeMenu();win.loadURL(START_URL);return win;}
+function create(){const win=new BrowserWindow({width:1440,height:900,minWidth:960,minHeight:640,backgroundColor:'#050811',frame:false,title:PRODUCT_NAME,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,spellcheck:false,backgroundThrottling:false}});win.removeMenu();browserSecurity.registerShell(win.webContents);win.loadURL(START_URL);return win;}
 app.whenReady().then(()=>{
   installVoiceBridge();
-  app.on('web-contents-created',(_event,contents)=>{
-    if(contents.getType()!=='webview')return;
-    const guard=(event,url)=>{if(!safeWebviewUrl(url))event.preventDefault();};
-    contents.on('will-navigate',guard);
-    contents.on('will-redirect',guard);
-  });
-  session.defaultSession.setPermissionCheckHandler((_wc,permission,origin)=>{
-    return trustedOrigin(origin) && (permission==='media'||permission==='notifications');
-  });
-  session.defaultSession.setPermissionRequestHandler((wc,permission,callback)=>{
-    callback(trustedOrigin(wc.getURL()) && (permission==='media'||permission==='notifications'));
-  });
+  browserSecurity.installSession(session.defaultSession);
   create();
   setTimeout(()=>checkForUpdates({manual:false}),15000);
   setInterval(()=>checkForUpdates({manual:false}),6*60*60*1000).unref();

@@ -9,12 +9,22 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-  id-token: write
 concurrency:
   group: panthorium-speaker-staging
   cancel-in-progress: false
 jobs:
+  security:
+    if: github.ref == 'refs/heads/staging'
+    uses: ./.github/workflows/security-scan.yml
+    with:
+      image-context: speaker-service
+      audit-node: false
   speaker:
+    if: github.ref == 'refs/heads/staging'
+    needs: security
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: staging
@@ -26,7 +36,9 @@ jobs:
       REGION: asia-southeast1
       SERVICE: panthorium-speaker-staging
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Verify isolated project
         run: |
           set -euo pipefail
@@ -34,11 +46,11 @@ jobs:
           [[ "$DEPLOY_SA" == "staging-deployer@$PROJECT.iam.gserviceaccount.com" ]]
           [[ "$RUNTIME_SA" == *"@$PROJECT.iam.gserviceaccount.com" ]]
           [[ -n "$WIF_PROVIDER" ]]
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOY_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
       - name: Build and deploy private speaker service
         run: |
           set -euo pipefail

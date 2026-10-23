@@ -17,18 +17,14 @@ class AgentAutomationPolicyService {
     if (!limits.enabled) return { ok: false, error: 'automation_policy_denied', limits };
     if (Number(everyMinutes) < limits.minEveryMinutes) return { ok: false, error: 'automation_interval_too_short', limits };
     if (maxRuns != null && Number(maxRuns) > limits.maxRuns) return { ok: false, error: 'automation_max_runs_exceeded', limits };
-    const schedules = await repository.listSchedules(user.sub, limits.maxSchedules + 1);
-    const active = schedules.filter((item) => item.enabled !== false).length;
-    if (active >= limits.maxSchedules) return { ok: false, error: 'automation_schedule_limit_reached', limits };
+    // Active-count reservation is enforced atomically by the repository insert.
     return { ok: true, limits };
   }
 
   async evaluateTrigger({ user, repository }) {
     const limits = this.profile(user);
     if (!limits.enabled) return { ok: false, error: 'automation_policy_denied', limits };
-    const triggers = await repository.listTriggers(user.sub, limits.maxTriggers + 1);
-    const active = triggers.filter((item) => item.enabled !== false).length;
-    if (active >= limits.maxTriggers) return { ok: false, error: 'automation_trigger_limit_reached', limits };
+    // Active-count reservation is enforced atomically by the repository insert.
     return { ok: true, limits };
   }
 

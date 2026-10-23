@@ -12,7 +12,12 @@ on:
       - staging
       - codex/browser-cloud-foundation-20261015
 
+permissions:
+  contents: read
+
 jobs:
+  security:
+    uses: ./.github/workflows/security-scan.yml
   test:
     runs-on: ubuntu-latest
     services:
@@ -31,22 +36,24 @@ jobs:
           --health-retries 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          node-version: 24
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.22.1
       - name: Install dependencies
-        run: npm install
+        run: npm ci --ignore-scripts
       - name: Syntax checks
         run: npm run check
       - name: Install media test dependency
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
-      - name: Run tests
+      - name: Run tests including security regressions
         run: npm test
       - name: Social media real browser audio and video
         run: |
-          npx playwright install --with-deps --only-shell chromium
+          npx --no-install playwright install --with-deps --only-shell chromium
           node test/social-rtc-browser.js
           node test/social-messages-browser.js
           node test/social-groups-browser.js
