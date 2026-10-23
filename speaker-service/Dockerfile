@@ -4,7 +4,7 @@ COPY build/media/ /build/media/
 RUN node /build/media/build-ffmpeg.mjs ffmpeg-speaker-source.lock.json
 
 FROM node:24.22.1-trixie-slim AS sndfile-build
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential cmake patch ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential cmake patch python3 ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY build/libsndfile/ /build/libsndfile/
 RUN node /build/libsndfile/build.mjs
 
