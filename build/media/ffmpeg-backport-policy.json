@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "vulnerability": "CVE-2026-107696",
+  "status": "fixed",
+  "reviewedAt": "2026-10-23",
+  "evidenceRun": "https://github.com/rambo4075krub/Panthorium/actions/runs/39924018752",
+  "sourceCommit": "946fcce07b6dcd0331c8cc609192aeff5e1924f8",
+  "patchCommit": "f5d4fd186c68913240c4f6e9cda98443e1518b34",
+  "patchSha256": "3988f39c86d88554272d0a89745a8ab6cdaff4360c162a6a4e80db5c855b2971",
+  "patchedFile": "libavformat/rtsp.c",
+  "patchedFileSha256": "9e181b7cea30a6fbbd9c1bfa4f63ec2c9834001f9804edffb6d2b01984747145",
+  "profiles": {
+    "backend": {
+      "os": "linux",
+      "architecture": "amd64",
+      "sourceLockSha256": "097c1337f23a4333cb7cd716c0f4227fb1760185f3256c842ed413aa5aea292c",
+      "binaries": {
+        "ffmpeg": "50f919add9fc9c8f275460f05305d6c2881cc22435c6dfb39442921291499b58",
+        "ffprobe": "d5e68106960b60d0c4b69eea3a3a490379f76cb02267314f4e3b8416480d41eb"
+      }
+    },
+    "speaker": {
+      "os": "linux",
+      "architecture": "amd64",
+      "sourceLockSha256": "8edce617d2b4c31a710a12464d85c866bb40d4cf99998ec95b36b6cbe66de6ff",
+      "binaries": {
+        "ffmpeg": "e8d5094a1fee2d25fc9a66a9415ae595dab44eccf066c91278f301ad3bedc1b7",
+        "ffprobe": "505f63fef04aa79c09d3de5c895ae7d4e3fc58bebc52ccabb407108148548e86"
+      }
+    }
+  }
+}

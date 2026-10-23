@@ -19,7 +19,7 @@ const source = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'ut
         assert(url.endsWith(`Panthorium-Browser-${edition}-update.json`), 'quiet check must not download a binary');
         if (fail) return { ok: false, status: 503 };
         const asset = { name: 'installer', sha256: 'a'.repeat(64), url: 'https://github.com/rambo4075krub/Panthorium/releases/download/staging/installer' };
-        return { ok: true, json: async () => ({ edition, version: remote, assets: { windows: asset, macos: asset, linux: asset } }) };
+        return Response.json({ edition, version: remote, assets: { windows: asset, macos: asset, linux: asset } });
       } }
     };
     const context = vm.createContext({ require: name => name === 'electron' ? electron : name === '../package.json' ? { panthoriumEdition: edition } : mainRequire(name), process: { platform, env: {} }, console: { warn() {} }, URL, Buffer, setTimeout, clearTimeout, setInterval });

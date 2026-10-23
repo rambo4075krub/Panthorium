@@ -19,12 +19,10 @@ jobs:
   security:
     uses: ./.github/workflows/security-scan.yml
   speaker-security:
-    # Audit the same OS/Python dependency stage without fetching model weights.
-    # Speaker deployment also scans the complete runtime image.
+    # Exercise the complete runtime, including verified model bytes and offline inference.
     uses: ./.github/workflows/security-scan.yml
     with:
       image-context: speaker-service
-      image-target: runtime-dependencies
       audit-node: false
   test:
     runs-on: ubuntu-latest

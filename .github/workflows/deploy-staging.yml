@@ -18,7 +18,7 @@ jobs:
       contents: read
       id-token: write
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 75
     environment: staging
     env:
       PROJECT: ${{ vars.STAGING_GCP_PROJECT_ID }}
@@ -106,11 +106,26 @@ jobs:
             [[ "$RESEND_SECRET" =~ ^[A-Za-z0-9_-]+$ ]]
             gcloud secrets describe "$RESEND_SECRET" --project="$PROJECT" >/dev/null
           fi
-      - name: Build and deploy isolated staging
+      - name: Build the staging image once and capture its immutable output
+        id: built-image
         run: |
           set -euo pipefail
           IMAGE="$REGION-docker.pkg.dev/$PROJECT/panthorium-staging/backend:$GITHUB_SHA"
-          gcloud builds submit --project="$PROJECT" --region="$REGION" --config=cloudbuild.staging.yaml --service-account="projects/$PROJECT/serviceAccounts/124818950958-compute@developer.gserviceaccount.com" --gcs-source-staging-dir="gs://${PROJECT}_cloudbuild/source" --substitutions="_IMAGE_URI=$IMAGE" --quiet .
+          gcloud builds submit --project="$PROJECT" --region="$REGION" --config=cloudbuild.staging.yaml --service-account="projects/$PROJECT/serviceAccounts/124818950958-compute@developer.gserviceaccount.com" --gcs-source-staging-dir="gs://${PROJECT}_cloudbuild/source" --substitutions="_IMAGE_URI=$IMAGE" --quiet --suppress-logs --format=json . > "$RUNNER_TEMP/deployment-build.json"
+          node scripts/resolve-build-image.js resolve "$RUNNER_TEMP/deployment-build.json" "$IMAGE" >> "$GITHUB_OUTPUT"
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+      - name: Verify the exact image that staging will run
+        uses: ./.github/actions/verify-deployment-image
+        with:
+          image: ${{ steps.built-image.outputs.image }}
+          profile: backend
+          evidence-dir: ${{ runner.temp }}/deployment-image-evidence
+          pull: 'true'
+      - name: Deploy verified isolated staging image
+        env:
+          IMAGE: ${{ steps.built-image.outputs.image }}
+        run: |
+          set -euo pipefail
           gcloud run deploy "$SERVICE" --project="$PROJECT" --region="$REGION" \
             --image="$IMAGE" --service-account="$RUNTIME_SA" --allow-unauthenticated \
             --port=8787 --max-instances=1 --min-instances=0 --cpu-throttling \
@@ -172,3 +187,15 @@ jobs:
           echo "Commit tested: $GITHUB_SHA. Await owner voice acceptance before merging main." >> "$GITHUB_STEP_SUMMARY"
 
 
+      - name: Preserve exact deployment image security evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deployment-image-security-backend-staging
+          path: |
+            ${{ runner.temp }}/deployment-build.json
+            ${{ runner.temp }}/deployment-image-evidence/*.json
+            ${{ runner.temp }}/deployment-image-evidence/*.log
+            ${{ runner.temp }}/deployment-image-evidence/*.yaml
+          if-no-files-found: ignore
+          retention-days: 14

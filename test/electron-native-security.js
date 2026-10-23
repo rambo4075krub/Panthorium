@@ -15,7 +15,7 @@ if (process.argv.includes('--verify-package')) {
   const archive = path.join(root, 'dist/win-unpacked/resources/app.asar');
   const metadata = JSON.parse(asar.extractFile(archive, 'package.json').toString());
   assert.equal(metadata.main, 'electron/main.cjs');
-  for (const file of ['main.cjs', 'preload.cjs', 'browser-security.cjs', 'update-signature.cjs', 'update-trust.json']) {
+  for (const file of ['main.cjs', 'preload.cjs', 'browser-security.cjs', 'update-signature.cjs', 'update-download.cjs', 'update-trust.json']) {
     assert.deepEqual(asar.extractFile(archive, 'electron/' + file), fs.readFileSync(path.join(root, 'electron', file)),
       'The unpacked application must contain the reviewed ' + file);
   }

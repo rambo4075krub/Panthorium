@@ -12,10 +12,14 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from app import decode_audio
-
 HOST = "--allow-host-ffmpeg" in sys.argv
 assert not (HOST and os.environ.get("CI")), "Host mode is forbidden in CI"
+if not HOST:
+    from runtime_guard import harden_process
+    assert harden_process()["NoNewPrivs"] == 1
+    child_status = subprocess.check_output([sys.executable, "-c", "from pathlib import Path;print(Path('/proc/self/status').read_text())"], text=True)
+    assert re.search(r"^NoNewPrivs:\s+1$", child_status, re.M)
+from app import decode_audio
 FIXTURES = Path(__file__).parent / "fixtures/container-audio"
 
 
@@ -64,7 +68,30 @@ if not HOST:
     assert importlib.metadata.version("soundfile") == "0.13.1"
     assert not any(path.name.endswith(".so") for path in (Path(soundfile.__file__).parent / "_soundfile_data").glob("*")), "Unexpected bundled libsndfile"
     assert not any(str(path).endswith(".so") for path in importlib.metadata.files("soundfile")), "SoundFile must use its pure-Python wheel"
-    print(f"Inventoried distro libsndfile: {soundfile.__libsndfile_version__}; unresolved distro advisories remain subject to scan")
+    import io
+    import numpy as np
+    import zlib
+    for name in ("libsndfile", "zlib"):
+        native_lock = json.loads((ROOT / f"build/{name}/source.lock.json").read_text())
+        native_manifest = json.loads(Path(f"/usr/local/share/panthorium/{name}-source.json").read_text())
+        for key, value in native_lock.items():
+            assert native_manifest[key] == value, f"{name} source lock mismatch: {key}"
+        library = Path(native_manifest["library"]["path"])
+        assert library.read_bytes().startswith(b"\x7fELF")
+        assert sha256(library) == native_manifest["library"]["sha256"]
+        version = command(["dpkg-query", "-W", "-f=${Version}", native_lock["debianPackageName"]]).stdout
+        assert version == native_lock["debianPackageVersion"], (name, version)
+        assert str(library) in Path("/proc/self/maps").read_text(), f"{name} actual import did not load reviewed library"
+    pcm = np.array([0.0, 0.25, -0.5, 0.75], dtype=np.float64)
+    for container in ("WAV", "MAT4"):
+        buffer = io.BytesIO()
+        soundfile.write(buffer, pcm, 16000, format=container, subtype="DOUBLE")
+        buffer.seek(0)
+        decoded, rate = soundfile.read(buffer, dtype="float64")
+        assert rate == 16000 and np.array_equal(decoded, pcm), container
+    payload = b"Panthorium standard zlib roundtrip" * 100
+    assert zlib.decompress(zlib.compress(payload)) == payload
+    print(f"Source-patched libsndfile {soundfile.__libsndfile_version__} and zlib {zlib.ZLIB_RUNTIME_VERSION}: actual ELF hashes, package versions and standard roundtrips verified")
     assert importlib.metadata.version("setuptools") == "84.2.1"
     import torch
     import torchaudio

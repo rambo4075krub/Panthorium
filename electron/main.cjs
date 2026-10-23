@@ -7,6 +7,7 @@ const {app,BrowserWindow,session,ipcMain,net,dialog}=require('electron');
 const metadata=require('../package.json');
 const {createBrowserSecurity}=require('./browser-security.cjs');
 const {verifyManifest}=require('./update-signature.cjs');
+const {fetchBounded}=require('./update-download.cjs');
 const updateTrust=require('./update-trust.json');
 const EDITION=metadata.panthoriumEdition==='admin'?'admin':'user';
 const PRODUCT_NAME='Panthorium Browser '+(EDITION==='admin'?'Admin':'User');
@@ -137,7 +138,14 @@ function applyUpdateInstaller(target,platform){
   }
   return false;
 }
+let updateInstallBusy=false;
 async function checkForUpdates(options={}){
+  if(options.checkOnly)return performUpdateCheck(options);
+  if(updateInstallBusy)return {ok:false,error:'update_in_progress'};
+  updateInstallBusy=true;
+  try{return await performUpdateCheck(options);}finally{updateInstallBusy=false;}
+}
+async function performUpdateCheck(options={}){
   const manual=options.manual===true;
   if(!app.isPackaged){
     if(manual)return {ok:false,error:'dev_build_skips_update',current:app.getVersion()};
@@ -150,9 +158,9 @@ async function checkForUpdates(options={}){
   }
   const manifestUrl='https://github.com/rambo4075krub/Panthorium/releases/download/staging/Panthorium-Browser-'+EDITION+'-update.json';
   try{
-    const response=await net.fetch(manifestUrl,{cache:'no-store'});
-    if(!response.ok)throw new Error('manifest_http_'+response.status);
-    const manifest=await response.json();
+    const manifestBytes=await fetchBounded(net.fetch.bind(net),manifestUrl,{maxBytes:64*1024,timeoutMs:20000,prefix:'manifest'});
+    const manifest=JSON.parse(manifestBytes.toString('utf8'));
+    if(!manifest||typeof manifest!=='object'||Array.isArray(manifest))throw new Error('invalid_manifest');
     const signature=verifyManifest(manifest,updateTrust);
     // A status check can report an unsigned version, but must never execute it.
     if(!signature.ok&&!options.checkOnly)throw new Error(signature.error);
@@ -171,13 +179,10 @@ async function checkForUpdates(options={}){
     if(!trustedUpdateUrl(asset.url))throw new Error('untrusted_update_url');
     // Rendering the Start Menu must never download an installer or open a dialog.
     if(options.checkOnly)return {ok:true,upToDate:false,available:true,current,remote,platform,installable:signature.ok,verificationError:signature.ok?null:signature.error};
-    const binaryResponse=await net.fetch(asset.url,{cache:'no-store'});
-    if(!binaryResponse.ok)throw new Error('update_http_'+binaryResponse.status);
-    const expected=Number(binaryResponse.headers.get('content-length')||asset.size||0);
-    if(expected&&expected>250*1024*1024)throw new Error('update_too_large');
-    const binary=Buffer.from(await binaryResponse.arrayBuffer());
-    if(!binary.length||binary.length>250*1024*1024)throw new Error('update_too_large');
-    if(expected&&Math.abs(binary.length-expected)>1024)throw new Error('update_size_mismatch');
+    const expected=asset.size;
+    if(!Number.isSafeInteger(expected)||expected<=0||expected>250*1024*1024)throw new Error('update_size_invalid');
+    const binary=await fetchBounded(net.fetch.bind(net),asset.url,{maxBytes:expected,timeoutMs:300000,prefix:'update'});
+    if(binary.length!==expected)throw new Error('update_size_mismatch');
     const digest=crypto.createHash('sha256').update(binary).digest('hex');
     if(digest!==asset.sha256)throw new Error('update_checksum_failed');
     const target=path.join(app.getPath('userData'),'updates',path.basename(asset.name));

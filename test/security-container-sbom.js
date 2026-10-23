@@ -31,6 +31,8 @@ assert.deepEqual(sbom.artifactRelationships.slice(0, raw.artifactRelationships.l
 assert.equal(sbom.artifacts.at(-1).cpes[0].cpe, lock.cpe);
 assert.equal(sbom.artifacts.at(-1).version, '9.0.2', 'Do not relabel patched builds as a newer upstream release');
 assert.ok(proof.artifactPurl.includes(digest(binaries.ffmpeg)));
+assert.ok(proof.artifactPurl.includes(`image_id=${encodeURIComponent(image.Id)}`));
+assert.notEqual(proof.artifactPurl, enrichSbom({ ...raw, source: { ...raw.source, metadata: { imageID: `sha256:${'e'.repeat(64)}` } } }, manifest, lock, binaries, { Id: `sha256:${'e'.repeat(64)}` }).proof.artifactPurl, 'Identical binaries in another image have a distinct VEX identity');
 assert.equal(proof.enrichedPackageCount, proof.originalPackageCount + 1);
 
 assert.throws(() => enrichSbom(raw, manifest, lock, { ...binaries, ffmpeg: Buffer.from('\x7fELFtampered') }, image), /differs/);

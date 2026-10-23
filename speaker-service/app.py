@@ -9,7 +9,13 @@ import binascii
 import json
 import math
 import os
+import selectors
+import signal
+import socket
 import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from model_assets import verify_model
@@ -18,6 +24,97 @@ MAX_BODY = 1_500_000
 MAX_AUDIO = 1_000_000
 MAX_SAMPLES = 16_000 * 18
 MIN_SAMPLES = 16_000
+MAX_DECODER_STDERR = 64 * 1024
+READ_TIMEOUT = 10
+
+
+def bounded_process(command, raw, timeout=12, stdout_limit=(MAX_SAMPLES + 1) * 4,
+                    stderr_limit=MAX_DECODER_STDERR):
+    """Drain all pipes concurrently, with hard byte caps and a wall-clock deadline."""
+    deadline = time.monotonic() + timeout
+    output = bytearray()
+    errors = 0
+    offset = 0
+    with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, bufsize=0, start_new_session=True,
+                          env={"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C",
+                               "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1"}) as child:
+        try:
+            with selectors.DefaultSelector() as selector:
+                for stream, event in ((child.stdin, selectors.EVENT_WRITE),
+                                      (child.stdout, selectors.EVENT_READ),
+                                      (child.stderr, selectors.EVENT_READ)):
+                    os.set_blocking(stream.fileno(), False)
+                    selector.register(stream, event)
+                while selector.get_map():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ValueError("audio_decode_failed")
+                    for key, _ in selector.select(remaining):
+                        stream = key.fileobj
+                        if stream is child.stdin:
+                            try:
+                                offset += os.write(stream.fileno(), raw[offset:offset + 65536])
+                            except BrokenPipeError:
+                                offset = len(raw)
+                            if offset == len(raw):
+                                selector.unregister(stream)
+                                stream.close()
+                            continue
+                        chunk = os.read(stream.fileno(), 65536)
+                        if not chunk:
+                            selector.unregister(stream)
+                            stream.close()
+                        elif stream is child.stdout:
+                            if len(output) + len(chunk) > stdout_limit:
+                                raise ValueError("audio_decode_failed")
+                            output.extend(chunk)
+                        else:
+                            errors += len(chunk)
+                            if errors > stderr_limit:
+                                raise ValueError("audio_decode_failed")
+                if child.wait(timeout=max(0.001, deadline - time.monotonic())) != 0:
+                    raise ValueError("audio_decode_failed")
+        finally:
+            # Terminate descendants too if native code misbehaves or a decoder
+            # leaves pipe-owning children behind. No preexec_fn in this server.
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            child.wait()
+    return bytes(output)
+
+
+class BoundedHTTPServer(ThreadingHTTPServer):
+    """Bound application workers independently of the reverse proxy's lifetime."""
+    daemon_threads = True
+
+    def __init__(self, address, handler, max_requests=2):
+        self.request_slots = threading.BoundedSemaphore(max_requests)
+        super().__init__(address, handler)
+
+    def process_request(self, request, client_address):
+        if not self.request_slots.acquire(blocking=False):
+            try:
+                request.settimeout(1)
+                request.sendall(b"HTTP/1.0 503 Service Unavailable\r\nConnection: close\r\n"
+                                b"Retry-After: 1\r\nContent-Length: 0\r\n\r\n")
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self.request_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.request_slots.release()
 
 
 def trim_edge_silence(samples):
@@ -58,20 +155,22 @@ def decode_audio(data_url):
     if len(raw) < 1000 or len(raw) > MAX_AUDIO:
         raise ValueError("invalid_audio_size")
     try:
-        result = subprocess.run(
-            ["ffmpeg", "-nostdin", "-v", "error", "-xerror",
+        decoded = bounded_process(
+            [sys.executable, str(Path(__file__).with_name("decode_worker.py")),
+             "-nostdin", "-v", "error", "-xerror", "-max_alloc", "67108864",
+             "-threads", "1", "-filter_threads", "1",
              "-protocol_whitelist", "pipe", "-i", "pipe:0", "-map", "0:a:0",
              "-vn", "-sn", "-dn", "-ac", "1", "-ar", "16000",
              # Bound decoded bytes before capture, while retaining one extra
              # sample so overlong recordings are rejected rather than truncated.
              "-t", str((MAX_SAMPLES + 1) / 16000), "-f", "f32le", "pipe:1"],
-            input=raw, capture_output=True, timeout=12, check=True,
+            raw,
         )
     except (subprocess.SubprocessError, OSError) as exc:
         raise ValueError("audio_decode_failed") from exc
     import numpy as np
 
-    samples = np.frombuffer(result.stdout, dtype="<f4")
+    samples = np.frombuffer(decoded, dtype="<f4")
     if len(samples) < MIN_SAMPLES:
         raise ValueError("voice_signal_too_short")
     if len(samples) > MAX_SAMPLES:
@@ -113,14 +212,34 @@ class SpeakerEncoder:
         return values
 
 
-def handler_class(encoder):
+def handler_class(encoder, read_timeout=READ_TIMEOUT):
     class Handler(BaseHTTPRequestHandler):
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(read_timeout)
+            # A socket inactivity timeout alone permits an endless slow trickle.
+            self.read_deadline = threading.Timer(read_timeout, self.abort_read)
+            self.read_deadline.daemon = True
+            self.read_deadline.start()
+
+        def abort_read(self):
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+        def finish(self):
+            self.read_deadline.cancel()
+            super().finish()
+
         def respond(self, status, payload):
             body = json.dumps(payload, separators=(",", ":")).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.close_connection = True
             self.end_headers()
             self.wfile.write(body)
 
@@ -134,10 +253,22 @@ def handler_class(encoder):
             if self.path != "/embed":
                 return self.respond(404, {"error": "not_found"})
             try:
-                size = int(self.headers.get("Content-Length", "0"))
+                lengths = self.headers.get_all("Content-Length", [])
+                if (self.headers.get_all("Transfer-Encoding") or len(lengths) != 1
+                        or not lengths[0].isascii() or not lengths[0].isdigit()):
+                    return self.respond(400, {"error": "invalid_request_framing"})
+                if self.headers.get_content_type() != "application/json":
+                    return self.respond(415, {"error": "json_required"})
+                size = int(lengths[0])
                 if size <= 0 or size > MAX_BODY:
                     return self.respond(413, {"error": "audio_too_large"})
-                data = json.loads(self.rfile.read(size))
+                body = self.rfile.read(size)
+                self.read_deadline.cancel()
+                if len(body) != size:
+                    return self.respond(400, {"error": "incomplete_request"})
+                data = json.loads(body)
+                if not isinstance(data, dict):
+                    return self.respond(400, {"error": "invalid_request"})
                 samples = decode_audio(data.get("audio"))
                 self.respond(200, {
                     "signalPresent": True,
@@ -145,7 +276,11 @@ def handler_class(encoder):
                     "embedding": encoder.encode(samples),
                 })
             except (ValueError, TypeError, json.JSONDecodeError) as exc:
-                self.respond(400, {"error": str(exc)[:80]})
+                allowed = {"invalid_audio", "invalid_audio_size", "audio_decode_failed",
+                           "voice_signal_too_short", "invalid_audio_duration", "voice_signal_missing"}
+                self.respond(400, {"error": str(exc) if str(exc) in allowed else "invalid_request"})
+            except (OSError, TimeoutError):
+                self.close_connection = True
             except Exception:
                 self.respond(503, {"error": "embedding_unavailable"})
 
@@ -153,4 +288,4 @@ def handler_class(encoder):
 
 
 if __name__ == "__main__":
-    ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8080"))), handler_class(SpeakerEncoder())).serve_forever()
+    BoundedHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8080"))), handler_class(SpeakerEncoder())).serve_forever()

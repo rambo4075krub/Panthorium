@@ -45,9 +45,10 @@ function enrichSbom(sbom, manifest, lock, binaries, image, profile = 'backend') 
     verifiedBinaries[name] = { path: entry.path, sha256: entry.sha256 };
   }
 
-  // A checksum qualifier scopes any later reviewed VEX to this exact executable,
-  // while the ordinary upstream CPE keeps all upstream CVEs visible to Grype.
-  const artifactPurl = `${manifest.purl}?checksum=sha256%3A${verifiedBinaries.ffmpeg.sha256}`;
+  // Grype's package-product VEX matching preserves qualifiers. Bind both the
+  // executable and this inspected image; local Docker images have no RepoDigest.
+  // Keep the ordinary upstream CPE so every upstream CVE remains discoverable.
+  const artifactPurl = `${manifest.purl}?checksum=sha256%3A${verifiedBinaries.ffmpeg.sha256}&image_id=${encodeURIComponent(image.Id)}`;
   const id = sha256(Buffer.from(artifactPurl)).slice(0, 16);
   assert.ok(!sbom.artifacts.some(item => item.id === id), 'Source artifact already exists');
   const result = structuredClone(sbom);

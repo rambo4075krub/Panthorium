@@ -141,7 +141,13 @@ function runProcess(binary, args, { timeoutMs = 120000, maxOutputBytes = 16 * 10
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      // Media tools need OS lookup/localization, not the application's cloud,
+      // database or signing credentials. Also exclude loader/proxy overrides.
+      const env = {};
+      for (const key of ['PATH', 'Path', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'FONTCONFIG_PATH', 'FONTCONFIG_FILE']) {
+        if (typeof process.env[key] === 'string') env[key] = process.env[key];
+      }
+      child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env });
     } catch (_) {
       reject(new MediaStudioError(503, 'media_encoder_unavailable'));
       return;

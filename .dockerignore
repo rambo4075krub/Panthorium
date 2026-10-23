@@ -9,3 +9,7 @@ logs
 data
 # Design-only prototypes must not be served as production applications.
 /design/social-media/
+
+# Python runtime/test bytecode is generated locally.
+__pycache__/
+*.py[cod]

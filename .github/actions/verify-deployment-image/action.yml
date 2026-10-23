@@ -1,0 +1,202 @@
+name: Verify the exact container image
+description: Bind offline runtime checks, source evidence, full inventory and the strict vulnerability gate to one local image ID
+inputs:
+  image:
+    description: Local build reference, or immutable Artifact Registry digest when pull is true
+    required: true
+  profile:
+    description: backend or speaker
+    required: true
+  evidence-dir:
+    description: Fresh absolute directory below RUNNER_TEMP
+    required: true
+  pull:
+    description: Pull and verify an immutable Artifact Registry digest before inspection
+    default: 'false'
+  require-model:
+    description: Require the full speaker model and run offline embedding inference
+    default: 'false'
+outputs:
+  image-id:
+    description: The immutable local Docker image ID used by every check
+    value: ${{ steps.identity.outputs.image-id }}
+  evidence-dir:
+    description: Directory containing bound inventories, manifests and reports
+    value: ${{ inputs.evidence-dir }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 24.22.1
+    - name: Capture one immutable image identity
+      id: identity
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        PROFILE: ${{ inputs.profile }}
+        EVIDENCE_DIR: ${{ inputs.evidence-dir }}
+        PULL_IMAGE: ${{ inputs.pull }}
+        REQUIRE_MODEL: ${{ inputs.require-model }}
+      run: |
+        set -euo pipefail
+        [[ "$PROFILE" == backend || "$PROFILE" == speaker ]]
+        [[ "$PULL_IMAGE" == false || "$PULL_IMAGE" == true ]]
+        [[ "$REQUIRE_MODEL" == false || ( "$REQUIRE_MODEL" == true && "$PROFILE" == speaker ) ]]
+        [[ "$IMAGE" =~ ^[a-z0-9][a-zA-Z0-9._:/@-]+$ ]]
+        [[ "$(realpath -m "$EVIDENCE_DIR")" == "$RUNNER_TEMP/"* ]]
+        mkdir "$EVIDENCE_DIR"
+        if [ "$PULL_IMAGE" == true ]; then
+          [[ "$IMAGE" =~ ^[a-z][a-z0-9-]*-docker\.pkg\.dev/[^@]+@sha256:[a-f0-9]{64}$ ]]
+          docker pull "$IMAGE"
+        fi
+        docker image inspect "$IMAGE" > "$EVIDENCE_DIR/image-inspect.json"
+        if [ "$PULL_IMAGE" == true ]; then
+          node scripts/resolve-build-image.js inspect "$EVIDENCE_DIR/image-inspect.json" "$IMAGE"
+        fi
+        IMAGE_ID="$(node -e 'const assert=require("node:assert/strict"),fs=require("node:fs");const images=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));assert.equal(images.length,1);const i=images[0];assert.match(i.Id,/^sha256:[a-f0-9]{64}$/);assert.equal(i.Os,"linux");assert.equal(i.Architecture,"amd64");assert.match(i.Config.User,/^(?:[1-9][0-9]*|node)(?::(?:[1-9][0-9]*|node))?$/);console.log(i.Id)' "$EVIDENCE_DIR/image-inspect.json")"
+        echo "image-id=$IMAGE_ID" >> "$GITHUB_OUTPUT"
+    - name: Test backend media with no network or Linux capabilities
+      if: inputs.profile == 'backend'
+      shell: bash
+      env:
+        IMAGE_ID: ${{ steps.identity.outputs.image-id }}
+        EVIDENCE_DIR: ${{ inputs.evidence-dir }}
+      run: |
+        set -euo pipefail
+        docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
+          --entrypoint node "$IMAGE_ID" test/container-media-smoke.js \
+          2>&1 | tee "$EVIDENCE_DIR/media-smoke.log"
+    - name: Verify speaker filesystem hardening without permitting writes
+      if: inputs.profile == 'speaker'
+      shell: bash
+      env:
+        IMAGE_ID: ${{ steps.identity.outputs.image-id }}
+        EVIDENCE_DIR: ${{ inputs.evidence-dir }}
+      run: |
+        set -euo pipefail
+        # Root is used only for read access to every directory in this separate
+        # read-only inspector. The application smoke below uses its non-root user.
+        docker run --rm --network none --read-only --user 0 --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges \
+          --entrypoint python "$IMAGE_ID" /app/harden_runtime.py --verify-image-root \
+          2>&1 | tee "$EVIDENCE_DIR/runtime-filesystem-proof.log"
+    - name: Test speaker audio and CPU imports with no network or Linux capabilities
+      if: inputs.profile == 'speaker'
+      shell: bash
+      env:
+        IMAGE_ID: ${{ steps.identity.outputs.image-id }}
+        EVIDENCE_DIR: ${{ inputs.evidence-dir }}
+      run: |
+        set -euo pipefail
+        docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
+          --entrypoint python "$IMAGE_ID" /app/test/container-speaker-media-smoke.py \
+          2>&1 | tee "$EVIDENCE_DIR/speaker-media-smoke.log"
+    - name: Verify the full speaker model performs offline embedding inference
+      if: inputs.require-model == 'true'
+      shell: bash
+      env:
+        IMAGE_ID: ${{ steps.identity.outputs.image-id }}
+        EVIDENCE_DIR: ${{ inputs.evidence-dir }}
+      run: |
+        set -euo pipefail
+        container_name="panthorium-model-smoke-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$RANDOM"
+        trap 'docker rm -f "$container_name" >/dev/null 2>&1 || true' EXIT
+        timeout --kill-after=5s 120s docker run --rm --name "$container_name" \
+          --network none --cap-drop ALL --security-opt no-new-privileges --memory 2g --cpus 2 \
+          --entrypoint python "$IMAGE_ID" /app/test/container-speaker-model-smoke.py \
+          2>&1 | tee "$EVIDENCE_DIR/speaker-model-smoke.log"
+    - name: Extract manifests and actual native executable bytes
+      shell: bash
+      env:
+        IMAGE_ID: ${{ steps.identity.outputs.image-id }}
+        EVIDENCE_DIR: ${{ inputs.evidence-dir }}
+        PROFILE: ${{ inputs.profile }}
+      run: |
+        set -euo pipefail
+        container_id="$(docker create "$IMAGE_ID")"
+        trap 'docker rm "$container_id" >/dev/null' EXIT
+        docker cp "$container_id:/usr/local/share/panthorium/ffmpeg-source.json" "$EVIDENCE_DIR/ffmpeg-source.json"
+        docker cp "$container_id:/usr/local/bin/ffmpeg" "$EVIDENCE_DIR/ffmpeg"
+        docker cp "$container_id:/usr/local/bin/ffprobe" "$EVIDENCE_DIR/ffprobe"
+        if [ "$PROFILE" == speaker ]; then
+          docker cp "$container_id:/usr/local/share/panthorium/runtime-surface.json" "$EVIDENCE_DIR/runtime-surface.json"
+          for manifest in libsndfile zlib; do
+            docker cp "$container_id:/usr/local/share/panthorium/$manifest-source.json" "$EVIDENCE_DIR/$manifest-source.json"
+          done
+          for library in libsndfile.so.1.0.37 libz.so.1.3.1 libgcc_s.so.1 libgomp.so.1.0.0 libstdc++.so.6.0.33; do
+            docker cp "$container_id:/usr/lib/x86_64-linux-gnu/$library" "$EVIDENCE_DIR/$library"
+          done
+        fi
+    - name: Inventory the entire captured image with Syft
+      uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      with:
+        image: ${{ steps.identity.outputs.image-id }}
+        format: json
+        output-file: ${{ inputs.evidence-dir }}/container-sbom.raw.syft.json
+        upload-artifact: false
+        upload-release-assets: false
+        dependency-snapshot: false
+    - name: Bind source FFmpeg to its actual executable and image inventory
+      shell: bash
+      env:
+        EVIDENCE_DIR: ${{ inputs.evidence-dir }}
+        PROFILE: ${{ inputs.profile }}
+      run: |
+        set -euo pipefail
+        SOURCE_LOCK=build/media/ffmpeg-source.lock.json
+        if [ "$PROFILE" == speaker ]; then SOURCE_LOCK=build/media/ffmpeg-speaker-source.lock.json; fi
+        node scripts/verify-container-sbom.js \
+          "$EVIDENCE_DIR/container-sbom.raw.syft.json" "$EVIDENCE_DIR/ffmpeg-source.json" \
+          "$EVIDENCE_DIR" "$EVIDENCE_DIR/image-inspect.json" "$SOURCE_LOCK" \
+          "$EVIDENCE_DIR/container-sbom.syft.json" "$EVIDENCE_DIR/ffmpeg-proof.json" "$PROFILE"
+        printf 'ignore: []\nmatch-upstream-kernel-headers: true\n' > "$EVIDENCE_DIR/grype.yaml"
+    - name: Preserve the complete unfiltered vulnerability report
+      uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+      with:
+        grype-version: 0.118.0
+        sbom: ${{ inputs.evidence-dir }}/container-sbom.syft.json
+        config: ${{ inputs.evidence-dir }}/grype.yaml
+        fail-build: false
+        severity-cutoff: high
+        only-fixed: false
+        output-format: json
+        output-file: ${{ inputs.evidence-dir }}/container-vulnerabilities.raw.json
+    - name: Bind repaired native library provenance to actual ELF bytes and Debian packages
+      if: inputs.profile == 'speaker'
+      shell: bash
+      env:
+        EVIDENCE_DIR: ${{ inputs.evidence-dir }}
+      run: node scripts/verify-native-library-provenance.js "$EVIDENCE_DIR"
+    - name: Record narrowly reviewed GCC runtime applicability without suppressing findings
+      if: inputs.profile == 'speaker'
+      shell: bash
+      env:
+        EVIDENCE_DIR: ${{ inputs.evidence-dir }}
+      run: node scripts/verified-gcc-runtime.js "$EVIDENCE_DIR"
+    - name: Verify the reviewed FFmpeg backport before creating image-bound VEX
+      id: verified-backport
+      shell: bash
+      env:
+        EVIDENCE_DIR: ${{ inputs.evidence-dir }}
+      run: node scripts/verified-ffmpeg-backport.js create "$EVIDENCE_DIR"
+    - name: Apply the strict vulnerability gate to the same image and database
+      id: filtered-image-scan
+      uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+      env:
+        GRYPE_DB_AUTO_UPDATE: 'false'
+      with:
+        grype-version: 0.118.0
+        sbom: ${{ inputs.evidence-dir }}/container-sbom.syft.json
+        config: ${{ inputs.evidence-dir }}/grype.yaml
+        vex: ${{ inputs.evidence-dir }}/ffmpeg-backport.vex.json
+        fail-build: true
+        severity-cutoff: high
+        only-fixed: false
+        output-format: json
+        output-file: ${{ inputs.evidence-dir }}/container-vulnerabilities.json
+    - name: Independently reject missing findings or unrelated suppressions
+      if: ${{ always() && steps.verified-backport.outcome == 'success' && steps.filtered-image-scan.outcome != 'skipped' }}
+      shell: bash
+      env:
+        EVIDENCE_DIR: ${{ inputs.evidence-dir }}
+      run: node scripts/verified-ffmpeg-backport.js verify "$EVIDENCE_DIR"
