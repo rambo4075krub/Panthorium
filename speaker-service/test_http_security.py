@@ -33,7 +33,15 @@ class BoundaryTests(unittest.TestCase):
             connection.sendall(request)
             response = http.client.HTTPResponse(connection)
             response.begin()
-            return response.status, response.read()
+            result = response.status, response.read()
+        if result[0] != 503:
+            # Reading the response can finish before the server thread's finally
+            # releases its slot. Sequential framing tests must await that release.
+            deadline = time.monotonic() + 1
+            while not self.server.request_slots._value and time.monotonic() < deadline:
+                time.sleep(0.005)
+            self.assertGreater(self.server.request_slots._value, 0, "Completed request retained its worker slot")
+        return result
 
     def test_ambiguous_framing_and_wrong_content_type_rejected_before_decode(self):
         bad_headers = [b"Content-Length: 2\r\nContent-Length: 2", b"Content-Length: +2",
@@ -99,12 +107,23 @@ class BoundaryTests(unittest.TestCase):
                 bounded_process([sys.executable, "-c", code], b"input", timeout=0.4)
             pid = int(pid_file.read_text())
             status = Path(f"/proc/{pid}/status")
+
+            def child_is_alive():
+                try:
+                    return "State:\tZ" not in status.read_text()
+                except FileNotFoundError:
+                    # A reaped child can disappear between any two /proc reads.
+                    return False
+
             deadline = time.monotonic() + 1
-            while status.exists() and "State:\tZ" not in status.read_text() and time.monotonic() < deadline:
+            while child_is_alive() and time.monotonic() < deadline:
                 time.sleep(0.01)
-            alive = status.exists() and "State:\tZ" not in status.read_text()
+            alive = child_is_alive()
             if alive:
-                os.kill(pid, 9)
+                try:
+                    os.kill(pid, 9)
+                except ProcessLookupError:
+                    pass
             self.assertFalse(alive, "Decoder descendants must not survive a timeout")
 
     def test_decoder_bootstrap_does_not_inherit_application_credentials(self):

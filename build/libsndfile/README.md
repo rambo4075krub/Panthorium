@@ -6,6 +6,10 @@ additional parser patch. The source archive and Debian patch archive hashes
 match the official `.dsc`; recording that signed descriptor does not claim an
 independent OpenPGP signature verification.
 
+The isolated Debian builder requires `build-essential`, `cmake`, `patch`,
+`python3`, and `ca-certificates`. Upstream uses Python to generate the shared
+library export list; no Python packages or optional codec headers are needed.
+
 Additional fixes are pinned to their exact reviewed source commits:
 
 - IMA ADPCM frame arithmetic: upstream PR 1123 head
