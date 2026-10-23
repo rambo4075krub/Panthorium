@@ -78,6 +78,30 @@ shared, the speaker has project-level roles, or public IAM bindings are present.
 Resource-level and inherited IAM grants must also be reviewed by the project
 owner; the repository cannot prove that external configuration is absent.
 
+An operator already authorized in Cloud Shell can inspect the existing deployment
+without changing it. From this reviewed checkout, run:
+
+```sh
+python3 scripts/check-cloud-readiness.py \
+  --project panthorium-staging --region asia-southeast1 \
+  --backend-service panthorium-backend-staging \
+  --speaker-service panthorium-speaker-staging
+```
+
+The checker only executes allowlisted `describe`/`get-iam-policy` commands.
+It projects environment **names**, keeps IAM bindings in memory, and prints a
+sanitized JSON report; it does not read Secret Manager values, save raw cloud
+snapshots, grant permissions, or deploy. Missing resources, denied access,
+missing `gcloud`, and malformed responses are reported as **unverified**, never
+as proof of safety. Observed configuration failures are **blocked**. Exit code
+0 means these limited checks passed; 1 means blocked/unverified. It checks that
+current traffic uses the inspected ready revision, the speaker has its dedicated
+identity, project/service IAM meets the stated policy, and the backend has the
+two required Voice Identity environment names. Names alone do not prove their
+values or that the configured URL points at this speaker. Inherited/resource IAM,
+secret access, live invocation, image scans, and voice calibration still require
+their separate checks. The report always leaves `releaseApproved` false.
+
 The deployment explicitly enables Cloud Run's invoker IAM check and verifies
 the candidate identity and service IAM policy before routing traffic to the
 exact ready candidate revision or changing the backend URL. Failed verification

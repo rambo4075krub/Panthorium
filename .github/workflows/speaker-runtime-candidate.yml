@@ -1,0 +1,114 @@
+name: Speaker runtime candidate evaluation
+
+on:
+  pull_request:
+    paths:
+      - speaker-service/experimental/**
+      - .github/workflows/speaker-runtime-candidate.yml
+
+# Experimental base evaluation only. This workflow cannot deploy or access
+# cloud/signing credentials, and does not replace the production image gates.
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Prepare retained evidence
+        run: |
+          mkdir -p "$RUNNER_TEMP/runtime-candidate"
+          echo "EVIDENCE_DIR=$RUNNER_TEMP/runtime-candidate" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Build isolated candidate base
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
+        with:
+          context: .
+          file: speaker-service/experimental/Dockerfile
+          target: runtime-base
+          tags: speaker-runtime-candidate:${{ github.sha }}
+          pull: true
+          load: true
+          push: false
+          cache-from: type=gha,scope=speaker-runtime-candidate
+          cache-to: type=gha,mode=max,scope=speaker-runtime-candidate,ignore-error=true,timeout=3m
+      - name: Capture immutable image and package inventory
+        id: image
+        env:
+          IMAGE_TAG: speaker-runtime-candidate:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE_ID=$(docker image inspect "$IMAGE_TAG" --format '{{.Id}}')
+          [[ "$IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "id=$IMAGE_ID" >> "$GITHUB_OUTPUT"
+          docker image inspect "$IMAGE_ID" > "$EVIDENCE_DIR/image-inspect.json"
+          container_id=$(docker create "$IMAGE_ID")
+          trap 'docker rm "$container_id" >/dev/null' EXIT
+          docker cp "$container_id:/var/lib/dpkg/status" "$EVIDENCE_DIR/dpkg-status.txt"
+          docker cp "$container_id:/var/lib/chisel" "$EVIDENCE_DIR/chisel"
+          test -s "$EVIDENCE_DIR/dpkg-status.txt"
+          printf 'ignore: []\nmatch-upstream-kernel-headers: true\n' > "$EVIDENCE_DIR/grype.yaml"
+      - name: Check Python under restricted runtime settings
+        env:
+          IMAGE_ID: ${{ steps.image.outputs.id }}
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --user 10001:10001 "$IMAGE_ID" \
+            | tee "$EVIDENCE_DIR/runtime-proof.json"
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --user 10001:10001 \
+            --entrypoint /usr/bin/python3.12 "$IMAGE_ID" -I -c \
+            'import ctypes, hashlib, json, math, sqlite3, ssl, sys, zlib; assert sys.version_info[:2] == (3,12); assert zlib.decompress(zlib.compress(b"runtime-check")) == b"runtime-check"; print(json.dumps({"python":sys.version.split()[0],"zlib":zlib.ZLIB_RUNTIME_VERSION,"openssl":ssl.OPENSSL_VERSION,"sqlite":sqlite3.sqlite_version,"status":"PASS"}))' \
+            | tee "$EVIDENCE_DIR/python-smoke.log"
+      - name: Inventory all candidate image packages
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ steps.image.outputs.id }}
+          format: json
+          output-file: ${{ env.EVIDENCE_DIR }}/candidate-sbom.syft.json
+          upload-artifact: false
+          upload-release-assets: false
+          dependency-snapshot: false
+      - name: Require complete package inventory for this image
+        env:
+          IMAGE_ID: ${{ steps.image.outputs.id }}
+        run: |
+          python3 - <<'PY'
+          import email.parser, json, os, pathlib
+          root = pathlib.Path(os.environ['EVIDENCE_DIR'])
+          sbom = json.loads((root / 'candidate-sbom.syft.json').read_text())
+          assert sbom['source']['metadata']['imageID'] == os.environ['IMAGE_ID'], 'SBOM image differs'
+          assert sbom['distro']['id'] == 'ubuntu' and sbom['distro']['versionID'] == '24.04', 'Unexpected distribution'
+          controls = [email.parser.Parser().parsestr(part) for part in (root / 'dpkg-status.txt').read_text().strip().split('\n\n')]
+          expected = {(p['Package'], p['Version'], p['Architecture']) for p in controls}
+          assert expected and all(all(row) for row in expected), 'Incomplete package metadata'
+          actual = {(p['name'], p['version'], p['metadata']['architecture']) for p in sbom['artifacts'] if p['type'] == 'deb'}
+          assert expected == actual, 'Scanner inventory differs from retained package metadata'
+          print(json.dumps({'imageID':os.environ['IMAGE_ID'], 'retainedPackages':len(expected), 'status':'PASS'}))
+          PY
+      - name: Scan candidate without exclusions
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          grype-version: v0.118.0
+          sbom: ${{ env.EVIDENCE_DIR }}/candidate-sbom.syft.json
+          config: ${{ env.EVIDENCE_DIR }}/grype.yaml
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: false
+          output-format: json
+          output-file: ${{ env.EVIDENCE_DIR }}/candidate-vulnerabilities.json
+      - name: Preserve candidate evaluation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: speaker-runtime-candidate
+          path: ${{ env.EVIDENCE_DIR }}/
+          if-no-files-found: error
+          retention-days: 14

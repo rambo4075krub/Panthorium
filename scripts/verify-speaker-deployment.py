@@ -33,12 +33,19 @@ def verify_service(speaker, backend, service, policy):
     require(callers == {expected}, "Only the configured backend may invoke this speaker service")
 
 
-def verify_candidate(service_name, candidate, current):
+def verify_candidate(service_name, candidate, current, expected_image=None):
     revision = candidate.get("status", {}).get("latestReadyRevisionName", "")
     require(re.fullmatch(re.escape(service_name) + r"-[a-z0-9-]+", revision) is not None, "Missing ready candidate revision")
     require(candidate.get("status", {}).get("latestCreatedRevisionName") == revision, "Candidate is not ready")
     require(current.get("status", {}).get("latestReadyRevisionName") == revision, "Another revision replaced the inspected candidate")
     require(current.get("status", {}).get("latestCreatedRevisionName") == revision, "A newer unverified revision exists")
+    if expected_image is not None:
+        require(re.fullmatch(r"[a-z0-9][a-z0-9./_-]*@sha256:[0-9a-f]{64}", expected_image) is not None,
+                "Expected image must use an immutable SHA-256 digest")
+        for service in (candidate, current):
+            containers = service.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+            require(len(containers) == 1 and containers[0].get("image") == expected_image,
+                    "Ready candidate must run exactly the verified image")
     return revision
 
 
@@ -50,9 +57,9 @@ if __name__ == "__main__":
         verify_identity(project, speaker, backend, *documents)
     elif mode == "service":
         verify_service(speaker, backend, *documents)
-    elif mode == "candidate":
-        require(backend == "-", "Unexpected candidate argument")
-        print(verify_candidate(speaker, *documents))
+    elif mode in {"candidate", "candidate-image"}:
+        require(mode == "candidate-image" or backend == "-", "Unexpected candidate argument")
+        print(verify_candidate(speaker, *documents, expected_image=backend if mode == "candidate-image" else None))
         sys.exit(0)
     else:
         raise ValueError("Unknown speaker verification mode")

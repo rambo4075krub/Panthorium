@@ -108,7 +108,7 @@ jobs:
           gcloud run services get-iam-policy "$SERVICE" --project="$PROJECT" --region="$REGION" --format=json > "$RUNNER_TEMP/speaker-service-policy.json"
           python3 scripts/verify-speaker-deployment.py service "$SPEAKER_RUNTIME_SA" "$RUNTIME_SA" \
             "$RUNNER_TEMP/speaker-service.json" "$RUNNER_TEMP/speaker-service-policy.json"
-          CANDIDATE_REVISION="$(python3 scripts/verify-speaker-deployment.py candidate "$SERVICE" - \
+          CANDIDATE_REVISION="$(python3 scripts/verify-speaker-deployment.py candidate-image "$SERVICE" "$IMAGE" \
             "$RUNNER_TEMP/speaker-candidate.json" "$RUNNER_TEMP/speaker-service.json")"
           gcloud run services update-traffic "$SERVICE" --project="$PROJECT" --region="$REGION" \
             --to-revisions="$CANDIDATE_REVISION=100" --quiet

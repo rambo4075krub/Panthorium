@@ -9,6 +9,23 @@ spec.loader.exec_module(policy)
 
 
 class DeploymentSecurityTests(unittest.TestCase):
+    def test_ready_revision_must_contain_only_the_scanned_image(self):
+        name = "panthorium-speaker-staging"
+        revision = f"{name}-00017-abc"
+        image = "asia-southeast1-docker.pkg.dev/test/repo/speaker@sha256:" + "a" * 64
+        service = {"status": {"latestReadyRevisionName": revision, "latestCreatedRevisionName": revision},
+                   "spec": {"template": {"spec": {"containers": [{"image": image}]}}}}
+        self.assertEqual(policy.verify_candidate(name, service, service, image), revision)
+        for containers in ([], [{"image": image + "0"}], [{"image": image}, {"image": image}]):
+            changed = copy.deepcopy(service)
+            changed["spec"]["template"]["spec"]["containers"] = containers
+            for candidate, current in ((changed, service), (service, changed)):
+                with self.assertRaises(ValueError):
+                    policy.verify_candidate(name, candidate, current, image)
+        for mutable in ("image:latest", "repo/image@sha256:" + "a" * 63, ""):
+            with self.assertRaises(ValueError):
+                policy.verify_candidate(name, service, service, mutable)
+
     def test_only_the_exact_ready_candidate_can_receive_traffic(self):
         service = "panthorium-speaker-staging"
         revision = f"{service}-00017-abc"
