@@ -153,7 +153,7 @@ runs:
     - name: Preserve the complete unfiltered vulnerability report
       uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
       with:
-        grype-version: 0.118.0
+        grype-version: v0.118.0
         sbom: ${{ inputs.evidence-dir }}/container-sbom.syft.json
         config: ${{ inputs.evidence-dir }}/grype.yaml
         fail-build: false
@@ -185,7 +185,7 @@ runs:
       env:
         GRYPE_DB_AUTO_UPDATE: 'false'
       with:
-        grype-version: 0.118.0
+        grype-version: v0.118.0
         sbom: ${{ inputs.evidence-dir }}/container-sbom.syft.json
         config: ${{ inputs.evidence-dir }}/grype.yaml
         vex: ${{ inputs.evidence-dir }}/ffmpeg-backport.vex.json
