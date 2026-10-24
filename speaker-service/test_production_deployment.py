@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from contextlib import redirect_stdout
 
 
@@ -60,8 +60,6 @@ class FakeRelease(release.Release):
             return {"bindings": []}
         if args[:3] == ["run", "revisions", "describe"]:
             return {"metadata": {"name": args[3]}, "status": {"imageDigest": BACKEND_IMAGE}}
-        if args[:2] == ["auth", "print-identity-token"]:
-            return "test.identity.token"
         if args[:2] == ["run", "deploy"] or args[:3] == ["run", "services", "update"]:
             name = args[2] if args[1] == "deploy" else args[3]
             self.assert_no_traffic(args)
@@ -101,8 +99,43 @@ class FakeRelease(release.Release):
         if "--no-traffic" not in args:
             raise AssertionError("Candidate mutation must not route traffic")
 
+    def token(self):
+        self.calls.append(["test", "id-token", self.backend_identity, self.speaker_url])
+        return "test.identity.token"
+
 
 class ProductionDeploymentTests(unittest.TestCase):
+    def test_oidc_uses_only_deployer_access_and_exact_backend_id_token_endpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = release.Release(PROJECT, "panthorium-staging", "asia-southeast1", SPEAKER, BACKEND, directory)
+            controller.backend_identity = BACKEND_SA
+            controller.speaker_url = service(SPEAKER)["status"]["url"]
+            response = MagicMock()
+            response.__enter__.return_value = response
+            response.status = 200
+            response.read.return_value = b'{"token":"test.identity.token"}'
+            opener = MagicMock()
+            opener.open.return_value = response
+            with patch.object(controller, "gcloud", return_value="deployer-own-access") as gc, \
+                    patch.object(release.urllib.request, "build_opener", return_value=opener) as build:
+                self.assertEqual(controller.token(), "test.identity.token")
+                gc.assert_called_once_with(["auth", "print-access-token"], json_output=False)
+                self.assertIsInstance(build.call_args.args[0], release.NoRedirect)
+                request = opener.open.call_args.args[0]
+                self.assertEqual(request.full_url, "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/backend-runtime%40panthorium-production.iam.gserviceaccount.com:generateIdToken")
+                self.assertEqual(request.get_header("Authorization"), "Bearer deployer-own-access")
+                self.assertEqual(json.loads(request.data), {"audience": controller.speaker_url, "includeEmail": True})
+                self.assertEqual(opener.open.call_args.kwargs, {"timeout": 20})
+                for body in (b'{}', b'[]', b'{"token":"bad token"}', b'x' * 32769):
+                    response.read.return_value = body
+                    with self.assertRaises(ValueError):
+                        controller.token()
+                controller.backend_identity = "attacker@other-project.iam.gserviceaccount.com"
+                gc.reset_mock()
+                with self.assertRaises(ValueError):
+                    controller.token()
+                gc.assert_not_called()
+
     def test_project_url_and_identity_boundaries(self):
         release.production_project(PROJECT, "panthorium-staging")
         for project in ("", "panthorium-staging", "another-staging-project", PROJECT):
@@ -164,12 +197,10 @@ class ProductionDeploymentTests(unittest.TestCase):
             self.assertNotIn("preserve-exactly", output.getvalue())
             calls = controller.calls
             self.assertFalse(any("add-iam-policy-binding" in call or "set-iam-policy" in call or "create" in call for call in calls))
-            token_calls = [call for call in calls if call[:2] == ["auth", "print-identity-token"]]
+            token_calls = [call for call in calls if call[:2] == ["test", "id-token"]]
             self.assertTrue(token_calls)
             for call in token_calls:
-                self.assertIn(f"--audiences={controller.speaker_url}", call)
-                self.assertIn(f"--impersonate-service-account={BACKEND_SA}", call)
-                self.assertIn("--include-email", call)
+                self.assertEqual(call[2:], [BACKEND_SA, controller.speaker_url])
             health.assert_any_call(controller.speaker_url, "test.identity.token", speaker=True)
             self.assertTrue(any("speaker-check-123-1---" in call.args[0] for call in health.call_args_list))
 
