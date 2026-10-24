@@ -101,7 +101,7 @@ jobs:
           gcloud run deploy "$SERVICE" --project="$PROJECT" --region="$REGION" \
             --image="$IMAGE" --service-account="$SPEAKER_RUNTIME_SA" --no-allow-unauthenticated --invoker-iam-check \
             --memory=2Gi --cpu=2 --concurrency=2 --timeout=60 --min-instances=0 --max-instances=1 \
-            --no-traffic --quiet --format=json > "$RUNNER_TEMP/speaker-candidate.json"
+            --no-traffic --tag="speaker-check-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" --quiet --format=json > "$RUNNER_TEMP/speaker-candidate.json"
           gcloud run services add-iam-policy-binding "$SERVICE" --project="$PROJECT" --region="$REGION" \
             --member="serviceAccount:$RUNTIME_SA" --role="roles/run.invoker" --quiet
           gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" --format=json > "$RUNNER_TEMP/speaker-service.json"
