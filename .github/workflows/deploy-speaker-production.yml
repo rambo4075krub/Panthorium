@@ -68,8 +68,6 @@ jobs:
           name: deployment-image-security-speaker-production
           path: |
             ${{ runner.temp }}/deployment-build.json
-            ${{ runner.temp }}/deployment-image-evidence/*.json
-            ${{ runner.temp }}/deployment-image-evidence/*.log
-            ${{ runner.temp }}/deployment-image-evidence/*.yaml
+            ${{ runner.temp }}/deployment-image-evidence/
           if-no-files-found: ignore
           retention-days: 14
