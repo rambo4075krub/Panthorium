@@ -33,16 +33,8 @@ jobs:
               release.speaker_url=release.service(release.speaker)["status"]["url"]
               token=release.token()
               print("Existing deployer minted scoped backend OIDC token",flush=True)
-              import urllib.request,urllib.error,json
-              for path in ("/health","/healthz"):
-                  try:
-                      req=urllib.request.Request(release.speaker_url+path,headers={"Authorization":"Bearer "+token})
-                      with urllib.request.urlopen(req,timeout=30) as response:
-                          payload=json.load(response)
-                          print("Endpoint",path,response.status,"ok",payload.get("ok"),"modelReady",payload.get("modelReady"),flush=True)
-                  except urllib.error.HTTPError as error:
-                      print("Endpoint",path,"HTTP status",error.code,flush=True)
-              s["inference"](release.speaker_url,token)
+              s["r"].speaker_inference(release.speaker_url,token)
+              s["private"](release.speaker_url)
               s["r"].health(release.service(release.backend)["status"]["url"],backend=True)
-              print("Read-only backend health and production speaker synthetic inference passed; legacy health endpoints return 404; no IAM or traffic changes",flush=True)
+              print("Read-only backend health, private speaker access and synthetic inference passed; no IAM or traffic changes",flush=True)
           PY

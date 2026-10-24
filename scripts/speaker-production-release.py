@@ -1,16 +1,21 @@
 """Guarded production speaker rollout; no IAM writes and no implicit bootstrap."""
 import copy
+import base64
+import io
 import json
+import math
 import os
 from pathlib import Path
 import re
 import subprocess
+import struct
 import sys
 import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import wave
 
 
 VERIFY = Path(__file__).with_name("verify-speaker-deployment.py")
@@ -144,7 +149,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise ValueError("Health checks must not redirect")
 
 
-def health(url, token=None, speaker=False, backend=False, legacy_speaker=False):
+def health(url, token=None, speaker=False, backend=False):
     # Caller validates both canonical and tagged origins before any token is used.
     cloud_url(url)
     headers = {"Authorization": "Bearer " + token} if token else {}
@@ -153,17 +158,7 @@ def health(url, token=None, speaker=False, backend=False, legacy_speaker=False):
         try:
             endpoints = ("/health", "/api/health") if backend else ("/health",)
             for endpoint in endpoints:
-                request = urllib.request.Request(url + endpoint, headers=headers)
-                try:
-                    response = opener.open(request, timeout=20)
-                except urllib.error.HTTPError as error:
-                    # The approved production image predates the /health route.
-                    # Only preflight may use its /healthz endpoint, and only on
-                    # an exact 404; candidate images must expose /health.
-                    if not (speaker and legacy_speaker and error.code == 404):
-                        raise
-                    response = opener.open(urllib.request.Request(url + "/healthz", headers=headers), timeout=20)
-                with response:
+                with opener.open(urllib.request.Request(url + endpoint, headers=headers), timeout=20) as response:
                     require(response.status == 200, "Health endpoint did not succeed")
                     data = response.read(65537)
                 require(len(data) <= 65536, "Health response exceeded the limit")
@@ -179,6 +174,41 @@ def health(url, token=None, speaker=False, backend=False, legacy_speaker=False):
             if attempt == 5:
                 raise ValueError("Cloud Run health request failed") from None
             time.sleep(3)
+
+
+def speaker_inference(url, token):
+    """Verify the current model using synthetic audio, including legacy images.
+
+    The legacy /healthz path is reserved by Cloud Run's frontend. A real
+    authenticated embedding proves that the decoder and model are operational.
+    New candidates still must pass the ordinary /health check independently.
+    """
+    cloud_url(url)
+    require(isinstance(token, str) and re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", token) is not None,
+            "Expected an OIDC identity token")
+    raw = io.BytesIO()
+    with wave.open(raw, "wb") as audio:
+        audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+        audio.writeframes(b"".join(struct.pack("<h", int(5000 * math.sin(2 * math.pi * 220 * i / 16000)
+                                                      + 1800 * math.sin(2 * math.pi * 370 * i / 16000)))
+                                  for i in range(48000)))
+    body = json.dumps({"audio": "data:audio/wav;base64," + base64.b64encode(raw.getvalue()).decode()}).encode()
+    request = urllib.request.Request(url + "/embed", data=body,
+                                     headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(request, timeout=60) as response:
+            require(response.status == 200, "Speaker inference request failed")
+            data = response.read(65537)
+        require(len(data) <= 65536, "Speaker inference response exceeded the limit")
+        result = json.loads(data)
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        raise ValueError("Authenticated speaker inference failed") from None
+    require(isinstance(result, dict) and result.get("signalPresent") is True, "Speaker did not detect the synthetic signal")
+    vector = result.get("embedding")
+    require(isinstance(vector, list) and len(vector) == 192
+            and all(type(value) in (int, float) and math.isfinite(value) for value in vector), "Invalid speaker embedding")
+    norm = math.hypot(*vector)
+    require(math.isfinite(norm) and norm > 1e-8, "Empty speaker embedding")
 
 
 class Release:
@@ -263,7 +293,7 @@ class Release:
         revision = self.gcloud(["run", "revisions", "describe", self.previous_backend, f"--region={self.region}"])
         require(revision.get("metadata", {}).get("name") == self.previous_backend, "Unexpected backend revision")
         self.backend_image = immutable_image(revision.get("status", {}).get("imageDigest", ""))
-        health(self.speaker_url, self.token(), speaker=True, legacy_speaker=True)
+        speaker_inference(self.speaker_url, self.token())
         health(self.backend_url, backend=True)
 
     def candidate(self, name, document, image, tag, canonical, previous):
