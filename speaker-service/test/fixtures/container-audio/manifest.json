@@ -1,0 +1,45 @@
+{
+  "description": "Synthetic 440 Hz sine recordings generated locally for decoder compatibility; no user recordings.",
+  "files": {
+    "aac.aac": {
+      "bytes": 18332,
+      "sha256": "3bda5f70a574dad082ea1a6c238fec76eda6fec773d14384ff45a3b8a22f1ad6"
+    },
+    "pcm-stereo.wav": {
+      "bytes": 384078,
+      "sha256": "b9d01208fcf83ed999d79663f827c22c18e98c4b3eb27fdceb77b855609576bc"
+    },
+    "alac.m4a": {
+      "bytes": 38797,
+      "sha256": "9aea7abd683535ffdb82cf8c98a2942ea1d2436f49c627e55b637f553734c9ea"
+    },
+    "audio.flac": {
+      "bytes": 34461,
+      "sha256": "951a6b4be3cb675810877904aa0a742833857758fe919793c0f4cb644a0891f5"
+    },
+    "audio.mp3": {
+      "bytes": 16557,
+      "sha256": "1f63b71dc8042fb595cda8cb5dc9198df0c3f36da4e4dfa6ae2f459cf60bb5a3"
+    },
+    "opus.ogg": {
+      "bytes": 19066,
+      "sha256": "d673ad8c5b20e4e506734fa3f3faf453f4d5f4889b9be08f74a14bb3b81988a8"
+    },
+    "vorbis.ogg": {
+      "bytes": 7569,
+      "sha256": "b1d18494cd124d711742a1aa621cb7c03f4aac9763f376d84e2e85099a101974"
+    },
+    "aac.m4a": {
+      "bytes": 18854,
+      "sha256": "c39cab9228afcabbf6cab9a635083ddf318e66416245f586121aa23bfaff5a78"
+    },
+    "opus.webm": {
+      "bytes": 19994,
+      "sha256": "ca0d0eae123f9edc238a7dc624599e27fc12bd0731be7ddfd447fb8b88d80054"
+    },
+    "overlong.opus.ogg": {
+      "bytes": 110457,
+      "sha256": "c6d9f1b94dfd1edb8e8b6de48948d487c5d4479ac70b07481504538ee7dd1dd4"
+    }
+  }
+}

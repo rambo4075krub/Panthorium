@@ -1,0 +1,73 @@
+name: Deploy Speaker Service Production
+on:
+  workflow_call:
+permissions:
+  contents: read
+# Called by deploy-gcp.yml before backend deployment. The caller owns the
+# panthorium-production concurrency lock for this entire ordered rollout.
+jobs:
+  security:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/security-scan.yml
+    with:
+      image-context: speaker-service
+      audit-node: false
+  speaker:
+    if: github.ref == 'refs/heads/main'
+    needs: security
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      STAGING_PROJECT: ${{ vars.STAGING_GCP_PROJECT_ID || 'panthorium-staging' }}
+      REGION: asia-southeast1
+      SERVICE: panthorium-speaker
+      BACKEND_SERVICE: panthorium-backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.22.1
+      - name: Authenticate using the existing production deployment identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Verify existing production services, identities and authenticated readiness
+        run: python3 scripts/speaker-production-release.py preflight
+      - name: Build the production speaker image once
+        id: built-image
+        run: |
+          set -euo pipefail
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT/panthorium/speaker:$GITHUB_SHA"
+          gcloud builds submit . --project="$PROJECT" --region="$REGION" \
+            --config=cloudbuild.speaker.production.yaml \
+            --substitutions="_IMAGE_URI=$IMAGE" --quiet --suppress-logs --format=json > "$RUNNER_TEMP/deployment-build.json"
+          node scripts/resolve-build-image.js resolve "$RUNNER_TEMP/deployment-build.json" "$IMAGE" >> "$GITHUB_OUTPUT"
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+      - name: Verify the exact full production speaker image
+        uses: ./.github/actions/verify-deployment-image
+        with:
+          image: ${{ steps.built-image.outputs.image }}
+          profile: speaker-candidate-noble
+          evidence-dir: ${{ runner.temp }}/deployment-image-evidence
+          pull: 'true'
+          require-model: 'true'
+      - name: Verify candidates and promote with guarded rollback
+        env:
+          IMAGE: ${{ steps.built-image.outputs.image }}
+          RELEASE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: python3 scripts/speaker-production-release.py rollout "$IMAGE" "$RELEASE_RUN_ID"
+      - name: Preserve exact deployment image security evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deployment-image-security-speaker-production
+          path: |
+            ${{ runner.temp }}/deployment-build.json
+            ${{ runner.temp }}/deployment-image-evidence/
+          if-no-files-found: ignore
+          retention-days: 14

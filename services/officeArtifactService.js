@@ -15,7 +15,7 @@ const MIME = {
   presentation: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
 };
 const EXT = { document: 'docx', spreadsheet: 'xlsx', presentation: 'pptx' };
-const LIMITS = Object.freeze({ sources: 8, sourceBytes: 16 * 1024 * 1024, imageBytes: 8 * 1024 * 1024, sourceChars: 40000, jsonChars: 180000 });
+const LIMITS = Object.freeze({ sources: 8, sourceBytes: 16 * 1024 * 1024, imageBytes: 8 * 1024 * 1024, sourceChars: 40000, jsonChars: 180000, previewXmlBytes: 4 * 1024 * 1024, previewXmlNodes: 100000, previewXmlDepth: 64, previewXmlTagChars: 8192 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 class OfficeArtifactError extends Error {
   constructor(status, code) { super(code); this.name = 'OfficeArtifactError'; this.status = status; this.code = code; this.artifactNotCreated = true; }
@@ -120,28 +120,224 @@ function decodeXml(value) {
     return Number.isInteger(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
   });
 }
-function extractOfficeText(bytes) {
-  const entries = unzip(bytes); let output = '';
-  const strings = entries['xl/sharedStrings.xml']?.toString('utf8') || '';
-  if (/<!DOCTYPE|<!ENTITY/i.test(strings)) fail('invalid_office_source');
-  const shared = [...strings.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map(m => [...m[1].matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(t => decodeXml(t[1])).join(''));
-  for (const name of Object.keys(entries).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))) {
-    if (!/^(word\/document\.xml|ppt\/slides\/slide\d+\.xml|xl\/worksheets\/sheet\d+\.xml)$/.test(name)) continue;
-    const source = entries[name].toString('utf8'); if (/<!DOCTYPE|<!ENTITY/i.test(source)) fail('invalid_office_source');
-    if (name.startsWith('xl/')) {
-      for (const row of source.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
-        const cells = [...row[1].matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)].map(cell => {
-          const value = /<v\b[^>]*>([\s\S]*?)<\/v>/.exec(cell[2])?.[1] || '';
-          if (/\bt=["']s["']/.test(cell[1])) return shared[Number(value)] || '';
-          return [...cell[2].matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(m => decodeXml(m[1])).join('') || decodeXml(value);
-        }); output += cells.join('\t') + '\n'; if (output.length > LIMITS.sourceChars) break;
-      }
-    } else {
-      const paragraphs = source.matchAll(/<(?:w|a):p\b[^>]*>([\s\S]*?)<\/(?:w|a):p>/g);
-      for (const paragraph of paragraphs) { output += [...paragraph[1].matchAll(/<(?:w|a):t\b[^>]*>([\s\S]*?)<\/(?:w|a):t>/g)].map(m => decodeXml(m[1])).join('') + '\n'; if (output.length > LIMITS.sourceChars) break; }
+
+// Forward-only tokenization avoids rescanning the remaining document for each
+// unmatched opening tag. No DTD, entity declarations or external resolution.
+function walkOfficeXml(source, visitor, budget) {
+  const stack = [];
+  let cursor = 0, roots = 0;
+  const emitText = (value, literal = false) => {
+    if (!budget.fragments && !stack.length && value.trim()) fail('invalid_office_source');
+    if (stack.length) visitor.text?.(literal ? value : decodeXml(value), stack.at(-1));
+  };
+  while (cursor < source.length) {
+    const start = source.indexOf('<', cursor);
+    if (start < 0) { emitText(source.slice(cursor)); cursor = source.length; break; }
+    if (start > cursor) emitText(source.slice(cursor, start));
+    if (++budget.nodes > LIMITS.previewXmlNodes) fail('office_source_too_large', 413);
+    if (source.startsWith('<!--', start)) {
+      const end = source.indexOf('-->', start + 4);
+      if (end < 0) fail('invalid_office_source');
+      cursor = end + 3; continue;
     }
-    if (output.length > LIMITS.sourceChars) break;
+    if (source.startsWith('<![CDATA[', start)) {
+      const end = source.indexOf(']]>', start + 9);
+      if (end < 0) fail('invalid_office_source');
+      emitText(source.slice(start + 9, end), true); cursor = end + 3; continue;
+    }
+    if (source.startsWith('<?', start)) {
+      const end = source.indexOf('?>', start + 2);
+      if (end < 0) fail('invalid_office_source');
+      cursor = end + 2; continue;
+    }
+    if (source.startsWith('<!', start)) fail('invalid_office_source');
+    let end = start + 1, quote = '';
+    for (; end < source.length; end++) {
+      if (end - start > LIMITS.previewXmlTagChars) fail('office_source_too_large', 413);
+      const character = source[end];
+      if (quote) { if (character === quote) quote = ''; }
+      else if (character === '"' || character === "'") quote = character;
+      else if (character === '>') break;
+      else if (character === '<') fail('invalid_office_source');
+    }
+    if (end === source.length || quote) fail('invalid_office_source');
+    const token = source.slice(start + 1, end);
+    cursor = end + 1;
+    if (token.startsWith('/')) {
+      const name = token.slice(1).trim();
+      const node = stack.pop();
+      if (!node || node.name !== name) fail('invalid_office_source');
+      node.closeStart = start; node.end = cursor;
+      visitor.close?.(node); continue;
+    }
+    const nameMatch = /^[A-Za-z_:][A-Za-z0-9_.:-]*/.exec(token);
+    if (!nameMatch) fail('invalid_office_source');
+    const name = nameMatch[0], attributes = Object.create(null), attributeRanges = [];
+    let position = name.length;
+    const selfClosing = token.endsWith('/');
+    const contentEnd = token.length - (selfClosing ? 1 : 0);
+    while (position < contentEnd) {
+      const attributeStart = position;
+      const whitespace = /^[\t\r\n ]+/.exec(token.slice(position));
+      if (!whitespace) fail('invalid_office_source');
+      position += whitespace[0].length;
+      if (position === contentEnd) break;
+      const attribute = /^([A-Za-z_:][A-Za-z0-9_.:-]*)[\t\r\n ]*=[\t\r\n ]*(["'])/.exec(token.slice(position));
+      if (!attribute || Object.hasOwn(attributes, attribute[1])) fail('invalid_office_source');
+      position += attribute[0].length;
+      const valueEnd = token.indexOf(attribute[2], position);
+      if (valueEnd < 0 || valueEnd >= contentEnd || token.slice(position, valueEnd).includes('<')) fail('invalid_office_source');
+      attributes[attribute[1]] = decodeXml(token.slice(position, valueEnd));
+      position = valueEnd + 1;
+      attributeRanges.push({ name: attribute[1], start: start + 1 + attributeStart, end: start + 1 + position });
+    }
+    if (position !== contentEnd) fail('invalid_office_source');
+    if (!stack.length && ++roots > 1 && !budget.fragments) fail('invalid_office_source');
+    if (stack.length >= LIMITS.previewXmlDepth) fail('office_source_too_large', 413);
+    const node = { name, attributes, attributeRanges, selfClosing, parent: stack.at(-1) || null, index: start, openEnd: cursor, closeStart: cursor, end: cursor };
+    visitor.open?.(node);
+    if (selfClosing) visitor.close?.(node);
+    else stack.push(node);
   }
+  if (stack.length || (!roots && !budget.fragments)) fail('invalid_office_source');
+}
+
+function validateOfficeXmlEntries(entries) {
+  const budget = { nodes: 0 }; let total = 0;
+  for (const [name, bytes] of Object.entries(entries)) {
+    if (!/\.(xml|rels)$/i.test(name)) continue;
+    total += Buffer.byteLength(bytes);
+    if (total > LIMITS.previewXmlBytes) fail('office_source_too_large', 413);
+    walkOfficeXml(bytes.toString('utf8'), {}, budget);
+  }
+}
+
+// A bounded cache also prevents editor enrichment from parsing the complete
+// same document once per paragraph. Element names match exactly, and markup
+// inside comments/CDATA never becomes an element for the legacy editor.
+const xmlIndexes = new Map();
+let xmlIndexChars = 0, xmlIndexNodes = 0;
+function xmlMatches(source, name, pairedOnly = false) {
+  let entry = xmlIndexes.get(source);
+  if (!entry) {
+    if (Buffer.byteLength(source) > LIMITS.previewXmlBytes) fail('office_source_too_large', 413);
+    const nodes = new Map(); let nodeCount = 0;
+    walkOfficeXml(source, { open(node) { nodeCount++; if (!nodes.has(node.name)) nodes.set(node.name, []); nodes.get(node.name).push(node); } }, { nodes: 0, fragments: true });
+    entry = { nodes, nodeCount, matches: new Map() };
+    while (xmlIndexes.size && (xmlIndexes.size >= 16 || xmlIndexChars + source.length > LIMITS.previewXmlBytes || xmlIndexNodes + nodeCount > LIMITS.previewXmlNodes)) {
+      const oldest = xmlIndexes.keys().next().value; xmlIndexChars -= oldest.length; xmlIndexNodes -= xmlIndexes.get(oldest).nodeCount; xmlIndexes.delete(oldest);
+    }
+    xmlIndexes.set(source, entry); xmlIndexChars += source.length; xmlIndexNodes += nodeCount;
+  } else { xmlIndexes.delete(source); xmlIndexes.set(source, entry); }
+  const key = name + (pairedOnly ? ':paired' : ':all');
+  if (!entry.matches.has(key)) entry.matches.set(key, (entry.nodes.get(name) || []).filter(node => !pairedOnly || !node.selfClosing).map(node => {
+    const match = [source.slice(node.index, node.end), node.selfClosing ? '' : source.slice(node.openEnd, node.closeStart)];
+    match.index = node.index; match.node = node; return match;
+  }));
+  return entry.matches.get(key);
+}
+function xmlReplace(source, name, replacement, { first = false, pairedOnly = false } = {}) {
+  return xmlReplaceSelected(source, xmlMatches(source, name, pairedOnly), replacement, first);
+}
+function xmlReplaceSelected(source, matches, replacement, first = false) {
+  const parts = []; let cursor = 0;
+  for (const match of matches) {
+    if (!match) fail('invalid_office_source');
+    if (match.index < cursor) continue;
+    if (source.slice(match.index, match.index + match[0].length) !== match[0]) fail('invalid_office_source');
+    parts.push(source.slice(cursor, match.index), typeof replacement === 'function' ? replacement(match[0], match.index) : replacement);
+    cursor = match.index + match[0].length;
+    if (first) break;
+  }
+  parts.push(source.slice(cursor)); return parts.join('');
+}
+function xmlDirectMatches(source, name) {
+  return xmlMatches(source, name).filter(match => match.node.parent && !match.node.parent.parent);
+}
+function xmlParagraphMatches(source, name, prefix) {
+  const paragraph = xmlMatches(source, prefix + ':p', true)[0]?.node;
+  if (!paragraph) return [];
+  return xmlMatches(source, name, true).filter(match => {
+    let parent = match.node.parent;
+    while (parent && parent.name !== prefix + ':p') parent = parent.parent;
+    return parent === paragraph;
+  });
+}
+function xmlWithoutAttributes(source, names) {
+  if (Buffer.byteLength(source) > LIMITS.previewXmlBytes) fail('office_source_too_large', 413);
+  let root;
+  walkOfficeXml(source, { open(node) { root ||= node; } }, { nodes: 0, fragments: true });
+  const parts = []; let cursor = 0;
+  for (const range of root?.attributeRanges || []) {
+    if (!names.includes(range.name)) continue;
+    parts.push(source.slice(cursor, range.start)); cursor = range.end;
+  }
+  parts.push(source.slice(cursor)); return parts.join('');
+}
+function xmlInsertChild(source, content, prepend = false) {
+  if (Buffer.byteLength(source) > LIMITS.previewXmlBytes) fail('office_source_too_large', 413);
+  let root;
+  walkOfficeXml(source, { open(node) { root ||= node; } }, { nodes: 0, fragments: true });
+  if (!root) return source;
+  if (root.selfClosing) return source.slice(0, root.openEnd - 2) + '>' + content + '</' + root.name + '>' + source.slice(root.end);
+  const index = prepend ? root.openEnd : root.closeStart;
+  return source.slice(0, index) + content + source.slice(index);
+}
+const xmlCacheStats = () => ({ entries: xmlIndexes.size, chars: xmlIndexChars, nodes: xmlIndexNodes });
+
+function extractOfficeText(bytes) {
+  const entries = unzip(bytes), shared = [], budget = { nodes: 0 };
+  validateOfficeXmlEntries(entries);
+  const names = Object.keys(entries).filter(name => /^(word\/document\.xml|ppt\/slides\/slide\d+\.xml|xl\/worksheets\/sheet\d+\.xml)$/.test(name)).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+  const xmlBytes = names.reduce((total, name) => total + entries[name].length, entries['xl/sharedStrings.xml']?.length || 0);
+  if (xmlBytes > LIMITS.previewXmlBytes) fail('office_source_too_large', 413);
+  const parts = []; let length = 0;
+  const append = value => { const part = value.slice(0, LIMITS.sourceChars - length); parts.push(part); length += part.length; };
+  if (entries['xl/sharedStrings.xml']) {
+    let item = null;
+    walkOfficeXml(entries['xl/sharedStrings.xml'].toString('utf8'), {
+      open(node) {
+        if (node.name === 'si') { if (item) fail('invalid_office_source'); item = []; }
+        if (item && node.name === 't') node.parts = [];
+      },
+      text(value, node) { if (node.parts) node.parts.push(value); },
+      close(node) {
+        if (node.name === 't' && node.parts) item.push(node.parts.join(''));
+        if (node.name === 'si') { shared.push(item.join('')); item = null; }
+      }
+    }, budget);
+  }
+  for (const name of names) {
+    const spreadsheet = name.startsWith('xl/');
+    let row = null, cell = null;
+    const paragraphStack = [], paragraphs = [];
+    walkOfficeXml(entries[name].toString('utf8'), {
+      open(node) {
+        if (spreadsheet) {
+          if (node.name === 'row') { if (row) fail('invalid_office_source'); row = []; }
+          if (node.name === 'c' && row) { if (cell) fail('invalid_office_source'); cell = { type: node.attributes.t, inline: [], value: '' }; }
+          if (cell && (node.name === 't' || node.name === 'v')) node.parts = [];
+        } else {
+          if (node.name === 'w:p' || node.name === 'a:p') { const paragraph = { parts: [], selfClosing: node.selfClosing }; paragraphStack.push(paragraph); paragraphs.push(paragraph); }
+          if (paragraphStack.length && (node.name === 'w:t' || node.name === 'a:t')) node.parts = [];
+        }
+      },
+      text(value, node) { if (node.parts) node.parts.push(value); },
+      close(node) {
+        if (spreadsheet) {
+          if (cell && node.parts) { if (node.name === 't') cell.inline.push(node.parts.join('')); else if (!cell.value) cell.value = node.parts.join(''); }
+          if (node.name === 'c' && cell) { row.push(cell.type === 's' ? shared[Number(cell.value)] || '' : cell.inline.join('') || cell.value); cell = null; }
+          if (node.name === 'row' && row) { if (!node.selfClosing) append(row.join('\t') + '\n'); row = null; }
+        } else {
+          if (node.parts) paragraphStack.at(-1).parts.push(node.parts.join(''));
+          if (node.name === 'w:p' || node.name === 'a:p') paragraphStack.pop();
+        }
+      }
+    }, budget);
+    for (const paragraph of paragraphs) { if (!paragraph.selfClosing) append(paragraph.parts.join('') + '\n'); if (length >= LIMITS.sourceChars) break; }
+    if (length >= LIMITS.sourceChars) break;
+  }
+  const output = parts.join('');
   if (!output.trim()) fail('office_source_has_no_readable_text');
   return output;
 }
@@ -433,4 +629,4 @@ class OfficeArtifactService {
     return { files: uploaded, summary: `สร้าง ${EXT[pluginId].toUpperCase()} ที่แก้ไขได้ พร้อมเอกสาร HTML สำหรับพิมพ์หรือบันทึก PDF${source.images.length ? ` แนบภาพ ${source.images.length} ภาพ (ไม่มีการวิเคราะห์ภาพ)` : ''}` };
   }
 }
-module.exports = { OfficeArtifactService, OfficeArtifactError, validateContent, extractOfficeText, LIMITS, _internals: { zip, unzip, documentBuffer, spreadsheetBuffer, presentationBuffer, printHtml, presentationPages, imageInfo, parseTable } };
+module.exports = { OfficeArtifactService, OfficeArtifactError, validateContent, extractOfficeText, LIMITS, _internals: { zip, unzip, documentBuffer, spreadsheetBuffer, presentationBuffer, printHtml, presentationPages, imageInfo, parseTable, validateOfficeXmlEntries, xmlMatches, xmlReplace, xmlReplaceSelected, xmlDirectMatches, xmlParagraphMatches, xmlWithoutAttributes, xmlInsertChild, xmlCacheStats } };

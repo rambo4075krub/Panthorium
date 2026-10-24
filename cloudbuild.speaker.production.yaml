@@ -1,0 +1,7 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: [build, -f, speaker-service/Dockerfile, -t, "${_IMAGE_URI}", "."]
+timeout: 1800s
+images: ["${_IMAGE_URI}"]
+options:
+  logging: CLOUD_LOGGING_ONLY

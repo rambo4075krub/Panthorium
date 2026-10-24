@@ -4,57 +4,126 @@ on:
     branches: [staging]
     paths:
       - speaker-service/**
+      - build/media/**
+      - build/libsndfile/**
+      - build/zlib/**
+      - build/security/**
+      - scripts/**
+      - .github/actions/verify-deployment-image/**
+      - .gcloudignore
+      - .dockerignore
+      - .github/workflows/security-scan.yml
       - cloudbuild.speaker.staging.yaml
       - .github/workflows/deploy-speaker-staging.yml
   workflow_dispatch:
 permissions:
   contents: read
-  id-token: write
 concurrency:
   group: panthorium-speaker-staging
   cancel-in-progress: false
 jobs:
+  security:
+    if: github.ref == 'refs/heads/staging'
+    uses: ./.github/workflows/security-scan.yml
+    with:
+      image-context: speaker-service
+      audit-node: false
   speaker:
+    if: github.ref == 'refs/heads/staging'
+    needs: security
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     environment: staging
     env:
       PROJECT: ${{ vars.STAGING_GCP_PROJECT_ID }}
       DEPLOY_SA: ${{ vars.STAGING_DEPLOY_SA }}
       WIF_PROVIDER: ${{ vars.STAGING_WIF_PROVIDER }}
       RUNTIME_SA: ${{ vars.STAGING_RUNTIME_SA }}
+      SPEAKER_RUNTIME_SA: ${{ vars.STAGING_SPEAKER_RUNTIME_SA || 'speaker-runtime@panthorium-staging.iam.gserviceaccount.com' }}
       REGION: asia-southeast1
       SERVICE: panthorium-speaker-staging
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.22.1
       - name: Verify isolated project
         run: |
           set -euo pipefail
           [[ "$PROJECT" == "panthorium-staging" ]]
           [[ "$DEPLOY_SA" == "staging-deployer@$PROJECT.iam.gserviceaccount.com" ]]
           [[ "$RUNTIME_SA" == *"@$PROJECT.iam.gserviceaccount.com" ]]
-          [[ -n "$WIF_PROVIDER" ]]
-      - uses: google-github-actions/auth@v2
+          [[ "$SPEAKER_RUNTIME_SA" == "speaker-runtime@$PROJECT.iam.gserviceaccount.com" ]]
+          [[ "$SPEAKER_RUNTIME_SA" != "$RUNTIME_SA" ]]
+          [[ "$WIF_PROVIDER" == "projects/124818950958/locations/global/workloadIdentityPools/github-staging/providers/github" ]]
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOY_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
-      - name: Build and deploy private speaker service
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Verify unprivileged speaker identity before deployment
+        run: |
+          set -euo pipefail
+          gcloud iam service-accounts describe "$SPEAKER_RUNTIME_SA" --project="$PROJECT" --format=json > "$RUNNER_TEMP/speaker-account.json"
+          gcloud projects get-iam-policy "$PROJECT" --format=json > "$RUNNER_TEMP/speaker-project-policy.json"
+          python3 scripts/verify-speaker-deployment.py identity "$SPEAKER_RUNTIME_SA" "$RUNTIME_SA" \
+            "$RUNNER_TEMP/speaker-account.json" "$RUNNER_TEMP/speaker-project-policy.json"
+      - name: Build the speaker image once and capture its immutable output
+        id: built-image
         run: |
           set -euo pipefail
           IMAGE="$REGION-docker.pkg.dev/$PROJECT/panthorium-staging/speaker:$GITHUB_SHA"
-          gcloud builds submit speaker-service --project="$PROJECT" --region="$REGION" \
+          gcloud builds submit . --project="$PROJECT" --region="$REGION" \
             --config=cloudbuild.speaker.staging.yaml \
             --service-account="projects/$PROJECT/serviceAccounts/124818950958-compute@developer.gserviceaccount.com" \
             --gcs-source-staging-dir="gs://${PROJECT}_cloudbuild/source" \
-            --substitutions="_IMAGE_URI=$IMAGE" --quiet
+            --substitutions="_IMAGE_URI=$IMAGE" --quiet --suppress-logs --format=json > "$RUNNER_TEMP/deployment-build.json"
+          node scripts/resolve-build-image.js resolve "$RUNNER_TEMP/deployment-build.json" "$IMAGE" >> "$GITHUB_OUTPUT"
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+      - name: Verify the exact full speaker image that Cloud Run will run
+        uses: ./.github/actions/verify-deployment-image
+        with:
+          image: ${{ steps.built-image.outputs.image }}
+          profile: speaker-candidate-noble
+          evidence-dir: ${{ runner.temp }}/deployment-image-evidence
+          pull: 'true'
+          require-model: 'true'
+      - name: Deploy verified private speaker image
+        env:
+          IMAGE: ${{ steps.built-image.outputs.image }}
+        run: |
+          set -euo pipefail
           gcloud run deploy "$SERVICE" --project="$PROJECT" --region="$REGION" \
-            --image="$IMAGE" --service-account="$RUNTIME_SA" --no-allow-unauthenticated \
-            --memory=2Gi --cpu=2 --concurrency=2 --timeout=60 --min-instances=0 --max-instances=1 --quiet
+            --image="$IMAGE" --service-account="$SPEAKER_RUNTIME_SA" --no-allow-unauthenticated --invoker-iam-check \
+            --memory=2Gi --cpu=2 --concurrency=2 --timeout=60 --min-instances=0 --max-instances=1 \
+            --no-traffic --tag="spk-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" --quiet --format=json > "$RUNNER_TEMP/speaker-candidate.json"
           gcloud run services add-iam-policy-binding "$SERVICE" --project="$PROJECT" --region="$REGION" \
             --member="serviceAccount:$RUNTIME_SA" --role="roles/run.invoker" --quiet
+          gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" --format=json > "$RUNNER_TEMP/speaker-service.json"
+          gcloud run services get-iam-policy "$SERVICE" --project="$PROJECT" --region="$REGION" --format=json > "$RUNNER_TEMP/speaker-service-policy.json"
+          python3 scripts/verify-speaker-deployment.py service "$SPEAKER_RUNTIME_SA" "$RUNTIME_SA" \
+            "$RUNNER_TEMP/speaker-service.json" "$RUNNER_TEMP/speaker-service-policy.json"
+          CANDIDATE_REVISION="$(python3 scripts/verify-speaker-deployment.py candidate-image "$SERVICE" "$IMAGE" \
+            "$RUNNER_TEMP/speaker-candidate.json" "$RUNNER_TEMP/speaker-service.json")"
+          gcloud run services update-traffic "$SERVICE" --project="$PROJECT" --region="$REGION" \
+            --to-revisions="$CANDIDATE_REVISION=100" --quiet
           URL=$(gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" --format='value(status.url)')
           [[ "$URL" == https://* ]]
           gcloud run services update panthorium-backend-staging --project="$PROJECT" --region="$REGION" \
             --update-env-vars="BIOMETRIC_SPEAKER_URL=$URL" --quiet
           echo "Speaker service deployed privately; backend bound to its URL. Live voice enrollment and threshold calibration remain required." >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve exact deployment image security evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deployment-image-security-speaker-staging
+          path: |
+            ${{ runner.temp }}/deployment-build.json
+            ${{ runner.temp }}/deployment-image-evidence/
+          if-no-files-found: ignore
+          retention-days: 14

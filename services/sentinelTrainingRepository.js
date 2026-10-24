@@ -18,12 +18,13 @@ class SentinelTrainingRepository {
     ALTER TABLE panthorium_training_examples ADD COLUMN IF NOT EXISTS evaluation JSONB;
     ALTER TABLE panthorium_training_examples ADD COLUMN IF NOT EXISTS auto_approved BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE panthorium_training_examples ADD COLUMN IF NOT EXISTS fingerprint TEXT;
+    ALTER TABLE panthorium_training_examples ADD COLUMN IF NOT EXISTS global_publication JSONB;
     CREATE INDEX IF NOT EXISTS idx_panthorium_training_status ON panthorium_training_examples(status, created_at DESC);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_panthorium_training_fingerprint ON panthorium_training_examples(fingerprint) WHERE fingerprint IS NOT NULL;`);
   }
 
   map(row) {
-    return {exampleId:row.example_id,prompt:row.prompt,answer:row.answer,source:row.source||null,provider:row.provider||null,model:row.model||null,tags:row.tags||[],status:row.status,qualityScore:row.quality_score==null?null:Number(row.quality_score),evaluation:row.evaluation||null,autoApproved:Boolean(row.auto_approved),fingerprint:row.fingerprint||null,createdBy:row.created_by,reviewedBy:row.reviewed_by||null,createdAt:row.created_at,reviewedAt:row.reviewed_at||null};
+    return {exampleId:row.example_id,prompt:row.prompt,answer:row.answer,source:row.source||null,provider:row.provider||null,model:row.model||null,tags:row.tags||[],status:row.status,qualityScore:row.quality_score==null?null:Number(row.quality_score),evaluation:row.evaluation||null,autoApproved:Boolean(row.auto_approved),fingerprint:row.fingerprint||null,globalPublication:row.global_publication||null,createdBy:row.created_by,reviewedBy:row.reviewed_by||null,createdAt:row.created_at,reviewedAt:row.reviewed_at||null};
   }
 
   async create({ prompt, answer, source, provider, model, tags, createdBy, fingerprint }) {
@@ -34,7 +35,7 @@ class SentinelTrainingRepository {
       return this.findByFingerprint(fingerprint);
     }
     if(fingerprint){const duplicate=await this.findByFingerprint(fingerprint);if(duplicate)return duplicate;}
-    const example={exampleId,prompt,answer,source:source||null,provider:provider||null,model:model||null,tags:tags||[],status:'pending',qualityScore:null,evaluation:null,autoApproved:false,fingerprint:fingerprint||null,createdBy,reviewedBy:null,createdAt:now,reviewedAt:null};this.examples.set(exampleId,example);return example;
+    const example={exampleId,prompt,answer,source:source||null,provider:provider||null,model:model||null,tags:tags||[],status:'pending',qualityScore:null,evaluation:null,autoApproved:false,fingerprint:fingerprint||null,globalPublication:null,createdBy,reviewedBy:null,createdAt:now,reviewedAt:null};this.examples.set(exampleId,example);return example;
   }
 
   async findByFingerprint(fingerprint){
