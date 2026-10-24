@@ -105,6 +105,25 @@ class FakeRelease(release.Release):
 
 
 class ProductionDeploymentTests(unittest.TestCase):
+    def test_legacy_health_route_is_only_available_in_preflight_on_exact_404(self):
+        url = service(SPEAKER)["status"]["url"]
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        response.read.return_value = b'{"ok":true,"modelReady":true}'
+        opener = MagicMock()
+        missing = release.urllib.error.HTTPError(url + "/health", 404, "Not Found", {}, None)
+        opener.open.side_effect = [missing, response]
+        with patch.object(release.urllib.request, "build_opener", return_value=opener), patch.object(release.time, "sleep"):
+            release.health(url, "test.identity.token", speaker=True, legacy_speaker=True)
+            self.assertEqual([call.args[0].full_url for call in opener.open.call_args_list], [url + "/health", url + "/healthz"])
+            for legacy, code in ((False, 404), (True, 403)):
+                opener.reset_mock()
+                opener.open.side_effect = release.urllib.error.HTTPError(url + "/health", code, "Denied", {}, None)
+                with self.assertRaises(ValueError):
+                    release.health(url, "test.identity.token", speaker=True, legacy_speaker=legacy)
+                self.assertTrue(all(call.args[0].full_url == url + "/health" for call in opener.open.call_args_list))
+
     def test_oidc_uses_only_deployer_access_and_exact_backend_id_token_endpoint(self):
         with tempfile.TemporaryDirectory() as directory:
             controller = release.Release(PROJECT, "panthorium-staging", "asia-southeast1", SPEAKER, BACKEND, directory)

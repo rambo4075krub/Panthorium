@@ -144,7 +144,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise ValueError("Health checks must not redirect")
 
 
-def health(url, token=None, speaker=False, backend=False):
+def health(url, token=None, speaker=False, backend=False, legacy_speaker=False):
     # Caller validates both canonical and tagged origins before any token is used.
     cloud_url(url)
     headers = {"Authorization": "Bearer " + token} if token else {}
@@ -153,7 +153,17 @@ def health(url, token=None, speaker=False, backend=False):
         try:
             endpoints = ("/health", "/api/health") if backend else ("/health",)
             for endpoint in endpoints:
-                with opener.open(urllib.request.Request(url + endpoint, headers=headers), timeout=20) as response:
+                request = urllib.request.Request(url + endpoint, headers=headers)
+                try:
+                    response = opener.open(request, timeout=20)
+                except urllib.error.HTTPError as error:
+                    # The approved production image predates the /health route.
+                    # Only preflight may use its /healthz endpoint, and only on
+                    # an exact 404; candidate images must expose /health.
+                    if not (speaker and legacy_speaker and error.code == 404):
+                        raise
+                    response = opener.open(urllib.request.Request(url + "/healthz", headers=headers), timeout=20)
+                with response:
                     require(response.status == 200, "Health endpoint did not succeed")
                     data = response.read(65537)
                 require(len(data) <= 65536, "Health response exceeded the limit")
@@ -253,7 +263,7 @@ class Release:
         revision = self.gcloud(["run", "revisions", "describe", self.previous_backend, f"--region={self.region}"])
         require(revision.get("metadata", {}).get("name") == self.previous_backend, "Unexpected backend revision")
         self.backend_image = immutable_image(revision.get("status", {}).get("imageDigest", ""))
-        health(self.speaker_url, self.token(), speaker=True)
+        health(self.speaker_url, self.token(), speaker=True, legacy_speaker=True)
         health(self.backend_url, backend=True)
 
     def candidate(self, name, document, image, tag, canonical, previous):
