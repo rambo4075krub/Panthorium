@@ -53,6 +53,12 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Syntax checks
         run: npm run check
+      - name: Free public-source live smoke (advisory)
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          PANTHORIUM_TEST_PUBLIC_WEB_LIVE: '1'
+        run: node test/public-web-live.js
       - name: Real PostgreSQL foundation and organization integration
         run: npm run test:postgres
         env:

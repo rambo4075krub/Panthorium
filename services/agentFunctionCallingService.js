@@ -2,9 +2,11 @@ const windowCatalog = require('../voice-window-catalog');
 const { payloadHash } = require('./actionLedgerRepository');
 const { createHash } = require('crypto');
 const { SOCIAL_TOOL_DEFINITIONS } = require('./socialTools');
+const { PUBLIC_WEB_TOOL_DEFINITIONS } = require('./publicWebTools');
 const { STUDIO_TOOL_DEFINITIONS } = require('./creativeStudioTools');
 
 const TOOL_DEFINITIONS = [
+  ...PUBLIC_WEB_TOOL_DEFINITIONS,
   ...STUDIO_TOOL_DEFINITIONS,
   ...SOCIAL_TOOL_DEFINITIONS,
   ...['minimize', 'maximize', 'fullscreen', 'restore'].map(operation => ({ name: `panthorium_window_${operation}`, toolId: `window.${operation}`, description: `${operation} a Panthorium window. Thai/English requests: ย่อ/minimize, ขยาย/maximize, เต็มจอ/fullscreen, คืนขนาด/restore. Use desktop-browser for the installed Panthorium Browser app; active-window for the current window.`, properties: { appId: { type: 'STRING', description: 'Window id, desktop-browser (native app), or active-window (current window).' } }, required: ['appId'], windowOperation: operation })),
