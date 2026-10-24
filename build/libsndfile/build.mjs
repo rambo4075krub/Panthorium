@@ -96,6 +96,9 @@ const libraryPath = `/usr/lib/${multiarch}/libsndfile.so.1.0.37`;
 fs.mkdirSync(path.dirname(root + libraryPath), { recursive: true });
 fs.copyFileSync(library, root + libraryPath);
 fs.symlinkSync('libsndfile.so.1.0.37', path.join(path.dirname(root + libraryPath), 'libsndfile.so.1'));
+// SoundFile's documented fallback uses this name when ldconfig/gcc are absent.
+// Keep the alias within this package and point only at the verified ABI library.
+if (noble) fs.symlinkSync('libsndfile.so.1', path.join(path.dirname(root + libraryPath), 'libsndfile.so'));
 const share = path.join(root, 'usr/local/share/panthorium'); fs.mkdirSync(share, { recursive: true });
 const manifest = { ...lock, sourceLockSha256: digest(sourceLockBytes), architecture, library: { path: libraryPath, sha256: digest(fs.readFileSync(library)) }, linkedLibraries: linked, tests: ['UBSan MAT4 invalid/valid', 'UBSan IMA read/close', 'upstream CTest suite', 'release MAT4 invalid/valid', 'release IMA read/close'] };
 fs.writeFileSync(path.join(share, 'libsndfile-source.json'), JSON.stringify(manifest, null, 2) + '\n');

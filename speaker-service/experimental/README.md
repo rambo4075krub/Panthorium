@@ -30,6 +30,9 @@ The complete service uses Python 3.12, the same pinned CPU model dependencies,
 the original hash-verified libsndfile sources/backports, and Ubuntu's patched
 zlib package. Every vendor file remains unchanged. The libsndfile package keeps
 its custom source identity, version, copyright, and ownership records. The final
+SBOM also adds libsndfile's unchanged upstream version and CPE alongside its
+package record, so the distro change cannot hide upstream parser advisories. The
+native artifact is bound to the inspected image and its actual ELF hash. The final
 service additionally records every file, link, and mode and checks them with a
 read-only root inspector. No administration shell or package manager is shipped.
 

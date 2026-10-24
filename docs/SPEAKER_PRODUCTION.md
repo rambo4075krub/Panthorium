@@ -75,6 +75,18 @@ replace real owner/impostor voice calibration or prove biometric accuracy.
 
 ## Local verification
 
+With an already authenticated Google Cloud SDK, inspect the selected services
+without changing them or printing secret values:
+
+```sh
+python scripts/check-cloud-readiness.py --project PROJECT --region asia-southeast1 --backend-service BACKEND --speaker-service SPEAKER
+```
+
+The checker also supports Windows with the SDK's `gcloud.cmd` on `PATH`. It
+resolves that launcher only after validating the exact read-only command. Passing
+these scoped checks does not approve a release or establish deployment-identity
+permissions; inherited/resource IAM and release-image verification remain separate.
+
 ```sh
 python3 -m unittest discover -s speaker-service -p 'test_production_deployment.py' -v
 ```

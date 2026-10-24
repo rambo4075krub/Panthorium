@@ -67,7 +67,11 @@ if not HOST:
     for flag in lock["configure"]:
         assert flag in config_flags, f"Missing configure flag: {flag}"
     package_records = [email.parser.Parser().parsestr(part) for part in Path("/var/lib/dpkg/status").read_text().strip().split("\n\n")]
-    package_versions = {item["Package"]: item["Version"] for item in package_records if item["Status"] == "install ok installed"}
+    # Chisel retains upstream control records, which do not contain dpkg's
+    # installed-state field. Their package/file membership is independently
+    # verified against the unmodified Chisel manifest in the candidate job.
+    package_versions = {item["Package"]: item["Version"] for item in package_records
+                        if item["Status"] == "install ok installed" or (NOBLE and item["Status"] is None)}
     packages = set(package_versions)
     assert "libsndfile1" in packages, "Required SoundFile native dependency must be inventoried"
     forbidden = {"ffmpeg", "libcjson1", "librist4", "libxml2", "libtiff6", "libx11-6", "libxi6", "libxrender1", "libasound2t64", "libpulse0"}

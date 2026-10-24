@@ -45,6 +45,29 @@ def fixtures():
 
 
 class CloudReadinessTests(unittest.TestCase):
+    def test_windows_launcher_is_resolved_after_allowlist_validation(self):
+        calls = []
+        def runner(command, **options):
+            calls.append((command, options))
+            return SimpleNamespace(returncode=0, stdout='{"etag":"test"}', stderr="")
+        reader = cloud.CloudReader(PROJECT, "asia-southeast1", BACKEND, SPEAKER, runner=runner)
+        executable = r"C:\Program Files\Google Cloud SDK\bin\gcloud.cmd"
+        with patch.object(cloud.os, "name", "nt"), patch.object(cloud.shutil, "which", return_value=executable) as resolve:
+            self.assertEqual(reader.read("project_policy"), {"etag": "test"})
+            self.assertEqual(calls[0][0], (executable, *reader.commands["project_policy"][1:]))
+            self.assertFalse(calls[0][1]["shell"])
+            resolve.assert_called_once_with("gcloud.cmd")
+            with self.assertRaisesRegex(ValueError, "allowlist"):
+                reader.execute(("gcloud", "run", "deploy", SPEAKER))
+            self.assertEqual(len(calls), 1)
+            resolve.assert_called_once_with("gcloud.cmd")
+
+    def test_missing_windows_launcher_is_unverified(self):
+        reader = cloud.CloudReader(PROJECT, "asia-southeast1", BACKEND, SPEAKER)
+        with patch.object(cloud.os, "name", "nt"), patch.object(cloud.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(cloud.ReadFailure, "gcloud_unavailable"):
+                reader.read("project_policy")
+
     def reader(self, responses=None, failures=None):
         responses = fixtures() if responses is None else responses
         failures = {} if failures is None else failures

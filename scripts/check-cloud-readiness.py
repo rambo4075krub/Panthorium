@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from types import MappingProxyType
@@ -68,7 +69,16 @@ class CloudReader:
             "CLOUDSDK_CORE_VERBOSITY": "error",
         })
         try:
-            result = self.runner(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            # CreateProcess does not apply PowerShell's command resolution or
+            # PATHEXT to a bare 'gcloud'. Resolve the installed Windows launcher
+            # only after the entire logical query passed the exact allowlist.
+            invocation = command
+            if os.name == "nt":
+                executable = shutil.which("gcloud.cmd")
+                if not executable:
+                    raise FileNotFoundError("gcloud.cmd")
+                invocation = (executable, *command[1:])
+            result = self.runner(invocation, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE, text=True, timeout=30, check=False,
                                  env=environment, shell=False)
         except FileNotFoundError:

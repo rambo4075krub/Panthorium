@@ -93,7 +93,10 @@ def prepare(root, control):
 
 def verify(root):
     root = Path(root).resolve()
-    manifest = json.loads((root / MANIFEST).read_text())
+    manifest_path = root / MANIFEST
+    manifest_mode = manifest_path.lstat().st_mode
+    require(stat.S_ISREG(manifest_mode) and stat.S_IMODE(manifest_mode) == 0o644, "invalid_inventory_file")
+    manifest = json.loads(manifest_path.read_text())
     require(manifest["schemaVersion"] == 1, "unknown_inventory_schema")
     require(inventory(root) == manifest["files"], "service_files_changed")
     for name in ("sh", "bash", "mount", "nsenter", "infocmp", "perl", "getfacl", "setfacl", "chacl"):

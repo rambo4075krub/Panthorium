@@ -51,6 +51,11 @@ class ServiceInventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "privileged_file"):
             service.verify(self.root)
 
+    def test_privileged_inventory_mode(self):
+        os.chmod(self.manifest, 0o4755)
+        with self.assertRaisesRegex(RuntimeError, "invalid_inventory_file"):
+            service.verify(self.root)
+
 
 if __name__ == "__main__":
     unittest.main()
