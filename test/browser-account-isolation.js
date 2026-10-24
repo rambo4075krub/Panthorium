@@ -1,0 +1,22 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{JSDOM}=require('jsdom');
+(async()=>{
+const dom=new JSDOM('<body><div id="sm-apps"></div></body>',{url:'https://panthorium.net/',runScripts:'outside-only'}),w=dom.window;
+w.requestAnimationFrame=fn=>fn();w.OS={state:{user:{id:'account-A',roles:['user'],permissions:['chat']}},config:{}};
+const external={id:'external-facebook',external:true,externalUrl:'https://www.facebook.com/',windowId:'external-facebook',selector:'.window[data-id="external-facebook"]',label:'Facebook',permission:'chat'};
+w.PanthoriumWindowCatalog={apps:[external,{id:'browser',permission:'chat'}],allowed:()=>true};
+w.panthoriumDesktop={isElectron:true,setBrowserAccount:async id=>({ok:true,partitions:Object.fromEntries(['browser','external'].map(kind=>[kind,'persist:panthorium-'+kind+'-v2-'+crypto.createHash('sha256').update(id).digest('hex')]))})};
+w.createWindow=(id,title,content)=>{const root=w.document.createElement('section');root.className='window';root.dataset.id=id;root.innerHTML=content;w.document.body.append(root);};
+w.closeWindow=id=>w.document.querySelector(`.window[data-id="${id}"]`)?.remove();
+for(const file of ['external-apps-ui.js','browser-ui.js'])w.eval(fs.readFileSync(path.join(__dirname,'..',file),'utf8'));
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+assert(w.PanthoriumExternalApps.open('external-facebook'));assert(w.PanthoriumBrowser.open());await flush();
+const first=w.document.querySelector('[data-external-webview]'),firstBrowser=w.document.querySelector('[data-browser-view]');
+assert(first);assert(firstBrowser);const partitionA=first.getAttribute('partition');
+w.dispatchEvent(new w.Event('panthorium:auth-changed'));await flush();assert.equal(w.document.querySelector('[data-external-webview]'),first);
+w.OS.state.user={id:'account-B',roles:['user'],permissions:['chat']};w.dispatchEvent(new w.Event('panthorium:auth-changed'));assert(!first.isConnected);assert(!firstBrowser.isConnected);
+w.PanthoriumExternalApps.open('external-facebook');w.PanthoriumBrowser.open();await flush();
+assert.notEqual(w.document.querySelector('[data-external-webview]').getAttribute('partition'),partitionA);
+w.OS.state.user=null;w.dispatchEvent(new w.Event('panthorium:auth-changed'));assert.equal(w.document.querySelector('webview'),null);
+w.close();console.log('Browser account isolation: both browser surfaces teardown on A -> B -> logout, same-account refresh preserves view');
+})().catch(error=>{console.error(error);process.exitCode=1;});

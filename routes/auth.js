@@ -8,6 +8,8 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
   const router = express.Router();
   const limiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false });
   const otpLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false });
+  const guestLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 120, standardHeaders: true, legacyHeaders: false });
+  router.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
   const auth = requireAuth(authService);
   const adminOnly = (req, res, next) => {
     if (!req.user?.roles?.includes("administrator")) return res.status(403).json({ ok: false, error: "forbidden" });
@@ -38,16 +40,15 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
     else res.cookie("pt_session", "1", { ...cookieOptions, maxAge: undefined });
   };
 
-  router.post("/guest", async (req, res, next) => {
+  router.post("/guest", guestLimiter, async (req, res, next) => {
     try {
       const deviceKey = String(req.body?.deviceKey || "");
       const hash = /^[0-9a-f]{64}$/i.test(deviceKey) ? crypto.createHash("sha256").update(deviceKey.toLowerCase()).digest("hex") : null;
       const recognizedOwner = hash && biometricRepository ? await biometricRepository.findGuestOwnerByDeviceKeyHash(hash) : null;
-      const requestedId = String(req.body?.guestSessionId || "");
-      const requestedOwner = `guest:${requestedId.toLowerCase()}`;
-      const protectedOwner = !recognizedOwner && biometricRepository && await biometricRepository.isDeviceBoundGuestOwner(requestedOwner);
-      const session = authService.guest({ ...requestMeta(req), guestSessionId: recognizedOwner ? recognizedOwner.slice(6) : protectedOwner ? null : requestedId });
-      res.json({ ok: true, accessToken: session.accessToken, user: session.principal, deviceRecognized: Boolean(recognizedOwner) });
+      const proof = authService.verifyGuestResume(req.cookies?.pt_guest);
+      const session = authService.guest({ ...requestMeta(req), verifiedGuestId: recognizedOwner ? recognizedOwner.slice(6) : proof?.id, expiresAt: recognizedOwner ? undefined : proof?.expiresAt });
+      res.cookie('pt_guest', session.resumeToken, { ...cookieOptions, maxAge: Math.max(0, session.expiresAt - Date.now()) });
+      res.json({ ok: true, accessToken: session.accessToken, user: session.principal, guestExpiresAt: session.expiresAt, deviceRecognized: Boolean(recognizedOwner) });
     } catch (error) { next(error); }
   });
 
@@ -251,6 +252,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
       await authService.revoke(req.cookies?.pt_refresh);
       res.clearCookie("pt_refresh", clearSessionCookieOptions);
       res.clearCookie("pt_session", clearSessionCookieOptions);
+      res.clearCookie("pt_guest", clearSessionCookieOptions);
       res.json({ ok: true });
     } catch (error) { next(error); }
   });

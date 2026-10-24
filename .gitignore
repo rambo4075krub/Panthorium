@@ -5,3 +5,7 @@ data/*
 logs/
 .DS_Store
 gha-creds-*.json
+
+# Python runtime/test bytecode is generated locally.
+__pycache__/
+*.py[cod]

@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const mainRequire = require('node:module').createRequire(require('node:path').join(__dirname, '../electron/main.cjs'));
 const { JSDOM } = require('jsdom');
 const catalog = require('../voice-window-catalog');
 const { ToolRegistry } = require('../services/toolRegistry');
@@ -52,7 +53,7 @@ const read = name => fs.readFileSync(name,'utf8');
   const handlers=new Map(),timers=[];let min=false,max=false,full=false,closed=false;
   const win={isDestroyed:()=>false,isMinimized:()=>min,isMaximized:()=>max,isFullScreen:()=>full,setFullScreen:value=>{full=value;},unmaximize:()=>{max=false;},minimize:()=>{min=true;},restore:()=>{min=false;},maximize:()=>{max=true;},show(){},focus(){},close(){closed=true;}};
   const electron={app:{getPath:()=>'/tmp',setPath(){},whenReady:()=>({then(){}}),on(){}},BrowserWindow:{fromWebContents:()=>win},ipcMain:{handle:(name,fn)=>handlers.set(name,fn)}};
-  const context=vm.createContext({require:name=>name==='electron'?electron:name==='../package.json'?{}:require(name),process:{env:{}},URL,Buffer,console,setTimeout:(fn)=>{timers.push(fn);},setInterval(){}});
+  const context=vm.createContext({require:name=>name==='electron'?electron:name==='../package.json'?{}:mainRequire(name),process:{env:{}},URL,Buffer,console,setTimeout:(fn)=>{timers.push(fn);},setInterval(){}});
   vm.runInContext(read('electron/main.cjs'),context);vm.runInContext('installVoiceBridge()',context);
   const control=handlers.get('panthorium:window-control');const event={sender:{},senderFrame:{url:'https://panthorium-backend-staging-124818950958.asia-southeast1.run.app/'}};
   for(const action of ['minimize','restore','maximize','fullscreen','restore','open']) assert((await control(event,action)).ok,action);

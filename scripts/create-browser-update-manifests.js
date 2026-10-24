@@ -3,6 +3,12 @@ const fs=require('fs');
 const path=require('path');
 const crypto=require('crypto');
 const metadata=require('../package.json');
+const {signManifest}=require('../electron/update-signature.cjs');
+const updateTrust=require('../electron/update-trust.json');
+const signingKey=process.env.PANTHORIUM_UPDATE_SIGNING_PRIVATE_KEY;
+const signingKeyId=process.env.PANTHORIUM_UPDATE_SIGNING_KEY_ID;
+// Validate provisioning before writing any release metadata.
+signManifest({probe:true},signingKey,signingKeyId,updateTrust);
 const directory=path.resolve(process.argv[2]||'dist');
 const releaseBase='https://github.com/rambo4075krub/Panthorium/releases/download/staging/';
 
@@ -59,7 +65,7 @@ for(const edition of ['admin','user']){
   }
   if(!manifest.assets.windows)throw new Error('missing Windows '+edition+' installer');
   const out=path.join(directory,'Panthorium-Browser-'+edition+'-update.json');
-  fs.writeFileSync(out,JSON.stringify(manifest,null,2)+'\n');
+  fs.writeFileSync(out,JSON.stringify(signManifest(manifest,signingKey,signingKeyId,updateTrust),null,2)+'\n');
   console.log('wrote',path.basename(out),'platforms',Object.keys(manifest.assets).sort().join(','));
 }
 console.log('Panthorium update manifests created for version',metadata.version);

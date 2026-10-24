@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "name": "libsndfile",
+  "version": "1.2.2",
+  "license": "LGPL-2.1-or-later",
+  "debianSourceVersion": "1.2.2-2+deb13u1",
+  "debianPackageVersion": "1.2.2-2+deb13u1+panthorium1",
+  "debianPackageName": "libsndfile1",
+  "archiveRoot": "libsndfile-1.2.2",
+  "sourceDescriptor": {
+    "url": "https://deb.debian.org/debian/pool/main/libs/libsndfile/libsndfile_1.2.2-2+deb13u1.dsc",
+    "sha256": "17e76a64e2dc4d53955cb0729d505ac2d77fab7f139f796d08b858becd88e572"
+  },
+  "archives": [
+    {
+      "url": "https://deb.debian.org/debian/pool/main/libs/libsndfile/libsndfile_1.2.2.orig.tar.gz",
+      "file": "libsndfile_1.2.2.orig.tar.gz",
+      "sha256": "ffe12ef8add3eaca876f04087734e6e8e029350082f3251f565fa9da55b52121"
+    },
+    {
+      "url": "https://deb.debian.org/debian/pool/main/libs/libsndfile/libsndfile_1.2.2-2+deb13u1.debian.tar.xz",
+      "file": "libsndfile_1.2.2-2+deb13u1.debian.tar.xz",
+      "sha256": "2549d7a791ca177213918fbcf9c9e39c5734a2e18782341b44d71e4b39365296"
+    }
+  ],
+  "debianPatchSeries": [
+    "fix_typos.patch",
+    "CVE-2022-33065/CVE-2022-33065-1.patch",
+    "CVE-2022-33065/CVE-2022-33065-2.patch",
+    "CVE-2022-33065/CVE-2022-33065-3.patch",
+    "CVE-2022-33065/CVE-2022-33065-4.patch",
+    "CVE-2022-33065/CVE-2022-33065-5.patch",
+    "CVE-2022-33065/CVE-2022-33065-6.patch",
+    "CVE-2022-33065/CVE-2022-33065-7.patch",
+    "CVE-2022-33065/CVE-2022-33065-8.patch",
+    "CVE-2022-33065/CVE-2022-33065-9.patch",
+    "CVE-2022-33065/CVE-2022-33065-10.patch",
+    "CVE-2022-33065/CVE-2022-33065-11.patch",
+    "CVE-2022-33065/CVE-2022-33065-12.patch",
+    "CVE-2022-33065/CVE-2022-33065-13.patch",
+    "0039-src-ogg-better-error-checking-for-vorbis.-Fixes-1035.patch",
+    "CVE-2025-56226.patch"
+  ],
+  "patches": [
+    {
+      "cve": "CVE-2026-37555",
+      "commit": "cdadf9a65fdc1f28da9d235eb443d5f5e57010d2",
+      "url": "https://github.com/libsndfile/libsndfile/commit/cdadf9a65fdc1f28da9d235eb443d5f5e57010d2.patch",
+      "file": "patches/ima-overflow.patch",
+      "sha256": "19828cfdc17b80f13c8d1fcc8b828ea5c328071d91171c6d80f94a2e1499b719"
+    },
+    {
+      "cve": "CVE-2026-88372",
+      "commit": "c45de8ed8b1d98ca532e94a00dbfb0e49eb9bb8a",
+      "url": "https://github.com/libsndfile/libsndfile/commit/c45de8ed8b1d98ca532e94a00dbfb0e49eb9bb8a.patch",
+      "file": "patches/mat4-dimensions.patch",
+      "sha256": "cea82691d3edeb19f0794ba80393198433a1e3633eedb62fae89f43a59188b91"
+    }
+  ],
+  "patchedFiles": [
+    {
+      "path": "src/ima_adpcm.c",
+      "sha256": "1fc2125643a1631f2e42598bd7930980273c81738886ced7f2e309614901903e"
+    },
+    {
+      "path": "src/mat4.c",
+      "sha256": "59a4327f63401d17e65d0e4d883a428e9f3043fc2b346a092b7abc0749d7aeec"
+    }
+  ],
+  "configure": [
+    "-DBUILD_SHARED_LIBS=ON",
+    "-DBUILD_PROGRAMS=OFF",
+    "-DBUILD_EXAMPLES=OFF",
+    "-DBUILD_TESTING=OFF",
+    "-DENABLE_EXTERNAL_LIBS=OFF",
+    "-DENABLE_MPEG=OFF",
+    "-DENABLE_EXPERIMENTAL=OFF",
+    "-DENABLE_CPACK=OFF"
+  ]
+}

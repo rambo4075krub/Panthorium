@@ -67,6 +67,19 @@ async function suite(repo) {
     write(owner, "group-review", { recordId: closed.id, userId: member.sub, accept: false }),
   ]);
   assert.equal(results.filter(x => x.status === "fulfilled").length, 1, "only one concurrent review applies");
+  // Independent PostgreSQL transactions can acquire the lock in either order.
+  // The stored membership must match the single successful decision.
+  const accepted = results[0].status === "fulfilled";
+  const rejected = results.find(x => x.status === "rejected");
+  assert.match(rejected.reason.message, /social_group_request_not_pending/);
+  assert.equal((await read(member, closed.id)).record.membership, accepted ? "member" : "declined");
+  assert.equal(results[accepted ? 0 : 1].value.groupRequest.status, accepted ? "accepted" : "declined");
+  if (!accepted) {
+    await assert.rejects(read(member, message.id), /social_not_found/);
+    await assert.rejects(service.media({ user: member, recordId: message.id, fileId }), /social_not_found/);
+    await write(member, "group-join", { recordId: closed.id });
+    await write(owner, "group-review", { recordId: closed.id, userId: member.sub, accept: true });
+  }
   assert.equal((await read(member, closed.id)).record.membership, "member");
   assert.equal((await read(member, closed.id)).items[0].text, "เฉพาะสมาชิก");
   assert.equal((await read(member, closed.id)).posts[0].text, "โพสต์เดิม");

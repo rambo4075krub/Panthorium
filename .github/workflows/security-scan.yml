@@ -1,0 +1,114 @@
+name: Dependency and container security
+
+on:
+  workflow_call:
+    inputs:
+      scan-container:
+        description: Build and scan the deployable container
+        type: boolean
+        default: true
+      image-context:
+        description: Image selector (. for backend or speaker-service)
+        type: string
+        default: .
+      image-target:
+        description: Reserved; release verification requires the complete default image
+        type: string
+        default: ''
+      audit-node:
+        description: Audit the backend, browser and Android lockfiles
+        type: boolean
+        default: true
+
+# This workflow never receives cloud credentials or signing secrets.
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    if: inputs.audit-node
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: [., mobile/android]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.22.1
+      - name: Audit locked runtime and build dependencies
+        working-directory: ${{ matrix.directory }}
+        run: npm audit --audit-level=high --ignore-scripts
+
+  container:
+    if: inputs.scan-container
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.22.1
+      - name: Initialize scan evidence directory
+        run: echo "EVIDENCE_DIR=$RUNNER_TEMP/panthorium-container-evidence" >> "$GITHUB_ENV"
+      - name: Validate image context and cache scope
+        id: build-context
+        env:
+          BUILD_CONTEXT: ${{ inputs.image-context }}
+          BUILD_TARGET: ${{ inputs.image-target }}
+        run: |
+          set -euo pipefail
+          [[ "$BUILD_CONTEXT" == "." || "$BUILD_CONTEXT" == "speaker-service" ]]
+          [[ -z "$BUILD_TARGET" ]] # Partial runtime stages cannot satisfy a release gate.
+          image_name=backend
+          dockerfile=Dockerfile
+          source_lock=build/media/ffmpeg-source.lock.json
+          if [ "$BUILD_CONTEXT" == "speaker-service" ]; then
+            image_name=speaker
+            dockerfile=speaker-service/Dockerfile
+            source_lock=build/media/ffmpeg-speaker-source.lock.json
+          fi
+          echo "cache-scope=panthorium-security-$image_name-${BUILD_TARGET:-runtime}" >> "$GITHUB_OUTPUT"
+          echo "dockerfile=$dockerfile" >> "$GITHUB_OUTPUT"
+          echo "source-lock=$source_lock" >> "$GITHUB_OUTPUT"
+          profile=$image_name
+          if [ "$BUILD_CONTEXT" == "speaker-service" ]; then profile=speaker-candidate-noble; fi
+          echo "profile=$profile" >> "$GITHUB_OUTPUT"
+      - name: Set up isolated image builder
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Build image for security inspection
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
+        with:
+          context: .
+          file: ${{ steps.build-context.outputs.dockerfile }}
+          target: ${{ inputs.image-target }}
+          tags: panthorium-security:${{ github.sha }}
+          pull: true
+          load: true
+          push: false
+          cache-from: type=gha,scope=${{ steps.build-context.outputs.cache-scope }}
+          # Cache export is optional; all build, smoke and security failures remain fatal.
+          cache-to: type=gha,mode=max,scope=${{ steps.build-context.outputs.cache-scope }},ignore-error=true,timeout=3m
+      - name: Verify the exact built image
+        uses: ./.github/actions/verify-deployment-image
+        with:
+          image: panthorium-security:${{ github.sha }}
+          profile: ${{ steps.build-context.outputs.profile }}
+          evidence-dir: ${{ env.EVIDENCE_DIR }}
+          require-model: ${{ inputs.image-context == 'speaker-service' && inputs.image-target == '' && 'true' || 'false' }}
+      - name: Preserve image inventories, provenance, smoke results and vulnerability report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: container-security-${{ inputs.image-context == '.' && 'backend' || 'speaker' }}-${{ inputs.image-target || 'runtime' }}
+          path: ${{ env.EVIDENCE_DIR }}/
+          if-no-files-found: ignore
+          retention-days: 14

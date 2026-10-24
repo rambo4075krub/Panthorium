@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "name": "ffmpeg",
+  "version": "9.0.2",
+  "license": "LGPL-2.1-or-later",
+  "purl": "pkg:generic/ffmpeg@9.0.2",
+  "cpe": "cpe:2.3:a:ffmpeg:ffmpeg:9.0.2:*:*:*:*:*:*:*",
+  "source": {
+    "url": "https://github.com/FFmpeg/FFmpeg/archive/946fcce07b6dcd0331c8cc609192aeff5e1924f8.tar.gz",
+    "sha256": "0aa2b1de2a5698b20a23e93d539a9a8e82ca0117496c5bdf05d198805f42bb3b",
+    "gitCommit": "946fcce07b6dcd0331c8cc609192aeff5e1924f8",
+    "releaseTag": "n9.0.2",
+    "signedTagObject": "ce8f11b9fac4cd7ccfb41ca7c01bc17f5cda8cc3",
+    "archiveRoot": "FFmpeg-946fcce07b6dcd0331c8cc609192aeff5e1924f8"
+  },
+  "patches": [
+    {
+      "cve": "CVE-2026-107696",
+      "commit": "f5d4fd186c68913240c4f6e9cda98443e1518b34",
+      "url": "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/f5d4fd186c68913240c4f6e9cda98443e1518b34.patch",
+      "file": "patches/ffmpeg-CVE-2026-107696.patch",
+      "sha256": "3988f39c86d88554272d0a89745a8ab6cdaff4360c162a6a4e80db5c855b2971",
+      "patchedFiles": [
+        {
+          "path": "libavformat/rtsp.c",
+          "sha256": "9e181b7cea30a6fbbd9c1bfa4f63ec2c9834001f9804edffb6d2b01984747145"
+        }
+      ]
+    }
+  ],
+  "configure": [
+    "--prefix=/opt/ffmpeg",
+    "--disable-autodetect",
+    "--disable-network",
+    "--disable-devices",
+    "--disable-avdevice",
+    "--disable-hwaccels",
+    "--disable-ffplay",
+    "--disable-doc",
+    "--disable-debug",
+    "--disable-shared",
+    "--enable-static",
+    "--disable-protocols",
+    "--enable-protocol=pipe",
+    "--disable-demuxer=rtsp,hls,dash,sdp",
+    "--disable-encoders",
+    "--enable-encoder=pcm_f32le",
+    "--disable-muxers",
+    "--enable-muxer=pcm_f32le",
+    "--disable-filters",
+    "--enable-filter=aresample,aformat,anull,atrim,asetpts",
+    "--enable-pic",
+    "--extra-cflags=-fstack-protector-strong -D_FORTIFY_SOURCE=2",
+    "--extra-ldflags=-Wl,-z,relro,-z,now"
+  ]
+}

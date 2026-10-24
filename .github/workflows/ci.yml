@@ -12,7 +12,18 @@ on:
       - staging
       - codex/browser-cloud-foundation-20261015
 
+permissions:
+  contents: read
+
 jobs:
+  security:
+    uses: ./.github/workflows/security-scan.yml
+  speaker-security:
+    # Exercise the complete runtime, including verified model bytes and offline inference.
+    uses: ./.github/workflows/security-scan.yml
+    with:
+      image-context: speaker-service
+      audit-node: false
   test:
     runs-on: ubuntu-latest
     services:
@@ -31,22 +42,40 @@ jobs:
           --health-retries 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          node-version: 24
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.22.1
       - name: Install dependencies
-        run: npm install
+        run: npm ci --ignore-scripts
       - name: Syntax checks
         run: npm run check
+      - name: Real PostgreSQL foundation and organization integration
+        run: npm run test:postgres
+        env:
+          TEST_DATABASE_URL: postgres://postgres:panthorium_ci_only@127.0.0.1:5432/panthorium_ci
       - name: Install media test dependency
-        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
-      - name: Run tests
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            # The runner's Azure mirror can trickle data below the step deadline.
+            # Prefer Ubuntu's signed archive over HTTPS; keep normal APT verification.
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            fi
+            sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq
+            sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version
+      - name: Run tests including security regressions
         run: npm test
       - name: Social media real browser audio and video
         run: |
-          npx playwright install --with-deps --only-shell chromium
+          npx --no-install playwright install --with-deps --only-shell chromium
           node test/social-rtc-browser.js
           node test/social-messages-browser.js
           node test/social-groups-browser.js
@@ -55,10 +84,6 @@ jobs:
           node test/social-redesign-browser.js
           node test/social-watch-browser.js
           node test/office-suite-browser.js
-      - name: Real PostgreSQL foundation and organization integration
-        run: npm run test:postgres
-        env:
-          TEST_DATABASE_URL: postgres://postgres:panthorium_ci_only@127.0.0.1:5432/panthorium_ci
       - name: Speaker service contract tests
         run: |
           python3 -m pip install --user numpy==1.26.4

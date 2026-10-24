@@ -85,6 +85,7 @@ const { BiometricIdentityService } = require("./services/biometricIdentityServic
 const { createEmailOtpRepository } = require("./services/emailOtpRepository");
 const { EmailOtpService } = require("./services/emailOtpService");
 const { requestContext } = require("./middleware/requestContext");
+const { createPublicAssetMiddleware } = require("./middleware/publicAssets");
 const { createGeminiLiveWebSocketGateway } = require("./services/geminiLiveWebSocket");
 const { ActionLedgerRepository } = require('./services/actionLedgerRepository');
 const { VoiceSessionRepository } = require('./services/voiceSessionRepository');
@@ -133,7 +134,7 @@ const integrations = new IntegrationService({ repository: integrationRepository,
 const sentinel = new Sentinel({ conversations, audit });
 const billingService = new (require('./services/omiseBillingService').OmiseBillingService)();
 const accountAdminService = new (require("./services/accountAdminService").AccountAdminService)(authService,billingService.pool);
-if (billingService.pool) { authService.validateAccountPrincipal = principal => accountAdminService.validate(principal); authService.accountPolicy = id => accountAdminService.policy(id); authService.invalidateAccountSessions = (id,actor) => accountAdminService.invalidate(id,actor); }
+if (billingService.pool) { authService.validateAccountPrincipal = principal => accountAdminService.validate(principal); authService.accountPolicy = id => accountAdminService.policy(id); authService.invalidateAccountSessions = (id,actor,options) => accountAdminService.invalidate(id,actor,options); }
 const developerStudioService = new (require("./services/developerStudioService").DeveloperStudioService)({pool:billingService.pool,providers:sentinel.providers});
 // AI and file quotas apply independently of the payment checkout mode.
 const liveEntitlements = billingService.pool ? billingService.entitlements() : null;
@@ -454,7 +455,7 @@ app.use(require('./routes/publicPrivacy').createPublicPrivacyRouter());
 app.get("/admin", serveShell);
 app.get("/admin/", serveShell);
 app.get("/admin.html", serveShell);
-app.use(express.static(frontendRoot, { index: false, etag: true, maxAge: config.isProduction ? "1h" : 0 }));
+app.use(createPublicAssetMiddleware(frontendRoot, { maxAge: config.isProduction ? "1h" : 0 }));
 app.use((req, res) => res.status(404).json({ ok: false, error: "not_found" }));
 app.use((err, req, res, next) => {
   console.error("[HTTP]", err.message);

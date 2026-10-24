@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "os": "linux",
+  "architecture": "amd64",
+  "distro": "debian",
+  "distroVersion": "13.7",
+  "packageVersion": "14.2.0-19",
+  "reviewedAt": "2026-10-23",
+  "references": {
+    "CVE-2026-95619": "https://github.com/gcc-mirror/gcc/commit/200183d4ab5d57575f3dfebc6af3baf649910b9e",
+    "CVE-2026-102010": "https://github.com/gcc-mirror/gcc/commit/aaa8351f4d2e636f9680a1f0a8ebc2f0a60611e6"
+  },
+  "packages": {
+    "gcc-14-base": {
+      "purl": "pkg:deb/debian/gcc-14-base@14.2.0-19?arch=amd64&distro=debian-13.7&upstream=gcc-14",
+      "fileManifestSha256": "06d0299b2031b2dfd545e24d95d627cc8bb0c2bfe99a5939915b7e74e0a97814",
+      "fileCount": 4
+    },
+    "libgcc-s1": {
+      "purl": "pkg:deb/debian/libgcc-s1@14.2.0-19?arch=amd64&distro=debian-13.7&upstream=gcc-14",
+      "fileManifestSha256": "053827f423e1c8734419505f204ed6f9a441f24dd38bd51992272ebf030e7cce",
+      "fileCount": 2,
+      "binary": {
+        "name": "libgcc_s.so.1",
+        "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+        "sha256": "30c61ab012a4241bed033725a09b61f5fdd3bb7df95ee852d0b096520524c7af",
+        "md5": "268b71c619a71f247cf39ddf4245fc32"
+      }
+    },
+    "libgomp1": {
+      "purl": "pkg:deb/debian/libgomp1@14.2.0-19?arch=amd64&distro=debian-13.7&upstream=gcc-14",
+      "fileManifestSha256": "73d7652d8befe0fad76a3e732c17512d59042c8621fffaac902c0f8e349106dc",
+      "fileCount": 1,
+      "binary": {
+        "name": "libgomp.so.1.0.0",
+        "path": "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0",
+        "sha256": "6456b504ac347bd50c419667440b691f6966ad8aff5309d2f06c977fe2f9debe",
+        "md5": "d5124d4fdfb0f27f5e285db87e43a5da"
+      }
+    },
+    "libstdc++6": {
+      "purl": "pkg:deb/debian/libstdc%2B%2B6@14.2.0-19?arch=amd64&distro=debian-13.7&upstream=gcc-14",
+      "fileManifestSha256": "b69ebd44e4a4029da90e4e61d24612a80d46c400a14bfb4fb742430852023bea",
+      "fileCount": 6,
+      "binary": {
+        "name": "libstdc++.so.6.0.33",
+        "path": "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33",
+        "sha256": "972bb2a18b71140dab0240f8a1f68ab3fb1d56bcd4c4f824a91b70888faf5a00",
+        "md5": "93db446b515784c044f70c8d710d30ae"
+      }
+    }
+  }
+}

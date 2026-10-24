@@ -6,6 +6,13 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: panthorium-production
+  cancel-in-progress: false
+
 env:
   MAILBOX_SEND_ENABLED: ${{ vars.MAILBOX_SEND_ENABLED || '1' }}
   MAILBOX_WEBHOOK_SECRET: ${{ vars.RESEND_WEBHOOK_SECRET_NAME || '' }}
@@ -22,13 +29,26 @@ env:
   PANTHORIUM_STAGING_FILES_BUCKET: ${{ vars.PANTHORIUM_STAGING_FILES_BUCKET || '' }}
 
 jobs:
+  security:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/security-scan.yml
+  speaker:
+    if: github.ref == 'refs/heads/main'
+    needs: security
+    uses: ./.github/workflows/deploy-speaker-production.yml
+    secrets: inherit
   deploy:
     name: Build & Deploy to Cloud Run
+    if: github.ref == 'refs/heads/main'
+    needs: [security, speaker]
     runs-on: ubuntu-latest
+    timeout-minutes: 75
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Require isolated Cloud Storage buckets
         run: |
@@ -48,27 +68,32 @@ jobs:
           fi
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24
+          node-version: 24.22.1
 
       - name: Install media test dependency
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
 
       - name: Install & Run Tests
         run: |
-          npm install
+          set -euo pipefail
+          npm ci --ignore-scripts
           npm run check
+          # npm test includes test:security; PostgreSQL tests run in CI separately.
           npm test
 
+      # Retained for compatibility until a restricted production WIF provider
+      # and deploy service account are provisioned. Rotate the existing key
+      # and scope its IAM permissions; do not grant it to pull-request jobs.
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Setup Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Verify production Voice Identity prerequisites
         env:
@@ -86,24 +111,37 @@ jobs:
             --description="Panthorium Docker Repository" \
             --quiet || true
 
-      - name: Build & Push via Cloud Build
-        run: |
-          gcloud auth list --filter=status:ACTIVE --format="value(account)"
-          IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
-          gcloud builds submit \
-            --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --config=cloudbuild.yaml \
-            --substitutions="_IMAGE_URI=$IMAGE_URI" \
-            --region=${{ env.REGION }} \
-            --quiet .
-
-      - name: Deploy candidate without production traffic
-        id: deploy_candidate
+      - name: Build the production image once and capture its immutable output
+        id: built-image
         env:
           PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         run: |
           set -euo pipefail
           IMAGE_URI="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$SERVICE_NAME:$GITHUB_SHA"
+          gcloud builds submit \
+            --project="$PROJECT_ID" \
+            --config=cloudbuild.yaml \
+            --substitutions="_IMAGE_URI=$IMAGE_URI" \
+            --region="$REGION" \
+            --quiet --suppress-logs --format=json . > "$RUNNER_TEMP/deployment-build.json"
+          node scripts/resolve-build-image.js resolve "$RUNNER_TEMP/deployment-build.json" "$IMAGE_URI" >> "$GITHUB_OUTPUT"
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Verify the exact image that production will run
+        uses: ./.github/actions/verify-deployment-image
+        with:
+          image: ${{ steps.built-image.outputs.image }}
+          profile: backend
+          evidence-dir: ${{ runner.temp }}/deployment-image-evidence
+          pull: 'true'
+
+      - name: Deploy candidate without production traffic
+        id: deploy_candidate
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          IMAGE_URI: ${{ steps.built-image.outputs.image }}
+        run: |
+          set -euo pipefail
           [[ "$MAILBOX_SEND_ENABLED" == "0" || "$MAILBOX_SEND_ENABLED" == "1" ]]
           ENV_VARS="^@^NODE_ENV=production@HOST=0.0.0.0@PANTHORIUM_MCP_ENABLED=1@PANTHORIUM_MCP_BASE_URL=https://panthorium.net@MAILBOX_SEND_ENABLED=$MAILBOX_SEND_ENABLED@TRUST_PROXY=1@PANTHORIUM_AI_MODE=gemini-live-only@AI_PRIORITY=gemini-live@SENTINEL_AUTO_TRAINING=0@SENTINEL_AUTO_CAPTURE=0@SENTINEL_ACTIVE_LEARNING_NEVER=0@SENTINEL_TEACHER_PROVIDERS=vertex@SENTINEL_EVALUATOR_PROVIDERS=vertex_eval_1,vertex_eval_2@SENTINEL_MIN_EVALUATORS=2@SENTINEL_VERTEX_EVALUATOR_MODELS=$VERTEX_EVALUATOR_MODELS@SENTINEL_VERTEX_EVALUATOR_LOCATION=$VERTEX_EVALUATOR_LOCATION@SENTINEL_VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID@SENTINEL_VERTEX_LOCATION=$VERTEX_LOCATION@SENTINEL_VERTEX_ENDPOINT_ID=$VERTEX_ENDPOINT_ID@SENTINEL_VERTEX_MODEL=$VERTEX_MODEL@PANTHORIUM_FILES_BUCKET=$PANTHORIUM_PRODUCTION_FILES_BUCKET@BIOMETRIC_GATE_ENABLED=1@BIOMETRIC_VOICE_THRESHOLD=0.21@GEMINI_LIVE_ENABLED=1@GEMINI_LIVE_LOCATION=us-central1@SENTINEL_RELEASE_GATE_AUTO_GATE=0@SENTINEL_RELEASE_GATE_AUTO_BENCHMARK=0@SENTINEL_RELEASE_GATE_AUTO_IMPROVE=0@PANTHORIUM_GOVERNANCE_MODE=off@PANTHORIUM_SENTINEL_CONTROL_MODE=off"
           SERVICE_JSON="$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format=json)"
@@ -178,3 +216,15 @@ jobs:
           fi
           echo "Production traffic routed to $CANDIDATE_REVISION after candidate checks passed." >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Preserve exact deployment image security evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deployment-image-security-backend-production
+          path: |
+            ${{ runner.temp }}/deployment-build.json
+            ${{ runner.temp }}/deployment-image-evidence/*.json
+            ${{ runner.temp }}/deployment-image-evidence/*.log
+            ${{ runner.temp }}/deployment-image-evidence/*.yaml
+          if-no-files-found: ignore
+          retention-days: 14

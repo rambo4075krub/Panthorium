@@ -38,17 +38,19 @@ jobs:
       PANTHORIUM_MOBILE_START_URL: ${{ inputs.production_url }}
     steps:
       - name: Check out reviewed main revision
-        uses: actions/checkout@v4
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          node-version: 24
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: mobile/android/package-lock.json
       - name: Check release inputs and preparation policy
         run: node mobile/android/test/release-preparation.cjs
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: "21"
@@ -86,7 +88,7 @@ jobs:
           PANTHORIUM_UPLOAD_KEY_PASSWORD: ${{ secrets.PANTHORIUM_UPLOAD_KEY_PASSWORD }}
         run: python3 mobile/android/scripts/signing_preflight.py
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         with:
           packages: "platform-tools platforms;android-36 build-tools;36.0.0"
       - name: Install locked Capacitor dependencies
@@ -110,7 +112,7 @@ jobs:
       - name: Verify signature, packaged configuration and merged manifest
         run: python3 mobile/android/scripts/verify-bundle.py
       - name: Upload reviewable AAB and verification receipt
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: panthorium-android-release-${{ inputs.version_code }}
           path: |

@@ -1,0 +1,18 @@
+'use strict';
+const assert=require('node:assert/strict'),crypto=require('node:crypto');
+const {signManifest,verifyManifest}=require('../electron/update-signature.cjs');
+const {privateKey,publicKey}=crypto.generateKeyPairSync('ed25519');
+const trust={version:1,keys:{test:publicKey.export({type:'spki',format:'pem'})}};
+const manifest={version:'1.0.1',edition:'user',assets:{windows:{url:'https://github.com/example/test',sha256:'a'.repeat(64)}}};
+const signed=signManifest(manifest,privateKey.export({type:'pkcs8',format:'pem'}),'test',trust);
+assert(verifyManifest(signed,trust).ok);
+assert(verifyManifest({signature:signed.signature,assets:manifest.assets,edition:'user',version:'1.0.1'},trust).ok);
+assert.equal(verifyManifest({...signed,version:'999.0.0'},trust).error,'update_signature_invalid');
+assert.equal(verifyManifest({...signed,assets:{windows:{...manifest.assets.windows,sha256:'b'.repeat(64)}}},trust).error,'update_signature_invalid');
+assert.equal(verifyManifest(manifest,trust).error,'update_signature_missing');
+assert.equal(verifyManifest(signed,{version:1,keys:{}}).error,'update_signature_unconfigured');
+assert.equal(verifyManifest({...signed,signature:{...signed.signature,keyId:'__proto__'}},trust).error,'update_signature_unknown_key');
+assert.equal(verifyManifest({...signed,signature:{...signed.signature,value:'corrupt'}},trust).error,'update_signature_missing');
+assert.throws(()=>signManifest(manifest,null,'test',trust));
+const other=crypto.generateKeyPairSync('ed25519');assert.throws(()=>signManifest(manifest,other.privateKey.export({type:'pkcs8',format:'pem'}),'test',trust));
+console.log('Browser update authentication: signed manifest, canonical ordering, tampering, unknown keys, missing provisioning and signer mismatch passed');

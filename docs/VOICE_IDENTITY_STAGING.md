@@ -62,6 +62,74 @@ service account `roles/run.invoker` on the private speaker service, and updates
 already be attached to `BIOMETRIC_TEMPLATE_KEY`. The workflow uses the staging
 project and does not alter production.
 
+### Speaker isolation rollout
+
+The decoder/model container must use a dedicated
+`speaker-runtime@panthorium-staging.iam.gserviceaccount.com` account, configured
+in the staging GitHub environment as `STAGING_SPEAKER_RUNTIME_SA`. Create this
+account before rollout, without project roles, secret access, bucket access,
+database access, or service-account impersonation grants. The model is already
+verified and bundled in the image; inference needs no Google API permissions.
+Keep `STAGING_RUNTIME_SA` as the backend identity and grant only that backend
+`roles/run.invoker` on the speaker service. The deployer needs permission to act
+as the dedicated speaker account and read project IAM policy for verification.
+Deployment intentionally fails if this setup is missing, the identities are
+shared, the speaker has project-level roles, or public IAM bindings are present.
+Resource-level and inherited IAM grants must also be reviewed by the project
+owner; the repository cannot prove that external configuration is absent.
+
+An operator already authorized in Cloud Shell can inspect the existing deployment
+without changing it. From this reviewed checkout, run:
+
+```sh
+python3 scripts/check-cloud-readiness.py \
+  --project panthorium-staging --region asia-southeast1 \
+  --backend-service panthorium-backend-staging \
+  --speaker-service panthorium-speaker-staging
+```
+
+The checker only executes allowlisted `describe`/`get-iam-policy` commands.
+It projects environment **names**, keeps IAM bindings in memory, and prints a
+sanitized JSON report; it does not read Secret Manager values, save raw cloud
+snapshots, grant permissions, or deploy. Missing resources, denied access,
+missing `gcloud`, and malformed responses are reported as **unverified**, never
+as proof of safety. Observed configuration failures are **blocked**. Exit code
+0 means these limited checks passed; 1 means blocked/unverified. It checks that
+current traffic uses the inspected ready revision, the speaker has its dedicated
+identity, project/service IAM meets the stated policy, and the backend has the
+two required Voice Identity environment names. Names alone do not prove their
+values or that the configured URL points at this speaker. Inherited/resource IAM,
+secret access, live invocation, image scans, and voice calibration still require
+their separate checks. The report always leaves `releaseApproved` false.
+
+The deployment explicitly enables Cloud Run's invoker IAM check and verifies
+the candidate identity and service IAM policy before routing traffic to the
+exact ready candidate revision or changing the backend URL. Failed verification
+leaves the prior revision's traffic in place.
+It leaves ingress routing unchanged: switching to internal-only ingress without
+the corresponding VPC path would break current backend requests. No shared
+bearer secret is introduced as a substitute for signed Google identity tokens.
+
+All container deployments resolve the image digest from the successful Cloud
+Build result, verify that exact image, and deploy the same digest. This second
+check covers the actual Cloud Build output as well as the earlier credential-free
+CI build. It includes a complete inventory, strict High/Critical vulnerability
+gate, native library provenance, and offline model inference for the full speaker
+image. Changed native binaries or unresolved findings stop deployment; they do
+not silently inherit earlier scan results. The additional checks increase build
+time. Reports and build identities are retained as workflow artifacts for 14 days.
+
+The application also limits itself to two active HTTP workers, ten seconds to
+read complete headers/body, and strict JSON request framing. Excess work gets
+HTTP 503 so a caller can retry. Decoding runs in a fresh child with a twelve-second
+wall deadline, eight-second CPU budget, 512 MiB address-space limit, one decoder
+thread, and strict stdout/stderr byte caps. Native crashes or quota failures do
+not create an unbounded worker or retained recording. Valid supported formats
+remain covered by real decoder tests; malformed or unusually expensive files
+can now be rejected. Roll back application changes using the prior tested image
+revision if necessary, while retaining the dedicated identity and private IAM
+policy. Do not restore a shared privileged account to work around a failure.
+
 ## Voice reliability staging work
 
 The speaker endpoint returns an approximate active-speech duration after edge-silence trimming. It is a diagnostic signal; the existing ECAPA embedding and configured 0.21 match threshold decide the match. Short-utterance calibration remains disabled until measured owner and impostor samples support it.

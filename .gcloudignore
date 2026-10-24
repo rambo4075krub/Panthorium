@@ -3,3 +3,17 @@
 .gitignore
 #!include:.gitignore
 gha-creds-*.json
+# Expanded speaker builds use the repository root; never upload local credentials.
+.env
+.env.*
+!.env.example
+.npmrc
+.pypirc
+.config/gcloud
+application_default_credentials.json
+credentials.json
+*.token
+*.pem
+*.key
+*.p12
+*.pfx

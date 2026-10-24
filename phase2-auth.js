@@ -53,20 +53,6 @@
     try { const key = window.localStorage.getItem(VOICE_DEVICE_KEY); return /^[0-9a-f]{64}$/i.test(key || '') ? key : null; }
     catch (_) { return null; }
   }
-  function stableGuestSessionId() {
-    const pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    try {
-      const raw = window.sessionStorage.getItem(GUEST_SESSION_KEY);
-      let entry;
-      try { entry = JSON.parse(raw); } catch (_) { entry = { id: raw, createdAt: Date.now() }; }
-      if (!entry || !pattern.test(entry.id || '') || !Number.isFinite(entry.createdAt) ||
-          (!rememberedDeviceKey() && Date.now() - entry.createdAt >= GUEST_LIFETIME_MS)) {
-        entry = { id: window.crypto?.randomUUID?.(), createdAt: Date.now() };
-      }
-      if (pattern.test(entry.id || '')) window.sessionStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(entry));
-      return pattern.test(entry.id || '') ? entry.id : undefined;
-    } catch (_) { return undefined; }
-  }
   function rememberVoiceDevice(key) {
     if (!/^[0-9a-f]{64}$/i.test(key || '')) throw new Error('invalid_device_key');
     window.localStorage.setItem(VOICE_DEVICE_KEY, key.toLowerCase());
@@ -84,12 +70,12 @@
   async function guestSession() {
     const base = OS.config.backendUrl.replace(/\/$/, '');
     const deviceKey = rememberedDeviceKey();
-    const res = await fetch(base + '/api/auth/guest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guestSessionId: stableGuestSessionId(), deviceKey }), credentials: 'include' });
+    const res = await fetch(base + '/api/auth/guest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceKey }), credentials: 'include' });
     if (!res.ok) throw new Error('guest_auth_failed'); const data = await res.json();
     if (deviceKey && !data.deviceRecognized) try { window.localStorage.removeItem(VOICE_DEVICE_KEY); } catch (_) {}
     if (data.user?.id?.startsWith('guest:')) {
       const id = data.user.id.slice(6);
-      try { const old = JSON.parse(window.sessionStorage.getItem(GUEST_SESSION_KEY)); window.sessionStorage.setItem(GUEST_SESSION_KEY, JSON.stringify({ id, createdAt: old?.id === id ? old.createdAt : Date.now() })); } catch (_) {}
+      try { window.sessionStorage.setItem(GUEST_SESSION_KEY, JSON.stringify({ id, createdAt: Number.isFinite(data.guestExpiresAt) ? data.guestExpiresAt - GUEST_LIFETIME_MS : Date.now() })); } catch (_) {}
     }
     OS.config.accessToken = data.accessToken || ''; OS.state.user = data.user || null; updateIdentityUI(); closeForbiddenWindows(); notifyAuthChanged(); scheduleGuestExpiry(); return data;
   }
@@ -100,8 +86,8 @@
   }
   async function refreshSession() {
     if (isGuest() && !isAdminEntry()) {
-      // Guests have no refresh cookie. Start a new identity for the next request;
-      // authorizedFetch must discard the old identity's in-flight response.
+      // Resume only with the server-signed cookie or remembered device proof.
+      // authorizedFetch must discard the previous in-flight response.
       await guestSession();
       return false;
     }

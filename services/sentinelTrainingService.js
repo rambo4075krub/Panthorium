@@ -1,4 +1,5 @@
 const { createHash } = require("crypto");
+const { privateTraining, validPublication } = require("./sentinelTrainingPrivacy");
 function cleanText(value, max) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
@@ -192,7 +193,7 @@ class SentinelTrainingService {
       source: cleanText(source, 120) || "human",
       provider: cleanText(provider, 60) || null,
       model: cleanText(model, 120) || null,
-      tags: cleanTags(tags),
+      tags: cleanTags(privateTraining({ source, tags }) ? ["private-training", ...(Array.isArray(tags) ? tags : [])] : tags),
       createdBy: user.sub || "system",
       fingerprint: hash,
     });
@@ -503,11 +504,35 @@ class SentinelTrainingService {
     }
     return { ok: true, example, learning };
   }
+  async globallyShareable(example, visited = new Set(), allowPublication = true) {
+    if (!example || visited.has(example.exampleId)) return false;
+    visited.add(example.exampleId);
+    if (privateTraining(example)) return allowPublication && validPublication(example);
+    // Older recovery rows may predate the private tag. Resolve their source
+    // version rather than laundering conversation data through a new label.
+    const recovery = /^recovery:([0-9a-f-]{36})(?::|$)/i.exec(String(example.source || ''));
+    if (/^recovery:/i.test(String(example.source || '')) && !recovery) return false;
+    if (recovery) {
+      if (!this.learning?.repository?.get || !this.repository.getById) return false;
+      const version = await this.learning.repository.get(recovery[1]);
+      const parent = version?.exampleId && await this.repository.getById(version.exampleId);
+      // Consent for a parent's exact bytes cannot publish an older derivative:
+      // it may still contain material removed during the parent's anonymization.
+      return !!parent && (await this.globallyShareable(parent, visited, false)
+        || allowPublication && validPublication(example));
+    }
+    return true;
+  }
+  async globalExamples(examples) {
+    const allowed = [];
+    for (const example of examples) if (await this.globallyShareable(example)) allowed.push(example);
+    return allowed;
+  }
   async contextFor(query, limit = 3) {
     await this.init();
     const queryTerms = terms(query);
     if (!queryTerms.size) return "";
-    let approved = await this.repository.approved();
+    let approved = await this.globalExamples(await this.repository.approved());
     if (this.learning) {
       const active = await this.learning.repository.list({
           state: "active",
@@ -543,7 +568,7 @@ class SentinelTrainingService {
   }
   async exportJsonl() {
     await this.init();
-    const examples = await this.repository.approved();
+    const examples = await this.globalExamples(await this.repository.approved());
     return examples
       .map((example) =>
         JSON.stringify({
