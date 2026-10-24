@@ -53,6 +53,18 @@ async function main() {
   const saved = await functions.confirm({ user: owner, call: settingsCall, actionId: settingsProposal.actionId, approvalHash: settingsProposal.confirmation.approvalHash });
   assert.equal(saved.output.settings.channels.voice, true); assert.equal(saved.output.settings.askBeforeNotify, false);
   assert.equal(saved.output.settings.channels.inApp, true); assert.equal((await notifications.settings({ user: other })).settings.channels.voice, false);
+  const eventCall = { name: send.name, id: 'event-settings', args: { action: 'settings', patch: { events: { operation_succeeded: false } } } };
+  const eventProposal = await functions.execute({ user: owner, call: eventCall, source: 'gemini-live', requestId: 'event-settings', requireCallId: true });
+  assert.equal(eventProposal.requiresConfirmation, true);
+  assert.equal((await notifications.settings({ user: owner })).settings.events.operation_succeeded, true, 'event switches wait for exact approval');
+  const eventResult = await functions.confirm({ user: owner, call: eventCall, actionId: eventProposal.actionId, approvalHash: eventProposal.confirmation.approvalHash });
+  assert.equal(eventResult.output.settings.events.operation_succeeded, false);
+  assert.equal(eventResult.output.settings.events.operation_failed, true, 'turning success off leaves failures enabled');
+  assert.equal((await notifications.settings({ user: other })).settings.events.operation_succeeded, true);
+  const eventSettings = await functions.execute({ user: owner, call: { name: 'panthorium_notifications_read', args: { action: 'settings' } } });
+  assert(eventSettings.output.eventCatalog.some(entry => entry.id === 'operation_succeeded'));
+  const declaration = functions.declarationsFor(owner, { surface: 'gemini-live' }).find(tool => tool.name === send.name);
+  assert.equal(declaration.parameters.properties.patch.properties.events.properties.operation_succeeded.type, 'BOOLEAN');
   const read = await functions.execute({ user: owner, call: { name: 'panthorium_notifications_read', args: { action: 'list', unreadOnly: true } } });
   assert.equal(read.output.untrusted, true); assert.equal(read.output.items[0].id, noticeId); assert.equal(read.output.items[0].readAt, null);
   assert.equal((await notifications.list({ user: owner })).unreadCount, 1, 'read-aloud/read does not silently mark read');
@@ -64,6 +76,9 @@ async function main() {
     { action: 'settings', patch: { quietHours: { start: '25:00' } } }, { action: 'settings', patch: { quietHours: { timeZone: 'bad/timezone' } } },
     { action: 'settings', patch: JSON.parse('{"__proto__":{"polluted":true}}') },
     { action: 'settings', patch: { categories: { constructor: true } } }, { action: 'settings', patch: {} },
+    { action: 'settings', patch: { events: { operation_succeeded: 'false' } } },
+    { action: 'settings', patch: { events: { invented_event: true } } },
+    { action: 'settings', patch: { events: JSON.parse('{"__proto__":true}') } },
     { action: 'mark_read', ids: [noticeId], all: true }, { action: 'delete', all: true }, { action: 'delete', ids: ['not-real'] }
   ]) {
     const result = await functions.execute({ user: owner, call: { name: send.name, args: bad }, requestId: randomUUID() });

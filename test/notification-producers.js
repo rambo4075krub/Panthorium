@@ -92,6 +92,7 @@ async function socialSuite() {
   const requestId = randomUUID();
   const thread = (await write(a, 'thread', { userId: b.sub }, requestId)).record;
   assert.equal(events.length, 1); assert.equal(events[0].userId, b.sub);
+  assert.equal(events[0].type, 'social.activity.thread-request', 'request uses a switch distinct from incoming messages');
   assert.match(events[0].sourceId, /^notification:[a-f0-9]{64}$/);
   await write(a, 'thread', { userId: b.sub }, requestId); assert.equal(events.length, 1, 'idempotent replay does not emit again');
   assert(await social.notifications.systemNotificationVisible(b.sub, events[0].sourceId));
@@ -100,6 +101,12 @@ async function socialSuite() {
   assert.equal(await social.notifications.systemNotificationVisible(b.sub, events[0].sourceId), false, 'superseded request is hidden');
   const message = (await write(a, 'message', { recordId: thread.id, text: 'PRIVATE-CONTENT' })).record;
   const notice = events.at(-1);
+  assert.equal(notice.type, 'social.activity.message', 'new messages can be enabled independently of Social requests');
+  const call=(await write(a,'call',{recordId:thread.id,video:false})).record;
+  const callNotice=events.at(-1);assert.equal(callNotice.type,'social.activity.call','incoming calls have an independent switch');
+  assert(await social.notifications.systemNotificationVisible(b.sub,callNotice.sourceId));
+  await repo.put({...call,status:'accepted'});
+  assert.equal(await social.notifications.systemNotificationVisible(b.sub,callNotice.sourceId),false,'resolved call no longer exposes stale activity');
   assert(!JSON.stringify(events).includes('PRIVATE-CONTENT')); assert(!JSON.stringify(events).includes('PRIVATE-NAME'));
   assert(await social.notifications.systemNotificationVisible(b.sub, notice.sourceId));
   await write(a, 'delete', { recordId: message.id });

@@ -6,9 +6,11 @@ const iso = value => value instanceof Date ? value.toISOString() : value;
 function failure(code, status = 400) { return Object.assign(new Error(code), { code, status, ...(status < 500 ? { sideEffectNotApplied: true } : {}) }); }
 function mergeSettings(previous, patch) {
   const result = { ...previous, ...patch };
-  for (const key of ['channels', 'categories', 'quietHours']) result[key] = { ...previous[key], ...(patch[key] || {}) };
+  for (const key of ['channels', 'categories', 'events', 'quietHours']) result[key] = { ...previous[key], ...(patch[key] || {}) };
   return clone(result);
 }
+const socialActivity = type => type === 'social.activity' || typeof type === 'string' && type.startsWith('social.activity.');
+const SOCIAL_ACTIVITY_SQL = "(type='social.activity' OR type LIKE 'social.activity.%')";
 const SELECT = 'id,user_id,category,type,title,body,source_id,severity,sensitive,created_at,read_at,deleted_at';
 function item(row) {
   return row ? { id: row.id, userId: row.user_id, category: row.category, type: row.type, title: row.title, body: row.body,
@@ -88,13 +90,13 @@ class NotificationRepository {
   }
   async list(userId, { limit, cursor, unreadOnly = false, cutoff, onlySocial = false, excludeSocial = false }) {
     this.assertReady();
-    if (!this.pool) return [...this.items.values()].filter(n => n.userId === userId && !n.deletedAt && n.createdAt >= cutoff && (!unreadOnly || !n.readAt) && (!onlySocial || n.type === 'social.activity') && (!excludeSocial || n.type !== 'social.activity') &&
+    if (!this.pool) return [...this.items.values()].filter(n => n.userId === userId && !n.deletedAt && n.createdAt >= cutoff && (!unreadOnly || !n.readAt) && (!onlySocial || socialActivity(n.type)) && (!excludeSocial || !socialActivity(n.type)) &&
       (!cursor || n.createdAt < cursor.createdAt || n.createdAt === cursor.createdAt && n.id < cursor.id))
       .sort((a,b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)).slice(0,limit).map(clone);
     const values = [userId,cutoff], where = ['user_id=$1', 'deleted_at IS NULL', 'created_at >= $2'];
     if (unreadOnly) where.push('read_at IS NULL');
-    if (onlySocial) where.push("type='social.activity'");
-    if (excludeSocial) where.push("type<>'social.activity'");
+    if (onlySocial) where.push(SOCIAL_ACTIVITY_SQL);
+    if (excludeSocial) where.push('NOT '+SOCIAL_ACTIVITY_SQL);
     if (cursor) { values.push(cursor.createdAt,cursor.id); where.push('(created_at < $3 OR (created_at = $3 AND id < $4))'); }
     values.push(limit);
     const result = await this.pool.query(`SELECT ${SELECT} FROM panthorium_notifications WHERE ${where.join(' AND ')} ORDER BY created_at DESC,id DESC LIMIT $${values.length}`, values);
@@ -102,8 +104,8 @@ class NotificationRepository {
   }
   async unreadCount(userId, cutoff, excludeSocial = false) {
     this.assertReady();
-    if (!this.pool) return [...this.items.values()].filter(n => n.userId === userId && !n.deletedAt && !n.readAt && n.createdAt >= cutoff && (!excludeSocial || n.type !== 'social.activity')).length;
-    const result = await this.pool.query(`SELECT COUNT(*) AS count FROM panthorium_notifications WHERE user_id=$1 AND deleted_at IS NULL AND read_at IS NULL AND created_at >= $2${excludeSocial ? " AND type<>'social.activity'" : ''}`, [userId,cutoff]);
+    if (!this.pool) return [...this.items.values()].filter(n => n.userId === userId && !n.deletedAt && !n.readAt && n.createdAt >= cutoff && (!excludeSocial || !socialActivity(n.type))).length;
+    const result = await this.pool.query(`SELECT COUNT(*) AS count FROM panthorium_notifications WHERE user_id=$1 AND deleted_at IS NULL AND read_at IS NULL AND created_at >= $2${excludeSocial ? ' AND NOT '+SOCIAL_ACTIVITY_SQL : ''}`, [userId,cutoff]);
     return Number(result.rows[0].count);
   }
   async markRead(userId, ids, all = false) {

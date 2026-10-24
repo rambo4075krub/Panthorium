@@ -164,6 +164,7 @@
     details.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;line-height:1.6';
     const categoryLabels = { system: 'ระบบ', security: 'ความปลอดภัยและบัญชี', operations: 'การดำเนินการ', reminders: 'การเตือนและกำหนดเวลา', calendar: 'ปฏิทิน', files: 'ไฟล์และเอกสาร', social: 'Social Media', billing: 'แพ็กเกจและชำระเงิน', ai: 'Sentinel AI' };
     const channelLabels = { inApp: 'ข้อความแจ้งเตือนในแอป', browser: 'การแจ้งเตือนของเบราว์เซอร์', sound: 'เสียงสัญญาณ', voice: 'อ่านการแจ้งเตือนด้วยเสียง' };
+    const eventLabels = Object.fromEntries((window.PanthoriumNotificationCatalog?.entries || []).map(entry => [entry.id, entry.label]));
     const flagLabels = { enabled: 'การแจ้งเตือนทั้งหมด', privacyPreview: 'แสดงเนื้อหาในตัวอย่างแจ้งเตือน', askBeforeNotify: 'ให้ Sentinel ถามว่าจะส่งการแจ้งเตือนเพิ่มไหม' };
     const add = (name, value) => details.append(make('p', name + ': ' + value));
     const onOff = value => value === true ? 'เปิด' : 'ปิด';
@@ -172,8 +173,8 @@
     if (args.action === 'settings') {
       for (const [key, value] of Object.entries(args.patch || {})) {
         if (Object.hasOwn(flagLabels, key)) add(flagLabels[key], onOff(value));
-        else if (key === 'channels' || key === 'categories') {
-          const names = key === 'channels' ? channelLabels : categoryLabels;
+        else if (key === 'channels' || key === 'categories' || key === 'events') {
+          const names = key === 'channels' ? channelLabels : key === 'events' ? eventLabels : categoryLabels;
           for (const [field, enabled] of Object.entries(value)) add(names[field] || field, onOff(enabled));
         } else if (key === 'quietHours') {
           const names = { enabled: 'ช่วงเวลาเงียบ', start: 'เริ่มเงียบ', end: 'สิ้นสุดเวลาเงียบ', timeZone: 'เขตเวลา' };

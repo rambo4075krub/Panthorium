@@ -5,6 +5,7 @@ const { Pool } = require('pg');
 const { NotificationRepository } = require('../services/notificationRepository');
 const { NotificationService } = require('../services/notificationService');
 const { ActionLedgerRepository } = require('../services/actionLedgerRepository');
+const eventCatalog = require('../notification-event-catalog');
 
 (async()=>{
   const connectionString=process.env.TEST_DATABASE_URL;
@@ -25,6 +26,8 @@ const { ActionLedgerRepository } = require('../services/actionLedgerRepository')
       service.updateSettings({user,patch:{channels:{sound:true}}}),
       service.updateSettings({user,patch:{categories:{social:false}}}),
       service.updateSettings({user,patch:{categories:{operations:false}}}),
+      service.updateSettings({user,patch:{events:{operation_succeeded:false}}}),
+      service.updateSettings({user,patch:{events:{operation_started:false}}}),
       service.updateSettings({user,patch:{quietHours:{start:'20:00'}}}),
       service.updateSettings({user,patch:{quietHours:{end:'08:00'}}}),
       service.updateSettings({user,patch:{privacyPreview:true}})
@@ -32,9 +35,16 @@ const { ActionLedgerRepository } = require('../services/actionLedgerRepository')
     const settings=(await service.settings({user})).settings;
     assert.equal(settings.channels.voice,true);assert.equal(settings.channels.sound,true);assert.equal(settings.channels.inApp,true);
     assert.equal(settings.categories.social,false);assert.equal(settings.categories.operations,false);assert.equal(settings.categories.security,true);
+    assert.equal(settings.events.operation_succeeded,false);assert.equal(settings.events.operation_started,false);assert.equal(settings.events.operation_failed,true,'concurrent per-event patches preserve siblings');
+    assert.deepEqual((await service.settings({user:other})).settings.events,eventCatalog.defaults);
     assert.equal(settings.quietHours.start,'20:00');assert.equal(settings.quietHours.end,'08:00');assert.equal(settings.privacyPreview,true);
     const reopened=new NotificationService({repository:new NotificationRepository({pool,required:true})});await reopened.init();
     assert.deepEqual((await reopened.settings({user})).settings,settings,'settings survive restart');
+    const legacySettings={enabled:true,channels:{inApp:true,browser:false,sound:false,voice:false},categories:{operations:false}};
+    await pool.query('INSERT INTO panthorium_notification_settings(user_id,settings) VALUES($1,$2::jsonb)',['legacy-owner',JSON.stringify(legacySettings)]);
+    const migrated=(await reopened.settings({user:{...user,sub:'legacy-owner'}})).settings;
+    assert.deepEqual(migrated.events,eventCatalog.defaults,'pre-event preference rows migrate without a write or destructive reset');
+    assert.equal(migrated.categories.operations,false);
     assert.equal((await reopened.list({user})).items[0].body,'Persistent notification');
     const id=results[0].notification.id;
     assert.equal((await reopened.list({user:other})).items.length,0);
@@ -53,6 +63,20 @@ const { ActionLedgerRepository } = require('../services/actionLedgerRepository')
     do{const page=await reopened.list({user,limit:2,before});ids.push(...page.items.map(n=>n.id));before=page.nextCursor||undefined;}while(before);
     assert.equal(ids.length,7);assert.equal(new Set(ids).size,7);assert.equal((await reopened.list({user})).unreadCount,7);
     await reopened.markRead({user,all:true});assert.equal((await service.list({user})).unreadCount,0);
+    const legacySocial=await reopened.publish({userId:user.sub,category:'social',type:'social.activity',title:'Legacy Social',sourceId:'legacy-notice'});
+    const messageSocial=await reopened.publish({userId:user.sub,category:'social',type:'social.activity.message',title:'New message',sourceId:'message-notice'});
+    const requestedSocial=(await reopened.send({user,category:'social',title:'My own request'})).notification;
+    reopened.socialVisibility=async()=>true;
+    assert((await reopened.list({user})).items.some(n=>n.id===messageSocial.id&&n.eventKey==='social_message'));
+    reopened.socialVisibility=async()=>{throw Error('source outage');};
+    const hidden=await reopened.list({user});
+    assert(!hidden.items.some(n=>[legacySocial.id,messageSocial.id].includes(n.id)),'SQL outage filtering includes legacy and subtype records');
+    assert(hidden.items.some(n=>n.id===requestedSocial.id),'self-requested Social-category notices are not source activity');
+    assert.equal(hidden.unreadCount,1);
+    reopened.socialVisibility=async()=>false;
+    const revoked=await reopened.list({user});assert(!revoked.items.some(n=>[legacySocial.id,messageSocial.id].includes(n.id)));
+    reopened.socialVisibility=async()=>true;
+    assert(!(await reopened.list({user})).items.some(n=>n.id===messageSocial.id),'revoked subtype stays dismissed');
     let clock=Date.now();
     const ledger=new ActionLedgerRepository({pool,required:true,now:()=>clock,staleAfterMs:1000});await ledger.init();
     const ownerAction=await ledger.propose({userId:user.sub,requestId:'owner-stale',toolId:'calendar.write',args:{title:'private appointment'},requiresConfirmation:true});
