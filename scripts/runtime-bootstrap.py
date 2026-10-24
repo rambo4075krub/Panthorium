@@ -97,48 +97,91 @@ def private(url):
 
 
 def main():
+    # Resume only the two known no-traffic candidates from the prior attempt.
+    known = {"panthorium-backend": "panthorium-backend-00152-jez", "panthorium-speaker": "panthorium-speaker-00002-buv"}
     with tempfile.TemporaryDirectory() as directory:
         release = Bootstrap(P, "panthorium-staging", "asia-southeast1", "panthorium-speaker", "panthorium-backend", directory)
         before = {name: release.service(name) for name in EXPECTED}
-        for name, document in before.items():
-            r.require(r.serving_revision(document, name) == EXPECTED[name], "Production revision changed since approved review")
-            r.require(document["spec"]["template"]["spec"]["serviceAccountName"] == OLD, "Unexpected existing identity")
+        images = {}
+        for name, current in before.items():
+            r.require(current["status"]["latestCreatedRevisionName"] == known[name]
+                      and current["status"]["latestReadyRevisionName"] == known[name]
+                      and r.traffic(current) == {EXPECTED[name]: 100}, "Concurrent production change")
+            original = release.gcloud(["run", "revisions", "describe", EXPECTED[name], "--region=asia-southeast1"])
+            images[name] = r.immutable_image(original["status"]["imageDigest"])
+            expected = copy.deepcopy(original["spec"])
+            actual = copy.deepcopy(current["spec"]["template"]["spec"])
+            expected["serviceAccountName"] = B if name == release.backend else S
+            expected["containers"][0]["image"] = images[name]
+            for spec in (expected, actual):
+                r.require(len(spec["containers"]) == 1, "Unexpected container count")
+                spec["containers"][0].pop("name", None)  # Generated single-container revision name.
+                if "env" in spec["containers"][0]:
+                    spec["containers"][0]["env"].sort(key=lambda item: item["name"])
+            r.require(expected == actual, "Candidate changed original runtime configuration")
         release.backend_identity = B
         release.speaker_url = before[release.speaker]["status"]["url"]
         release.backend_url = before[release.backend]["status"]["url"]
-        policy = release.policy()
-        callers = {m for binding in policy.get("bindings", []) if binding["role"] == "roles/run.invoker" for m in binding["members"]}
-        r.require(callers == {"serviceAccount:" + OLD, "serviceAccount:" + B}, "Unexpected speaker callers before migration")
         v.verify_identity(P, S, B, release.gcloud(["iam", "service-accounts", "describe", S]),
                           release.gcloud(["projects", "get-iam-policy", P]))
+        callers = {m for binding in release.policy().get("bindings", []) if binding["role"] == "roles/run.invoker" for m in binding["members"]}
+        r.require(callers == {"serviceAccount:" + OLD, "serviceAccount:" + B}, "Unexpected Speaker callers")
         r.speaker_inference(release.speaker_url, release.token())
         r.health(release.backend_url, backend=True)
         private(release.speaker_url)
-        print("Existing deployment identity, private access, health and synthetic inference passed", flush=True)
         removed_old = False
         candidates = {}
         try:
-            for name, identity in ((release.backend, B), (release.speaker, S)):
-                current = release.service(name)
-                r.require(current["spec"] == before[name]["spec"] and r.serving_revision(current, name) == EXPECTED[name],
-                          "Concurrent service change before candidate")
-                revision = release.gcloud(["run", "revisions", "describe", EXPECTED[name], "--region=asia-southeast1"])
-                image = r.immutable_image(revision["status"]["imageDigest"])
-                tag = "iam-pr274"
-                document = release.gcloud(["run", "services", "update", name, "--region=asia-southeast1",
-                                           "--image=" + image, "--service-account=" + identity, "--no-traffic", "--tag=" + tag])
-                current, revision, url = release.candidate(name, document, image, tag, before[name]["status"]["url"], EXPECTED[name])
-                unchanged(before[name], current, identity, image)
-                candidates[name] = (revision, url, identity, image)
-                if name == release.backend:
-                    r.health(url, backend=True)
-                else:
-                    r.speaker_inference(url, release.token())
-                    private(url)
-                print("No-traffic candidate verified: " + name + " " + revision, flush=True)
-            for name, (revision, url, identity, image) in candidates.items():
+            # Reattach the tested backend candidate without changing its template.
+            document = release.gcloud(["run", "services", "update-traffic", release.backend, "--region=asia-southeast1",
+                                       "--update-tags=iam-pr274=" + known[release.backend]])
+            current, revision, url = release.candidate(release.backend, document, images[release.backend], "iam-pr274",
+                                                       release.backend_url, EXPECTED[release.backend])
+            unchanged(before[release.backend], current, B, images[release.backend])
+            r.health(url, backend=True)
+            candidates[release.backend] = (revision, url)
+            print("Reused verified backend candidate: " + revision, flush=True)
+            # The CLI injected maxScale=10 into the console-created Speaker's
+            # revision. Preserve its original absence through an exact service
+            # replacement; the existing service-level cap remains unchanged.
+            current = release.service(release.speaker)
+            r.require(current["spec"] == before[release.speaker]["spec"], "Speaker changed before exact replacement")
+            metadata = current["spec"]["template"]["metadata"]
+            r.require(metadata["annotations"].get("autoscaling.knative.dev/maxScale") == "10", "Unexpected injected scaling value")
+            expected_speaker = copy.deepcopy(before[release.speaker])
+            expected_speaker["spec"]["template"]["metadata"]["annotations"].pop("autoscaling.knative.dev/maxScale")
+            desired = copy.deepcopy(current)
+            desired.pop("status", None)
+            allowed_metadata = {"name", "namespace", "resourceVersion", "labels", "annotations"}
+            desired["metadata"] = {k: val for k, val in desired["metadata"].items() if k in allowed_metadata}
+            for key in ("run.googleapis.com/operation-id", "run.googleapis.com/urls", "run.googleapis.com/ingress-status",
+                        "serving.knative.dev/creator", "serving.knative.dev/lastModifier"):
+                desired["metadata"].get("annotations", {}).pop(key, None)
+            desired["spec"]["template"]["metadata"]["annotations"].pop("autoscaling.knative.dev/maxScale")
+            candidate_name = "panthorium-speaker-iam274-v2"
+            desired["spec"]["template"]["metadata"]["name"] = candidate_name
+            desired["spec"]["traffic"] = [entry for entry in desired["spec"]["traffic"] if entry.get("tag") != "iam-pr274"]
+            r.require(not any(entry.get("latestRevision") for entry in desired["spec"]["traffic"]), "Traffic must reference explicit revisions")
+            desired["spec"]["traffic"].append({"revisionName": candidate_name, "tag": "iam-pr274", "percent": 0})
+            manifest = Path(directory) / "speaker-identity.json"
+            manifest.write_text(json.dumps(desired), encoding="utf8")
+            manifest.chmod(0o600)
+            document = release.gcloud(["run", "services", "replace", str(manifest), "--region=asia-southeast1"])
+            manifest.unlink()
+            current, revision, url = release.candidate(release.speaker, document, images[release.speaker], "iam-pr274",
+                                                       release.speaker_url, EXPECTED[release.speaker])
+            unchanged(expected_speaker, current, S, images[release.speaker])
+            for key, value in before[release.speaker]["metadata"].get("annotations", {}).items():
+                if key not in {"run.googleapis.com/operation-id", "run.googleapis.com/urls", "run.googleapis.com/ingress-status",
+                               "serving.knative.dev/creator", "serving.knative.dev/lastModifier",
+                               "run.googleapis.com/client-name", "run.googleapis.com/client-version"}:
+                    r.require(current["metadata"].get("annotations", {}).get(key) == value, "Unrelated service metadata changed")
+            r.speaker_inference(url, release.token())
+            private(url)
+            candidates[release.speaker] = (revision, url)
+            print("Speaker candidate preserves original scaling and passed inference: " + revision, flush=True)
+            for name, (revision, url) in candidates.items():
                 release.promotion_guard(name, revision, EXPECTED[name])
-                unchanged(before[name], release.service(name), identity, image)
             for name in (release.backend, release.speaker):
                 revision = candidates[name][0]
                 release.promotion_guard(name, revision, EXPECTED[name])
@@ -156,7 +199,8 @@ def main():
             print(json.dumps({"status": "verified", "backendRevision": candidates[release.backend][0],
                               "speakerRevision": candidates[release.speaker][0], "backendIdentity": B,
                               "speakerIdentity": S, "speakerProjectRoles": 0, "speakerCallers": [B]}), flush=True)
-        except Exception:
+        except Exception as error:
+            print("Bootstrap stopped: " + (str(error) if isinstance(error, ValueError) else type(error).__name__), flush=True)
             if removed_old:
                 release.gcloud(["run", "services", "add-iam-policy-binding", release.speaker, "--region=asia-southeast1",
                                 "--member=serviceAccount:" + OLD, "--role=roles/run.invoker"])
