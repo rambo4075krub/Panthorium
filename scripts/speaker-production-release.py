@@ -208,9 +208,30 @@ class Release:
         return self.command([sys.executable, str(VERIFY), mode, first, second, *paths])
 
     def token(self):
-        token = self.gcloud(["auth", "print-identity-token", f"--impersonate-service-account={self.backend_identity}",
-                             f"--audiences={self.speaker_url}", "--include-email"], json_output=False)
-        require(len(token) <= 16384 and re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", token) is not None,
+        require(re.fullmatch(r"[a-z][a-z0-9-]*@" + re.escape(self.project) + r"\.iam\.gserviceaccount\.com",
+                             self.backend_identity) is not None, "Unexpected token target identity")
+        cloud_url(self.speaker_url)
+        # gcloud's impersonation path also requests a backend OAuth access token.
+        # Call generateIdToken directly so the deployer only needs the narrower
+        # iam.serviceAccounts.getOpenIdToken permission on the backend account.
+        access = self.gcloud(["auth", "print-access-token"], json_output=False)
+        require(re.fullmatch(r"[A-Za-z0-9._~+/=-]{1,16384}", access) is not None, "Deployment access token was not returned")
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print("::add-mask::" + access, flush=True)
+        endpoint = "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/" + urllib.parse.quote(self.backend_identity, safe="") + ":generateIdToken"
+        request = urllib.request.Request(endpoint, method="POST",
+                                         headers={"Authorization": "Bearer " + access, "Content-Type": "application/json"},
+                                         data=json.dumps({"audience": self.speaker_url, "includeEmail": True}).encode())
+        try:
+            with urllib.request.build_opener(NoRedirect()).open(request, timeout=20) as response:
+                require(response.status == 200, "OIDC token request failed")
+                data = response.read(32769)
+            require(len(data) <= 32768, "OIDC token response exceeded the limit")
+            result = json.loads(data)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            raise ValueError("Scoped backend OIDC token request failed") from None
+        token = result.get("token") if isinstance(result, dict) else None
+        require(isinstance(token, str) and len(token) <= 16384 and re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", token) is not None,
                 "Identity token was not returned")
         if os.environ.get("GITHUB_ACTIONS") == "true":
             print("::add-mask::" + token, flush=True)

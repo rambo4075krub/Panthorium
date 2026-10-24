@@ -22,8 +22,6 @@ jobs:
       - name: Verify existing deployment principal
         run: |
           test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)')" = "github-deployer@project-0f6aa7d0-6055-420f-842.iam.gserviceaccount.com"
-      - name: Diagnose scoped OIDC issuance without exposing the token
-        run: gcloud auth print-identity-token --impersonate-service-account=backend-runtime@project-0f6aa7d0-6055-420f-842.iam.gserviceaccount.com --audiences=https://panthorium-speaker-64ltez5ocq-as.a.run.app --include-email --project=project-0f6aa7d0-6055-420f-842 > /dev/null
       - name: Read-only readiness checks using the existing deployer
         run: |
           python3 - <<'PY'
