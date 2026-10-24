@@ -105,24 +105,34 @@ class FakeRelease(release.Release):
 
 
 class ProductionDeploymentTests(unittest.TestCase):
-    def test_legacy_health_route_is_only_available_in_preflight_on_exact_404(self):
+    def test_synthetic_preflight_requires_real_finite_nonzero_embedding(self):
         url = service(SPEAKER)["status"]["url"]
         response = MagicMock()
         response.__enter__.return_value = response
         response.status = 200
-        response.read.return_value = b'{"ok":true,"modelReady":true}'
+        response.read.return_value = json.dumps({"signalPresent": True, "embedding": [0.1] * 192}).encode()
         opener = MagicMock()
-        missing = release.urllib.error.HTTPError(url + "/health", 404, "Not Found", {}, None)
-        opener.open.side_effect = [missing, response]
-        with patch.object(release.urllib.request, "build_opener", return_value=opener), patch.object(release.time, "sleep"):
-            release.health(url, "test.identity.token", speaker=True, legacy_speaker=True)
-            self.assertEqual([call.args[0].full_url for call in opener.open.call_args_list], [url + "/health", url + "/healthz"])
-            for legacy, code in ((False, 404), (True, 403)):
-                opener.reset_mock()
-                opener.open.side_effect = release.urllib.error.HTTPError(url + "/health", code, "Denied", {}, None)
+        opener.open.return_value = response
+        with patch.object(release.urllib.request, "build_opener", return_value=opener) as build:
+            release.speaker_inference(url, "test.identity.token")
+            request = opener.open.call_args.args[0]
+            self.assertEqual(request.full_url, url + "/embed")
+            self.assertEqual(request.get_header("Authorization"), "Bearer test.identity.token")
+            self.assertIsInstance(build.call_args.args[0], release.NoRedirect)
+            self.assertEqual(opener.open.call_args.kwargs, {"timeout": 60})
+            data = json.loads(request.data)["audio"].split(",", 1)[1]
+            with release.wave.open(io.BytesIO(release.base64.b64decode(data))) as audio:
+                self.assertEqual((audio.getnchannels(), audio.getframerate(), audio.getnframes()), (1, 16000, 48000))
+            for result in ({}, {"signalPresent": True, "embedding": [0.0] * 192},
+                           {"signalPresent": True, "embedding": [True] * 192},
+                           {"signalPresent": True, "embedding": [float("inf")] * 192},
+                           {"signalPresent": True, "embedding": [0.1] * 191}):
+                response.read.return_value = json.dumps(result).encode()
                 with self.assertRaises(ValueError):
-                    release.health(url, "test.identity.token", speaker=True, legacy_speaker=legacy)
-                self.assertTrue(all(call.args[0].full_url == url + "/health" for call in opener.open.call_args_list))
+                    release.speaker_inference(url, "test.identity.token")
+            response.read.return_value = b"x" * 65537
+            with self.assertRaises(ValueError):
+                release.speaker_inference(url, "test.identity.token")
 
     def test_oidc_uses_only_deployer_access_and_exact_backend_id_token_endpoint(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -205,7 +215,7 @@ class ProductionDeploymentTests(unittest.TestCase):
             release.unchanged_backend(before, changed, BACKEND_IMAGE, url)
 
     def test_rollout_promotes_only_after_full_candidate_checks_without_iam_writes(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(release, "health") as health:
+        with tempfile.TemporaryDirectory() as directory, patch.object(release, "health") as health, patch.object(release, "speaker_inference") as inference:
             controller = FakeRelease(directory)
             output = io.StringIO()
             with redirect_stdout(output):
@@ -220,11 +230,12 @@ class ProductionDeploymentTests(unittest.TestCase):
             self.assertTrue(token_calls)
             for call in token_calls:
                 self.assertEqual(call[2:], [BACKEND_SA, controller.speaker_url])
+            inference.assert_called_once_with(controller.speaker_url, "test.identity.token")
             health.assert_any_call(controller.speaker_url, "test.identity.token", speaker=True)
             self.assertTrue(any("speaker-check-123-1---" in call.args[0] for call in health.call_args_list))
 
     def test_ambiguous_backend_promotion_failure_restores_backend_then_speaker(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(release, "health"):
+        with tempfile.TemporaryDirectory() as directory, patch.object(release, "health"), patch.object(release, "speaker_inference"):
             controller = FakeRelease(directory)
             controller.fail_backend_promotion = True
             with self.assertRaisesRegex(ValueError, "previous production traffic"):
@@ -237,7 +248,7 @@ class ProductionDeploymentTests(unittest.TestCase):
             self.assertEqual(restorations, [BACKEND, SPEAKER])
 
     def test_failed_backend_rollback_keeps_verified_speaker_and_requires_review(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(release, "health"):
+        with tempfile.TemporaryDirectory() as directory, patch.object(release, "health"), patch.object(release, "speaker_inference"):
             controller = FakeRelease(directory)
             controller.fail_backend_promotion = controller.fail_backend_rollback = True
             with self.assertRaisesRegex(ValueError, "operator review"):
@@ -250,7 +261,7 @@ class ProductionDeploymentTests(unittest.TestCase):
         def health(url, *args, **kwargs):
             if "speaker-check-" in url:
                 raise ValueError("Synthetic unhealthy candidate")
-        with tempfile.TemporaryDirectory() as directory, patch.object(release, "health", side_effect=health):
+        with tempfile.TemporaryDirectory() as directory, patch.object(release, "health", side_effect=health), patch.object(release, "speaker_inference"):
             controller = FakeRelease(directory)
             with self.assertRaisesRegex(ValueError, "previous production traffic"):
                 controller.rollout(IMAGE, "123-1")
