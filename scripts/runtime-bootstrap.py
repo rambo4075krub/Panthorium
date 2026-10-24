@@ -133,8 +133,10 @@ def main():
         candidates = {}
         try:
             # Reattach the tested backend candidate without changing its template.
-            document = release.gcloud(["run", "services", "update-traffic", release.backend, "--region=asia-southeast1",
+            release.gcloud(["run", "services", "update-traffic", release.backend, "--region=asia-southeast1",
                                        "--update-tags=iam-pr274=" + known[release.backend]])
+            document = release.service(release.backend)
+            r.require(document["status"]["latestCreatedRevisionName"] == known[release.backend], "Backend candidate changed")
             current, revision, url = release.candidate(release.backend, document, images[release.backend], "iam-pr274",
                                                        release.backend_url, EXPECTED[release.backend])
             unchanged(before[release.backend], current, B, images[release.backend])
@@ -166,7 +168,9 @@ def main():
             manifest = Path(directory) / "speaker-identity.json"
             manifest.write_text(json.dumps(desired), encoding="utf8")
             manifest.chmod(0o600)
-            document = release.gcloud(["run", "services", "replace", str(manifest), "--region=asia-southeast1"])
+            release.gcloud(["run", "services", "replace", str(manifest), "--region=asia-southeast1"])
+            document = release.service(release.speaker)
+            r.require(document["status"]["latestCreatedRevisionName"] == candidate_name, "Speaker candidate changed")
             manifest.unlink()
             current, revision, url = release.candidate(release.speaker, document, images[release.speaker], "iam-pr274",
                                                        release.speaker_url, EXPECTED[release.speaker])
@@ -200,7 +204,7 @@ def main():
                               "speakerRevision": candidates[release.speaker][0], "backendIdentity": B,
                               "speakerIdentity": S, "speakerProjectRoles": 0, "speakerCallers": [B]}), flush=True)
         except Exception as error:
-            print("Bootstrap stopped: " + (str(error) if isinstance(error, ValueError) else type(error).__name__), flush=True)
+            print("Bootstrap stopped: " + (str(error) if isinstance(error, (ValueError, AttributeError)) else type(error).__name__), flush=True)
             if removed_old:
                 release.gcloud(["run", "services", "add-iam-policy-binding", release.speaker, "--region=asia-southeast1",
                                 "--member=serviceAccount:" + OLD, "--role=roles/run.invoker"])
