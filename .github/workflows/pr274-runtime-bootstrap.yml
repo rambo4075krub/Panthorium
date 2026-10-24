@@ -33,7 +33,7 @@ jobs:
               release.speaker_url=release.service(release.speaker)["status"]["url"]
               token=release.token()
               print("Existing deployer minted scoped backend OIDC token",flush=True)
-              s["r"].health(release.speaker_url,token,speaker=True)
+              s["r"].health(release.speaker_url,token,speaker=True,legacy_speaker=True)
               s["inference"](release.speaker_url,token)
               s["private"](release.speaker_url)
               s["r"].health(release.service(release.backend)["status"]["url"],backend=True)

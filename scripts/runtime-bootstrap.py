@@ -89,7 +89,7 @@ def inference(url, token):
 
 def private(url):
     try:
-        urllib.request.build_opener(r.NoRedirect()).open(url + "/health", timeout=30)
+        urllib.request.build_opener(r.NoRedirect()).open(url + "/healthz", timeout=30)
     except urllib.error.HTTPError as error:
         r.require(error.code in (401, 403, 404), "Unexpected unauthenticated response")
         return
@@ -111,7 +111,7 @@ def main():
         r.require(callers == {"serviceAccount:" + OLD, "serviceAccount:" + B}, "Unexpected speaker callers before migration")
         v.verify_identity(P, S, B, release.gcloud(["iam", "service-accounts", "describe", S]),
                           release.gcloud(["projects", "get-iam-policy", P]))
-        r.health(release.speaker_url, release.token(), speaker=True)
+        r.health(release.speaker_url, release.token(), speaker=True, legacy_speaker=True)
         inference(release.speaker_url, release.token())
         r.health(release.backend_url, backend=True)
         private(release.speaker_url)
@@ -134,7 +134,7 @@ def main():
                 if name == release.backend:
                     r.health(url, backend=True)
                 else:
-                    r.health(url, release.token(), speaker=True)
+                    r.health(url, release.token(), speaker=True, legacy_speaker=True)
                     inference(url, release.token())
                     private(url)
                 print("No-traffic candidate verified: " + name + " " + revision, flush=True)
@@ -148,7 +148,7 @@ def main():
                 if name == release.backend:
                     r.health(release.backend_url, backend=True)
                 else:
-                    r.health(release.speaker_url, release.token(), speaker=True)
+                    r.health(release.speaker_url, release.token(), speaker=True, legacy_speaker=True)
                     inference(release.speaker_url, release.token())
                 print("Production identity verified: " + name, flush=True)
             removed_old = True
