@@ -7,6 +7,7 @@ import json
 import math
 from pathlib import Path
 import struct
+import subprocess
 import tempfile
 import urllib.error
 import urllib.request
@@ -31,6 +32,15 @@ EXPECTED = {"panthorium-backend": "panthorium-backend-00150-jox",
 
 
 class Bootstrap(r.Release):
+    def command(self, args):
+        if args[1:3] == ["projects", "get-iam-policy"]:
+            result = subprocess.run(args, capture_output=True, text=True)
+            if result.returncode:
+                print(result.stderr, flush=True)
+                raise ValueError("Project IAM readiness read failed")
+            return result.stdout.strip()
+        return super().command(args)
+
     def verify(self, mode, first, second, *documents):
         if mode == "identity":
             v.verify_identity(P, first, second, *documents)
