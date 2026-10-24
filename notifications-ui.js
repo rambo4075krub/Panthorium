@@ -12,6 +12,8 @@
     ai: ['Sentinel AI', 'สถานะงานและข้อผิดพลาดของ AI']
   };
   const roots = new Map();
+  const eventCatalog = () => window.PanthoriumNotificationCatalog;
+  const eventEntries = () => eventCatalog()?.entries || [];
   let session = null, generation = 0, audioContext = null, ownSpeech = null, aiSpeaking = false;
   const os = () => typeof OS !== 'undefined' ? OS : null;
   const owner = () => String(os()?.state?.user?.sub || os()?.state?.user?.id || '');
@@ -35,8 +37,15 @@
       [data-notifications-root]{display:grid;gap:14px;color:var(--text,#e4f5ff);font:13px/1.5 system-ui;min-width:0}
       [data-notifications-root] h2{font-size:18px;margin:0}[data-notifications-root] h3{font-size:14px;margin:0 0 9px}
       .pn-card{padding:14px;border:1px solid rgba(132,197,231,.23);border-radius:14px;background:rgba(8,25,40,.54);min-width:0}
-      .pn-muted{color:var(--text-dim,#adc1d2);font-size:12px}.pn-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid rgba(132,197,231,.1)}
-      .pn-row:last-child{border-bottom:0}.pn-row>div{flex:1;min-width:0}.pn-row strong{display:block;font-size:13px;font-weight:600}
+      .pn-muted{color:var(--text-dim,#adc1d2);font-size:12px}.pn-row{display:grid;grid-template-columns:minmax(0,1fr) 44px;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid rgba(132,197,231,.1)}
+      .pn-row:last-child{border-bottom:0}.pn-row>div{min-width:0;overflow-wrap:anywhere}.pn-row strong{display:block;font-size:13px;font-weight:600;text-align:left}
+      .pn-event-group+.pn-event-group{margin-top:20px}.pn-event-group h4{margin:0;padding:0 0 6px;color:var(--text-dim,#adc1d2);font-size:12px;letter-spacing:.02em}
+      .pn-event-row{min-height:42px}.pn-event-list>p{margin:0 0 18px}.pn-event-list h3{margin-bottom:4px}
+      .pn-event-columns{display:grid;grid-template-columns:minmax(0,1fr) 44px;align-items:center;gap:14px}.pn-event-columns>span{text-align:center;color:var(--text-dim,#adc1d2);font-size:11px;white-space:nowrap}
+      [data-notifications-root] details>summary{cursor:pointer;font-weight:600;padding:4px 0;overflow-wrap:anywhere}
+      [data-notifications-root] details>summary:focus-visible{outline:2px solid #80e4ff;outline-offset:4px;border-radius:5px}
+      [data-notifications-root] details[open]>summary{margin-bottom:14px}.pn-advanced-content{display:grid;gap:12px;padding-top:4px}
+      .pn-global-state{margin:7px 0 0;color:#ffcf8e;font-size:12px;overflow-wrap:anywhere}
       [data-notifications-root] button{border:1px solid rgba(132,197,231,.3);background:rgba(64,147,184,.1);border-radius:9px;padding:7px 10px;color:inherit;font:inherit;cursor:pointer}
       [data-notifications-root] button:focus-visible,#panthorium-notification-bell:focus-visible{outline:2px solid #80e4ff;outline-offset:3px}
       [data-notifications-root] button:disabled{opacity:.5;cursor:wait}
@@ -123,7 +132,7 @@
   function deliver(s, items) {
     const settings = s.settings;
     if (!current(s) || !settings?.enabled || quietNow(settings)) return;
-    const eligible = items.filter(item => !item.readAt && settings.categories?.[item.category] === true);
+    const eligible = items.filter(item => !item.readAt && eventCatalog()?.enabled(settings, item) === true);
     if (!eligible.length) return;
     const latest = eligible[0];
     const text = eligible.length > 1 ? `มี ${eligible.length} การแจ้งเตือนใหม่ใน Panthorium` : preview(latest, settings);
@@ -211,6 +220,21 @@
     const control = button('', () => onChange(!value), { role: 'switch', 'aria-checked': String(value === true), 'aria-label': label, 'data-notification-setting': key });
     control.disabled = !!session?.saving; row.append(copy, control); return row;
   }
+  function eventPreference(settings, entry) {
+    return settings.categories?.[entry.category] === true && settings.events?.[entry.id] !== false;
+  }
+  function changeEvent(entry, enabled) {
+    const s = session;
+    if (!current(s) || !s.settings) return;
+    const events = { [entry.id]: enabled };
+    // Enabling one row under a muted category must not enable its siblings.
+    if (enabled && s.settings.categories?.[entry.category] !== true) {
+      for (const sibling of eventEntries()) if (sibling.category === entry.category) events[sibling.id] = false;
+      events[entry.id] = true;
+      return saveSettings({ categories: { [entry.category]: true }, events });
+    }
+    return saveSettings({ events });
+  }
   async function channel(key, value) {
     const s = session;
     if (!current(s)) return;
@@ -250,24 +274,51 @@
     } catch (_) { if (current(s)) message('เปิดเสียงบนอุปกรณ์ไม่สำเร็จ • ตรวจสิทธิ์เสียงแล้วลองอีกครั้ง'); }
   }
   function renderSettings(view, s) {
-    const settings = s.settings, signature = JSON.stringify([settings, !!s.saving]);
+    const settings = s.settings, signature = JSON.stringify([settings, !!s.saving, quietNow(settings)]);
     if (view.signature === signature) return;
+    const focused = document.activeElement?.dataset?.notificationSetting;
+    if (focused && view.settings.contains(document.activeElement)) view.focusKey = focused;
+    const previousAdvanced = view.settings.querySelector('[data-notification-advanced]');
+    if (previousAdvanced) view.advancedOpen = previousAdvanced.open;
     view.signature = signature; const host = view.settings; host.replaceChildren();
     const master = node('section', null, { class: 'pn-card' });
     master.append(switchRow('เปิดการแจ้งเตือน', 'ควบคุมป๊อปอัปและเสียงของระบบ การตั้งเตือนอีเมลแยกอยู่ด้านล่าง', settings.enabled, value => saveSettings({ enabled: value }), 'enabled'));
+    if (!settings.enabled) master.append(node('p', 'ปิดการแจ้งเตือนทั้งหมดอยู่ การเลือกรายการด้านล่างจะบันทึกไว้และใช้เมื่อเปิดสวิตช์หลัก', { class: 'pn-global-state', 'data-notification-global-state': '' }));
+    else if (quietNow(settings)) master.append(node('p', 'อยู่ในช่วงห้ามรบกวน รายการที่เปิดไว้จะบันทึกในประวัติ แต่พักป๊อปอัปและเสียง', { class: 'pn-global-state', 'data-notification-global-state': '' }));
     host.append(master);
+    const eventList = node('section', null, { class: 'pn-card pn-event-list', 'data-notification-event-list': '', 'aria-label': 'เลือกรายการที่ต้องการแจ้งเตือน' });
+    const columns = node('div', null, { class: 'pn-event-columns' });
+    columns.append(node('h3', 'รายการแจ้งเตือน'), node('span', 'เปิด–ปิด'));
+    eventList.append(columns, node('p', 'เลือกรายการที่ต้องการรับแจ้งเตือน • บันทึกอัตโนมัติ', { class: 'pn-muted' }));
+    let group, lastCategory;
+    for (const entry of eventEntries()) {
+      if (entry.category !== lastCategory) {
+        group = node('section', null, { class: 'pn-event-group', 'data-notification-event-group': entry.category });
+        group.append(node('h4', CATEGORIES[entry.category]?.[0] || entry.category)); eventList.append(group); lastCategory = entry.category;
+      }
+      const row = switchRow(entry.label, entry.description, eventPreference(settings, entry), value => changeEvent(entry, value), 'events.' + entry.id);
+      row.classList.add('pn-event-row'); row.dataset.notificationEvent = entry.id;
+      row.querySelector('strong').setAttribute('data-notification-event-label', '');
+      group.append(row);
+    }
+    if (!eventEntries().length) eventList.append(node('p', 'โหลดรายการตั้งค่าไม่สำเร็จ กรุณารีเฟรชหน้า', { class: 'pn-muted' }));
+    host.append(eventList);
+    const advanced = node('details', null, { class: 'pn-card', 'data-notification-advanced': '' });
+    advanced.open = view.advancedOpen === true;
+    advanced.append(node('summary', 'ช่องทางและตัวเลือกเพิ่มเติม'));
+    const advancedContent = node('div', null, { class: 'pn-advanced-content' }); advanced.append(advancedContent); host.append(advanced);
     const channels = node('section', null, { class: 'pn-card' }); channels.append(node('h3', 'ช่องทางรับการแจ้งเตือน'));
     const defs = { inApp: ['ในแอป', 'แสดงข้อความเมื่อเปิด Panthorium'], browser: ['บนอุปกรณ์', 'ต้องอนุญาตในเบราว์เซอร์ และเปิด Panthorium ไว้'], sound: ['เสียงสัญญาณ', 'เล่นเสียงสั้นเมื่อไม่มีการสนทนาหรือโทรอยู่'], voice: ['อ่านการแจ้งเตือนด้วยเสียง', 'อ่านเมื่อว่างจากการสนทนา ใช้เสียงที่อุปกรณ์รองรับ'] };
     for (const [key, [title, desc]] of Object.entries(defs)) channels.append(switchRow(title, desc, settings.channels?.[key], value => channel(key, value), 'channels.' + key));
     channels.append(button('เปิด/ทดสอบเสียงบนอุปกรณ์นี้', unlockDeviceAudio, { 'data-notification-audio-unlock': '' }));
     channels.append(node('p', audioContext?.state === 'running' ? 'เสียงสัญญาณพร้อมในหน้านี้ • เสียงอ่านขึ้นกับเสียงและสิทธิ์ของอุปกรณ์' : 'หลังเปิดหน้าใหม่ แตะทดสอบเสียงเพื่อเปิดเสียงบนอุปกรณ์นี้ สวิตช์เสียงเพียงอย่างเดียวไม่ได้ปลดล็อกเสียงของเบราว์เซอร์', { class: 'pn-muted' }));
-    channels.append(node('p', 'ปิดแอป ออฟไลน์ หรืออุปกรณ์พักการทำงาน อาจไม่ได้รับป๊อปอัปและเสียง รายการจะกลับมาเมื่อเชื่อมต่อใหม่ การเตือนอีเมลต้องตั้งและยินยอมเป็นรายรายการ', { class: 'pn-muted' })); host.append(channels);
-    const types = node('section', null, { class: 'pn-card' }); types.append(node('h3', 'ประเภทการแจ้งเตือน'));
+    channels.append(node('p', 'ปิดแอป ออฟไลน์ หรืออุปกรณ์พักการทำงาน อาจไม่ได้รับป๊อปอัปและเสียง รายการจะกลับมาเมื่อเชื่อมต่อใหม่ การเตือนอีเมลต้องตั้งและยินยอมเป็นรายรายการ', { class: 'pn-muted' })); advancedContent.append(channels);
+    const types = node('section', null, { class: 'pn-card' }); types.append(node('h3', 'เปิด–ปิดทั้งหมวด'));
     for (const [key, [title, desc]] of Object.entries(CATEGORIES)) types.append(switchRow(title, desc, settings.categories?.[key], value => saveSettings({ categories: { [key]: value } }), 'categories.' + key));
-    host.append(types);
+    advancedContent.append(types);
     const privacy = node('section', null, { class: 'pn-card' }); privacy.append(node('h3', 'ความเป็นส่วนตัวและการขอแจ้งเตือน'));
     privacy.append(switchRow('แสดงและอ่านรายละเอียด', 'เมื่อปิด ป๊อปอัปและเสียงบอกเพียงว่ามีการแจ้งเตือนใหม่ รายละเอียดยังอ่านได้ในศูนย์นี้', settings.privacyPreview, value => saveSettings({ privacyPreview: value }), 'privacyPreview'));
-    privacy.append(switchRow('ให้ Sentinel ถามก่อนเสนอส่งแจ้งเตือน', 'เช่น “ให้ส่งแจ้งเตือนไหม” ต้องตอบรับก่อนสร้างรายการที่เสนอ', settings.askBeforeNotify, value => saveSettings({ askBeforeNotify: value }), 'askBeforeNotify')); host.append(privacy);
+    privacy.append(switchRow('ให้ Sentinel ถามก่อนเสนอส่งแจ้งเตือน', 'เช่น “ให้ส่งแจ้งเตือนไหม” ต้องตอบรับก่อนสร้างรายการที่เสนอ', settings.askBeforeNotify, value => saveSettings({ askBeforeNotify: value }), 'askBeforeNotify')); advancedContent.append(privacy);
     const quiet = node('section', null, { class: 'pn-card' }); quiet.append(node('h3', 'ช่วงห้ามรบกวน'));
     quiet.append(switchRow('เปิดช่วงห้ามรบกวน', 'พักป๊อปอัปและเสียง รายการยังอยู่ในศูนย์แจ้งเตือน', settings.quietHours?.enabled, value => saveSettings({ quietHours: { enabled: value } }), 'quietHours.enabled'));
     const form = node('form', null, { class: 'pn-quiet' });
@@ -280,7 +331,11 @@
       const patch = Object.fromEntries(['start', 'end', 'timeZone'].map(key => [key, form.elements.namedItem(key).value.trim()]));
       try { new Intl.DateTimeFormat('th', { timeZone: patch.timeZone }).format(); } catch (_) { message('เขตเวลาไม่ถูกต้อง เช่น Asia/Bangkok'); return; }
       saveSettings({ quietHours: patch });
-    }); quiet.append(form, node('p', 'ถ้าเวลาเริ่มและสิ้นสุดเท่ากัน จะพักการแจ้งเตือนตลอดวัน', { class: 'pn-muted' })); host.append(quiet);
+    }); quiet.append(form, node('p', 'ถ้าเวลาเริ่มและสิ้นสุดเท่ากัน จะพักการแจ้งเตือนตลอดวัน', { class: 'pn-muted' })); advancedContent.append(quiet);
+    if (!s.saving && view.focusKey) {
+      [...host.querySelectorAll('[data-notification-setting]')].find(control => control.dataset.notificationSetting === view.focusKey)?.focus({ preventScroll: true });
+      view.focusKey = null;
+    }
   }
   async function changeItems(action, ids) {
     const s = session; if (!current(s)) return;
@@ -300,7 +355,7 @@
     view.history.replaceChildren();
     const items = [...s.items, ...view.older.filter(item => !s.items.some(latest => latest.id === item.id))];
     const unread = items.filter(item => !item.readAt).slice(0, 100).map(item => item.id);
-    view.history.append(node('h3', `การแจ้งเตือน • ยังไม่อ่าน ${Math.max(0, Number(s.unreadCount) || 0)}`));
+    view.historySummary.textContent = `ประวัติการแจ้งเตือน • ยังไม่อ่าน ${Math.max(0, Number(s.unreadCount) || 0)}`;
     const actions = node('div', null, { class: 'pn-actions' });
     actions.append(button('รีเฟรช', refresh), button('อ่านให้ฟัง', readAloud), button('หยุดอ่าน', stopSpeaking));
     if (unread.length) actions.append(button(unread.length < 100 ? 'อ่านแล้วทั้งหน้านี้' : 'อ่านแล้ว 100 รายการในหน้านี้', () => changeItems('read', unread))); view.history.append(actions);
@@ -333,7 +388,7 @@
       if (!root.isConnected) { roots.delete(root); continue; }
       if (!current(session)) {
         root.removeAttribute('data-notification-ready');
-        view.signature = ''; view.settings.replaceChildren(); view.history.replaceChildren();
+        view.signature = ''; view.settings.replaceChildren(); view.history.replaceChildren(); view.historySummary.textContent = 'ประวัติการแจ้งเตือน'; view.historyDetails.open = false;
         view.status.textContent = 'ลงชื่อเข้าใช้บัญชีเพื่อดูและตั้งค่าการแจ้งเตือน'; continue;
       }
       if (!session.settings) { view.status.textContent = 'กำลังโหลดการแจ้งเตือน…'; continue; }
@@ -346,10 +401,13 @@
     if (!root || roots.has(root)) return;
     styles(); root.setAttribute('data-notifications-root', '');
     const status = node('div', 'กำลังโหลดการแจ้งเตือน…', { role: 'status', 'aria-live': 'polite', class: 'pn-muted' });
-    const settings = node('div', null, { style: 'display:grid;gap:12px;' });
-    const history = node('section', null, { class: 'pn-card', 'aria-label': 'ศูนย์แจ้งเตือน' });
-    root.replaceChildren(node('h2', 'การแจ้งเตือนของ Panthorium'), status, history, settings);
-    roots.set(root, { status, settings, history, signature: '', older: [], pageLoaded: false, nextCursor: null });
+    const settings = node('div', null, { style: 'display:grid;gap:12px;', 'data-notification-settings-list': '' });
+    const historyDetails = node('details', null, { class: 'pn-card', 'data-notification-history': '' });
+    const historySummary = node('summary', 'ประวัติการแจ้งเตือน');
+    const history = node('section', null, { 'aria-label': 'ศูนย์แจ้งเตือน' });
+    historyDetails.append(historySummary, history);
+    root.replaceChildren(node('h2', 'ตั้งค่าการแจ้งเตือน'), status, settings, historyDetails);
+    roots.set(root, { status, settings, history, historyDetails, historySummary, signature: '', older: [], pageLoaded: false, nextCursor: null, advancedOpen: false });
     sync(); render(); refresh();
   }
   async function readAloud() {
@@ -375,7 +433,7 @@
     session = null; stopSpeaking();
     if (audioContext) { audioContext.close?.().catch?.(() => {}); audioContext = null; }
     document.querySelector('[data-notification-toast]')?.remove();
-    for (const view of roots.values()) { view.signature = ''; view.older = []; view.pageLoaded = false; view.nextCursor = null; view.settings.replaceChildren(); view.history.replaceChildren(); }
+    for (const view of roots.values()) { view.signature = ''; view.older = []; view.pageLoaded = false; view.nextCursor = null; view.advancedOpen = false; view.settings.replaceChildren(); view.history.replaceChildren(); view.historySummary.textContent = 'ประวัติการแจ้งเตือน'; view.historyDetails.open = false; }
     if (registered()) session = { uid: owner(), generation, controller: new AbortController(), items: [], unreadCount: 0, settings: null, settingsRevision: 0, seen: new Set(), loaded: false, browserNotices: new Set() };
     render(); updateBadge();
   }

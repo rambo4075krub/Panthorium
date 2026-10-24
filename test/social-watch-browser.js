@@ -120,9 +120,23 @@ async function until(fn, label) { const end = Date.now() + 16000; while (Date.no
     for (const width of [1280, 390, 320]) {
       await author.setViewportSize({ width, height: 900 });
       const row = card(post.id).locator(".social-post-actions"), button = row.getByRole("button", { name: "ตัวเลือกโพสต์", exact: true });
-      const [rowBox, likeBox, commentBox, moreBox] = await Promise.all([row.boundingBox(), row.getByRole("button", { name: "ถูกใจ 1", exact: true }).boundingBox(), row.getByRole("button", { name: "ความคิดเห็น 0", exact: true }).boundingBox(), button.boundingBox()]);
-      assert(Math.abs(likeBox.y - commentBox.y) < 3 && Math.abs(likeBox.y - moreBox.y) < 5, "actions share one row");
-      assert(Math.abs(rowBox.x + rowBox.width - moreBox.x - moreBox.width) < 3, "menu at far right");
+      let geometry;
+      // Measure one frame: independent protocol calls can straddle responsive
+      // media layout after a viewport change and mix unrelated row positions.
+      try {
+        await until(async () => {
+          geometry = await row.evaluate(node => {
+            const controls = [node, node.querySelector('[aria-label="ถูกใจ 1"]'), node.querySelector('[data-comment-toggle]'), node.querySelector('[aria-label="ตัวเลือกโพสต์"]')];
+            if (controls.some(control => !control) || controls[2].textContent !== 'ความคิดเห็น 0') return null;
+            return { width: innerWidth, boxes: controls.map(control => control.getBoundingClientRect().toJSON()) };
+          });
+          if (!geometry || geometry.width !== width || geometry.boxes.some(box => !box.width || !box.height)) return false;
+          const [rowBox, likeBox, commentBox, moreBox] = geometry.boxes;
+          return Math.abs(likeBox.y - commentBox.y) < 3 && Math.abs(likeBox.y - moreBox.y) < 5 && Math.abs(rowBox.x + rowBox.width - moreBox.x - moreBox.width) < 3;
+        }, `actions share one row and menu stays at far right at ${width}px`);
+      } catch (error) {
+        throw new Error(`${error.message}; last geometry: ${JSON.stringify(geometry)}`);
+      }
       await button.click(); const box = await card(post.id).locator(".social-post-menu-items").boundingBox();
       assert(box.x >= 0 && box.x + box.width <= width, "dropdown stays inside viewport");
       assert(await watch.evaluate(node => node.scrollWidth <= node.clientWidth + 1), "no mobile content overflow");

@@ -73,7 +73,7 @@ class SocialNotifications {
     for (const notice of notices) {
       try {
         if (!await this.systemNotificationVisible(notice.ownerId, notice.id)) continue;
-        await this.service.systemNotifications.publish({ userId: notice.ownerId, category: 'social', type: 'social.activity',
+        await this.service.systemNotifications.publish({ userId: notice.ownerId, category: 'social', type: 'social.activity.' + notice.type,
           title: 'ความเคลื่อนไหวใหม่ใน Social Media', body: 'เปิด Social Media เพื่อดูความเคลื่อนไหวที่คุณมีสิทธิ์เข้าถึง',
           sourceId: notice.id, sensitive: true });
       } catch { /* Social mutation is already committed; delivery cannot invalidate it. */ }

@@ -1,11 +1,13 @@
 'use strict';
 const { createHash, randomUUID } = require('crypto');
 const { failure } = require('./notificationRepository');
+const eventCatalog = require('../notification-event-catalog');
 
 const CATEGORY_LABELS = Object.freeze({ system: 'ระบบ', security: 'ความปลอดภัยและบัญชี', operations: 'การดำเนินการ', reminders: 'การเตือนและกำหนดเวลา', calendar: 'ปฏิทิน', files: 'ไฟล์และเอกสาร', social: 'Social Media', billing: 'แพ็กเกจและชำระเงิน', ai: 'Sentinel AI' });
 const DEFAULT_SETTINGS = Object.freeze({ enabled: true,
   channels: Object.freeze({ inApp: true, browser: false, sound: false, voice: false }),
   categories: Object.freeze(Object.fromEntries(Object.keys(CATEGORY_LABELS).map(key => [key,true]))),
+  events: eventCatalog.defaults,
   quietHours: Object.freeze({ enabled: false, start: '22:00', end: '07:00', timeZone: 'Asia/Bangkok' }),
   privacyPreview: false, askBeforeNotify: true });
 const RETENTION_DAYS = 90;
@@ -16,7 +18,7 @@ const own = (object,key) => Object.prototype.hasOwnProperty.call(object,key);
 function validateSettingsPatch(patch) {
   if (!plain(patch) || !Object.keys(patch).length || Object.keys(patch).some(key => !own(DEFAULT_SETTINGS,key))) return 'invalid_notification_settings';
   for (const key of ['enabled','privacyPreview','askBeforeNotify']) if (own(patch,key) && typeof patch[key] !== 'boolean') return 'invalid_notification_settings';
-  for (const key of ['channels','categories']) {
+  for (const key of ['channels','categories','events']) {
     if (!own(patch,key)) continue;
     if (!plain(patch[key]) || !Object.keys(patch[key]).length || Object.entries(patch[key]).some(([field,value]) => !own(DEFAULT_SETTINGS[key],field) || typeof value !== 'boolean')) return 'invalid_notification_settings';
   }
@@ -33,7 +35,7 @@ function validateSettingsPatch(patch) {
   return null;
 }
 function validUserId(value) { return text(value,256) && !/^guest[:_-]/i.test(value); }
-function publicItem(value) { if (!value) return null; const { userId, deletedAt, ...rest } = value; return rest; }
+function publicItem(value) { if (!value) return null; const { userId, deletedAt, ...rest } = value; return {...rest,eventKey:eventCatalog.keyFor(rest)}; }
 function operationTitle(state, toolId) {
   const title = ({awaiting_confirmation:'มีการดำเนินการรอการยืนยัน',running:'เริ่มดำเนินการแล้ว',succeeded:'ดำเนินการสำเร็จ',failed:'ดำเนินการไม่สำเร็จ',cancel_requested:'รับคำขอยกเลิกการดำเนินการแล้ว',unknown:'ยังยืนยันผลการดำเนินการไม่ได้'})[state];
   if (!title) return undefined;
@@ -97,7 +99,7 @@ class NotificationService {
   cutoff() { return new Date(this.now() - RETENTION_DAYS * 86400000).toISOString(); }
   async settings({ user } = {}) {
     const userId = this.assertUser(user);
-    return { ok:true,settings:await this.repository.getSettings(userId,DEFAULT_SETTINGS),categories:CATEGORY_LABELS,
+    return { ok:true,settings:await this.repository.getSettings(userId,DEFAULT_SETTINGS),categories:CATEGORY_LABELS,eventCatalog:eventCatalog.entries,
       capabilities:{inApp:true,browser:true,sound:true,voice:true,backgroundPush:false,email:false},retentionDays:RETENTION_DAYS };
   }
   async updateSettings({ user, patch } = {}) {
@@ -123,7 +125,7 @@ class NotificationService {
     if (requestId != null && !text(requestId,240)) throw failure('invalid_notification_request');
     const notification = await this.publish({userId,title,body,category,type:'user.requested',sourceId:requestId ? 'request:'+requestId : null,sensitive:true});
     const settings = await this.repository.getSettings(userId,DEFAULT_SETTINGS);
-    return {ok:true,notification,deliveryChannel:'in_app',deliveryState:'saved',alertsEnabled:settings.enabled && settings.categories[category],backgroundPush:false};
+    return {ok:true,notification,deliveryChannel:'in_app',deliveryState:'saved',alertsEnabled:eventCatalog.enabled(settings,{category,type:'user.requested'}),backgroundPush:false};
   }
   async reconcileActions(userId) {
     if (!this.actionLedger?.ready || typeof this.actionLedger.list !== 'function') return;
@@ -208,7 +210,7 @@ class NotificationService {
     }
     if (entry.event === 'agent.job_terminal') {
       const title = ({completed:'งานตามกำหนดเวลาสำเร็จ',failed:'งานตามกำหนดเวลาไม่สำเร็จ',cancelled:'งานตามกำหนดเวลาถูกยกเลิก',expired:'งานตามกำหนดเวลาหมดอายุ'})[entry.status];
-      if (title) spec = ['operations',title,'ตรวจรายละเอียดได้ในรายการงาน'];
+      if (title) { spec = ['operations',title,'ตรวจรายละเอียดได้ในรายการงาน']; type = entry.event + '.' + entry.status; }
     }
     if (!spec) return;
     const identity = entry.actionId || entry.runId || entry.jobId || entry.workflowId || entry.orchestrationId || entry.reminderId || entry.memoryId || entry.requestId || entry.alertId;

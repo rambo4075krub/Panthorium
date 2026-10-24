@@ -2,8 +2,9 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { JSDOM } = require('jsdom');
+const catalog = require('../notification-event-catalog');
 const tick = () => new Promise(resolve => setTimeout(resolve, 15));
-const defaults = () => ({ enabled: true, channels: { inApp: true, browser: false, sound: false, voice: false }, categories: Object.fromEntries(['system', 'security', 'operations', 'reminders', 'calendar', 'files', 'social', 'billing', 'ai'].map(k => [k, true])), quietHours: { enabled: false, start: '22:00', end: '07:00', timeZone: 'Asia/Bangkok' }, privacyPreview: false, askBeforeNotify: true });
+const defaults = () => ({ enabled: true, events: { ...catalog.defaults }, channels: { inApp: true, browser: false, sound: false, voice: false }, categories: Object.fromEntries(['system', 'security', 'operations', 'reminders', 'calendar', 'files', 'social', 'billing', 'ai'].map(k => [k, true])), quietHours: { enabled: false, start: '22:00', end: '07:00', timeZone: 'Asia/Bangkok' }, privacyPreview: false, askBeforeNotify: true });
 const clone = x => JSON.parse(JSON.stringify(x));
 const merge = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && typeof v === 'object' ? merge(a[k] || {}, v) : v; return a; };
 (async () => {
@@ -31,17 +32,36 @@ const merge = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && ty
     return { ok: true, json: async () => payload() };
   };
   w.authorizedFetch = normalFetch;
+  w.eval(fs.readFileSync('notification-event-catalog.js', 'utf8'));
   w.eval(fs.readFileSync('notifications-ui.js', 'utf8'));
   const root = w.document.querySelector('main');
   w.PanthoriumNotifications.mount(root); await tick();
   assert.equal(calls.length, 0, 'guests must not read another account notification feed');
   assert.equal(w.document.getElementById('panthorium-notification-bell'), null);
   const switchAccount = sub => { w.OS.state.user = { sub, permissions: ['chat'], roles: ['user'] }; w.dispatchEvent(new w.Event('panthorium:auth-changed')); };
-  const item = id => ({ id, category: 'operations', title: '<img src=x onerror=alert(1)> private task', body: '<script>secret()</script>', createdAt: '2026-10-24T12:00:00Z', readAt: null });
+  const item = (id, type = 'action.succeeded') => ({ id, type, category: 'operations', title: '<img src=x onerror=alert(1)> private task', body: '<script>secret()</script>', createdAt: '2026-10-24T12:00:00Z', readAt: null });
   items = [item('old')]; switchAccount('alpha'); await w.PanthoriumNotifications.refresh();
   const setting = key => root.querySelector('[data-notification-setting="' + key + '"]');
   assert.equal(root.dataset.notificationReady, 'true');
-  assert.equal(root.querySelectorAll('[role=switch]').length, 17);
+  assert.equal(root.querySelectorAll('[role=switch]').length, 17 + catalog.entries.length);
+  const eventList = root.querySelector('[data-notification-event-list]'), advanced = () => root.querySelector('[data-notification-advanced]'), history = root.querySelector('[data-notification-history]');
+  assert.equal(history.open, false); assert.equal(advanced().open, false);
+  assert(eventList.compareDocumentPosition(history) & w.Node.DOCUMENT_POSITION_FOLLOWING, 'event choices precede collapsed history');
+  assert.deepEqual([...eventList.querySelectorAll('[data-notification-event]')].map(row => row.dataset.notificationEvent), catalog.entries.map(row => row.id), 'all concrete notification rows follow the shared fixed order');
+  assert.match(eventList.querySelector('.pn-event-columns').textContent, /รายการแจ้งเตือนเปิด–ปิด/);
+  advanced().open = true;
+  setting('events.operation_succeeded').focus(); setting('events.operation_succeeded').click(); await tick();
+  assert.equal(settings.events.operation_succeeded, false); assert.equal(settings.events.operation_failed, true, 'success and failure choices are independent');
+  assert.equal(w.document.activeElement.dataset.notificationSetting, 'events.operation_succeeded', 'keyboard focus survives server save and rerender');
+  assert.equal(advanced().open, true, 'advanced disclosure state survives saving a row');
+  await w.PanthoriumNotifications.refresh(); assert.equal(setting('events.operation_succeeded').getAttribute('aria-checked'), 'false', 'saved event survives refresh');
+  setting('events.operation_succeeded').click(); await tick();
+  setting('categories.operations').click(); await tick();
+  assert.equal(setting('events.operation_succeeded').getAttribute('aria-checked'), 'false');
+  setting('events.operation_succeeded').click(); await tick();
+  assert.equal(settings.categories.operations, true); assert.equal(settings.events.operation_succeeded, true);
+  assert.equal(settings.events.operation_failed, false); assert.equal(settings.events.operation_started, false, 'enabling a child cannot turn on muted siblings');
+  settings.events = { ...catalog.defaults }; await w.PanthoriumNotifications.refresh();
   assert.equal(permissionCalls, 0, 'loading settings must never request browser permission');
   assert.equal(notices.length, 0, 'do not replay old notifications after signing in');
   assert.equal(root.querySelectorAll('img,script').length, 0, 'untrusted titles and content render as text');
@@ -92,6 +112,17 @@ const merge = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && ty
   assert.equal(w.PanthoriumNotifications.getState().unreadCount, 0);
   assert(oldNotices.every(n => n.closed), 'switching account closes previously displayed device notices');
   assert.equal(root.querySelectorAll('[data-notification-id]').length, 0);
+  const deliveredBefore = notices.length, spokenBefore = spoken.length;
+  settings.channels.browser = true; settings.channels.voice = true;
+  settings.events.operation_succeeded = false; settings.events.operation_failed = true;
+  await w.PanthoriumNotifications.refresh();
+  items.unshift(item('success-muted')); await w.PanthoriumNotifications.refresh();
+  assert.equal(notices.length, deliveredBefore); assert.equal(spoken.length, spokenBefore);
+  assert.equal(w.document.querySelector('[data-notification-toast]'), null, 'muted success produces no in-app, device or voice alert');
+  items.unshift(item('failure-enabled', 'action.failed')); await w.PanthoriumNotifications.refresh();
+  assert.equal(notices.length, deliveredBefore + 1); assert.equal(spoken.length, spokenBefore + 1);
+  assert(w.document.querySelector('[data-notification-toast]'), 'enabled failure still alerts');
+  assert(root.querySelector('[data-notification-id="success-muted"]'), 'disabled delivery retains reviewable history');
   let contexts = 0, closed = 0;
   w.AudioContext = class {
     constructor() { contexts++; this.state = 'suspended'; this.currentTime = 0; this.destination = {}; }
@@ -112,5 +143,5 @@ const merge = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && ty
   assert.equal(w.document.getElementById('panthorium-notification-bell'), null);
   assert.equal(closed, 1, 'logout closes notification audio context');
   dom.window.close();
-  console.log('Notifications UI: switches, failed-save rollback, explicit permission, XSS, privacy, quiet hours, voice contention, stale-poll settings and account isolation passed');
+  console.log('Notifications UI: ordered event switches, independent persisted choices, keyboard focus, category migration, delivery filters, permissions, privacy, quiet hours and account isolation passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

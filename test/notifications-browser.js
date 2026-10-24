@@ -11,6 +11,7 @@ const { createNotificationRouter } = require("../routes/notifications");
 const { ReminderRepository } = require("../services/reminderRepository");
 const { ReminderService } = require("../services/reminderService");
 const { createReminderRouter } = require("../routes/reminders");
+const notificationCatalog = require("../notification-event-catalog");
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(check, message) {
@@ -40,7 +41,7 @@ async function until(check, message) {
   app.use(express.json());
   app.use("/api/notifications", createNotificationRouter(auth, notifications));
   app.use("/api/reminders", createReminderRouter(auth, reminders));
-  for (const file of ["notifications-ui.js", "reminders-ui.js"]) app.get("/" + file, (_, res) => res.sendFile(path.join(__dirname, "..", file)));
+  for (const file of ["notification-event-catalog.js", "notifications-ui.js", "reminders-ui.js"]) app.get("/" + file, (_, res) => res.sendFile(path.join(__dirname, "..", file)));
   app.get("/", (_, res) => res.type("html").send(`<!doctype html><html lang="th"><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
     :root{--text:#e8eef5;--text-dim:#98abc0;--bg:#0a1220;}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}.window{position:fixed;inset:0 0 42px;display:flex;flex-direction:column}.window-content{flex:1;min-height:0;overflow:hidden}#taskbar{position:fixed;inset:auto 0 0;height:42px;display:flex;align-items:center}
   </style></head><body><div id="taskbar"><div id="system-controls-left"></div></div><script>
@@ -49,7 +50,7 @@ async function until(check, message) {
     window.createWindow=(id,title,markup,options={})=>{const el=document.createElement('div');el.className='window';el.dataset.id=id;const heading=document.createElement('div');heading.style.cssText='padding:10px 16px;flex:none;background:#142034';heading.textContent=title;const content=document.createElement('div');content.className='window-content';content.innerHTML=markup;el.append(heading,content);document.body.append(el);OS.windows.set(id,{id,el,onClose:options.onClose});};
     window.focusWindow=id=>{const el=OS.windows.get(id)?.el;if(el)el.style.display='flex';};
     window.closeWindow=id=>{const win=OS.windows.get(id);win?.onClose?.();win?.el.remove();OS.windows.delete(id);};
-  </script><script src="/notifications-ui.js"></script><script src="/reminders-ui.js"></script></body></html>`));
+  </script><script src="/notification-event-catalog.js"></script><script src="/notifications-ui.js"></script><script src="/reminders-ui.js"></script></body></html>`));
   app.use((error, _, res, __) => res.status(error.status || 500).json({ ok: false, error: error.code || error.message }));
   const server = app.listen(0, "127.0.0.1");
   await new Promise(resolve => server.once("listening", resolve));
@@ -70,6 +71,9 @@ async function until(check, message) {
     await page.waitForFunction(() => window.PanthoriumNotifications?.getState()?.settings);
     const root = page.locator("[data-notifications-root]");
     const center = root.getByRole("region", { name: "ศูนย์แจ้งเตือน" });
+    const advanced = root.locator("details[data-notification-advanced]");
+    const historyDetails = root.locator("details[data-notification-history]");
+    const openDetails = async details => { if (!await details.evaluate(element => element.open)) await details.locator("summary").first().click(); };
     const setting = key => root.locator('[data-notification-setting="' + key + '"]');
     const row = id => center.locator('[data-notification-id="' + id + '"]');
     const checked = async (key, value) => {
@@ -77,16 +81,47 @@ async function until(check, message) {
       await until(async () => await control.getAttribute("aria-checked") === String(value) && !await control.isDisabled(), "setting persisted: " + key);
     };
     const toggle = async (key, value) => {
+      if (key !== "enabled" && !key.startsWith("events.")) await openDetails(advanced);
       if (await setting(key).getAttribute("aria-checked") !== String(value)) await setting(key).click();
       await checked(key, value);
     };
     const refresh = () => page.evaluate(() => PanthoriumNotifications.refresh());
     const clearToast = () => page.evaluate(() => document.querySelector("[data-notification-toast]")?.remove());
-    const publish = async (sourceId, category = "system", body = "เนื้อหาทดสอบส่วนตัว") => {
-      const result = await notifications.publish({ userId: a.sub, category, type: "test.notice", title: "รายการ " + sourceId, body, sourceId });
+    const publish = async (sourceId, category = "system", body = "เนื้อหาทดสอบส่วนตัว", type = "test.notice") => {
+      const result = await notifications.publish({ userId: a.sub, category, type, title: "รายการ " + sourceId, body, sourceId });
       await refresh(); return result;
     };
 
+    assert.equal(await historyDetails.evaluate(element => element.open), false, "history starts collapsed beneath settings");
+    assert.equal(await advanced.evaluate(element => element.open), false, "advanced channels do not precede the event list");
+    const eventList = root.locator("[data-notification-event-list]");
+    assert(await eventList.evaluate((element) => !!(element.compareDocumentPosition(document.querySelector('[data-notification-history]')) & Node.DOCUMENT_POSITION_FOLLOWING)), "the ordered event list precedes history");
+    const eventKeys = notificationCatalog.entries.map(entry => "events." + entry.id);
+    assert.deepEqual(await eventList.locator("[data-notification-setting]").evaluateAll(nodes => nodes.map(n => n.dataset.notificationSetting)), eventKeys, "all supported event rows keep catalog order");
+    for (const width of [1000, 390, 320]) {
+      await page.setViewportSize({ width, height: 800 });
+      await until(() => page.evaluate(expected => window.innerWidth === expected, width), "viewport applied: " + width);
+      for (const entry of notificationCatalog.entries) {
+        const control = setting("events." + entry.id), eventRow = control.locator("..");
+        const [labelBox, controlBox, rowBox] = await eventRow.evaluate(element => {
+          const box = node => {
+            if (!node?.getClientRects().length) return null;
+            const rect = node.getBoundingClientRect();
+            return { x: rect.x, width: rect.width };
+          };
+          return [box(element.querySelector("strong")), box(element.querySelector('[role="switch"]')), box(element)];
+        });
+        assert(labelBox && controlBox && rowBox, "event label and switch have layout boxes");
+        assert(labelBox.x + labelBox.width <= controlBox.x + 1, "event name stays left of its switch: " + entry.id + " at " + width);
+        assert(Math.abs(rowBox.x + rowBox.width - controlBox.x - controlBox.width) < 3, "event switch stays aligned to the right: " + entry.id + " at " + width);
+      }
+      assert(await eventList.evaluate(element => element.scrollWidth <= element.clientWidth + 1), "event list fits viewport " + width);
+    }
+    await page.setViewportSize({ width: 390, height: 800 });
+    await root.evaluate(element => element.closest('[data-reminders-root]').scrollTop = 0);
+    if (process.env.EVENT_SWITCH_SCREENSHOT) await page.screenshot({ path: process.env.EVENT_SWITCH_SCREENSHOT });
+    await page.setViewportSize({ width: 1000, height: 800 });
+    await openDetails(historyDetails);
     await row(initial.id).getByText(unsafeTitle, { exact: true }).waitFor();
     assert.equal(await row(initial.id).locator("img,script").count(), 0, "notification content is rendered as inert text");
     assert.equal(await page.evaluate(() => window.notificationXss), undefined);
@@ -105,6 +140,32 @@ async function until(check, message) {
     await page.reload();
     await page.evaluate(() => PanthoriumReminders.open());
     await checked("categories.operations", false);
+    await checked("events.operation_succeeded", false);
+    await checked("events.operation_failed", false);
+    await toggle("events.operation_succeeded", true);
+    let savedEvents = (await notifications.settings({ user: a })).settings;
+    assert.equal(savedEvents.categories.operations, true, "enabling one event opens its legacy category");
+    assert.equal(savedEvents.events.operation_succeeded, true);
+    for (const entry of notificationCatalog.entries.filter(entry => entry.category === "operations" && entry.id !== "operation_succeeded")) {
+      assert.equal(savedEvents.events[entry.id], false, "enabling one event does not silently enable legacy-muted siblings: " + entry.id);
+    }
+    await toggle("events.operation_succeeded", false);
+    await toggle("events.operation_failed", true);
+    assert.equal((await notifications.settings({ user: b })).settings.events.operation_succeeded, true, "event switches stay account scoped");
+    await page.reload(); await page.evaluate(() => PanthoriumReminders.open());
+    await checked("events.operation_succeeded", false);
+    await checked("events.operation_failed", true);
+    await checked("events.operation_started", false);
+    await openDetails(historyDetails);
+    const disabledSuccess = await publish("event-success-muted", "operations", "งานสำเร็จที่ปิดการแจ้งเตือน", "action.succeeded");
+    await row(disabledSuccess.id).waitFor();
+    assert.equal(await page.locator("[data-notification-toast]").count(), 0, "a disabled success event remains in history but does not notify");
+    const enabledFailure = await publish("event-failure-enabled", "operations", "งานล้มเหลวที่เปิดการแจ้งเตือน", "action.failed");
+    await page.locator("[data-notification-toast]").waitFor();
+    await clearToast();
+    assert.equal((await notifications.settings({ user: a })).settings.events.operation_succeeded, false, "failure toggle leaves success preference unchanged");
+    await notifications.remove({ user: a, ids: [disabledSuccess.id, enabledFailure.id] }); await refresh();
+    await toggle("categories.operations", false);
 
     await row(initial.id).getByRole("button", { name: "อ่านแล้ว", exact: true }).click();
     await until(async () => (await notifications.list({ user: a })).unreadCount === 0, "read is persisted on the server");
@@ -132,6 +193,7 @@ async function until(check, message) {
     await publish("category-muted", "operations");
     assert.equal(await page.locator("[data-notification-toast]").count(), 0, "category switch suppresses delivery");
 
+    await openDetails(advanced);
     await root.getByLabel("เริ่ม", { exact: true }).fill("00:00");
     await root.getByLabel("สิ้นสุด", { exact: true }).fill("00:00");
     await root.getByLabel("เขตเวลา", { exact: true }).fill("Asia/Bangkok");
@@ -213,6 +275,7 @@ async function until(check, message) {
       OS.state.user = user; OS.config.accessToken = token;
       window.dispatchEvent(new Event("panthorium:auth-changed"));
     }, { user: b, token: auth.signAccessToken(b) });
+    await openDetails(historyDetails);
     await row(other.id).waitFor();
     releaseResponse(); await stale;
     assert.equal(await row(detailed.id).count(), 0, "late old-account response cannot restore private content");
@@ -231,7 +294,7 @@ async function until(check, message) {
     assert.doesNotMatch(await page.locator("body").textContent(), /ข้อมูลของบัญชีที่สอง|รายละเอียดบัญชีแรก/);
 
     assert.deepEqual(errors, []);
-    console.log("Notifications browser: integrated settings, real route persistence, independent accounts, switches and permission, quiet hours, privacy previews, history reads/deletes, no replay/XSS, mobile layout and stale-session isolation passed");
+    console.log("Notifications browser: ordered event names left/switches right, independent event persistence and delivery, category migration, collapsed history, mobile layouts, permissions, quiet hours, privacy, XSS and stale-session isolation passed");
   } finally {
     await browser?.close();
     await notifications.close();

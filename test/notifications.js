@@ -5,6 +5,9 @@ const { NotificationRepository } = require('../services/notificationRepository')
 const { NotificationService, DEFAULT_SETTINGS } = require('../services/notificationService');
 const { AuditService } = require('../services/auditService');
 const { ActionLedgerRepository } = require('../services/actionLedgerRepository');
+const catalog = require('../notification-event-catalog');
+const fs = require('node:fs');
+const vm = require('node:vm');
 
 const user = {sub:'notification-owner',roles:['user'],permissions:['chat']};
 const other = {...user,sub:'notification-other'};
@@ -19,7 +22,7 @@ async function suite(repository,label) {
     await assert.rejects(()=>service.list({user:guest}),/notifications_requires_account/);
     await assert.rejects(()=>service.send({user:guest,title:'rejected'}),/notifications_requires_account/);
   }
-  for (const patch of [{channels:{voice:'true'}},{enabled:null},{unknown:true},{quietHours:{start:'25:99'}},{quietHours:{timeZone:'Mars'}},{categories:{administrator:true}},JSON.parse('{"__proto__":{}}')]) {
+  for (const patch of [{channels:{voice:'true'}},{enabled:null},{unknown:true},{quietHours:{start:'25:99'}},{quietHours:{timeZone:'Mars'}},{categories:{administrator:true}},{events:{operation_succeeded:'false'}},{events:{arbitrary:true}},{events:null},{events:[]},JSON.parse('{"events":{"__proto__":false}}'),JSON.parse('{"__proto__":{}}')]) {
     await assert.rejects(()=>service.updateSettings({user,patch}),error=>error.status===400&&error.sideEffectNotApplied===true);
   }
   await service.updateSettings({user,patch:{channels:{voice:true},categories:{social:false},quietHours:{enabled:true,start:'21:30'}}});
@@ -77,6 +80,65 @@ async function suite(repository,label) {
   await service.close();
   console.log('Notifications '+label+' passed');
 }
+async function eventSuite(repository,label) {
+  const service=new NotificationService({repository});await service.init();
+  const actor={...user,sub:'event-owner'},legacyUser={...user,sub:'legacy-event-owner'};
+  const legacy=JSON.parse(JSON.stringify(DEFAULT_SETTINGS));delete legacy.events;legacy.categories.operations=false;
+  if(repository.pool)await repository.pool.query('INSERT INTO panthorium_notification_settings(user_id,settings) VALUES($1,$2::jsonb)',[legacyUser.sub,JSON.stringify(legacy)]);
+  else repository.preferences.set(legacyUser.sub,legacy);
+  const migrated=(await service.settings({user:legacyUser})).settings;
+  assert.deepEqual(migrated.events,catalog.defaults,'existing accounts gain event defaults without resetting category choices');
+  assert.equal(migrated.categories.operations,false);
+  assert.equal(catalog.enabled(migrated,{category:'operations',type:'action.succeeded'}),false);
+  assert.equal(catalog.enabled(legacy,{category:'files',type:'files.uploaded'}),true,'old clients/settings retain previous category behavior');
+  const settingsResponse=await service.settings({user:actor});
+  assert.deepEqual(settingsResponse.eventCatalog,catalog.entries);
+  await service.updateSettings({user:actor,patch:{events:{operation_succeeded:false,self_notification:false,social_message:false}}});
+  await service.updateSettings({user:actor,patch:{events:{operation_started:false}}});
+  let prefs=(await service.settings({user:actor})).settings;
+  assert.equal(prefs.events.operation_succeeded,false);assert.equal(prefs.events.operation_started,false);assert.equal(prefs.events.operation_failed,true);
+  assert.equal(catalog.enabled(prefs,{category:'operations',type:'action.succeeded'}),false);
+  assert.equal(catalog.enabled(prefs,{category:'operations',type:'action.failed'}),true,'success and failure can be controlled independently');
+  assert.equal(catalog.enabled(prefs,{category:'operations',type:'action.succeeded',eventKey:'operation_failed'}),false,'client-supplied classification cannot bypass the real type');
+  assert.equal(catalog.enabled(prefs,{category:'social',type:'social.activity.message'}),false);
+  assert.equal(catalog.enabled(prefs,{category:'social',type:'social.activity.call'}),true,'messages can be muted while calls remain enabled');
+  const systemMuted={...DEFAULT_SETTINGS,categories:{...DEFAULT_SETTINGS.categories,system:false}};
+  assert.equal(catalog.enabled(systemMuted,{category:'files',type:'user.requested'}),false,'self notices follow the visible System row regardless of requested history category');
+  const success=await service.publish({userId:actor.sub,category:'operations',type:'action.succeeded',title:'Finished',sourceId:'op1'});
+  assert.equal(success.eventKey,'operation_succeeded');
+  const sent=await service.send({user:actor,title:'Still saved while muted'});assert.equal(sent.alertsEnabled,false);
+  let list=await service.list({user:actor});assert(list.items.some(n=>n.id===success.id),'muting does not discard stored history');
+  assert.equal((await service.settings({user:other})).settings.events.operation_succeeded,true,'event choices are owner-scoped');
+  // New Social subtypes must retain the exact legacy visibility/revocation boundary.
+  const social=await service.publish({userId:actor.sub,category:'social',type:'social.activity.message',title:'New activity',sourceId:'notification:event-source'});
+  service.socialVisibility=async()=>true;
+  list=await service.list({user:actor});assert(list.items.some(n=>n.id===social.id&&n.eventKey==='social_message'));
+  const count=list.unreadCount;
+  service.socialVisibility=async()=>{throw Error('source unavailable');};
+  list=await service.list({user:actor});assert(!list.items.some(n=>n.id===social.id));assert.equal(list.unreadCount,count-1);
+  service.socialVisibility=async()=>false;
+  assert(!(await service.list({user:actor})).items.some(n=>n.id===social.id),'new subtype is revoked after access loss');
+  service.socialVisibility=async()=>true;
+  assert(!(await service.list({user:actor})).items.some(n=>n.id===social.id),'revocation remains tombstoned');
+  await service.updateSettings({user:actor,patch:{categories:{operations:false}}});
+  prefs=(await service.settings({user:actor})).settings;
+  assert.equal(catalog.enabled(prefs,{category:'operations',type:'action.failed'}),false,'category/master switches still constrain individual events');
+  const reopened=new NotificationService({repository:repository.pool?new NotificationRepository({pool:repository.pool,required:true}):repository});
+  await reopened.init();assert.deepEqual((await reopened.settings({user:actor})).settings,prefs);
+  await Promise.all([service.close(),reopened.close()]);
+  console.log('Notification event switches '+label+' passed');
+}
+function catalogSuite() {
+  assert.equal(new Set(catalog.entries.map(e=>e.id)).size,catalog.entries.length);
+  for(const entry of catalog.entries){assert(/^[a-z][a-z0-9_]+$/.test(entry.id));assert(entry.label&&entry.description);for(const type of entry.types)assert.equal(catalog.keyFor({category:entry.category,type}),entry.id);}
+  assert.equal(catalog.keyFor({category:'files',type:'agent.memory_created'}),'notes_changed');
+  assert.equal(catalog.keyFor({category:'calendar',type:'agent.memory_created'}),'calendar_created');
+  assert.equal(catalog.keyFor({category:'ai',type:'user.requested'}),'self_notification');
+  assert.equal(catalog.keyFor({category:'social',type:'social.activity.new-type'}),'social_activity');
+  const context={window:{}};vm.runInNewContext(fs.readFileSync(require.resolve('../notification-event-catalog'),'utf8'),context);
+  assert.equal(context.window.PanthoriumNotificationCatalog.entries.length,catalog.entries.length);
+  assert.equal(context.window.PanthoriumNotificationCatalog.keyFor({category:'operations',type:'action.failed'}),'operation_failed');
+}
 async function auditSuite() {
   const audit=new AuditService(),repository=new NotificationRepository({allowMemory:true}),ledger=new ActionLedgerRepository({allowMemory:true});
   await ledger.init();
@@ -105,15 +167,19 @@ async function auditSuite() {
   notifications.reconciledActions.clear();assert(!(await notifications.list({user})).items.some(n=>n.id===success.id));
   assert(!JSON.stringify(list.items).includes('Private appointment'));assert(!JSON.stringify(list.items).includes('NOT FOR NOTICE'));
   assert.equal((await notifications.list({user:other})).items.length,0);
+  audit.record('agent.job_terminal',{userId:user.sub,jobId:'terminal-result',status:'failed'});
+  list=await notifications.list({user});assert(list.items.some(n=>n.type==='agent.job_terminal.failed'&&n.eventKey==='operation_failed'),'terminal job outcomes use the right individual switch');
   await notifications.close();audit.record('auth.login_success',{userId:user.sub});
   assert.equal(notifications.pending.size,0);
   console.log('Notification audit and durable action reconciliation passed');
 }
 (async()=>{
+  catalogSuite();
   await assert.rejects(()=>new NotificationRepository({required:true,allowMemory:true}).init(),/notifications_storage_unavailable/);
   await suite(new NotificationRepository({allowMemory:true}),'memory isolation/settings/pagination/retention');
+  await eventSuite(new NotificationRepository({allowMemory:true}),'memory');
   const db=newDb({noAstCoverageCheck:true}),pool=new (db.adapters.createPg().Pool)();
-  try {await suite(new NotificationRepository({pool,required:true}),'SQL adapter');}finally{await pool.end();}
+  try {await suite(new NotificationRepository({pool,required:true}),'SQL adapter');await eventSuite(new NotificationRepository({pool,required:true}),'SQL adapter');}finally{await pool.end();}
   await auditSuite();
   console.log('pg-mem checks SQL predicates; PostgreSQL concurrency is covered by notifications-postgres.js.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
