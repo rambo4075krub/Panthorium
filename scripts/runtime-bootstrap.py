@@ -98,7 +98,7 @@ def private(url):
 
 def main():
     # Resume only the two known no-traffic candidates from the prior attempt.
-    known = {"panthorium-backend": "panthorium-backend-00152-jez", "panthorium-speaker": "panthorium-speaker-00002-buv"}
+    known = {"panthorium-backend": "panthorium-backend-00152-jez", "panthorium-speaker": "panthorium-speaker-iam274-v2"}
     with tempfile.TemporaryDirectory() as directory:
         release = Bootstrap(P, "panthorium-staging", "asia-southeast1", "panthorium-speaker", "panthorium-backend", directory)
         before = {name: release.service(name) for name in EXPECTED}
@@ -144,14 +144,15 @@ def main():
             candidates[release.backend] = (revision, url)
             print("Reused verified backend candidate: " + revision, flush=True)
             # The CLI injected maxScale=10 into the console-created Speaker's
-            # revision. Preserve its original absence through an exact service
-            # replacement; the existing service-level cap remains unchanged.
+            # revision, even on exact replacement. Pin the same effective cap
+            # of three as the unchanged service-level cap; never expand capacity.
             current = release.service(release.speaker)
             r.require(current["spec"] == before[release.speaker]["spec"], "Speaker changed before exact replacement")
             metadata = current["spec"]["template"]["metadata"]
             r.require(metadata["annotations"].get("autoscaling.knative.dev/maxScale") == "10", "Unexpected injected scaling value")
+            r.require(current["metadata"].get("annotations", {}).get("run.googleapis.com/maxScale") == "3", "Original service-level cap changed")
             expected_speaker = copy.deepcopy(before[release.speaker])
-            expected_speaker["spec"]["template"]["metadata"]["annotations"].pop("autoscaling.knative.dev/maxScale")
+            expected_speaker["spec"]["template"]["metadata"]["annotations"]["autoscaling.knative.dev/maxScale"] = "3"
             desired = copy.deepcopy(current)
             desired.pop("status", None)
             allowed_metadata = {"name", "namespace", "resourceVersion", "labels", "annotations"}
@@ -159,8 +160,8 @@ def main():
             for key in ("run.googleapis.com/operation-id", "run.googleapis.com/urls", "run.googleapis.com/ingress-status",
                         "serving.knative.dev/creator", "serving.knative.dev/lastModifier"):
                 desired["metadata"].get("annotations", {}).pop(key, None)
-            desired["spec"]["template"]["metadata"]["annotations"].pop("autoscaling.knative.dev/maxScale")
-            candidate_name = "panthorium-speaker-iam274-v2"
+            desired["spec"]["template"]["metadata"]["annotations"]["autoscaling.knative.dev/maxScale"] = "3"
+            candidate_name = "panthorium-speaker-iam274-v3"
             desired["spec"]["template"]["metadata"]["name"] = candidate_name
             desired["spec"]["traffic"] = [entry for entry in desired["spec"]["traffic"] if entry.get("tag") != "iam-pr274"]
             r.require(not any(entry.get("latestRevision") for entry in desired["spec"]["traffic"]), "Traffic must reference explicit revisions")
