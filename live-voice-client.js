@@ -40,6 +40,11 @@
   let reconnectTimer = null;
   let outputSuppressed = false;
   let activeContextKey = null;
+  let activeAccountKey = null;
+  function accountKey() {
+    try { const user = typeof OS !== 'undefined' ? OS.state?.user : null; return String(user?.sub || user?.id || ''); }
+    catch { return ''; }
+  }
   const MAX_INPUT_BUFFER_BYTES = 64 * 1024;
   const MAX_PLAYBACK_SECONDS = 4;
   const MAX_AUDIO_FRAME_BYTES = 512 * 1024;
@@ -280,7 +285,7 @@
     if (frame.type === "toolResult") {
       if (frame.toolId === 'calendar.write' && frame.ok && !frame.error) window.dispatchEvent(new CustomEvent('panthorium:calendar-changed'));
       if (frame.error) console.info("Gemini Live function result", frame.toolId || "unknown", frame.error);
-      if (frame.toolId?.startsWith('studio.') || frame.toolId?.startsWith('social.')) {
+      if (frame.toolId?.startsWith('studio.') || frame.toolId?.startsWith('social.') || frame.toolId?.startsWith('notifications.')) {
         window.dispatchEvent(new CustomEvent('panthorium:ai-done', { detail: { source: 'gemini-live', toolResults: [frame] } }));
       }
       return;
@@ -305,7 +310,7 @@
   }
 
   async function openLiveSession(generation) {
-    const ensureCurrent = () => { if (generation !== sessionGeneration) throw cancelled(); };
+    const ensureCurrent = () => { if (generation !== sessionGeneration || activeAccountKey !== null && activeAccountKey !== accountKey()) throw cancelled(); };
     inputTranscript = ""; outputTranscript = ""; chatUserRow = null; chatAssistantRow = null;
     outputSuppressed = false;
     setStatus("กำลังเปิดไมโครโฟน", "processing");
@@ -322,8 +327,9 @@
     if (audioContext.state !== "running") throw new Error("เปิดเสียงไม่สำเร็จ กรุณาอนุญาตเสียงเว็บไซต์");
     const token = await getAccessToken();
     ensureCurrent();
+    activeAccountKey = accountKey();
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-    if (generation !== sessionGeneration) { stream.getTracks().forEach(track => track.stop()); throw cancelled(); }
+    if (generation !== sessionGeneration || activeAccountKey !== accountKey()) { stream.getTracks().forEach(track => track.stop()); throw cancelled(); }
     microphone = stream;
     socket = new WebSocket(backendWebSocketUrl());
     socket.binaryType = "arraybuffer";
@@ -359,6 +365,10 @@
         }
       };
       socket.onmessage = event => {
+        // A late frame from another account/session must never speak, expose
+        // private notifications or display an approval after an identity switch.
+        if (generation !== sessionGeneration) return;
+        if (activeAccountKey !== accountKey()) { cleanup(); return; }
         let frame;
         try {
           const json = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data);
@@ -381,6 +391,7 @@
     mutedOutput = audioContext.createGain();
     mutedOutput.gain.value = 0;
     processor.onaudioprocess = event => {
+      if (activeAccountKey !== accountKey()) { cleanup(); return; }
       if (!serverReady || socket?.readyState !== WebSocket.OPEN) return;
       // Capture/playback only: no offline recording, inference or request replay.
       if ((socket.bufferedAmount || 0) > MAX_INPUT_BUFFER_BYTES) {
@@ -399,7 +410,7 @@
   function cleanup(closeSocket = true, preserveResume = false) {
     sessionGeneration++;
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    if (!preserveResume) { resumeSessionId = null; resumeEnabled = false; reconnectAttempts = 0; }
+    if (!preserveResume) { resumeSessionId = null; resumeEnabled = false; reconnectAttempts = 0; activeAccountKey = null; }
     cancelConnection?.(); cancelConnection = null;
     serverReady = false;
     for (const pending of approvalDialogs.values()) {
@@ -434,9 +445,12 @@
   }
   window.PanthoriumLiveVoice = {
     toggle, stop:cleanup,
-    sendText:text => { if (!serverReady || socket?.readyState !== WebSocket.OPEN || typeof text !== 'string' || !text.trim() || text.length > 2000) return false; socket.send(JSON.stringify({clientContent:{turns:[{role:'user',parts:[{text}]}],turnComplete:true}})); return true; },
+    sendText:text => { if (activeAccountKey !== null && activeAccountKey !== accountKey()) { cleanup(); return false; } if (!serverReady || socket?.readyState !== WebSocket.OPEN || typeof text !== 'string' || !text.trim() || text.length > 2000) return false; socket.send(JSON.stringify({clientContent:{turns:[{role:'user',parts:[{text}]}],turnComplete:true}})); return true; },
     stopPlayback:() => { outputSuppressed = true; stopPlayback(); if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'stopPlayback' })); },
-    isActive:() => serverReady, syncChatButton,
+    isActive:() => serverReady,
+    isBusy:() => !!(serverReady || starting || reconnectTimer || microphone || activeSources.size),
+    state:() => ({ active: serverReady, busy: !!(serverReady || starting || reconnectTimer || microphone || activeSources.size), mode: currentStatus.mode }),
+    syncChatButton,
     stopChatSession:() => { if (sessionOwner === "chat") cleanup(); }
   };
   document.getElementById("desktop-voice")?.addEventListener("click", () => toggle("desktop"));
@@ -448,7 +462,7 @@
     }
   });
   window.addEventListener("panthorium:auth-changed", () => {
-    if (!window.PanthoriumAuth?.getAccessToken?.()) cleanup();
+    if (!window.PanthoriumAuth?.getAccessToken?.() || activeAccountKey !== null && activeAccountKey !== accountKey()) cleanup();
   });
   syncChatButton();
   window.addEventListener("pagehide", () => cleanup());

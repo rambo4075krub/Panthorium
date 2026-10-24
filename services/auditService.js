@@ -12,6 +12,7 @@ class AuditService {
     this.databaseSslMode = options.databaseSslMode || "disable";
     this.pool = null;
     this.alertAcks = new Map();
+    this.listeners = new Set();
     if (this.file) fs.mkdirSync(path.dirname(this.file), { recursive: true });
   }
 
@@ -38,6 +39,12 @@ class AuditService {
     `);
   }
 
+  subscribe(listener) {
+    if (typeof listener !== 'function') throw new TypeError('audit_listener_required');
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
   record(event, fields = {}) {
     const entry = { time: new Date().toISOString(), event, ...fields };
     if (this.file) fs.appendFile(this.file, JSON.stringify(entry) + "\n", () => {});
@@ -55,6 +62,10 @@ class AuditService {
           Number.isFinite(Number(fields.durationMs)) ? Number(fields.durationMs) : null,
           fields.userAgent || null, JSON.stringify(metadata)]
       ).catch((error) => console.error("[Audit] PostgreSQL write failed:", error.message));
+    }
+    for (const listener of this.listeners) {
+      try { Promise.resolve(listener({ ...entry })).catch(() => {}); }
+      catch { /* Observers cannot break the audited operation. */ }
     }
   }
 

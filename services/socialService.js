@@ -43,6 +43,7 @@ class SocialService {
     files,
     accounts,
     supportAdminUsername,
+    systemNotifications = null,
     turnUrls = process.env.SOCIAL_TURN_URLS,
     turnSecret = process.env.SOCIAL_TURN_SECRET,
   } = {}) {
@@ -51,6 +52,7 @@ class SocialService {
     this.accounts = accounts;
     this.supportAdminUsername = supportAdminUsername;
     this.notifications = new SocialNotifications(this);
+    this.systemNotifications = systemNotifications;
     this.turnUrls = turnUrls;
     this.turnSecret = turnSecret;
   }
@@ -487,7 +489,8 @@ class SocialService {
     const fingerprint = key(action, JSON.stringify(input));
     if (requestId && !/^[\w:.-]{1,160}$/.test(requestId))
       fail("social_invalid_request_id");
-    return this.repo.transaction(async (repo) => {
+    const committedNotices = [];
+    const result = await this.repo.transaction(async (repo) => {
       const receiptId = requestId ? "receipt:" + key(uid, requestId) : null;
       if (receiptId) {
         const old = await repo.get(receiptId);
@@ -508,7 +511,7 @@ class SocialService {
         prepared,
         user,
       );
-      await this.notifications.record(repo, uid, action, result, input);
+      await this.notifications.record(repo, uid, action, result, input, committedNotices);
       if (receiptId)
         await repo.put(
           row("receipt", uid, {
@@ -525,6 +528,8 @@ class SocialService {
         );
       return result;
     });
+    await this.notifications.publishCommitted(committedNotices);
+    return result;
   }
   async mutate(repo, uid, action, a, files, user) {
     let record;

@@ -114,8 +114,9 @@ class AgentMemoryService {
     if (!this.allowed(user)) return { ok:false,error:'memory_requires_account' };
     if (!this.validScope(scope)) return { ok:false,error:'invalid_memory_scope' };
     const id=String(memoryId || ''); if (!/^[0-9a-f-]{36}$/i.test(id)) return { ok:false,error:'invalid_memory_id' };
+    const current=await this.repository.get(user.sub,id,scope);
     const deleted=await this.repository.delete(user.sub,id,scope); if (!deleted) return { ok:false,error:'memory_not_found' };
-    this.audit?.record('agent.memory_deleted',{ userId:user.sub,requestId,memoryId:id,scope });
+    this.audit?.record('agent.memory_deleted',{ userId:user.sub,requestId,memoryId:id,scope,kind:current?.kind });
     return { ok:true };
   }
 

@@ -114,6 +114,21 @@ class ActionLedgerRepository {
     const items = [...this.memory.values()].filter(item => item.userId === userId).sort((a,b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, safeLimit);
     return Promise.all(items.map(item => this.get(userId, item.actionId)));
   }
+  async listNotificationStates(userId, limit = 100) {
+    this.assertReady(); identifier(userId, 'action_owner');
+    const count = Math.min(100, Math.max(1, Math.floor(Number(limit) || 100)));
+    if (!this.pool) return this.list(userId,count);
+    const now = new Date(this.now()).toISOString();
+    const stale = new Date(this.now() - this.staleAfterMs).toISOString();
+    // One account-scoped reconciliation and one narrow query replace per-row get()
+    // calls for a polling inbox. Never expose approval hashes, arguments or results.
+    await this.pool.query(`UPDATE panthorium_action_ledger SET state='unknown',updated_at=$2
+      WHERE user_id=$1 AND state IN ('running','cancel_requested') AND started_at < $3 AND result IS NULL`, [userId,now,stale]);
+    const result = await this.pool.query(`SELECT action_id AS "actionId",user_id AS "userId",tool_id AS "toolId",state,
+      started_at AS "startedAt",created_at AS "createdAt",updated_at AS "updatedAt"
+      FROM panthorium_action_ledger WHERE user_id=$1 ORDER BY created_at DESC,action_id DESC LIMIT $2`, [userId,count]);
+    return result.rows;
+  }
   async claim(userId, actionId, approvalHash) {
     const item = await this.get(userId, actionId);
     if (!item) throw new Error('action_not_found');

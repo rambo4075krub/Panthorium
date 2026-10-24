@@ -9,6 +9,7 @@ async function main() {
   const dom = new JSDOM('<body data-gemini-live-enabled="true"><button id="desktop-voice"></button><button id="chat-mic"></button><div id="chat-messages"></div></body>');
   let processor; let starts = 0; let stops = 0; let micStops = 0;
   const listeners = new Map(); const sockets = [];
+  const OS = { state: { user: { id: 'first-account' } } };
   let task = { packId: 'learning', featureId: 'notes', scope: 'personal', sessionId: 'cloud-task' };
   class AudioContext {
     constructor() { this.state = 'running'; this.sampleRate = 48000; this.currentTime = 0; }
@@ -29,7 +30,7 @@ async function main() {
   }
   const window = { AudioContext, location: { origin: 'https://test' }, PanthoriumAuth: { ensureSession: async () => {}, getAccessToken: () => 'token' },
     PanthoriumCloudApps: { voiceContext: () => task }, speechSynthesis: { cancel() {} }, dispatchEvent() {}, addEventListener: (name, callback) => listeners.set(name, callback) };
-  vm.runInNewContext(fs.readFileSync(require.resolve('../live-voice-client.js'), 'utf8'), { window, document: dom.window.document,
+  vm.runInNewContext(fs.readFileSync(require.resolve('../live-voice-client.js'), 'utf8'), { window, OS, document: dom.window.document,
     navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() { micStops++; } }] }) } },
     WebSocket: Socket, CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
     TextDecoder, Uint8Array, DataView, Float32Array, Set, Math, Promise, setTimeout, clearTimeout, console,
@@ -63,7 +64,24 @@ async function main() {
   sockets[2].disconnected(); await new Promise(resolve => setTimeout(resolve, 550));
   assert.equal(sockets.length, 3, 'pending approval is cancelled on disconnect, never resumed or replayed');
   assert(micStops >= 3);
+  await window.PanthoriumLiveVoice.toggle();
+  assert(window.PanthoriumLiveVoice.isBusy());
+  assert.equal(window.PanthoriumLiveVoice.state().active, true);
+  listeners.get('panthorium:auth-changed')();
+  assert(window.PanthoriumLiveVoice.isActive(), 'same-account token refresh preserves live session');
+  const lateFrame = sockets[3].onmessage;
+  const priorText = dom.window.document.getElementById('chat-messages').textContent;
+  OS.state.user = { id: 'second-account' }; listeners.get('panthorium:auth-changed')();
+  assert.equal(sockets[3].readyState, 3, 'account switch closes prior live transport');
+  assert(!window.PanthoriumLiveVoice.isActive()); assert(!window.PanthoriumLiveVoice.isBusy());
+  lateFrame({ data: JSON.stringify({ serverContent: { outputTranscription: { text: 'private first-account notification' } } }) });
+  assert.equal(dom.window.document.getElementById('chat-messages').textContent, priorText, 'late private output is discarded');
+  await window.PanthoriumLiveVoice.toggle();
+  assert.equal(sockets[4].sent[0].sessionId, undefined, 'new account never resumes old voice session');
+  OS.state.user = { id: 'third-account' };
+  assert.equal(window.PanthoriumLiveVoice.sendText('read my notifications'), false, 'identity guard also protects sends before an auth event');
+  assert.equal(sockets[4].readyState, 3);
   window.PanthoriumLiveVoice.stop(); dom.window.close();
-  console.log('Browser voice: bounded capture/playback, immediate stop, context changes and safe reconnect passed');
+  console.log('Browser voice: bounded capture/playback, immediate stop, context/account changes, late-frame privacy and safe reconnect passed');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
