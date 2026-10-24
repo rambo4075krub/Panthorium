@@ -15,7 +15,7 @@ function fixture(profile) {
   const image = { Id: `sha256:${'a'.repeat(64)}`, Os: 'linux', Architecture: 'amd64' };
   const binaries = { ffmpeg: Buffer.from('\x7fELFfixture-ffmpeg'), ffprobe: Buffer.from('\x7fELFfixture-ffprobe') };
   const manifest = { ...clone(lock), binaries: Object.fromEntries(Object.entries(binaries).map(([name, bytes]) => [name, { path: `/usr/local/bin/${name}`, sha256: hash(bytes) }])) };
-  const rawSbom = { schema: { version: '16.1.11' }, source: { id: 'image', type: 'image', metadata: { imageID: image.Id } }, distro: { id: profile === 'backend' ? 'alpine' : 'debian' }, artifacts: [{ id: 'base', name: 'base-library', version: '1.0', type: 'binary' }] };
+  const rawSbom = { schema: { version: '16.1.11' }, source: { id: 'image', type: 'image', metadata: { imageID: image.Id } }, distro: profile === 'speaker-candidate-noble' ? { id: 'ubuntu', versionID: '24.04' } : { id: profile === 'backend' ? 'alpine' : 'debian' }, artifacts: [{ id: 'base', name: 'base-library', version: '1.0', type: 'binary' }] };
   const { sbom, proof } = enrichSbom(rawSbom, manifest, lock, binaries, image, profile);
   const input = { rawSbom, sbom, proof, manifest, lock, binaries, image, profile, timestamp: '2026-10-23T00:00:00.000Z', patchBytes: fs.readFileSync(path.join(__dirname, '../build/media/patches/ffmpeg-CVE-2026-107696.patch')) };
   // Only tests substitute a reviewed executable identity. The CLI has no policy
@@ -25,7 +25,7 @@ function fixture(profile) {
   return { input, policy };
 }
 
-for (const profile of ['backend', 'speaker']) {
+for (const profile of ['backend', 'speaker', 'speaker-candidate-noble']) {
   const { input, policy } = fixture(profile);
   assert.throws(() => createArtifacts(input), /not an independently reviewed executable/);
   const { vex, record } = createArtifacts(input, policy);

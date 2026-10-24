@@ -38,7 +38,11 @@ read-only root inspector. No administration shell or package manager is shipped.
 
 The complete-service workflow runs the nine-format decoder matrix and offline
 192-dimension model inference, retains all package identities and native bytes,
-and performs a strict scan with no exclusions or VEX exemptions. A successful
+and retains a complete unfiltered scan. The strict gate permits only the existing
+reviewed FFmpeg backport, bound to independently reproduced executable hashes
+and this exact image. A second verifier rejects missing or unrelated findings,
+changed matching rules, changed severities, and database differences. All other
+findings, including upstream libsndfile records, remain in the report. A successful
 build or base-only scan is insufficient for release. Full-image findings, ABI
 compatibility, model behavior, and staging validation must all be reviewed before
 the production Dockerfile can change.

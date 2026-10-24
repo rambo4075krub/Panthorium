@@ -61,7 +61,7 @@ function createArtifacts({ rawSbom, sbom, manifest, lock, binaries, image, patch
     schemaVersion: 1, profile, timestamp, ...identity,
     binaries: proof.binaries, sourceLockSha256: jsonHash(lock), patchSha256: sha256(patchBytes),
     rawSbomSha256: jsonHash(rawSbom), sbomSha256: jsonHash(sbom), vexSha256: jsonHash(vex),
-    evidenceRun: policy.evidenceRun
+    evidenceRun: profilePolicy.evidenceRun || policy.evidenceRun
   };
   return { vex, record };
 }
@@ -158,13 +158,14 @@ function verifyReports(raw, filtered, vex, record) {
 function loadEvidence(directory, timestamp) {
   const read = name => JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8'));
   const proof = read('ffmpeg-proof.json');
-  const names = { backend: 'ffmpeg-source.lock.json', speaker: 'ffmpeg-speaker-source.lock.json' };
+  const names = { backend: 'ffmpeg-source.lock.json', speaker: 'ffmpeg-speaker-source.lock.json', 'speaker-candidate-noble': 'ffmpeg-speaker-source.lock.json' };
   assert.ok(names[proof.profile], 'Unknown source profile');
   const lock = require(path.join(__dirname, '../build/media', names[proof.profile]));
   const images = read('image-inspect.json');
   assert.ok(Array.isArray(images) && images.length === 1);
   return {
-    rawSbom: read('container-sbom.raw.syft.json'), sbom: read('container-sbom.syft.json'), manifest: read('ffmpeg-source.json'),
+    rawSbom: read(proof.profile === 'speaker-candidate-noble' ? 'service-sbom.with-native.syft.json' : 'container-sbom.raw.syft.json'),
+    sbom: read(proof.profile === 'speaker-candidate-noble' ? 'service-sbom.syft.json' : 'container-sbom.syft.json'), manifest: read('ffmpeg-source.json'),
     lock, proof, profile: proof.profile, image: images[0], timestamp,
     binaries: { ffmpeg: fs.readFileSync(path.join(directory, 'ffmpeg')), ffprobe: fs.readFileSync(path.join(directory, 'ffprobe')) },
     patchBytes: fs.readFileSync(path.join(__dirname, '../build/media/patches/ffmpeg-CVE-2026-107696.patch'))

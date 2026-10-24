@@ -7,6 +7,7 @@ on:
       - build/media/**
       - build/libsndfile/**
       - scripts/verify-container-sbom.js
+      - scripts/verified-ffmpeg-backport.js
       - .github/workflows/speaker-service-candidate.yml
 
 # No deployment credentials, publishing, exclusions, or production gate changes.
@@ -115,18 +116,42 @@ jobs:
             "$EVIDENCE_DIR/service-sbom.with-native.syft.json" "$EVIDENCE_DIR/ffmpeg-source.json" \
             "$EVIDENCE_DIR" "$EVIDENCE_DIR/image-inspect.json" build/media/ffmpeg-speaker-source.lock.json \
             "$EVIDENCE_DIR/service-sbom.syft.json" "$EVIDENCE_DIR/ffmpeg-proof.json" speaker-candidate-noble
-      - name: Require strict full-image scan without exclusions
+      - name: Preserve the complete unfiltered full-image scan
+        id: raw-scan
         if: ${{ !cancelled() && steps.provenance.outcome == 'success' }}
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           grype-version: v0.118.0
           sbom: ${{ env.EVIDENCE_DIR }}/service-sbom.syft.json
           config: ${{ env.EVIDENCE_DIR }}/grype.yaml
+          fail-build: false
+          severity-cutoff: high
+          only-fixed: false
+          output-format: json
+          output-file: ${{ env.EVIDENCE_DIR }}/container-vulnerabilities.raw.json
+      - name: Verify reviewed source and exact native executables for this image
+        id: backport
+        if: ${{ !cancelled() && steps.raw-scan.outcome == 'success' }}
+        run: node scripts/verified-ffmpeg-backport.js create "$EVIDENCE_DIR"
+      - name: Require strict gate with only the verified backport
+        id: filtered-scan
+        if: ${{ !cancelled() && steps.backport.outcome == 'success' }}
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        env:
+          GRYPE_DB_AUTO_UPDATE: 'false'
+        with:
+          grype-version: v0.118.0
+          sbom: ${{ env.EVIDENCE_DIR }}/service-sbom.syft.json
+          config: ${{ env.EVIDENCE_DIR }}/grype.yaml
+          vex: ${{ env.EVIDENCE_DIR }}/ffmpeg-backport.vex.json
           fail-build: true
           severity-cutoff: high
           only-fixed: false
           output-format: json
-          output-file: ${{ env.EVIDENCE_DIR }}/service-vulnerabilities.json
+          output-file: ${{ env.EVIDENCE_DIR }}/container-vulnerabilities.json
+      - name: Independently reject changed findings or unrelated exemptions
+        if: ${{ !cancelled() && steps.backport.outcome == 'success' && steps.filtered-scan.outcome != 'skipped' }}
+        run: node scripts/verified-ffmpeg-backport.js verify "$EVIDENCE_DIR"
       - name: Preserve complete service evaluation
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
