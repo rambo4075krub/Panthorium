@@ -6,6 +6,7 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
 async function main() {
+await require('./start-menu-layout')();
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const shell = read('sentinel.html');
 const server = read('server.js');

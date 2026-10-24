@@ -4,7 +4,20 @@
   const lists = new WeakMap();
   const groupState = new WeakMap();
   let sequence = 0;
+  const menuOrder = ['sentinel', 'files', 'calendar', 'notes', 'cloud-group-social', 'cloud-group-creative', 'billing', 'privacy-policy', 'cloud-group-settings'];
+  const settingsOrder = ['goals', 'assistant-preferences', 'contact', 'reminders', 'account-logout'];
+  const hiddenApps = new Set(['calculator', 'organizations', 'cloud-group-life', 'cloud-group-study', 'cloud-group-work', 'cloud-group-specialist', 'cloud-apps']);
+  const curated = list => list?.dataset.startLayout === 'curated';
+  function menuHidden(item, list) {
+    if (!curated(list)) return false;
+    for (let node = item; node && node !== list; node = node.parentElement) {
+      const id = node.dataset?.appId || '';
+      if (hiddenApps.has(id) || id.startsWith('cloud-apps-') || /^cloud-(life|study|work|specialist)$/.test(id)) return true;
+    }
+    return false;
+  }
   const paths = {
+    settings: 'M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1 1-3ZM12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z',
     social:'M16 21v-3c0-3-2-5-5-5s-5 2-5 5v3M11 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM17 5c4 0 4 6 0 6M19 14c2 1 3 3 3 6',
     life: 'M12 21s-8-5-8-11a4 4 0 0 1 8-2 4 4 0 0 1 8 2c0 6-8 11-8 11Z',
     study: 'm3 8 9-5 9 5-9 5-9-5Zm3 2v7c3 3 9 3 12 0v-7M21 8v8',
@@ -29,7 +42,7 @@
     presentation: 'M3 4h18v13H3V4ZM12 17v4M7 21l5-4 5 4M7 12V9M12 12V7M17 12v-2',
     chevron: 'm8 5 7 7-7 7'
   };
-  function normalize(value) { return String(value || '').normalize('NFKC').trim().toLocaleLowerCase(); }
+  function normalize(value) { return String(value || '').normalize('NFKC').replace(/\s*·\s*/g, ' ').replace(/\s+/g, ' ').trim().toLocaleLowerCase(); }
   function icon(name, doc) {
     doc = doc || root.document;
     const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -84,7 +97,7 @@
     if (!list) return 0;
     const state = listState(list), needle = normalize(query); state.query = needle; state.emptyState = emptyState || null;
     function visit(item, inheritedMatch, ancestorHidden) {
-      const accessHidden = hiddenByAccess(item, list);
+      const accessHidden = hiddenByAccess(item, list) || (!needle && menuHidden(item, list));
       if (item.dataset?.startGroup) {
         const groupMatch = !!needle && normalize(item.dataset.searchText || '').includes(needle);
         let count = 0;
@@ -149,6 +162,22 @@
   function groupItems(section) { return groupState.get(section)?.body || section; }
   function keepPinnedLast(list) {
     if (!list) return;
+    if (curated(list)) {
+      const settings = Array.from(list.children).find(item => item.dataset?.startGroup === 'settings');
+      if (settings) {
+        const body = groupItems(settings);
+        for (const id of settingsOrder) {
+          const item = Array.from(list.querySelectorAll('.sm-app')).find(child => child.dataset.appId === id);
+          if (item && item.parentElement !== body) body.appendChild(item);
+        }
+        const items = Array.from(body.children).sort((a, b) => settingsOrder.indexOf(a.dataset.appId) - settingsOrder.indexOf(b.dataset.appId));
+        items.forEach((item, index) => { if (body.children[index] !== item) body.insertBefore(item, body.children[index] || null); });
+      }
+      const rank = item => { const index = menuOrder.indexOf(item.dataset?.appId); return index < 0 ? menuOrder.length : index; };
+      const ordered = Array.from(list.children).sort((a, b) => rank(a) - rank(b));
+      ordered.forEach((item, index) => { if (list.children[index] !== item) list.insertBefore(item, list.children[index] || null); });
+      return;
+    }
     const children = Array.from(list.children), pinned = [...pinnedLast].map(id => children.find(child => child.dataset?.appId === id)).filter(Boolean);
     // Keep the public contact entry immediately beside Privacy/Policy, even after extensions append apps.
     const contact = children.find(child => child.dataset?.appId === "contact");

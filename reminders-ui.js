@@ -32,7 +32,7 @@
     const os = api();
     if (!os || typeof createWindow !== 'function') return false;
     if (os.windows.has('reminders')) { focusWindow('reminders'); return true; }
-    createWindow('reminders', '⏰ Reminders', markup(), { width: 560, height: 600 });
+    createWindow('reminders', '🔔 ตั้งค่าการแจ้งเตือน', markup(), { width: 560, height: 600 });
     const win = document.querySelector(selector);
     const root = win?.querySelector('[data-reminders-root]');
     if (!root) return false;

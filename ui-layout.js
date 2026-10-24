@@ -54,6 +54,7 @@
     var menu = document.getElementById('sm-apps');
     if (menu) {
       Array.from(menu.children).forEach(function (item) {
+        if (item.dataset.startGroup === 'settings') return;
         var text = (item.textContent || '').trim();
         if (/ตั้งค่า|settings/i.test(text)) item.style.display = guest ? 'none' : '';
       });

@@ -928,10 +928,10 @@
                 <label class="sr-only" for="start-search">ค้นหาแอปและเครื่องมือ</label>
                 <input id="start-search" type="search" placeholder="ค้นหาแอปหรือเครื่องมือ..." autocomplete="off" enterkeyhint="search">
             </div>
-            <div class="sm-apps" id="sm-apps" aria-label="แอปและหน้าต่าง"></div>
+            <div class="sm-apps" id="sm-apps" data-start-layout="curated" aria-label="แอปและหน้าต่าง"></div>
             <div id="sm-empty" hidden>ไม่พบแอปที่ตรงกับคำค้นหา</div>
             <div class="sm-footer">
-                <button id="btn-settings-quick">⚙️ ตั้งค่า</button>
+                <button id="btn-settings-quick" hidden style="display:none!important">⚙️ ตั้งค่า</button>
                 <button id="btn-logout" hidden style="display:none!important">🔄 รีสตาร์ท</button>
             </div>
         </div>
@@ -952,7 +952,7 @@
     <!-- External libs -->
     <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js" integrity="sha384-5SEinnOIOK1Nl6bzEIWwfXWMg4EaJhN2bXKgrjYC0Bq+fYNZHwhD3ntM92lTHnfL" crossorigin="anonymous"></script>
     <script src="/vendor/three.min.js?v=r128-local"></script>
-    <script src="/start-menu-ui.js?v=workspace-ux-20261015"></script>
+    <script src="/start-menu-ui.js?v=start-menu-20261024"></script>
     <script src="/billing-catalog.js?v=billing-20261011"></script>
     <script src="/billing-ui.js?v=billing-20261011"></script>
     <script src="/account-ui.js?v=account-windows-20261011"></script>
@@ -3190,7 +3190,7 @@
     }
 
     const APP_LIST = [
-        { id: "sentinel", name: "Sentinel AI", icon: "🤖", open: openSentinel },
+        { id: "sentinel", name: "Sentinel AI", menuName: "Sentinel AI แชท", icon: "🤖", open: openSentinel },
         { id: "calculator", name: "เครื่องคิดเลข", icon: "🧮", open: openCalculator },
         { id: "calendar", name: "ปฏิทิน", icon: "📅", startMenuOnly: true, open: () => window.PanthoriumCalendar?.open?.(), visible: () => {
             const user = OS.state.user;
@@ -3216,7 +3216,11 @@
         { id: "account-login", name: "เข้าสู่ระบบ / ลืมรหัสผ่าน", icon: "🔐", startMenuOnly: true, visible: () => !OS.state.user || OS.state.user.roles?.includes("guest"), open: () => window.PanthoriumAccounts?.openLogin?.() },
         { id: "account-logout", name: "ออกจากระบบ", icon: "🚪", startMenuOnly: true, open: () => window.PanthoriumAccounts?.openLogout?.(), visible: () => Boolean(OS.state.user && !OS.state.user.roles?.includes("guest")) },
         { id: "billing", name: "แพ็กเกจและชำระเงิน", icon: "💳", startMenuOnly: true, open: () => window.PanthoriumBilling?.open?.() },
-        { id: "contact", name: "ติดต่อสอบถาม", icon: "✉️", startMenuOnly: true, open: () => window.PanthoriumContact?.open?.() },
+        { id: "contact", name: "ศูนย์ช่วยเหลือ", icon: "✉️", startMenuOnly: true, open: () => window.PanthoriumContact?.open?.() },
+        { id: "reminders", name: "ตั้งค่าการแจ้งเตือน", icon: "🔔", startMenuOnly: true, open: () => window.PanthoriumReminders?.open?.(), visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
         { id: "privacy-policy", name: "Privacy/Policy", icon: "🔐", startMenuOnly: true, open: () => window.PanthoriumPrivacyPolicy?.open?.() }
     ];
 
@@ -3267,21 +3271,25 @@
         });
 
         sm.innerHTML = "";
+        const settingsGroup = window.PanthoriumStartMenuUI?.group?.("settings", "ตั้งค่า", sm);
+        const settingsApps = new Set(["goals", "assistant-preferences", "contact", "reminders", "account-logout"]);
         apps.forEach(app => {
+            const label = app.menuName || app.name;
             const el = document.createElement("button");
             el.type = "button";
             el.className = "sm-app";
             el.dataset.appId = app.id;
-            el.dataset.baseLabel = app.name;
-            el.dataset.searchText = `${app.id} ${app.name}`;
-            el.innerHTML = `<div class="ico" aria-hidden="true">${app.icon}</div><span>${app.name}</span>`;
+            el.dataset.baseLabel = label;
+            el.dataset.searchText = `${app.id} ${label}`;
+            el.innerHTML = `<div class="ico" aria-hidden="true">${app.icon}</div><span>${label}</span>`;
             el.onclick = () => {
                 const existingWindow = findWindowByAppId(app.id);
                 if (existingWindow) focusWindow(existingWindow.id);
                 else app.open();
                 closeStartMenu();
             };
-            sm.appendChild(el);
+            const target = settingsGroup && settingsApps.has(app.id) ? window.PanthoriumStartMenuUI.groupItems(settingsGroup) : sm;
+            target.appendChild(el);
         });
         // Rebuild extension launchers after replacing the base menu on every Start click.
         window.PanthoriumSocial?.renderMenu?.();
