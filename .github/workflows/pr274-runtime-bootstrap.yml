@@ -1,0 +1,26 @@
+name: PR 274 production runtime identity bootstrap
+on:
+  push:
+    branches: [ops/pr274-runtime-bootstrap]
+permissions:
+  contents: read
+concurrency:
+  group: panthorium-production
+  cancel-in-progress: false
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Verify existing deployment principal
+        run: |
+          test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)')" = "github-deployer@project-0f6aa7d0-6055-420f-842.iam.gserviceaccount.com"
+      - name: Verify and migrate private runtime identities with guarded rollback
+        run: python3 scripts/runtime-bootstrap.py
