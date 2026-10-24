@@ -12,7 +12,7 @@
   function open() {
     const existing = document.querySelector('[data-panthorium-contact]');
     if (existing) { window.focusWindow?.(APP_ID); sync(); return existing; }
-    window.createWindow(APP_ID, 'ติดต่อสอบถาม', `
+    window.createWindow(APP_ID, 'ศูนย์ช่วยเหลือ', `
       <section data-panthorium-contact>
         <style>
           [data-panthorium-contact]{box-sizing:border-box;height:100%;overflow:auto;padding:clamp(20px,5vw,48px);color:var(--text,#edf2f7);background:linear-gradient(145deg,#10151f,#221a15);font:15px/1.7 system-ui,sans-serif}
@@ -28,7 +28,7 @@
           [data-panthorium-contact] :focus-visible{outline:2px solid #91d9ff;outline-offset:4px}
           [data-panthorium-contact] [role=status]{color:#ffb26e}
         </style>
-        <small>PANTHORIUM / CONTACT</small><h1>ติดต่อ Panthorium</h1>
+        <small>PANTHORIUM / HELP CENTER</small><h1>ศูนย์ช่วยเหลือ</h1>
         <article><h2>สำนักงานใหญ่</h2><address>32 moo4 Pajod Kohkeaw Waritchaphum SakonNakhon 47150</address></article>
         <article><h2>อีเมล์</h2><a href="mailto:account@panthorium.net">account@panthorium.net</a></article>
         <article><h2>แชทกับเรา</h2><p data-contact-note></p><button type="button" data-contact-chat>แชทกับเรา</button><p role="status" aria-live="polite"></p></article>

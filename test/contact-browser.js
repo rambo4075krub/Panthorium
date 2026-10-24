@@ -37,7 +37,7 @@ const { createSocialRouter } = require('../routes/social');
       await page.goto('http://127.0.0.1:' + server.address().port);
     }
     await customer.evaluate(() => PanthoriumContact.open());
-    await customer.getByRole('heading', { name: 'ติดต่อ Panthorium', exact: true }).waitFor();
+    await customer.getByRole('heading', { name: 'ศูนย์ช่วยเหลือ', exact: true }).waitFor();
     assert(await customer.locator('[data-panthorium-contact]').evaluate(el => el.scrollWidth <= el.clientWidth));
     if (process.env.CONTACT_SCREENSHOT) await customer.screenshot({ path: process.env.CONTACT_SCREENSHOT });
     await customer.getByRole('button', { name: 'แชทกับเรา', exact: true }).click();

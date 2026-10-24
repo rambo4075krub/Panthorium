@@ -26,12 +26,13 @@ const read = f => fs.readFileSync(require('node:path').join(__dirname, '..', f),
         evaluate('renderAppLaunchers()'); w.PanthoriumAccessShell.sync(); await tick();
         const contact = d.querySelector('#sm-apps [data-app-id="contact"]');
         assert(contact, role + ' has contact');
-        assert.equal(contact.nextElementSibling?.dataset.appId, 'privacy-policy');
+        assert.equal(contact.closest('[data-start-group]')?.dataset.startGroup, 'settings');
+        assert.equal(contact.textContent.trim(), '✉️ศูนย์ช่วยเหลือ');
         for (const id of ['account-login', 'account-register']) assert.equal(!!d.querySelector('#sm-apps [data-app-id="' + id + '"]'), role === 'guest');
         assert.equal(d.querySelector('#desktop-icons [data-app-id="contact"]'), null);
         const extra = d.createElement('button'); extra.dataset.appId = 'late-extension'; extra.className = 'sm-app';
         d.getElementById('sm-apps').append(extra); await tick();
-        assert.equal(contact.nextElementSibling?.dataset.appId, 'privacy-policy', 'extensions preserve adjacency');
+        assert.equal(contact.closest('[data-start-group]')?.dataset.startGroup, 'settings', 'extensions preserve Help Center placement');
       }
       d.querySelector('#sm-apps [data-app-id="contact"]').click();
       const root = d.querySelector('[data-panthorium-contact]'); assert(root);

@@ -185,6 +185,7 @@
   function choosePack(v, pack) {
     if (!current(v) || v.busy || !pack) return;
     v.pack = pack; v.session = null; v.run = null; v.idempotencyKey = null;
+    v.root.closest('.window').dataset.cloudCategory = category(pack);
     v.root.querySelector('[data-input]').value = '';
     v.root.querySelector('[data-input]').maxLength = readiness.limits?.maxInputChars || 4000;
     v.root.querySelector('[data-sources]').replaceChildren();
@@ -361,7 +362,16 @@
     document.querySelectorAll('#sm-apps [data-cloud-pack-group="true"]').forEach(item => item.remove());
     if (allowed()) loadCatalog().catch(() => {});
   }
-  window.PanthoriumCloudApps = Object.freeze({ open, refreshCatalog: () => loadCatalog(true), voiceContext: () => allowed() && view && current(view) && context ? contextFor(view) : null });
+  async function openCategory(id) {
+    if (!allowed() || !Object.hasOwn(groups, id)) return false;
+    const owner = principal(), epoch = generation;
+    try { await loadCatalog(); } catch (_) { return false; }
+    if (!allowed() || owner !== principal() || epoch !== generation || view?.busy) return false;
+    const packs = (catalog?.packs || []).filter(pack => category(pack) === id);
+    const pack = packs.find(item => !item.blocked) || packs[0];
+    return pack ? open(pack.id) : false;
+  }
+  window.PanthoriumCloudApps = Object.freeze({ open, openLife: () => openCategory('life'), openStudy: () => openCategory('study'), openWork: () => openCategory('work'), openSpecialist: () => openCategory('specialist'), refreshCatalog: () => loadCatalog(true), voiceContext: () => allowed() && view && current(view) && context ? contextFor(view) : null });
   window.addEventListener('panthorium:auth-changed', () => {
     const next = authFingerprint();
     if (next === authStamp) { installMenu(); if (allowed() && !catalog) loadCatalog().catch(() => {}); return; }
