@@ -33,6 +33,15 @@ jobs:
               release.speaker_url=release.service(release.speaker)["status"]["url"]
               token=release.token()
               print("Existing deployer minted scoped backend OIDC token",flush=True)
+              import urllib.request,urllib.error,json
+              for path in ("/health","/healthz"):
+                  try:
+                      req=urllib.request.Request(release.speaker_url+path,headers={"Authorization":"Bearer "+token})
+                      with urllib.request.urlopen(req,timeout=30) as response:
+                          payload=json.load(response)
+                          print("Endpoint",path,response.status,"ok",payload.get("ok"),"modelReady",payload.get("modelReady"),flush=True)
+                  except urllib.error.HTTPError as error:
+                      print("Endpoint",path,"HTTP status",error.code,flush=True)
               s["r"].health(release.speaker_url,token,speaker=True,legacy_speaker=True)
               s["inference"](release.speaker_url,token)
               s["private"](release.speaker_url)
