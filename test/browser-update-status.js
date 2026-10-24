@@ -2,10 +2,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
 const mainRequire = require('node:module').createRequire(path.join(__dirname, '../electron/main.cjs'));
 const source = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
 
 (async () => {
+  const publicKey = crypto.generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' });
+  for (const fixture of [
+    { trust: { version: 1, keys: {} }, error: 'update_signature_unconfigured' },
+    { trust: { version: 1, keys: { fixture: publicKey } }, error: 'update_signature_missing' }
+  ]) {
   for (const edition of ['admin', 'user']) for (const platform of ['win32', 'darwin', 'linux']) {
     const handlers = new Map(), requests = [];
     let dialogs = 0, remote = '15.0.5', fail = false;
@@ -22,7 +28,7 @@ const source = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'ut
         return Response.json({ edition, version: remote, assets: { windows: asset, macos: asset, linux: asset } });
       } }
     };
-    const context = vm.createContext({ require: name => name === 'electron' ? electron : name === '../package.json' ? { panthoriumEdition: edition } : mainRequire(name), process: { platform, env: {} }, console: { warn() {} }, URL, Buffer, setTimeout, clearTimeout, setInterval });
+    const context = vm.createContext({ require: name => name === 'electron' ? electron : name === '../package.json' ? { panthoriumEdition: edition } : name === './update-trust.json' ? fixture.trust : mainRequire(name), process: { platform, env: {} }, console: { warn() {} }, URL, Buffer, setTimeout, clearTimeout, setInterval });
     vm.runInContext(source, context);
     vm.runInContext('installVoiceBridge()', context);
     const check = handlers.get('panthorium:update-status');
@@ -30,9 +36,9 @@ const source = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'ut
     const status = await check(event);
     assert.equal(status.available, true);
     assert.equal(status.installable, false);
-    assert.equal(status.verificationError, 'update_signature_unconfigured');
+    assert.equal(status.verificationError, fixture.error);
     const manual = await handlers.get('panthorium:check-updates')(event);
-    assert.equal(manual.error, 'update_signature_unconfigured');
+    assert.equal(manual.error, fixture.error);
     dialogs = 0;
     remote = '15.0.4';
     assert.equal((await check(event)).upToDate, true);
@@ -46,5 +52,6 @@ const source = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'ut
     assert.equal((await handlers.get('panthorium:check-updates')({ senderFrame: { url: 'https://www.youtube.com/' } })).error, 'untrusted_origin');
     assert.equal(requests.length, count);
   }
-  console.log('Update status: both editions on Windows/macOS/Linux; no installer/dialog on status checks; current/new/error and untrusted origins');
+  }
+  console.log('Update status: configured/unconfigured trust; both editions on Windows/macOS/Linux; no installer/dialog on status checks; current/new/error and untrusted origins');
 })().catch(error => { console.error(error); process.exitCode = 1; });
