@@ -5,7 +5,7 @@ inputs:
     description: Local build reference, or immutable Artifact Registry digest when pull is true
     required: true
   profile:
-    description: backend or speaker
+    description: backend, legacy speaker, or speaker-candidate-noble
     required: true
   evidence-dir:
     description: Fresh absolute directory below RUNNER_TEMP
@@ -19,7 +19,7 @@ inputs:
 outputs:
   image-id:
     description: The immutable local Docker image ID used by every check
-    value: ${{ steps.identity.outputs.image-id }}
+    value: ${{ steps.identity.outputs.image-id || steps.noble.outputs.image-id }}
   evidence-dir:
     description: Directory containing bound inventories, manifests and reports
     value: ${{ inputs.evidence-dir }}
@@ -30,6 +30,7 @@ runs:
       with:
         node-version: 24.22.1
     - name: Capture one immutable image identity
+      if: ${{ inputs.profile != 'speaker-candidate-noble' }}
       id: identity
       shell: bash
       env:
@@ -92,7 +93,7 @@ runs:
           --entrypoint python "$IMAGE_ID" /app/test/container-speaker-media-smoke.py \
           2>&1 | tee "$EVIDENCE_DIR/speaker-media-smoke.log"
     - name: Verify the full speaker model performs offline embedding inference
-      if: inputs.require-model == 'true'
+      if: inputs.profile == 'speaker' && inputs.require-model == 'true'
       shell: bash
       env:
         IMAGE_ID: ${{ steps.identity.outputs.image-id }}
@@ -106,6 +107,7 @@ runs:
           --entrypoint python "$IMAGE_ID" /app/test/container-speaker-model-smoke.py \
           2>&1 | tee "$EVIDENCE_DIR/speaker-model-smoke.log"
     - name: Extract manifests and actual native executable bytes
+      if: ${{ inputs.profile != 'speaker-candidate-noble' }}
       shell: bash
       env:
         IMAGE_ID: ${{ steps.identity.outputs.image-id }}
@@ -128,6 +130,7 @@ runs:
           done
         fi
     - name: Inventory the entire captured image with Syft
+      if: ${{ inputs.profile != 'speaker-candidate-noble' }}
       uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
       with:
         image: ${{ steps.identity.outputs.image-id }}
@@ -137,6 +140,7 @@ runs:
         upload-release-assets: false
         dependency-snapshot: false
     - name: Bind source FFmpeg to its actual executable and image inventory
+      if: ${{ inputs.profile != 'speaker-candidate-noble' }}
       shell: bash
       env:
         EVIDENCE_DIR: ${{ inputs.evidence-dir }}
@@ -151,6 +155,7 @@ runs:
           "$EVIDENCE_DIR/container-sbom.syft.json" "$EVIDENCE_DIR/ffmpeg-proof.json" "$PROFILE"
         printf 'ignore: []\nmatch-upstream-kernel-headers: true\n' > "$EVIDENCE_DIR/grype.yaml"
     - name: Preserve the complete unfiltered vulnerability report
+      if: ${{ inputs.profile != 'speaker-candidate-noble' }}
       uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
       with:
         grype-version: v0.118.0
@@ -174,12 +179,14 @@ runs:
         EVIDENCE_DIR: ${{ inputs.evidence-dir }}
       run: node scripts/verified-gcc-runtime.js "$EVIDENCE_DIR"
     - name: Verify the reviewed FFmpeg backport before creating image-bound VEX
+      if: ${{ inputs.profile != 'speaker-candidate-noble' }}
       id: verified-backport
       shell: bash
       env:
         EVIDENCE_DIR: ${{ inputs.evidence-dir }}
       run: node scripts/verified-ffmpeg-backport.js create "$EVIDENCE_DIR"
     - name: Apply the strict vulnerability gate to the same image and database
+      if: ${{ inputs.profile != 'speaker-candidate-noble' }}
       id: filtered-image-scan
       uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
       env:
@@ -200,3 +207,12 @@ runs:
       env:
         EVIDENCE_DIR: ${{ inputs.evidence-dir }}
       run: node scripts/verified-ffmpeg-backport.js verify "$EVIDENCE_DIR"
+    - name: Verify the complete Noble speaker runtime
+      id: noble
+      if: ${{ inputs.profile == 'speaker-candidate-noble' }}
+      uses: ./.github/actions/verify-speaker-runtime
+      with:
+        image: ${{ inputs.image }}
+        evidence-dir: ${{ inputs.evidence-dir }}
+        pull: ${{ inputs.pull }}
+        require-model: ${{ inputs.require-model }}

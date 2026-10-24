@@ -9,6 +9,8 @@ on:
       - scripts/verify-container-sbom.js
       - scripts/verified-ffmpeg-backport.js
       - .github/workflows/speaker-service-candidate.yml
+      - .github/actions/verify-deployment-image/**
+      - .github/actions/verify-speaker-runtime/**
 
 # No deployment credentials, publishing, exclusions, or production gate changes.
 permissions:
@@ -29,9 +31,9 @@ jobs:
         run: |
           python3 -m unittest discover -s speaker-service/experimental -p 'test_*.py' -v
           node test/security-container-sbom.js
+          node test/security-verified-backport.js
       - name: Prepare evidence
         run: |
-          mkdir -p "$RUNNER_TEMP/speaker-service-candidate"
           echo "EVIDENCE_DIR=$RUNNER_TEMP/speaker-service-candidate" >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Build complete service with coherent native libraries
@@ -40,7 +42,7 @@ jobs:
           DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
-          file: speaker-service/experimental/Dockerfile
+          file: speaker-service/Dockerfile
           target: runtime-service
           tags: speaker-service-candidate:${{ github.sha }}
           pull: true
@@ -48,110 +50,13 @@ jobs:
           push: false
           cache-from: type=gha,scope=speaker-complete-candidate
           cache-to: type=gha,mode=max,scope=speaker-complete-candidate,ignore-error=true,timeout=3m
-      - name: Capture immutable image and source evidence
-        id: image
-        env:
-          IMAGE_TAG: speaker-service-candidate:${{ github.sha }}
-        run: |
-          set -euo pipefail
-          IMAGE_ID=$(docker image inspect "$IMAGE_TAG" --format '{{.Id}}')
-          [[ "$IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]]
-          echo "id=$IMAGE_ID" >> "$GITHUB_OUTPUT"
-          docker image inspect "$IMAGE_ID" > "$EVIDENCE_DIR/image-inspect.json"
-          container_id=$(docker create "$IMAGE_ID")
-          trap 'docker rm "$container_id" >/dev/null' EXIT
-          docker cp "$container_id:/var/lib/dpkg/status" "$EVIDENCE_DIR/dpkg-status.txt"
-          docker cp "$container_id:/var/lib/dpkg/info" - > "$EVIDENCE_DIR/dpkg-info.tar"
-          docker cp "$container_id:/var/lib/chisel" "$EVIDENCE_DIR/chisel"
-          docker cp "$container_id:/usr/local/share/panthorium/." "$EVIDENCE_DIR/"
-          docker cp "$container_id:/usr/local/bin/ffmpeg" "$EVIDENCE_DIR/ffmpeg"
-          docker cp "$container_id:/usr/local/bin/ffprobe" "$EVIDENCE_DIR/ffprobe"
-          docker cp "$container_id:/usr/lib/x86_64-linux-gnu/libsndfile.so.1.0.37" "$EVIDENCE_DIR/libsndfile.so.1.0.37"
-          printf 'ignore: []\nmatch-upstream-kernel-headers: true\n' > "$EVIDENCE_DIR/grype.yaml"
-      - name: Verify complete filesystem without permitting writes
-        id: filesystem
-        env:
-          IMAGE_ID: ${{ steps.image.outputs.id }}
-        run: |
-          set -euo pipefail
-          docker run --rm --network none --read-only --user 0 --cap-drop ALL --cap-add DAC_OVERRIDE \
-            --security-opt no-new-privileges "$IMAGE_ID" /app/experimental/verify-service.py --verify \
-            | tee "$EVIDENCE_DIR/filesystem-proof.json"
-      - name: Test actual audio decoders and CPU imports
-        env:
-          IMAGE_ID: ${{ steps.image.outputs.id }}
-        run: |
-          set -euo pipefail
-          docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
-            --memory 2g --cpus 2 "$IMAGE_ID" /app/test/container-speaker-media-smoke.py --candidate-noble \
-            2>&1 | tee "$EVIDENCE_DIR/media-smoke.log"
-      - name: Test exact model with offline inference
-        if: ${{ !cancelled() && steps.filesystem.outcome == 'success' }}
-        env:
-          IMAGE_ID: ${{ steps.image.outputs.id }}
-        run: |
-          set -euo pipefail
-          timeout --kill-after=5s 180s docker run --rm --network none --cap-drop ALL \
-            --security-opt no-new-privileges --memory 2g --cpus 2 \
-            "$IMAGE_ID" /app/test/container-speaker-model-smoke.py \
-            2>&1 | tee "$EVIDENCE_DIR/model-smoke.log"
-      - name: Inventory the entire service image
-        id: sbom
-        if: ${{ !cancelled() && steps.filesystem.outcome == 'success' }}
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      - name: Verify the exact complete speaker image
+        uses: ./.github/actions/verify-deployment-image
         with:
-          image: ${{ steps.image.outputs.id }}
-          format: json
-          output-file: ${{ env.EVIDENCE_DIR }}/service-sbom.raw.syft.json
-          upload-artifact: false
-          upload-release-assets: false
-          dependency-snapshot: false
-      - name: Verify complete vendor package inventory and bind native sources
-        id: provenance
-        if: ${{ !cancelled() && steps.sbom.outcome == 'success' }}
-        run: |
-          set -euo pipefail
-          python3 speaker-service/experimental/check-service-sbom.py "$EVIDENCE_DIR"
-          node scripts/verify-container-sbom.js \
-            "$EVIDENCE_DIR/service-sbom.with-native.syft.json" "$EVIDENCE_DIR/ffmpeg-source.json" \
-            "$EVIDENCE_DIR" "$EVIDENCE_DIR/image-inspect.json" build/media/ffmpeg-speaker-source.lock.json \
-            "$EVIDENCE_DIR/service-sbom.syft.json" "$EVIDENCE_DIR/ffmpeg-proof.json" speaker-candidate-noble
-      - name: Preserve the complete unfiltered full-image scan
-        id: raw-scan
-        if: ${{ !cancelled() && steps.provenance.outcome == 'success' }}
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
-        with:
-          grype-version: v0.118.0
-          sbom: ${{ env.EVIDENCE_DIR }}/service-sbom.syft.json
-          config: ${{ env.EVIDENCE_DIR }}/grype.yaml
-          fail-build: false
-          severity-cutoff: high
-          only-fixed: false
-          output-format: json
-          output-file: ${{ env.EVIDENCE_DIR }}/container-vulnerabilities.raw.json
-      - name: Verify reviewed source and exact native executables for this image
-        id: backport
-        if: ${{ !cancelled() && steps.raw-scan.outcome == 'success' }}
-        run: node scripts/verified-ffmpeg-backport.js create "$EVIDENCE_DIR"
-      - name: Require strict gate with only the verified backport
-        id: filtered-scan
-        if: ${{ !cancelled() && steps.backport.outcome == 'success' }}
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
-        env:
-          GRYPE_DB_AUTO_UPDATE: 'false'
-        with:
-          grype-version: v0.118.0
-          sbom: ${{ env.EVIDENCE_DIR }}/service-sbom.syft.json
-          config: ${{ env.EVIDENCE_DIR }}/grype.yaml
-          vex: ${{ env.EVIDENCE_DIR }}/ffmpeg-backport.vex.json
-          fail-build: true
-          severity-cutoff: high
-          only-fixed: false
-          output-format: json
-          output-file: ${{ env.EVIDENCE_DIR }}/container-vulnerabilities.json
-      - name: Independently reject changed findings or unrelated exemptions
-        if: ${{ !cancelled() && steps.backport.outcome == 'success' && steps.filtered-scan.outcome != 'skipped' }}
-        run: node scripts/verified-ffmpeg-backport.js verify "$EVIDENCE_DIR"
+          image: speaker-service-candidate:${{ github.sha }}
+          profile: speaker-candidate-noble
+          evidence-dir: ${{ env.EVIDENCE_DIR }}
+          require-model: 'true'
       - name: Preserve complete service evaluation
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

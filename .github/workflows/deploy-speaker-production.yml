@@ -52,7 +52,7 @@ jobs:
         uses: ./.github/actions/verify-deployment-image
         with:
           image: ${{ steps.built-image.outputs.image }}
-          profile: speaker
+          profile: speaker-candidate-noble
           evidence-dir: ${{ runner.temp }}/deployment-image-evidence
           pull: 'true'
           require-model: 'true'

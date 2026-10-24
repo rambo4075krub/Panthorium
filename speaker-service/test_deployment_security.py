@@ -22,6 +22,12 @@ class DeploymentSecurityTests(unittest.TestCase):
             for candidate, current in ((changed, service), (service, changed)):
                 with self.assertRaises(ValueError):
                     policy.verify_candidate(name, candidate, current, image)
+        for field in ("command", "args"):
+            changed = copy.deepcopy(service)
+            changed["spec"]["template"]["spec"]["containers"][0][field] = ["override"]
+            for candidate, current in ((changed, service), (service, changed)):
+                with self.assertRaises(ValueError):
+                    policy.verify_candidate(name, candidate, current, image)
         for mutable in ("image:latest", "repo/image@sha256:" + "a" * 63, ""):
             with self.assertRaises(ValueError):
                 policy.verify_candidate(name, service, service, mutable)

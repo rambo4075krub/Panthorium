@@ -42,7 +42,7 @@ jobs:
       DEPLOY_SA: ${{ vars.STAGING_DEPLOY_SA }}
       WIF_PROVIDER: ${{ vars.STAGING_WIF_PROVIDER }}
       RUNTIME_SA: ${{ vars.STAGING_RUNTIME_SA }}
-      SPEAKER_RUNTIME_SA: ${{ vars.STAGING_SPEAKER_RUNTIME_SA }}
+      SPEAKER_RUNTIME_SA: ${{ vars.STAGING_SPEAKER_RUNTIME_SA || 'speaker-runtime@panthorium-staging.iam.gserviceaccount.com' }}
       REGION: asia-southeast1
       SERVICE: panthorium-speaker-staging
     steps:
@@ -89,7 +89,7 @@ jobs:
         uses: ./.github/actions/verify-deployment-image
         with:
           image: ${{ steps.built-image.outputs.image }}
-          profile: speaker
+          profile: speaker-candidate-noble
           evidence-dir: ${{ runner.temp }}/deployment-image-evidence
           pull: 'true'
           require-model: 'true'

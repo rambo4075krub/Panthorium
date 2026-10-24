@@ -12,7 +12,7 @@ on:
         type: string
         default: .
       image-target:
-        description: Optional speaker dependency stage (excludes downloaded model assets)
+        description: Reserved; release verification requires the complete default image
         type: string
         default: ''
       audit-node:
@@ -65,9 +65,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$BUILD_CONTEXT" == "." || "$BUILD_CONTEXT" == "speaker-service" ]]
-          if [ -n "$BUILD_TARGET" ]; then
-            [[ "$BUILD_CONTEXT" == "speaker-service" && "$BUILD_TARGET" == "runtime-dependencies" ]]
-          fi
+          [[ -z "$BUILD_TARGET" ]] # Partial runtime stages cannot satisfy a release gate.
           image_name=backend
           dockerfile=Dockerfile
           source_lock=build/media/ffmpeg-source.lock.json
@@ -79,7 +77,9 @@ jobs:
           echo "cache-scope=panthorium-security-$image_name-${BUILD_TARGET:-runtime}" >> "$GITHUB_OUTPUT"
           echo "dockerfile=$dockerfile" >> "$GITHUB_OUTPUT"
           echo "source-lock=$source_lock" >> "$GITHUB_OUTPUT"
-          echo "profile=$image_name" >> "$GITHUB_OUTPUT"
+          profile=$image_name
+          if [ "$BUILD_CONTEXT" == "speaker-service" ]; then profile=speaker-candidate-noble; fi
+          echo "profile=$profile" >> "$GITHUB_OUTPUT"
       - name: Set up isolated image builder
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Build image for security inspection
@@ -109,9 +109,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: container-security-${{ inputs.image-context == '.' && 'backend' || 'speaker' }}-${{ inputs.image-target || 'runtime' }}
-          path: |
-            ${{ env.EVIDENCE_DIR }}/*.json
-            ${{ env.EVIDENCE_DIR }}/*.log
-            ${{ env.EVIDENCE_DIR }}/*.yaml
+          path: ${{ env.EVIDENCE_DIR }}/
           if-no-files-found: ignore
           retention-days: 14

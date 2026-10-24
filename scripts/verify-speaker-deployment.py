@@ -46,6 +46,8 @@ def verify_candidate(service_name, candidate, current, expected_image=None):
             containers = service.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
             require(len(containers) == 1 and containers[0].get("image") == expected_image,
                     "Ready candidate must run exactly the verified image")
+            require(not containers[0].get("command") and not containers[0].get("args"),
+                    "Candidate must preserve the verified runtime entrypoint and arguments")
     return revision
 
 

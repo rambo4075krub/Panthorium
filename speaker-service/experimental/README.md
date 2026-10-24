@@ -1,9 +1,10 @@
-# Speaker runtime base experiment
+# Speaker minimal runtime verification
 
 The `runtime-base` Ubuntu 24.04 target contains no application, model, or
 custom media libraries. The separate `runtime-service` target adds the complete
 application, verified model snapshot, and native media builds compiled on Noble.
-Neither target replaces the production Dockerfile or its release gates.
+Both targets now share `speaker-service/Dockerfile`. Only the complete service
+can satisfy deployment verification; the base target is a separate diagnostic.
 
 Chisel resolves security packages through signed Ubuntu archive metadata. The
 image retains its unchanged manifest and every original package control record.
@@ -26,7 +27,7 @@ including protected directories; it does not start the application. Ownership
 records are archived intact so their standard colon-containing names can be
 retained by the artifact service.
 
-The complete service uses Python 3.12, the same pinned CPU model dependencies,
+The complete service in the deployment Dockerfile uses Python 3.12, the same pinned CPU model dependencies,
 the original hash-verified libsndfile sources/backports, and Ubuntu's patched
 zlib package. Every vendor file remains unchanged. The libsndfile package keeps
 its custom source identity, version, copyright, and ownership records. The final
@@ -44,5 +45,6 @@ and this exact image. A second verifier rejects missing or unrelated findings,
 changed matching rules, changed severities, and database differences. All other
 findings, including upstream libsndfile records, remain in the report. A successful
 build or base-only scan is insufficient for release. Full-image findings, ABI
-compatibility, model behavior, and staging validation must all be reviewed before
-the production Dockerfile can change.
+compatibility, model behavior, and staging validation remain required before
+rollout. Passing the High/Critical gate does not mean every remaining vendor or
+upstream advisory is fixed.

@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - speaker-service/experimental/**
+      - speaker-service/Dockerfile
       - .github/workflows/speaker-runtime-candidate.yml
 
 # Experimental base evaluation only. This workflow cannot deploy or access
@@ -32,7 +33,7 @@ jobs:
           DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
-          file: speaker-service/experimental/Dockerfile
+          file: speaker-service/Dockerfile
           target: runtime-base
           tags: speaker-runtime-candidate:${{ github.sha }}
           pull: true

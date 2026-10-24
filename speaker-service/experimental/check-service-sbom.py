@@ -30,6 +30,14 @@ expected = {identity(p) for p in controls}
 assert expected and all(all(row) for row in expected)
 actual = {(p["name"], p["version"], p["metadata"]["architecture"], p["metadata"].get("source") or p["name"], p["metadata"].get("sourceVersion") or p["version"]) for p in sbom["artifacts"] if p["type"] == "deb"}
 assert expected == actual, "Scanner inventory differs from retained package metadata"
+versions = {item[0]: item[1] for item in actual}
+for package, pattern, minimum in (
+    ("libc6", r"2\.39-0ubuntu8\.(\d+)", 9),
+    ("zlib1g", r"1:1\.3\.dfsg-3\.1ubuntu2\.(\d+)", 3),
+    ("python3.12-minimal", r"3\.12\.3-1ubuntu0\.(\d+)", 17),
+):
+    version = re.fullmatch(pattern, versions[package])
+    assert version and int(version[1]) >= minimum, "Reviewed vendor update required: " + package
 lock = json.loads(Path("build/libsndfile/source.lock.json").read_text())
 manifest = json.loads((root / "libsndfile-source.json").read_text())
 assert all(manifest[key] == value for key, value in lock.items())

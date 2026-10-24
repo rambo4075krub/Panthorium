@@ -9,6 +9,22 @@ speaker security gate stops the production rollout.
 This is deployment preparation. Source tests do not establish that production IAM,
 service identities, model calibration, or live readiness have been verified.
 
+## Complete runtime image
+
+The deployment Dockerfile builds a minimal Ubuntu 24.04 runtime with Python 3.12,
+all pinned CPU model dependencies, the verified model snapshot, and native media
+libraries built against the same ABI. The vendor's patched zlib and libc files
+retain their original package identities and ownership. No administration shell
+or package manager is included. The complete image runs as UID/GID 10001.
+
+CI and registry-digest verification share the same composite action. Every release
+requires complete filesystem and package inventory checks, nine real decoder
+formats, offline model inference, an unfiltered report, and the strict High/Critical
+gate. Only the reviewed FFmpeg source backport may receive an image-bound fixed
+statement after checking the actual independently reproduced executable hashes.
+All other findings remain visible. A passing threshold does not assert that all
+Medium or lower findings are fixed or that biometric calibration is complete.
+
 ## Existing infrastructure required
 
 - The existing `GCP_PROJECT_ID` and `GCP_SA_KEY` production deployment credentials,
@@ -23,6 +39,10 @@ service identities, model calibration, or live readiness have been verified.
 - The private speaker service must have its IAM invoker check enabled and exactly
   the backend account as its service-level `roles/run.invoker` caller. No public
   project or speaker-service IAM bindings are accepted by the existing verifier.
+- The deployment identity must have `roles/iam.serviceAccountUser` on the
+  dedicated speaker account (or an equivalent reviewed `iam.serviceAccounts.actAs`
+  grant) to attach it to a revision. This is separate from granting the speaker
+  account access to project resources.
 - The deployment identity must already be able to read the relevant IAM/service
   state and mint a Google ID token for the backend account. The token is used only
   for authenticated speaker health checks with the canonical speaker URL as its
