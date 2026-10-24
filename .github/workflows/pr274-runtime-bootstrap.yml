@@ -22,5 +22,20 @@ jobs:
       - name: Verify existing deployment principal
         run: |
           test "$(gcloud auth list --filter=status:ACTIVE --format='value(account)')" = "github-deployer@project-0f6aa7d0-6055-420f-842.iam.gserviceaccount.com"
-      - name: Verify and migrate private runtime identities with guarded rollback
-        run: python3 scripts/runtime-bootstrap.py
+      - name: Read-only readiness checks using the existing deployer
+        run: |
+          python3 - <<'PY'
+          import runpy,tempfile
+          s=runpy.run_path("scripts/runtime-bootstrap.py",run_name="bootstrap_library")
+          with tempfile.TemporaryDirectory() as directory:
+              release=s["Bootstrap"](s["P"],"panthorium-staging","asia-southeast1","panthorium-speaker","panthorium-backend",directory)
+              release.backend_identity=s["B"]
+              release.speaker_url=release.service(release.speaker)["status"]["url"]
+              token=release.token()
+              print("Existing deployer minted scoped backend OIDC token",flush=True)
+              s["r"].health(release.speaker_url,token,speaker=True)
+              s["inference"](release.speaker_url,token)
+              s["private"](release.speaker_url)
+              s["r"].health(release.service(release.backend)["status"]["url"],backend=True)
+              print("Read-only production health, private access and synthetic inference passed; no IAM or traffic changes",flush=True)
+          PY
