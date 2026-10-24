@@ -1,5 +1,6 @@
 """Offline real decoder checks; imports no model and makes no inference request."""
 import base64
+import email.parser
 import hashlib
 import importlib.metadata
 import json
@@ -13,7 +14,14 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 HOST = "--allow-host-ffmpeg" in sys.argv
+NOBLE = sys.argv[1:] == ["--candidate-noble"]
+assert sys.argv[1:] in ([], ["--allow-host-ffmpeg"], ["--candidate-noble"])
 assert not (HOST and os.environ.get("CI")), "Host mode is forbidden in CI"
+if NOBLE:
+    release = Path("/etc/os-release").read_text()
+    assert re.search(r"^ID=ubuntu$", release, re.M)
+    assert re.search(r'^VERSION_ID="24\.04"$', release, re.M)
+    assert sys.version_info[:2] == (3, 12)
 if not HOST:
     from runtime_guard import harden_process
     assert harden_process()["NoNewPrivs"] == 1
@@ -43,7 +51,7 @@ if not HOST:
         assert sha256(binary) == manifest["binaries"][name]["sha256"]
         version = command([str(binary), "-version"]).stdout
         assert re.search(r"version 9\.0\.2(?:\s|$)", version), version
-        linked = command(["ldd", str(binary)]).stdout
+        linked = command((["/lib64/ld-linux-x86-64.so.2", "--list"] if NOBLE else ["ldd"]) + [str(binary)]).stdout
         assert not re.search(r"not found|libcjson|librist|libasound|libpulse|libSDL|libvulkan|libcuda|libxml|libtiff|libsndfile", linked, re.I), linked
         # Static FFmpeg internals, only glibc's libc/libm and loader are needed.
         libraries = re.findall(r"^\s*([^ /\s]+)\s+=>", linked, re.M)
@@ -58,8 +66,9 @@ if not HOST:
             config_flags.extend(parsed)
     for flag in lock["configure"]:
         assert flag in config_flags, f"Missing configure flag: {flag}"
-    package_lines = command(["dpkg-query", "-W", "-f=${binary:Package}\t${db:Status-Status}\n"]).stdout.splitlines()
-    packages = {line.split("\t")[0].split(":")[0] for line in package_lines if line.endswith("\tinstalled")}
+    package_records = [email.parser.Parser().parsestr(part) for part in Path("/var/lib/dpkg/status").read_text().strip().split("\n\n")]
+    package_versions = {item["Package"]: item["Version"] for item in package_records if item["Status"] == "install ok installed"}
+    packages = set(package_versions)
     assert "libsndfile1" in packages, "Required SoundFile native dependency must be inventoried"
     forbidden = {"ffmpeg", "libcjson1", "librist4", "libxml2", "libtiff6", "libx11-6", "libxi6", "libxrender1", "libasound2t64", "libpulse0"}
     assert not packages & forbidden, f"Unnecessary native packages: {packages & forbidden}"
@@ -71,7 +80,7 @@ if not HOST:
     import io
     import numpy as np
     import zlib
-    for name in ("libsndfile", "zlib"):
+    for name in (("libsndfile",) if NOBLE else ("libsndfile", "zlib")):
         native_lock = json.loads((ROOT / f"build/{name}/source.lock.json").read_text())
         native_manifest = json.loads(Path(f"/usr/local/share/panthorium/{name}-source.json").read_text())
         for key, value in native_lock.items():
@@ -79,9 +88,13 @@ if not HOST:
         library = Path(native_manifest["library"]["path"])
         assert library.read_bytes().startswith(b"\x7fELF")
         assert sha256(library) == native_manifest["library"]["sha256"]
-        version = command(["dpkg-query", "-W", "-f=${Version}", native_lock["debianPackageName"]]).stdout
+        version = package_versions[native_lock["debianPackageName"]]
         assert version == native_lock["debianPackageVersion"], (name, version)
         assert str(library) in Path("/proc/self/maps").read_text(), f"{name} actual import did not load reviewed library"
+    if NOBLE:
+        assert re.fullmatch(r"1:1\.3\.dfsg-3\.1ubuntu2\.(?:[3-9]|[1-9][0-9]+)", package_versions["zlib1g"])
+        assert "/usr/lib/x86_64-linux-gnu/libz.so.1.3" in Path("/proc/self/maps").read_text()
+        assert not packages & {"apt", "dpkg", "bash", "dash", "perl-base", "util-linux", "libacl1"}
     pcm = np.array([0.0, 0.25, -0.5, 0.75], dtype=np.float64)
     for container in ("WAV", "MAT4"):
         buffer = io.BytesIO()

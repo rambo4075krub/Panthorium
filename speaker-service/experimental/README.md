@@ -1,8 +1,9 @@
 # Speaker runtime base experiment
 
-This dependency-only Ubuntu 24.04 candidate contains no application, model, or
-custom media libraries. It is not a deployment image and does not replace the
-production Dockerfile or its release gates.
+The `runtime-base` Ubuntu 24.04 target contains no application, model, or
+custom media libraries. The separate `runtime-service` target adds the complete
+application, verified model snapshot, and native media builds compiled on Noble.
+Neither target replaces the production Dockerfile or its release gates.
 
 Chisel resolves security packages through signed Ubuntu archive metadata. The
 image retains its unchanged manifest and every original package control record.
@@ -25,6 +26,16 @@ including protected directories; it does not start the application. Ownership
 records are archived intact so their standard colon-containing names can be
 retained by the artifact service.
 
-A full migration still requires coherent native media builds, all
-application dependencies, exact-image scans, decoder/model tests, and staging
-validation before production release.
+The complete service uses Python 3.12, the same pinned CPU model dependencies,
+the original hash-verified libsndfile sources/backports, and Ubuntu's patched
+zlib package. Every vendor file remains unchanged. The libsndfile package keeps
+its custom source identity, version, copyright, and ownership records. The final
+service additionally records every file, link, and mode and checks them with a
+read-only root inspector. No administration shell or package manager is shipped.
+
+The complete-service workflow runs the nine-format decoder matrix and offline
+192-dimension model inference, retains all package identities and native bytes,
+and performs a strict scan with no exclusions or VEX exemptions. A successful
+build or base-only scan is insufficient for release. Full-image findings, ABI
+compatibility, model behavior, and staging validation must all be reviewed before
+the production Dockerfile can change.

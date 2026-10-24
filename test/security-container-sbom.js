@@ -47,4 +47,9 @@ assert.throws(() => enrichSbom(speakerRaw, manifest, lock, binaries, image), /di
 assert.throws(() => enrichSbom(raw, manifest, lock, binaries, image, 'speaker'), /distribution/);
 assert.throws(() => enrichSbom(raw, manifest, lock, binaries, image, 'unknown'), /Unknown image profile/);
 assert.equal(enrichSbom(speakerRaw, manifest, lock, binaries, image, 'speaker').proof.profile, 'speaker');
+const nobleRaw = { ...raw, distro: { id: 'ubuntu', versionID: '24.04' } };
+assert.throws(() => enrichSbom(nobleRaw, manifest, lock, binaries, image, 'speaker'), /distribution/);
+assert.throws(() => enrichSbom(speakerRaw, manifest, lock, binaries, image, 'speaker-candidate-noble'), /distribution/);
+assert.throws(() => enrichSbom({ ...nobleRaw, distro: { id: 'ubuntu', versionID: '26.04' } }, manifest, lock, binaries, image, 'speaker-candidate-noble'), /release/);
+assert.deepEqual(enrichSbom(nobleRaw, manifest, lock, binaries, image, 'speaker-candidate-noble').sbom.artifacts.slice(0, raw.artifacts.length), raw.artifacts);
 console.log('Container SBOM provenance, package preservation, and tamper rejection tests passed');

@@ -17,9 +17,10 @@ function enrichSbom(sbom, manifest, lock, binaries, image, profile = 'backend') 
   assert.ok(Array.isArray(sbom.artifacts) && sbom.artifacts.length, 'Image SBOM has no packages');
   assert.match(image?.Id || '', /^sha256:[a-f0-9]{64}$/, 'Missing Docker image identity');
   assert.equal(sbom.source.metadata?.imageID, image.Id, 'SBOM describes a different image');
-  const expectedDistro = { backend: 'alpine', speaker: 'debian' }[profile];
+  const expectedDistro = { backend: 'alpine', speaker: 'debian', 'speaker-candidate-noble': 'ubuntu' }[profile];
   assert.ok(expectedDistro, 'Unknown image profile');
   assert.equal(sbom.distro?.id, expectedDistro, 'Unexpected image distribution for profile');
+  if (profile === 'speaker-candidate-noble') assert.equal(sbom.distro.versionID, '24.04', 'Unexpected candidate release');
 
   for (const field of provenanceFields) {
     assert.notEqual(lock[field], undefined, `Source lock omits ${field}`);

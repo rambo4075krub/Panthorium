@@ -9,6 +9,14 @@ import { execFileSync } from 'node:child_process';
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const sourceLockBytes = fs.readFileSync(path.join(directory, 'source.lock.json'));
 const lock = JSON.parse(sourceLockBytes);
+const noble = process.argv[2] === '--ubuntu-noble';
+assert.deepEqual(process.argv.slice(2), noble ? ['--ubuntu-noble'] : []);
+const release = fs.readFileSync('/etc/os-release', 'utf8');
+if (noble) {
+  assert.match(release, /^ID=ubuntu$/m);
+  assert.match(release, /^VERSION_ID="24\.04"$/m);
+}
+const minimumLibc = noble ? '2.39' : '2.41';
 const work = fs.mkdtempSync('/tmp/panthorium-libsndfile-build-');
 const output = '/opt/libsndfile';
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -97,7 +105,7 @@ fs.writeFileSync(path.join(docs, 'source-provenance.json'), JSON.stringify(manif
 fs.mkdirSync(path.join(docs, 'patches'));
 for (const patch of lock.patches) fs.copyFileSync(path.join(directory, patch.file), path.join(docs, 'patches', path.basename(patch.file)));
 fs.mkdirSync(path.join(root, 'DEBIAN'));
-fs.writeFileSync(path.join(root, 'DEBIAN/control'), `Package: libsndfile1\nVersion: ${lock.debianPackageVersion}\nSource: libsndfile (${lock.debianPackageVersion})\nArchitecture: ${architecture}\nMulti-Arch: same\nMaintainer: Panthorium\nSection: libs\nPriority: optional\nDepends: libc6 (>= 2.41)\nDescription: Panthorium reviewed libsndfile build\n Preserves the Debian security baseline and adds hash-pinned parser backports.\n External codecs and command-line programs are disabled.\n`);
+fs.writeFileSync(path.join(root, 'DEBIAN/control'), `Package: libsndfile1\nVersion: ${lock.debianPackageVersion}\nSource: libsndfile (${lock.debianPackageVersion})\nArchitecture: ${architecture}\nMulti-Arch: same\nMaintainer: Panthorium\nSection: libs\nPriority: optional\nDepends: libc6 (>= ${minimumLibc})\nDescription: Panthorium reviewed libsndfile build\n Preserves the Debian security baseline and adds hash-pinned parser backports.\n External codecs and command-line programs are disabled.\n`);
 function regularFiles(directory, prefix = '') {
   return fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(entry => {
     const name = path.posix.join(prefix, entry.name);
