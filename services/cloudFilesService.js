@@ -32,8 +32,9 @@ function safeContentType(input) {
 }
 
 class CloudFilesService {
-  constructor({ bucket = process.env.PANTHORIUM_FILES_BUCKET, clientFactory, entitlements = null } = {}) {
+  constructor({ bucket = process.env.PANTHORIUM_FILES_BUCKET, clientFactory, entitlements = null, notifications = null } = {}) {
     this.entitlements = entitlements;
+    this.notifications = notifications;
     this.maxUserFiles=entitlements ? 10000 : MAX_USER_FILES;
     this.bucket = String(bucket || "").trim();
     this.clientFactory = clientFactory || (async () => new GoogleAuth({
@@ -138,8 +139,18 @@ class CloudFilesService {
 
   async upload(userId, filename, contentType, body) {
     // Serialize actual storage mutations across instances; entitlement reads happen before locking.
-    if(this.entitlements)return this.entitlements.locked(userId,async client=>{const state=await this.entitlements.stateIn(client,userId);return this.uploadWithLimit(userId,filename,contentType,body,state.remaining.storageBytes);});
-    return this.uploadWithLimit(userId,filename,contentType,body,MAX_USER_BYTES);
+    const file = this.entitlements
+      ? await this.entitlements.locked(userId,async client=>{const state=await this.entitlements.stateIn(client,userId);return this.uploadWithLimit(userId,filename,contentType,body,state.remaining.storageBytes);})
+      : await this.uploadWithLimit(userId,filename,contentType,body,MAX_USER_BYTES);
+    await this.notify(userId, file.id, 'files.uploaded', 'บันทึกไฟล์แล้ว', 'ไฟล์ของคุณถูกบันทึกในพื้นที่ไฟล์เรียบร้อยแล้ว');
+    return file;
+  }
+
+  async notify(userId, fileId, type, title, body) {
+    // A notification outage must not make a completed storage mutation fail.
+    // Generic copy avoids exposing file names or contents in previews or speech.
+    try { await this.notifications?.publish({ userId, category: 'files', type, title, body, sourceId: fileId, sensitive: true }); }
+    catch { /* The file remains the authoritative outcome. */ }
   }
   async uploadWithLimit(userId, filename, contentType, body, maxBytes) {
     const prefix = this.ownerPrefix(userId);
@@ -252,6 +263,7 @@ class CloudFilesService {
       url: this.objectsUrl() + "/" + encodeURIComponent(objectName),
       method: "DELETE"
     });
+    await this.notify(userId, file.id, 'files.deleted', 'ลบไฟล์แล้ว', 'ลบไฟล์ที่คุณเลือกออกจากพื้นที่ไฟล์เรียบร้อยแล้ว');
     return { ok: true, fileId: file.id };
   }
 }

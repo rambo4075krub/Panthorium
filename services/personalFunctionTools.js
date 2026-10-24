@@ -225,15 +225,16 @@ function registerPersonalFunctionTools(registry, { memory, reminders, files, kno
       validateArgs: args => onlyKeys(args, ['limit']) && (args.limit == null || boundedInt(args.limit, 1, 100)) ? null : 'invalid_tool_args',
       run: async ({ user, args }) => {
         const out = ensureOk(await reminders.list({ user, limit: args.limit == null ? 30 : Number(args.limit) }));
-        return { reminders: out.reminders.map(({ reminderId, kind, title, details, dueAt, timeZone, status }) => ({ reminderId, kind, title, details, dueAt, timeZone, status })), deliveryAvailable: out.deliveryAvailable === true };
+        return { reminders: out.reminders.map(({ reminderId, kind, title, details, dueAt, timeZone, status, recurrence, occurrence }) => ({ reminderId, kind, title, details, dueAt, timeZone, status, recurrence: recurrence || null, occurrence })), deliveryAvailable: out.deliveryAvailable === true };
       }
     });
     registry.register({
-      id: 'reminders.write', description: 'Schedule or cancel a reminder for the current user; scheduling sends email to the verified account and requires explicit on-screen confirmation', permission: 'chat', risk: 'high', mutates: true, requiresConfirmation: true,
-      argsSchema: { action: 'create or cancel', kind: 'medication or appointment', title: 'max 240 characters', details: 'max 1000 characters', dueAt: 'future ISO date-time', timeZone: 'IANA time zone', emailConsent: 'must be true; approval dialog confirms email delivery', reminderId: 'required for cancel', expectedTitle: 'required for cancel' },
+      id: 'reminders.write', description: 'Schedule, postpone (snooze), or cancel a reminder for the current user; scheduling sends email to the verified account and requires exact confirmation', permission: 'chat', risk: 'high', mutates: true, requiresConfirmation: true,
+      argsSchema: { action: 'create, snooze, or cancel', kind: 'medication, appointment, task, deadline, or study', title: 'max 240 characters', details: 'max 1000 characters', dueAt: 'future ISO date-time', timeZone: 'IANA time zone', emailConsent: 'must be true; approval dialog confirms email delivery', reminderId: 'required for snooze/cancel', expectedTitle: 'required for snooze/cancel' },
       validateArgs: args => {
         if (!onlyKeys(args, ['action', 'kind', 'title', 'details', 'dueAt', 'timeZone', 'emailConsent', 'reminderId', 'expectedTitle', 'recurrence'])) return 'invalid_tool_args';
-        if (args.action === 'create') return ['medication', 'appointment'].includes(args.kind) && trimText(args.title, 240) && (args.details == null || typeof args.details === 'string' && args.details.length <= 1000) && Number.isFinite(Date.parse(args.dueAt)) && validTimeZone(args.timeZone) && args.emailConsent === true ? null : 'invalid_reminder';
+        if (args.action === 'create') return ['medication', 'appointment', 'task', 'deadline', 'study'].includes(args.kind) && trimText(args.title, 240) && (args.details == null || typeof args.details === 'string' && args.details.length <= 1000) && stamp(args.dueAt) && validTimeZone(args.timeZone) && args.emailConsent === true ? null : 'invalid_reminder';
+        if (args.action === 'snooze') return Object.keys(args).every(k => ['action', 'reminderId', 'expectedTitle', 'dueAt'].includes(k)) && UUID_RE.test(String(args.reminderId || '')) && trimText(args.expectedTitle, 240) && stamp(args.dueAt) ? null : 'invalid_reminder';
         return args.action === 'cancel' && /^[0-9a-f-]{36}$/i.test(String(args.reminderId || '')) && trimText(args.expectedTitle, 240) && Object.keys(args).every(k => ['action', 'reminderId', 'expectedTitle'].includes(k)) ? null : 'invalid_reminder';
       },
       run: async ({ user, args }) => {
@@ -241,6 +242,7 @@ function registerPersonalFunctionTools(registry, { memory, reminders, files, kno
         const list = ensureOk(await reminders.list({ user, limit: 100 }));
         const existing = list.reminders.find(item => item.reminderId === args.reminderId && item.title === args.expectedTitle);
         if (!existing) throw new Error('reminder_not_found');
+        if (args.action === 'snooze') return ensureOk(await reminders.snooze({ user, reminderId: args.reminderId, dueAt: args.dueAt }));
         return ensureOk(await reminders.cancel({ user, reminderId: args.reminderId }));
       }
     });

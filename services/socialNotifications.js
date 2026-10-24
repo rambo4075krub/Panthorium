@@ -9,50 +9,74 @@ class SocialNotifications {
     if (!recipient || actorId === recipient || await this.service.blocked(repo, actorId, recipient)) return;
     const id = noticeId(type, source.id, recipient);
     if (await repo.get(id)) return;
-    await repo.put({ id, kind: "notification", ownerId: recipient, actorId, type, sourceId: source.id, targetId, createdAt: new Date().toISOString() });
+    const notice = { id, kind: "notification", ownerId: recipient, actorId, type, sourceId: source.id, targetId, createdAt: new Date().toISOString() };
+    await repo.put(notice);
+    return notice;
   }
-  async record(repo, uid, action, result, input) {
+  async record(repo, uid, action, result, input, committedNotices = []) {
+    const emit = async (...args) => {
+      const notice = await this.emit(...args);
+      if (notice) committedNotices.push(notice);
+      return notice;
+    };
     const r = result.record;
     if (action === "like" && result.liked) {
       const target = await repo.get(input.recordId);
-      return this.emit(repo, "like", { id: "like:" + hash(uid, target.id) }, uid, target.ownerId, target.id);
+      return emit(repo, "like", { id: "like:" + hash(uid, target.id) }, uid, target.ownerId, target.id);
     }
     if (!r) return;
     if (action === "friend-request" && r.status === "pending") {
-      await this.emit(repo, "friend-request", { id: r.eventId }, r.requesterId, r.recipientId, r.id);
+      await emit(repo, "friend-request", { id: r.eventId }, r.requesterId, r.recipientId, r.id);
     } else if (action === "friend-review") {
-      await this.emit(repo, "friend-" + r.status, { id: r.eventId }, uid, r.requesterId, r.id);
+      await emit(repo, "friend-" + r.status, { id: r.eventId }, uid, r.requesterId, r.id);
     } else if (action === "group-join" && result.groupRequest) {
-      await this.emit(repo, "group-request", { id: result.groupRequest.eventId }, uid, r.ownerId, r.id);
+      await emit(repo, "group-request", { id: result.groupRequest.eventId }, uid, r.ownerId, r.id);
     } else if (action === "group-review") {
-      await this.emit(repo, "group-" + result.groupRequest.status, { id: result.groupRequest.eventId }, uid, result.groupRequest.ownerId, r.id);
+      await emit(repo, "group-" + result.groupRequest.status, { id: result.groupRequest.eventId }, uid, result.groupRequest.ownerId, r.id);
     } else if (action === "group-message") {
       const group = await repo.get(r.parentId);
-      for (const member of group.members) await this.emit(repo, "group-message", r, uid, member);
+      for (const member of group.members) await emit(repo, "group-message", r, uid, member);
     } else if (action === "thread") {
-      if (r.status === "pending") await this.emit(repo, "thread-request", r, r.ownerId, r.members.find(x => x !== r.ownerId));
+      if (r.status === "pending") await emit(repo, "thread-request", r, r.ownerId, r.members.find(x => x !== r.ownerId));
     } else if (action === "accept-thread") {
-      await this.emit(repo, "thread-" + r.status, r, uid, r.ownerId);
+      await emit(repo, "thread-" + r.status, r, uid, r.ownerId);
     } else if (action === "message" || action === "call") {
       const thread = await repo.get(r.parentId);
-      await this.emit(repo, action, r, uid, thread.members.find(x => x !== uid));
+      await emit(repo, action, r, uid, thread.members.find(x => x !== uid));
     } else if (action === "comment") {
       const target = await repo.get(r.parentId);
-      await this.emit(repo, "comment", r, uid, target.ownerId);
+      await emit(repo, "comment", r, uid, target.ownerId);
     } else if (action === "follow") {
-      await this.emit(repo, "follow", r, uid, r.targetId, "profile:" + uid);
+      await emit(repo, "follow", r, uid, r.targetId, "profile:" + uid);
     } else if (action === "order" || action === "order-status") {
       const type = "order-" + r.status;
-      for (const member of r.members) await this.emit(repo, type, r, uid, member);
+      for (const member of r.members) await emit(repo, type, r, uid, member);
     } else if (action === "interest" && await repo.get("interest:" + hash(input.userId, uid))) {
       const pair = { id: [uid, input.userId].sort().join(":") };
-      await this.emit(repo, "connect-match", pair, uid, input.userId, "connect:" + uid);
-      await this.emit(repo, "connect-match", pair, input.userId, uid, "connect:" + input.userId);
+      await emit(repo, "connect-match", pair, uid, input.userId, "connect:" + uid);
+      await emit(repo, "connect-match", pair, input.userId, uid, "connect:" + input.userId);
     } else if ((action === "live-end" || action === "live-leave") && r.status === "ended") {
-      for (const member of r.members) await this.emit(repo, "live-ended", r, uid, member);
+      for (const member of r.members) await emit(repo, "live-ended", r, uid, member);
     } else if (action === "moderate") {
       // Only the owner receives the decision; no reporter identity is disclosed.
-      await this.emit(repo, r.hidden ? "moderation-hidden" : "moderation-restored", r, uid, r.ownerId);
+      await emit(repo, r.hidden ? "moderation-hidden" : "moderation-restored", r, uid, r.ownerId);
+    }
+  }
+  async systemNotificationVisible(uid, sourceId) {
+    // Re-check the current source permissions on every central inbox read.
+    // Revocation, blocks, expired messages and removed records stay hidden.
+    if (!/^notification:[a-f0-9]{64}$/.test(String(sourceId || ''))) return false;
+    return !!await this.view(this.service.repo, uid, await this.service.repo.get(sourceId));
+  }
+  async publishCommitted(notices) {
+    if (!this.service.systemNotifications) return;
+    for (const notice of notices) {
+      try {
+        if (!await this.systemNotificationVisible(notice.ownerId, notice.id)) continue;
+        await this.service.systemNotifications.publish({ userId: notice.ownerId, category: 'social', type: 'social.activity',
+          title: 'ความเคลื่อนไหวใหม่ใน Social Media', body: 'เปิด Social Media เพื่อดูความเคลื่อนไหวที่คุณมีสิทธิ์เข้าถึง',
+          sourceId: notice.id, sensitive: true });
+      } catch { /* Social mutation is already committed; delivery cannot invalidate it. */ }
     }
   }
   async seed(repo, uid) {

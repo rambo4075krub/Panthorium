@@ -5,8 +5,9 @@ const catalog = require('../billing-catalog');
 class BillingError extends Error { constructor(code, status=503) { super(code); this.status=status; } }
 const fail = (code, status) => { throw new BillingError(code, status); };
 class OmiseBillingService {
-  constructor({ databaseUrl=process.env.DATABASE_URL, databaseSslMode=process.env.DATABASE_SSL_MODE, secret=process.env.OMISE_SECRET_KEY, mode=process.env.OMISE_MODE || 'test', liveEnabled=process.env.OMISE_LIVE_ENABLED === '1', fetcher=global.fetch, pool }={}) {
+  constructor({ databaseUrl=process.env.DATABASE_URL, databaseSslMode=process.env.DATABASE_SSL_MODE, secret=process.env.OMISE_SECRET_KEY, mode=process.env.OMISE_MODE || 'test', liveEnabled=process.env.OMISE_LIVE_ENABLED === '1', fetcher=global.fetch, pool, notifications = null }={}) {
     this.secret=String(secret || '').trim(); this.fetcher=fetcher;
+    this.notifications=notifications;
     this.mode=mode; this.liveEnabled=liveEnabled; this.live=mode==='live';
     this.orders=this.live ? 'panthorium_omise_live_orders':'panthorium_omise_test_orders';
     this.receipts=this.live ? 'panthorium_omise_live_receipts':'panthorium_omise_test_receipts';
@@ -77,6 +78,7 @@ class OmiseBillingService {
     if (!charge || charge.object!=='charge' || charge.livemode!==this.live || !(this.live ? /^chrg_(?!test_)[a-z0-9]+$/i : /^chrg_test_[a-z0-9]+$/i).test(charge.id || '')) fail('invalid_charge',400);
     if (!/^[0-9a-f-]{36}$/i.test(id || '')) fail('invalid_order',400);
     const client=await this.pool.connect();
+    let saved;
     try { await client.query('BEGIN');const result=await client.query(`SELECT * FROM ${this.orders} WHERE id=$1 FOR UPDATE`,[id]);const row=result.rows[0];
       if (!row) fail('order_not_found',404);
       if (row.amount!==charge.amount || row.currency.toLowerCase()!==String(charge.currency).toLowerCase() || charge.metadata?.panthorium_order_id!==id || (row.charge_id && row.charge_id!==charge.id)) fail('charge_mismatch',409);
@@ -94,8 +96,29 @@ class OmiseBillingService {
         await client.query('UPDATE panthorium_entitlement_grants SET revoked_at=NOW() WHERE order_id=$1 AND revoked_at IS NULL',[id]);
       }
       if(!this.live && status==='refunded') await client.query(`DELETE FROM ${this.receipts} WHERE order_id=$1`,[id]);
-      await client.query('COMMIT');return this.view(updated.rows[0]);
+      await client.query('COMMIT');saved=updated.rows[0];
     } catch(error) {await client.query('ROLLBACK');throw error;}finally{client.release();}
+    // Publish after commit and release, so delivery never holds the billing lock.
+    // The stable status key permits safe retry on verified webhook/order reads.
+    await this.notifyOrder(saved);
+    return this.view(saved);
+  }
+  async notifyOrder(row) {
+    const labels = {
+      pending: ['รอการชำระเงิน', 'คำสั่งซื้อของคุณรอการชำระเงิน ตรวจรายละเอียดในแพ็กเกจและชำระเงิน'],
+      paid: ['ยืนยันการชำระเงินแล้ว', 'ผู้ให้บริการยืนยันการชำระเงินแล้ว ตรวจใบเสร็จและสิทธิ์ในแพ็กเกจและชำระเงิน'],
+      failed: ['การชำระเงินไม่สำเร็จ', 'ผู้ให้บริการแจ้งว่าการชำระเงินไม่สำเร็จ ตรวจสถานะก่อนเริ่มรายการใหม่'],
+      expired: ['คำสั่งชำระเงินหมดอายุ', 'คำสั่งชำระเงินหมดอายุแล้ว ตรวจรายละเอียดในแพ็กเกจและชำระเงิน'],
+      refunded: ['สถานะการชำระเงินเปลี่ยนแล้ว', 'คำสั่งซื้อมีการคืนเงินหรือยกเลิกการชำระ ตรวจสถานะและสิทธิ์ในแพ็กเกจและชำระเงิน'],
+      verification_required: ['กำลังตรวจสอบการชำระเงิน', 'ยังยืนยันผลการชำระเงินไม่ได้ ตรวจสถานะก่อนเริ่มรายการใหม่'],
+    };
+    const label=labels[row?.status];
+    if(!label) return;
+    const prefix=this.live ? '' : 'ทดสอบ: ';
+    try { await this.notifications?.publish({ userId:row.user_id,category:'billing',type:'billing.'+row.status,
+      title:prefix+label[0],body:prefix+label[1]+(this.live ? '' : ' รายการทดสอบไม่มอบสิทธิ์ใช้งานจริง'),
+      sourceId:this.mode+':'+row.id+':'+row.status,severity:['failed','expired','verification_required'].includes(row.status) ? 'warning' : 'info',sensitive:true }); }
+    catch { /* Verified payment state remains committed even if notification storage is unavailable. */ }
   }
   async order(userId,id) {
     await this.init();if(!/^[0-9a-f-]{36}$/i.test(id || '')) fail('invalid_order',400);
