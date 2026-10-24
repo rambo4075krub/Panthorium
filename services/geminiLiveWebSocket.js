@@ -1,3 +1,4 @@
+const { PUBLIC_WEB_GUIDANCE } = require('./publicWebTools');
 const {hasQuota}=require('../billing-catalog');
 const { URL } = require("node:url");
 const { randomUUID } = require("node:crypto");
@@ -198,7 +199,8 @@ function createGeminiLiveWebSocketGateway({
         const contextInstruction = verifiedContext?.systemInstruction || verifiedContext?.systemPrompt;
         const studioInstruction = tools.some(tool => tool.name === 'panthorium_studio_create')
           ? '\nFor new images, videos, printable documents, spreadsheets, presentations, and connected creative workflows, prefer panthorium_studio_catalog followed by panthorium_studio_create. This keeps all outputs in the shared Creative Studio job history. Reuse exact current-account source file IDs and only compatible handoffs. Never describe a queued or running job as complete; read panthorium_studio_status for its actual state. Do not change Auto/Never settings or invent links. The exact workflow requires the on-screen approval before work starts.' : '';
-        const sessionInstruction = systemInstruction + studioInstruction + (typeof contextInstruction === 'string' ? '\n' + contextInstruction.slice(0, 16000) : '');
+        const publicWebInstruction = tools.some(tool => tool.name === 'panthorium_web_search') ? PUBLIC_WEB_GUIDANCE : '';
+        const sessionInstruction = systemInstruction + studioInstruction + publicWebInstruction + (typeof contextInstruction === 'string' ? '\n' + contextInstruction.slice(0, 16000) : '');
         upstream = await connectLive({ projectId, location, systemInstruction: sessionInstruction, tools, transcription: process.env.PANTHORIUM_AI_MODE === "gemini-live-only" || voiceApprovalEnabled,
           sessionResumption: resumeAllowed ? { handle: resumeHandle } : null, contextCompression });
       } catch (error) {

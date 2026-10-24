@@ -26,6 +26,8 @@ const { ConversationRepository } = require("./services/conversationRepository");
 const { AiOperationsService } = require("./services/aiOperationsService");
 const { Sentinel } = require("./services/sentinel");
 const { ToolRegistry } = require("./services/toolRegistry");
+const { PublicWebService } = require("./services/publicWebService");
+const { registerPublicWebTools } = require("./services/publicWebTools");
 const { AgentService } = require("./services/agentService");
 const { AgentPlannerService } = require("./services/agentPlannerService");
 const { AgentWorkflowService } = require("./services/agentWorkflowService");
@@ -192,6 +194,7 @@ toolRegistry.register({
   run: async ({ user, args }) => agentKnowledge.search({ user, query: args.query, limit: args.limit == null ? 8 : Number(args.limit) })
 });
 const agentMemory = new AgentMemoryService({ repository: agentMemoryRepository, audit, knowledge: agentKnowledge });
+registerPublicWebTools(toolRegistry, { service: new PublicWebService() });
 registerPersonalFunctionTools(toolRegistry, { memory: agentMemory, reminders, files: cloudFiles, knowledge: agentKnowledge });
 registerCreativeStudioTools(toolRegistry, { studio: creativeStudio });
 require('./services/socialTools').registerSocialTools(toolRegistry,{social});
