@@ -127,7 +127,8 @@ async function until(check, message) {
     assert.equal(await page.evaluate(() => window.notificationXss), undefined);
     assert.equal(await row(other.id).count(), 0, "another account's notification is absent");
     assert.equal(await page.locator("[data-notification-toast]").count(), 0, "opening an account does not replay historical alerts");
-    assert.equal(await page.locator("#panthorium-notification-bell [data-notification-count]").textContent(), "1");
+    assert.equal(await page.locator("#panthorium-notification-bell").count(), 0, "desktop has no notification bell even with unread items");
+    assert.match(await historyDetails.locator("summary").textContent(), /ยังไม่อ่าน 1/, "unread count stays in notification settings");
     await checked("enabled", true);
     await checked("channels.voice", false);
     await checked("channels.sound", false);
