@@ -51,7 +51,7 @@ RUN python3.12 -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-cache-dir setuptools==84.2.1 \
  && /opt/venv/bin/pip install --no-cache-dir torch==2.14.1 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cpu \
  && /opt/venv/bin/pip install --no-cache-dir https://files.pythonhosted.org/packages/64/28/e2a36573ccbcf3d57c00626a21fe51989380636e821b341d36ccca0c1c3a/soundfile-0.13.1-py2.py3-none-any.whl#sha256=a23c717560da2cf4c7b5ae1142514e0fd82d6bbd9dfc93a50423447142f2c445 \
- && /opt/venv/bin/pip install --no-cache-dir speechbrain==1.1.2 numpy==1.26.4 requests==2.34.2 huggingface_hub==0.36.2 \
+ && /opt/venv/bin/pip install --no-cache-dir speechbrain==1.1.2 numpy==1.26.4 requests==2.34.2 huggingface_hub==0.36.2 filelock==4.2.1 \
  && /opt/venv/bin/pip check
 FROM service-toolchain AS service-builder
 COPY --from=service-python /opt/venv/ /rootfs/opt/venv/
