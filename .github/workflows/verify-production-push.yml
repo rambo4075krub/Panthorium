@@ -1,0 +1,63 @@
+name: Verify production push Scheduler
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-production-push.yml'
+      - 'scripts/verify-production-push-scheduler.js'
+      - 'test/production-push-scheduler.js'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-production-push.yml'
+      - 'scripts/verify-production-push-scheduler.js'
+      - 'test/production-push-scheduler.js'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: panthorium-production-push-verification
+  cancel-in-progress: false
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.22.1
+      - run: node --check scripts/verify-production-push-scheduler.js && node test/production-push-scheduler.js
+  activate-existing-job:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.22.1
+      # Reuses the existing production deployment identity. No API, IAM,
+      # service-account, job creation, or runtime configuration writes.
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Verify active production and resume the approved push job
+        run: node scripts/verify-production-push-scheduler.js --activate
+      - name: Preserve sanitized execution receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-push-verification
+          path: production-push-verification.json
+          if-no-files-found: ignore
+          retention-days: 14
