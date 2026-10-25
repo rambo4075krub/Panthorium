@@ -25,13 +25,22 @@ function prepare(env = release) {
   return spawnSync(process.execPath, [path.join(__dirname, '../scripts/prepare-android.js'), root], { encoding: 'utf8', env: { ...process.env, ...env } });
 }
 try {
-  write('app/src/main/AndroidManifest.xml', '<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:icon="@mipmap/old" android:roundIcon="@mipmap/old_round" android:allowBackup="true" /></manifest>');
+  write('app/src/main/AndroidManifest.xml', '<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:icon="@mipmap/old" android:roundIcon="@mipmap/old_round" android:allowBackup="true"></application></manifest>');
   write('app/build.gradle', "android {\n namespace 'com.panthorium.browser'\n defaultConfig {\n applicationId 'com.panthorium.browser'\n versionCode 1\n versionName '0.1.0'\n }\n}\n");
   write('app/src/main/assets/capacitor.config.json', JSON.stringify(config));
   write('app/src/main/assets/public/index.html', sourceIndex);
   const first = prepare(); assert.equal(first.status, 0, first.stderr);
   assert.equal(verifyRelease(root, release).versionCode, 30001);
   const second = prepare(); assert.equal(second.status, 0, second.stderr);
+  const firebase=JSON.parse(fs.readFileSync(path.join(root,'app/google-services.json'),'utf8'));
+  assert.equal(firebase.project_info.project_id,'project-0f6aa7d0-6055-420f-842');
+  assert.equal(firebase.client[0].client_info.android_client_info.package_name,'com.panthorium.browser');
+  const manifest=fs.readFileSync(path.join(root,'app/src/main/AndroidManifest.xml'),'utf8');
+  assert(manifest.includes('android.permission.POST_NOTIFICATIONS'));
+  assert(manifest.includes('android:name="firebase_messaging_auto_init_enabled" android:value="false"'),'native token creation waits for opt-in');
+  assert.equal((manifest.match(/firebase_messaging_auto_init_enabled/g)||[]).length,1);
+  write('wrong-firebase.json',JSON.stringify({project_info:{project_id:'wrong'},client:[]}));
+  assert.notEqual(prepare({...release,PANTHORIUM_FIREBASE_CONFIG:path.join(root,'wrong-firebase.json')}).status,0,'mismatched package config is refused');
   const index = fs.readFileSync(path.join(root, 'app/src/main/assets/public/index.html'), 'utf8');
   assert.equal(index.match(/panthorium-cloud-start.js/g).length, 1);
   assert.equal(index.replace('<script src="panthorium-cloud-start.js"></script>\n', ''), sourceIndex, 'release preparation preserves the bundled interface');

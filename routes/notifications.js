@@ -7,6 +7,10 @@ function createNotificationRouter(authService, notifications) {
   const router = express.Router();
   const reads = rateLimit({windowMs:60000,limit:90,standardHeaders:true,legacyHeaders:false,keyGenerator:req=>req.user.sub});
   const writes = rateLimit({windowMs:60000,limit:30,standardHeaders:true,legacyHeaders:false,keyGenerator:req=>req.user.sub});
+  router.post('/push/revoke',rateLimit({windowMs:60000,limit:20,standardHeaders:true,legacyHeaders:false}),async(req,res)=>{
+    res.set('Cache-Control','no-store');
+    try { res.json(await notifications.push.revoke(req.body?.id,req.body?.token)); } catch { res.status(400).json({ok:false,error:'invalid_push_revocation'}); }
+  });
   router.use(requireAuth(authService),requirePermission('chat'));
   router.use((req,res,next)=>{res.set('Cache-Control','no-store');next();});
   const route = fn => async(req,res,next)=>{
@@ -21,6 +25,9 @@ function createNotificationRouter(authService, notifications) {
     if (!input || typeof input!=='object' || Array.isArray(input) || Object.keys(input).some(key=>!keys.includes(key))) throw Object.assign(new Error('invalid_notification_request'),{status:400});
     return input;
   };
+  router.get('/push/config',reads,route(req=>{notifications.assertUser(req.user);return notifications.push?.config()||{ok:true,available:false,nativeAvailable:false};}));
+  router.post('/push/subscribe',writes,route(req=>notifications.push.subscribe(req.user,body(req,['subscription']))));
+  router.delete('/push/subscribe',writes,route(req=>notifications.push.unsubscribe(req.user,body(req,['id']).id)));
   router.get('/settings',reads,route(req=>notifications.settings({user:req.user})));
   router.patch('/settings',writes,route(req=>notifications.updateSettings({user:req.user,patch:req.body})));
   router.get('/',reads,route(req=>{

@@ -43,7 +43,7 @@ const merge = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && ty
   items = [item('old')]; switchAccount('alpha'); await w.PanthoriumNotifications.refresh();
   const setting = key => root.querySelector('[data-notification-setting="' + key + '"]');
   assert.equal(root.dataset.notificationReady, 'true');
-  assert.equal(root.querySelectorAll('[role=switch]').length, 17 + catalog.entries.length);
+  assert.equal(root.querySelectorAll('[role=switch]').length, 18 + catalog.entries.length);
   const eventList = root.querySelector('[data-notification-event-list]'), advanced = () => root.querySelector('[data-notification-advanced]'), history = root.querySelector('[data-notification-history]');
   assert.equal(history.open, false); assert.equal(advanced().open, false);
   assert(eventList.compareDocumentPosition(history) & w.Node.DOCUMENT_POSITION_FOLLOWING, 'event choices precede collapsed history');

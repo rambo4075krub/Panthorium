@@ -19,8 +19,15 @@ if (!fs.existsSync(gradlePath)) {
   throw new Error('Android app/build.gradle not found at ' + gradlePath + '.');
 }
 
+// Firebase client configuration contains public app identifiers, never service-account keys.
+const firebasePath = process.env.PANTHORIUM_FIREBASE_CONFIG || path.join(mobileRoot, 'firebase', 'google-services.json');
+if (fs.existsSync(firebasePath)) {
+  const firebase = JSON.parse(fs.readFileSync(firebasePath, 'utf8'));
+  if (!firebase.project_info?.project_id || !firebase.client?.some(client => client.client_info?.android_client_info?.package_name === 'com.panthorium.browser')) throw new Error('Firebase config does not match com.panthorium.browser');
+  fs.copyFileSync(firebasePath, path.join(androidRoot, 'app', 'google-services.json'));
+}
 let manifest = fs.readFileSync(manifestPath, 'utf8');
-const permissions = ['android.permission.CAMERA', 'android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS'];
+const permissions = ['android.permission.POST_NOTIFICATIONS', 'android.permission.CAMERA', 'android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS'];
 for (const permission of permissions) {
   if (!manifest.includes('android:name="' + permission + '"')) {
     manifest = manifest.replace(
@@ -37,6 +44,7 @@ for (const permission of permissions) {
 manifest = manifest
   .replace(/android:icon="@mipmap\/[^"]+"/, 'android:icon="@mipmap/ic_launcher"')
   .replace(/android:roundIcon="@mipmap\/[^"]+"/, 'android:roundIcon="@mipmap/ic_launcher_round"');
+if (!manifest.includes('firebase_messaging_auto_init_enabled')) manifest = manifest.replace('</application>', '    <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />\n    <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />\n</application>');
 fs.writeFileSync(manifestPath, manifest);
 
 if (!fs.existsSync(resourcesSource)) throw new Error('Panthorium launcher icon resources are missing.');

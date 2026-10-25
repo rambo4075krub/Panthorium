@@ -39,6 +39,7 @@ const { ReminderRepository } = require("./services/reminderRepository");
 const { ReminderService } = require("./services/reminderService");
 const { NotificationRepository } = require('./services/notificationRepository');
 const { NotificationService } = require('./services/notificationService');
+const { NotificationPushService } = require('./services/notificationPushService');
 const { registerNotificationTools } = require('./services/notificationTools');
 const { createNotificationRouter } = require('./routes/notifications');
 const { AgentAutomationRepository } = require("./services/agentAutomationRepository");
@@ -149,6 +150,10 @@ const cloudStoreOptions = { databaseUrl: config.databaseUrl, databaseSslMode: co
 const actionLedger = new ActionLedgerRepository({ ...cloudStoreOptions, allowMemory: !config.isProduction && !config.databaseUrl });
 const notificationRepository = new NotificationRepository({ ...cloudStoreOptions, allowMemory: !config.isProduction && !config.databaseUrl });
 const notifications = new NotificationService({ repository: notificationRepository, audit, actionLedger });
+const notificationPush = new NotificationPushService({notifications,pool:notificationRepository.pool,authorizeOwner:async(sub,accountVersion)=>{
+  try { const user=await authService.validateAccountPrincipal({sub,accountVersion}); return notifications.allowed(user); } catch { return false; }
+}});
+notifications.push=notificationPush;
 billingService.notifications = notifications;
 const voiceSessions = new VoiceSessionRepository({ ...cloudStoreOptions, secret: process.env.VOICE_SESSION_ENCRYPTION_KEY || config.jwtSecret });
 const usageLedger = new UsageLedgerRepository(cloudStoreOptions);
@@ -258,12 +263,14 @@ app.use(express.json({ limit: "2mb", type: "application/json" }));
 app.use(cookieParser());
 app.use(requestContext(audit));
 if (config.mcpEnabled) app.use(require('./routes/mcp').createMcpRouter({ oauth: mcpOAuth, toolService: mcpTools, authService, config, audit }));
+app.use('/internal/push', createInternalJobsRouter({ scheduler: {tick:()=>notificationPush.tick()},audience:process.env.PUSH_SCHEDULER_AUDIENCE,serviceAccounts:process.env.PUSH_SCHEDULER_SERVICE_ACCOUNTS }));
 app.use('/internal/jobs', createInternalJobsRouter({ scheduler: { tick: async () => {
   await voiceSessions.purgeExpired();
   const socialRetention = await social.purgeExpiredMessages();
   const scheduled = await agentScheduler.tick();
   const studio = await creativeStudio.tick();
-  return { ...scheduled, studio, socialRetention };
+  const push = await notificationPush.tick();
+  return { ...scheduled, studio, socialRetention, push };
 } } }));
 
 app.get("/health", async (req, res) => {
@@ -329,7 +336,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-studio-ui.js", "social-rtc.js", "social-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "live-voice-client.js"];
+const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-studio-ui.js", "social-rtc.js", "social-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "live-voice-client.js"];
 for (const script of [...shellScripts, "workspace-ui.css"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -479,6 +486,7 @@ app.use((err, req, res, next) => {
 async function start() {
   await actionLedger.init();
   await notifications.init();
+  await notificationPush.init();
   await voiceSessions.init();
   await usageLedger.init();
   await cloudApps.init();
