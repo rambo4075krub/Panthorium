@@ -47,7 +47,7 @@
       [data-notifications-root] details[open]>summary{margin-bottom:14px}.pn-advanced-content{display:grid;gap:12px;padding-top:4px}
       .pn-global-state{margin:7px 0 0;color:#ffcf8e;font-size:12px;overflow-wrap:anywhere}
       [data-notifications-root] button{border:1px solid rgba(132,197,231,.3);background:rgba(64,147,184,.1);border-radius:9px;padding:7px 10px;color:inherit;font:inherit;cursor:pointer}
-      [data-notifications-root] button:focus-visible,#panthorium-notification-bell:focus-visible{outline:2px solid #80e4ff;outline-offset:3px}
+      [data-notifications-root] button:focus-visible{outline:2px solid #80e4ff;outline-offset:3px}
       [data-notifications-root] button:disabled{opacity:.5;cursor:wait}
       [data-notifications-root] button[role=switch]{position:relative;flex:none;width:44px;height:26px;padding:0;border-radius:20px;background:#324250}
       [data-notifications-root] button[role=switch]::after{content:'';position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:#eaf6ff;transition:transform .15s}
@@ -57,8 +57,6 @@
       .pn-quiet input{box-sizing:border-box;min-width:0;width:100%;padding:7px;border:1px solid rgba(132,197,231,.3);border-radius:8px;background:#102130;color:inherit;font:inherit}
       .pn-item{padding:11px;margin-top:8px;border-radius:10px;border:1px solid rgba(132,197,231,.15);overflow-wrap:anywhere}.pn-item[data-unread=true]{border-left:3px solid #52dcc8;background:rgba(25,113,111,.1)}
       .pn-item p{margin:4px 0;white-space:pre-wrap}.pn-item time{font-size:11px;color:var(--text-dim,#adc1d2)}
-      #panthorium-notification-bell{position:relative;width:30px;height:30px;padding:0;border:1px solid rgba(132,197,231,.25);border-radius:50%;background:rgba(5,22,35,.8);color:var(--text,#fff);cursor:pointer;flex:none}
-      #panthorium-notification-bell span{position:absolute;top:-6px;right:-6px;border-radius:14px;background:#ffad56;color:#172331;font:700 10px/15px system-ui;min-width:15px;padding:0 2px}
       [data-notification-toast]{position:fixed;right:16px;bottom:88px;max-width:min(340px,calc(100vw - 32px));box-sizing:border-box;padding:14px 16px;border:1px solid #3aa89e;border-radius:13px;background:#102536;color:#eaf9ff;box-shadow:0 8px 35px #0006;z-index:2147482000;font:13px/1.5 system-ui;overflow-wrap:anywhere}
     `, { id: 'panthorium-notifications-style' });
     document.head.append(style);
@@ -155,19 +153,6 @@
       if (settings.channels?.voice) speak(s, text);
     }
   }
-  function updateBadge() {
-    let bell = document.getElementById('panthorium-notification-bell');
-    if (!current(session)) { bell?.remove(); return; }
-    if (!bell) {
-      const host = document.getElementById('system-controls-left');
-      if (!host) return;
-      bell = button('🔔', open, { id: 'panthorium-notification-bell', title: 'ตั้งค่าการแจ้งเตือน' });
-      bell.append(node('span', '', { 'data-notification-count': '' })); host.append(bell);
-    }
-    const count = Math.max(0, Number(session.unreadCount) || 0), badge = bell.querySelector('span');
-    badge.textContent = count > 99 ? '99+' : String(count); badge.hidden = !count;
-    bell.setAttribute('aria-label', `การแจ้งเตือน ${count} รายการที่ยังไม่อ่าน`);
-  }
   async function refresh() {
     sync();
     const s = session; if (!current(s)) return false;
@@ -188,7 +173,7 @@
         s.items.forEach(item => s.seen.add(item.id));
         if (s.seen.size > 1000) s.seen = new Set(s.items.map(item => item.id));
         if (s.loaded) deliver(s, fresh);
-        s.loaded = true; render(); updateBadge();
+        s.loaded = true; render();
         return true;
       } catch (_) {
         if (current(s)) { s.error = true; message('โหลดการแจ้งเตือนไม่สำเร็จ • แตะรีเฟรชเพื่อลองอีกครั้ง'); }
@@ -435,7 +420,7 @@
     document.querySelector('[data-notification-toast]')?.remove();
     for (const view of roots.values()) { view.signature = ''; view.older = []; view.pageLoaded = false; view.nextCursor = null; view.advancedOpen = false; view.settings.replaceChildren(); view.history.replaceChildren(); view.historySummary.textContent = 'ประวัติการแจ้งเตือน'; view.historyDetails.open = false; }
     if (registered()) session = { uid: owner(), generation, controller: new AbortController(), items: [], unreadCount: 0, settings: null, settingsRevision: 0, seen: new Set(), loaded: false, browserNotices: new Set() };
-    render(); updateBadge();
+    render();
   }
   window.PanthoriumNotifications = { mount, open, refresh, readAloud, stopSpeaking, getState: () => current(session) ? { loaded: session.loaded, unreadCount: session.unreadCount, settings: session.settings ? JSON.parse(JSON.stringify(session.settings)) : null } : null };
   window.addEventListener('panthorium:auth-changed', () => { sync(true); refresh(); });
