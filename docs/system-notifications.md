@@ -12,7 +12,7 @@ The settings page starts with an ordered vertical list of 48 notification events
 - Quiet hours use the saved IANA timezone, including overnight intervals. Equal start/end times mean quiet all day. Muted activity stays available in history.
 - Detail previews start disabled. Automatic alerts use generic copy until the account explicitly enables details.
 - Automatic notification audio does not interrupt an active voice conversation or call. A user can ask Sentinel to read notifications in the ongoing conversation.
-- The open client polls the account's inbox. There is no server Web Push, SMS, or closed-app audio delivery. An offline, closed, or suspended client cannot reliably alert. Previously approved email reminders remain the separate closed-app channel when its provider is configured.
+- The open client polls the account's inbox. Background Push additionally requires the server deployment and device opt-in described below; it does not provide SMS or closed-app spoken reading. Previously approved email reminders remain a separate channel when its provider is configured.
 
 ## Event sources
 
@@ -66,7 +66,7 @@ Social notifications contain generic text and are checked against current source
 
 Push respects the master switch, browser channel, individual event switches, quiet hours, current account authorization, and current Social source visibility. Payloads intentionally contain generic text only. Notification titles, messages, sender identities, authentication tokens, and account IDs are never included in lock-screen payloads. Automatic spoken reading is still a foreground feature; background sound is controlled by OS channels and device settings.
 
-The persistent delivery ledger recovers notification commits, leases batches across instances, retries temporary failures up to five attempts, and retires expired endpoints. Provider acceptance is not a device-delivery receipt. A network failure after provider acceptance may retry; stable tags/topics reduce repeated visible notifications. Events from before device opt-in are not replayed. Subscriptions expire after 90 days and are revoked on sign-out/account changes; a capability permits revocation even after the login token expires. Already accepted generic OS notifications cannot be recalled remotely.
+The persistent delivery ledger recovers notification commits, leases batches across instances, retries temporary failures up to five attempts, and retires expired endpoints. Provider acceptance is not a device-delivery receipt. A network failure after provider acceptance may retry; stable tags/topics reduce repeated visible notifications. Events from before device opt-in are not replayed. Subscriptions expire after 90 days; an opted-in client refreshes registration on boot, reconnect, or foreground return, at most once per hour, without requesting permission again. Sign-out/account changes revoke registrations; a capability permits revocation even after the login token expires. Already accepted generic OS notifications cannot be recalled remotely.
 
 Deployment requirements:
 - PostgreSQL initializes the push tables and persistent VAPID key automatically.
@@ -76,3 +76,15 @@ Deployment requirements:
 - Build/install the updated Android APK; an older APK cannot gain the native Firebase plugin through a web refresh.
 
 Validation must include a closed-tab Web Push test and a real Android device test with the app closed before declaring production background delivery complete. Force-stop, revoked permissions, offline devices, and OS power restrictions can prevent or delay delivery.
+
+### Provisioning checkpoint — 2026-10-25
+
+Firebase is active in the existing production project `project-0f6aa7d0-6055-420f-842` (number `699017940678`). The owner approved Firebase terms and the existing project's Blaze pricing confirmation. Optional Analytics was not enabled. Android app `com.panthorium.browser` has app ID `1:699017940678:android:df1062f927f08d2a03d1c7`; its public SDK configuration is checked into `mobile/android/firebase/google-services.json`. This is not a service-account credential.
+
+The following changes are prepared but **not applied**. Automatic approval review blocked IAM provisioning and requires specific owner approval:
+
+1. Create custom role `panthoriumPushSender` containing only `firebasecloudmessaging.messages.create` in this project, and bind it to the existing `backend-runtime@project-0f6aa7d0-6055-420f-842.iam.gserviceaccount.com` runtime identity. This permits sending FCM messages in this project; it grants no data read or administration permissions and requires no downloaded private key.
+2. Create `push-scheduler@project-0f6aa7d0-6055-420f-842.iam.gserviceaccount.com` for a single authenticated Cloud Scheduler HTTP job `panthorium-push-retry` in `asia-southeast1`, every minute, targeting `https://panthorium-backend-64ltez5ocq-as.a.run.app/internal/push/tick`. Use that same URL as the OIDC audience. The application allowlist authorizes only the push retry endpoint; this identity does not need project-wide roles.
+3. Configure the existing backend with `PANTHORIUM_FCM_PROJECT_ID`, `PUSH_SCHEDULER_AUDIENCE`, and `PUSH_SCHEDULER_SERVICE_ACCOUNTS` set to the project, URL, and scheduler identity above. Stage configuration without routing production traffic to an unverified revision. Enable the scheduler after the backend deployment, then verify its authenticated execution.
+
+Firebase, FCM, Firebase Installations and Cloud Scheduler APIs are enabled. IAM bindings, scheduler identity/job, backend environment and real-device receipt verification are still pending. Do not report the notification system as deployed or background delivery as verified at this checkpoint.

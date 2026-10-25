@@ -435,6 +435,7 @@
   window.PanthoriumNotifications = { mount, open, refresh, readAloud, stopSpeaking, getState: () => current(session) ? { loaded: session.loaded, unreadCount: session.unreadCount, settings: session.settings ? JSON.parse(JSON.stringify(session.settings)) : null } : null };
   window.addEventListener('panthorium:auth-changed', () => { sync(true); refresh(); });
   window.addEventListener('panthorium:boot-complete', refresh);
+  window.addEventListener('panthorium:push-changed', () => { for(const view of roots.values())view.signature='';render(); });
   window.addEventListener('online', refresh);
   window.addEventListener('offline', () => { stopSpeaking(); message('ออฟไลน์ • รายการจะอัปเดตเมื่อเชื่อมต่ออีกครั้ง'); });
   window.addEventListener('panthorium:notifications-changed', async () => {

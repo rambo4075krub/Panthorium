@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "699017940678",
+    "project_id": "project-0f6aa7d0-6055-420f-842",
+    "storage_bucket": "project-0f6aa7d0-6055-420f-842.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:699017940678:android:df1062f927f08d2a03d1c7",
+        "android_client_info": {
+          "package_name": "com.panthorium.browser"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDP2tFIcO0ApFpO8vnwSO-ouzD8IrUh7tQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
