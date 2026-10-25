@@ -1,0 +1,14 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {createECDH,randomBytes}=require('node:crypto');
+const {validateSubscription,quiet}=require('../services/notificationPushService');
+const ec=createECDH('prime256v1');ec.generateKeys();
+const valid={endpoint:'https://fcm.googleapis.com/fcm/send/example',keys:{p256dh:ec.getPublicKey().toString('base64url'),auth:randomBytes(16).toString('base64url')}};
+assert.equal(validateSubscription(valid).kind,'web');
+for(const endpoint of ['http://fcm.googleapis.com/a','https://127.0.0.1/a','https://metadata.google.internal/a','https://fcm.googleapis.com.evil.test/a','https://user@fcm.googleapis.com/a','https://fcm.googleapis.com:444/a'])assert.throws(()=>validateSubscription({...valid,endpoint}));
+assert.throws(()=>validateSubscription({...valid,keys:{...valid.keys,auth:'bad'}}));
+assert.throws(()=>validateSubscription({kind:'fcm',token:'short'}));
+assert.equal(validateSubscription({kind:'fcm',token:'x'.repeat(100)}).kind,'fcm');
+assert(quiet({quietHours:{enabled:true,start:'22:00',end:'07:00',timeZone:'Asia/Bangkok'}},Date.parse('2026-10-25T18:00:00Z')));
+assert(!quiet({quietHours:{enabled:true,start:'22:00',end:'07:00',timeZone:'Asia/Bangkok'}},Date.parse('2026-10-25T03:00:00Z')));
+console.log('Push validation: public provider endpoints only, key/token bounds and overnight timezone rules passed');

@@ -100,7 +100,7 @@ class NotificationService {
   async settings({ user } = {}) {
     const userId = this.assertUser(user);
     return { ok:true,settings:await this.repository.getSettings(userId,DEFAULT_SETTINGS),categories:CATEGORY_LABELS,eventCatalog:eventCatalog.entries,
-      capabilities:{inApp:true,browser:true,sound:true,voice:true,backgroundPush:false,email:false},retentionDays:RETENTION_DAYS };
+      capabilities:{inApp:true,browser:true,sound:true,voice:true,backgroundPush:this.push?.ready===true,nativePush:this.push?.config().nativeAvailable===true,email:false},retentionDays:RETENTION_DAYS };
   }
   async updateSettings({ user, patch } = {}) {
     const userId = this.assertUser(user), error = validateSettingsPatch(patch);
@@ -118,6 +118,10 @@ class NotificationService {
     const id = 'notice_' + createHash('sha256').update(JSON.stringify([userId,identityCategory,type,sourceId || randomUUID()])).digest('hex');
     const saved = await this.repository.put({id,userId,category,type,title:title.trim(),body:body.trim(),sourceId,severity,sensitive,createdAt:date,readAt:null,deletedAt:null});
     if (saved.category !== category || saved.title !== title.trim() || saved.body !== body.trim()) throw failure('notification_request_conflict',409);
+    if (!saved.deletedAt && this.push?.ready) {
+      // Await provider work during the producing request; failed deliveries remain queued.
+      await this.push.tick(userId).catch(()=>{});
+    }
     return saved.deletedAt ? null : publicItem(saved);
   }
   async send({ user,title,body='',category='system',requestId } = {}) {
@@ -125,7 +129,7 @@ class NotificationService {
     if (requestId != null && !text(requestId,240)) throw failure('invalid_notification_request');
     const notification = await this.publish({userId,title,body,category,type:'user.requested',sourceId:requestId ? 'request:'+requestId : null,sensitive:true});
     const settings = await this.repository.getSettings(userId,DEFAULT_SETTINGS);
-    return {ok:true,notification,deliveryChannel:'in_app',deliveryState:'saved',alertsEnabled:eventCatalog.enabled(settings,{category,type:'user.requested'}),backgroundPush:false};
+    return {ok:true,notification,deliveryChannel:'in_app',deliveryState:'saved',alertsEnabled:eventCatalog.enabled(settings,{category,type:'user.requested'}),backgroundPush:this.push?.ready===true};
   }
   async reconcileActions(userId) {
     if (!this.actionLedger?.ready || typeof this.actionLedger.list !== 'function') return;

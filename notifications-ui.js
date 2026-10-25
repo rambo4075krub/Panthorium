@@ -140,7 +140,7 @@
       toast.append(node('div', text), button('เปิดการแจ้งเตือน', () => { toast.remove(); open(); }));
       document.body.append(toast); setTimeout(() => toast.remove(), 7000);
     }
-    if (settings.channels?.browser && window.Notification?.permission === 'granted') {
+    if (settings.channels?.browser && !window.PanthoriumPush?.active() && window.Notification?.permission === 'granted') {
       try {
         const n = new Notification('Panthorium', { body: text, tag: 'panthorium-' + s.uid, silent: true });
         s.browserNotices.add(n); n.onclose = () => s.browserNotices.delete(n);
@@ -223,7 +223,9 @@
   async function channel(key, value) {
     const s = session;
     if (!current(s)) return;
-    if (key === 'browser' && value) {
+    if (key === 'browser' && value && window.PanthoriumPush?.native()) {
+      try { await window.PanthoriumPush.enable(); } catch(e) { message(e.message); return; }
+    } else if (key === 'browser' && value) {
       if (!window.Notification) { message('เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือนบนอุปกรณ์'); return; }
       try {
         const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
@@ -293,11 +295,19 @@
     advanced.append(node('summary', 'ช่องทางและตัวเลือกเพิ่มเติม'));
     const advancedContent = node('div', null, { class: 'pn-advanced-content' }); advanced.append(advancedContent); host.append(advanced);
     const channels = node('section', null, { class: 'pn-card' }); channels.append(node('h3', 'ช่องทางรับการแจ้งเตือน'));
-    const defs = { inApp: ['ในแอป', 'แสดงข้อความเมื่อเปิด Panthorium'], browser: ['บนอุปกรณ์', 'ต้องอนุญาตในเบราว์เซอร์ และเปิด Panthorium ไว้'], sound: ['เสียงสัญญาณ', 'เล่นเสียงสั้นเมื่อไม่มีการสนทนาหรือโทรอยู่'], voice: ['อ่านการแจ้งเตือนด้วยเสียง', 'อ่านเมื่อว่างจากการสนทนา ใช้เสียงที่อุปกรณ์รองรับ'] };
+    const defs = { inApp: ['ในแอป', 'แสดงข้อความเมื่อเปิด Panthorium'], browser: ['บนอุปกรณ์', 'ควบคุมป๊อปอัป • เปิดแจ้งเตือนแม้ปิดแอปบนอุปกรณ์นี้เพิ่มได้'], sound: ['เสียงสัญญาณ', 'เล่นเสียงสั้นเมื่อไม่มีการสนทนาหรือโทรอยู่'], voice: ['อ่านการแจ้งเตือนด้วยเสียง', 'อ่านเมื่อว่างจากการสนทนา ใช้เสียงที่อุปกรณ์รองรับ'] };
     for (const [key, [title, desc]] of Object.entries(defs)) channels.append(switchRow(title, desc, settings.channels?.[key], value => channel(key, value), 'channels.' + key));
+    const pushActive=window.PanthoriumPush?.active()===true;
+    channels.append(switchRow('แจ้งเตือนแม้ปิดแอปบนอุปกรณ์นี้', pushActive?'ลงทะเบียนอุปกรณ์แล้ว • ต้องเปิดช่องทางบนอุปกรณ์และรายการที่ต้องการด้วย':'อนุญาต Push Notification เพื่อรับแจ้งเตือนเมื่อไม่ได้เปิด Panthorium',pushActive,async value=>{
+      try { if(!window.PanthoriumPush)throw Error('กรุณารีเฟรชเพื่อโหลดระบบแจ้งเตือน');
+        if(value){await window.PanthoriumPush.enable();if(current(s))await saveSettings({channels:{browser:true}});}
+        else await window.PanthoriumPush.disconnect();
+        for(const view of roots.values())view.signature='';render();
+      }catch(e){message(e.message);}
+    },'device.push'));
     channels.append(button('เปิด/ทดสอบเสียงบนอุปกรณ์นี้', unlockDeviceAudio, { 'data-notification-audio-unlock': '' }));
     channels.append(node('p', audioContext?.state === 'running' ? 'เสียงสัญญาณพร้อมในหน้านี้ • เสียงอ่านขึ้นกับเสียงและสิทธิ์ของอุปกรณ์' : 'หลังเปิดหน้าใหม่ แตะทดสอบเสียงเพื่อเปิดเสียงบนอุปกรณ์นี้ สวิตช์เสียงเพียงอย่างเดียวไม่ได้ปลดล็อกเสียงของเบราว์เซอร์', { class: 'pn-muted' }));
-    channels.append(node('p', 'ปิดแอป ออฟไลน์ หรืออุปกรณ์พักการทำงาน อาจไม่ได้รับป๊อปอัปและเสียง รายการจะกลับมาเมื่อเชื่อมต่อใหม่ การเตือนอีเมลต้องตั้งและยินยอมเป็นรายรายการ', { class: 'pn-muted' })); advancedContent.append(channels);
+    channels.append(node('p', 'Push ช่วยรับแจ้งเตือนเมื่อปิดแอป แต่การบังคับหยุดแอป ปิดสิทธิ์ ออฟไลน์ หรือโหมดประหยัดแบตเตอรี่อาจทำให้ล่าช้า เสียงตอนปิดแอปขึ้นกับระบบของอุปกรณ์', { class: 'pn-muted' })); advancedContent.append(channels);
     const types = node('section', null, { class: 'pn-card' }); types.append(node('h3', 'เปิด–ปิดทั้งหมวด'));
     for (const [key, [title, desc]] of Object.entries(CATEGORIES)) types.append(switchRow(title, desc, settings.categories?.[key], value => saveSettings({ categories: { [key]: value } }), 'categories.' + key));
     advancedContent.append(types);

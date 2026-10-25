@@ -59,3 +59,20 @@ Social notifications contain generic text and are checked against current source
 - `node test/notifications-browser.js`: real Chromium settings, delivery, mobile layout, and session isolation.
 - `TEST_DATABASE_URL=... node test/notifications-postgres.js`: real PostgreSQL migration, concurrent updates, deduplication, persistence, and ownership. Use only a disposable test database.
 - `npm run check`, `npm test`, and `npm run test:postgres` include the new checks alongside existing regressions.
+
+## Background Push (implementation in progress)
+
+`notificationPushService` registers up to ten devices per account in PostgreSQL. VAPID keys are generated once and stored server-side, shared across instances and restarts. Web clients explicitly subscribe through the service worker; Android uses the Capacitor Push Notifications plugin and Firebase Cloud Messaging HTTP v1 with runtime service-account credentials. No service-account key is shipped to a client.
+
+Push respects the master switch, browser channel, individual event switches, quiet hours, current account authorization, and current Social source visibility. Payloads intentionally contain generic text only. Notification titles, messages, sender identities, authentication tokens, and account IDs are never included in lock-screen payloads. Automatic spoken reading is still a foreground feature; background sound is controlled by OS channels and device settings.
+
+The persistent delivery ledger recovers notification commits, leases batches across instances, retries temporary failures up to five attempts, and retires expired endpoints. Provider acceptance is not a device-delivery receipt. A network failure after provider acceptance may retry; stable tags/topics reduce repeated visible notifications. Events from before device opt-in are not replayed. Subscriptions expire after 90 days and are revoked on sign-out/account changes; a capability permits revocation even after the login token expires. Already accepted generic OS notifications cannot be recalled remotely.
+
+Deployment requirements:
+- PostgreSQL initializes the push tables and persistent VAPID key automatically.
+- For Android, finish Firebase onboarding in the production Google Cloud project, register `com.panthorium.browser`, and put its public `google-services.json` in `mobile/android/firebase/` (or provide `PANTHORIUM_FIREBASE_CONFIG` at build time). Do not use a service-account JSON file here.
+- Set `PANTHORIUM_FCM_PROJECT_ID` on the backend and grant its runtime identity only the FCM message-send permission in that project. Until configured, the native capability is reported unavailable.
+- For unattended retries after scale-to-zero, call `POST /internal/push/tick` from Cloud Scheduler using a Google OIDC token. Configure `PUSH_SCHEDULER_AUDIENCE` and `PUSH_SCHEDULER_SERVICE_ACCOUNTS`; this route only drains push work. Ordinary event-producing requests also await a bounded immediate delivery attempt.
+- Build/install the updated Android APK; an older APK cannot gain the native Firebase plugin through a web refresh.
+
+Validation must include a closed-tab Web Push test and a real Android device test with the app closed before declaring production background delivery complete. Force-stop, revoked permissions, offline devices, and OS power restrictions can prevent or delay delivery.
