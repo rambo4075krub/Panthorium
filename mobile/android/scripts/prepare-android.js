@@ -41,6 +41,14 @@ for (const permission of permissions) {
     throw new Error('Failed to add required Android permission: ' + permission);
   }
 }
+// Permission requests otherwise imply mandatory hardware in Google Play. The
+// Browser's text and notification flows work without a camera or microphone.
+for (const feature of ['android.hardware.camera', 'android.hardware.camera.autofocus', 'android.hardware.microphone']) {
+  const declaration = '    <uses-feature android:name="' + feature + '" android:required="false" />\n';
+  const existing = new RegExp('<uses-feature\\b[^>]*android:name="' + feature.replace(/\./g, '\\.') + '"[^>]*/>\\s*', 'g');
+  manifest = manifest.replace(existing, '');
+  manifest = manifest.replace(/(<application\b)/, declaration + '    $1');
+}
 manifest = manifest
   .replace(/android:icon="@mipmap\/[^"]+"/, 'android:icon="@mipmap/ic_launcher"')
   .replace(/android:roundIcon="@mipmap\/[^"]+"/, 'android:roundIcon="@mipmap/ic_launcher_round"');

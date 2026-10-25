@@ -39,6 +39,10 @@ try {
   assert(manifest.includes('android.permission.POST_NOTIFICATIONS'));
   assert(manifest.includes('android:name="firebase_messaging_auto_init_enabled" android:value="false"'),'native token creation waits for opt-in');
   assert.equal((manifest.match(/firebase_messaging_auto_init_enabled/g)||[]).length,1);
+  for (const feature of ['android.hardware.camera', 'android.hardware.camera.autofocus', 'android.hardware.microphone']) {
+    assert.equal(manifest.split('android:name="' + feature + '"').length - 1, 1, 'hardware declarations remain unique after repeated preparation');
+    assert(manifest.includes('<uses-feature android:name="' + feature + '" android:required="false"'), 'optional hardware must not exclude existing Play users');
+  }
   write('wrong-firebase.json',JSON.stringify({project_info:{project_id:'wrong'},client:[]}));
   assert.notEqual(prepare({...release,PANTHORIUM_FIREBASE_CONFIG:path.join(root,'wrong-firebase.json')}).status,0,'mismatched package config is refused');
   const index = fs.readFileSync(path.join(root, 'app/src/main/assets/public/index.html'), 'utf8');

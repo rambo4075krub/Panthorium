@@ -37,6 +37,10 @@ if app is None or sdk is None or sdk.get(android + "targetSdkVersion") != "36":
     raise SystemExit("Merged release manifest does not target API 36")
 if manifest.get("package") != "com.panthorium.browser" or manifest.get(android + "versionCode") != str(receipt["versionCode"]) or manifest.get(android + "versionName") != receipt["versionName"]:
     raise SystemExit("Merged manifest identity/version mismatch")
+features = {entry.get(android + "name"): entry.get(android + "required") for entry in manifest.findall("uses-feature")}
+for feature in ("android.hardware.camera", "android.hardware.camera.autofocus", "android.hardware.microphone"):
+    if features.get(feature) != "false":
+        raise SystemExit("Optional Browser hardware became required in the merged manifest: " + feature)
 # Android defaults debuggable to false when the merged attribute is absent.
 if app.get(android + "debuggable") not in (None, "false"):
     raise SystemExit("Merged release manifest enables debugging")
