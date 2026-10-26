@@ -55,7 +55,7 @@ const read = name => fs.readFileSync(name,'utf8');
   const electron={app:{getPath:()=>'/tmp',setPath(){},whenReady:()=>({then(){}}),on(){}},BrowserWindow:{fromWebContents:()=>win},ipcMain:{handle:(name,fn)=>handlers.set(name,fn)}};
   const context=vm.createContext({require:name=>name==='electron'?electron:name==='../package.json'?{}:mainRequire(name),process:{env:{}},URL,Buffer,console,setTimeout:(fn)=>{timers.push(fn);},setInterval(){}});
   vm.runInContext(read('electron/main.cjs'),context);vm.runInContext('installVoiceBridge()',context);
-  const control=handlers.get('panthorium:window-control');const event={sender:{},senderFrame:{url:'https://panthorium-backend-staging-124818950958.asia-southeast1.run.app/'}};
+  const control=handlers.get('panthorium:window-control');const event={sender:{},senderFrame:{url:'https://panthorium.net/'}};
   for(const action of ['minimize','restore','maximize','fullscreen','restore','open']) assert((await control(event,action)).ok,action);
   assert.equal((await control({...event,senderFrame:{url:'https://evil.test/'}},'close')).error,'untrusted_origin');
   assert.equal((await control(event,'delete')).error,'invalid_window_action');

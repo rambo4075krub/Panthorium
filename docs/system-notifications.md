@@ -77,14 +77,16 @@ Deployment requirements:
 
 Validation must include a closed-tab Web Push test and a real Android device test with the app closed before declaring production background delivery complete. Force-stop, revoked permissions, offline devices, and OS power restrictions can prevent or delay delivery.
 
-### Provisioning checkpoint — 2026-10-25
+### Provisioning checkpoint — 2026-10-26
 
 Firebase is active in the existing production project `project-0f6aa7d0-6055-420f-842` (number `699017940678`). The owner approved Firebase terms and the existing project's Blaze pricing confirmation. Optional Analytics was not enabled. Android app `com.panthorium.browser` has app ID `1:699017940678:android:df1062f927f08d2a03d1c7`; its public SDK configuration is checked into `mobile/android/firebase/google-services.json`. This is not a service-account credential.
 
-The following changes are prepared but **not applied**. Automatic approval review blocked IAM provisioning and requires specific owner approval:
+The owner subsequently approved and applied the following production configuration:
 
 1. Create custom role `panthoriumPushSender` containing only `firebasecloudmessaging.messages.create` in this project, and bind it to the existing `backend-runtime@project-0f6aa7d0-6055-420f-842.iam.gserviceaccount.com` runtime identity. This permits sending FCM messages in this project; it grants no data read or administration permissions and requires no downloaded private key.
 2. Create `push-scheduler@project-0f6aa7d0-6055-420f-842.iam.gserviceaccount.com` for a single authenticated Cloud Scheduler HTTP job `panthorium-push-retry` in `asia-southeast1`, every minute, targeting `https://panthorium-backend-64ltez5ocq-as.a.run.app/internal/push/tick`. Use that same URL as the OIDC audience. The application allowlist authorizes only the push retry endpoint; this identity does not need project-wide roles.
 3. Configure the existing backend with `PANTHORIUM_FCM_PROJECT_ID`, `PUSH_SCHEDULER_AUDIENCE`, and `PUSH_SCHEDULER_SERVICE_ACCOUNTS` set to the project, URL, and scheduler identity above. Stage configuration without routing production traffic to an unverified revision. Enable the scheduler after the backend deployment, then verify its authenticated execution.
 
-Firebase, FCM, Firebase Installations and Cloud Scheduler APIs are enabled. IAM bindings, scheduler identity/job, backend environment and real-device receipt verification are still pending. Do not report the notification system as deployed or background delivery as verified at this checkpoint.
+Firebase, FCM, Firebase Installations and Cloud Scheduler APIs are enabled. The production runtime configuration was verified on revision `panthorium-backend-00195-dul` receiving 100% traffic. The existing Scheduler was resumed on 2026-10-26 at 08:41 Asia/Bangkok. Scheduler execution logs show authenticated endpoint HTTP 200 responses at `2026-10-26T01:41:51.456886679Z` and `2026-10-26T01:42:13.499811536Z`.
+
+This proves the production retry trigger executes; it does not prove a physical device received a push. The Android 1.0.1 versionCode 3 release is available on both Internal and closed Alpha tracks. Real closed-app receipt still requires device acceptance. Staging Scheduler provisioning remains unapplied: automatic approval review rejected enabling its API and creating its service account. The GitHub deployment identity also lacks Scheduler access; its historical verification-workflow failure must not be described as a delivery failure or a successful activation.

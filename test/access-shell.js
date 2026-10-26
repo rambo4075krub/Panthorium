@@ -70,14 +70,16 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
       {
         assert.equal(w.document.getElementById('panthorium-browser-download'), null, 'no installer hyperlink inside any installed browser');
         const update = w.document.getElementById('panthorium-browser-update');
-        assert.equal(update.textContent, 'ปัจจุบันเป็นเวอร์ชันล่าสุดแล้ว');
+        assert.equal(update.querySelector('[data-update-label]').textContent, 'อัพเดท');
+        assert.equal(update.querySelector('[data-update-message]').textContent, 'เป็นเวอร์ชั่นล่าสุดแล้ว');
         assert.equal(manual, 0, 'checking status must not invoke an installer');
         available = true;
         await w.PanthoriumAccessShell.refreshUpdateStatus(true);
-        assert.equal(update.textContent, 'อัปเดต Panthorium Browser');
+        assert.equal(update.querySelector('[data-update-label]').textContent, 'อัพเดท');
+        assert.equal(update.querySelector('[data-update-message]').textContent, 'มีเวอร์ชั่นใหม่พร้อมอัพเดท');
         await update.onclick();
         assert.equal(manual, 1);
-        assert.equal(update.textContent, 'อัปเดต Panthorium Browser', 'deferring an update must not claim it is installed');
+        assert.equal(update.querySelector('[data-update-message]').textContent, 'มีเวอร์ชั่นใหม่พร้อมอัพเดท', 'deferring an update must not claim it is installed');
         fail = true;
         await w.PanthoriumAccessShell.refreshUpdateStatus(true);
         assert.equal(update.dataset.state, 'unknown', 'offline does not mean current');

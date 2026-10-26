@@ -14,11 +14,18 @@ self.addEventListener('activate', (event) => {
     await Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)));
     await self.clients.claim();
 
-    // Existing tabs may still be displaying the old cache-first shell. Refresh each
-    // visible client once when this worker takes control so it receives fresh HTML.
+    // Updated clients manage reloads without losing edits. Migrate older clients
+    // that do not implement the handshake once to the fresh no-store shell.
     const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    await Promise.all(clients.map((client) => {
-      try { return client.navigate(client.url); } catch (_) { return null; }
+    await Promise.all(clients.map(async (client) => {
+      const managed = await new Promise(resolve => {
+        const channel = new MessageChannel();
+        const timer = setTimeout(() => { channel.port1.close(); resolve(false); }, 1500);
+        channel.port1.onmessage = event => { clearTimeout(timer); channel.port1.close(); resolve(event.data?.managed === true); };
+        try { client.postMessage({ type: 'panthorium:update-ready' }, [channel.port2]); }
+        catch (_) { clearTimeout(timer); channel.port1.close(); resolve(false); }
+      });
+      if (!managed) { try { return await client.navigate(client.url); } catch (_) {} }
     }));
   })());
 });
