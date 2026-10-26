@@ -10,7 +10,8 @@ function validateSubscription(value) {
   if (!value || typeof value !== 'object') throw failure('invalid_push_subscription');
   if (value.kind === 'fcm') {
     if (typeof value.token !== 'string' || !/^[A-Za-z0-9_:.-]{30,4096}$/.test(value.token)) throw failure('invalid_push_subscription');
-    return { kind:'fcm', token:value.token };
+    if (value.popupChannels != null && value.popupChannels !== 2) throw failure('invalid_push_subscription');
+    return { kind:'fcm', token:value.token, ...(value.popupChannels === 2 ? {popupChannels:2} : {}) };
   }
   let url; try { url = new URL(value.endpoint); } catch { throw failure('invalid_push_endpoint'); }
   const allowed = url.hostname === 'fcm.googleapis.com' || url.hostname === 'updates.push.services.mozilla.com' || /^(?:[a-z0-9-]+\.)?push\.apple\.com$/.test(url.hostname);
@@ -48,6 +49,13 @@ class NotificationPushService {
     this.vapid={subject:'https://panthorium.net',publicKey:saved.public_key,privateKey:saved.private_key};this.ready=true;
   }
   config() { return {ok:true,available:this.ready,publicKey:this.ready?this.vapid.publicKey:null,nativeAvailable:this.ready&&!!this.fcmProject}; }
+  async status(user,id) {
+    const uid=this.notifications.assertUser(user);
+    if(!this.ready)return {ok:true,registered:false};
+    if(!/^[a-f0-9]{64}$/.test(id||''))throw failure('invalid_push_device');
+    const device=(await this.pool.query('SELECT id FROM panthorium_push_devices WHERE id=$1 AND user_id=$2 AND expires_at>NOW()',[id,uid])).rows[0];
+    return {ok:true,registered:!!device};
+  }
   async subscribe(user,input) {
     const uid=this.notifications.assertUser(user);if(!this.ready)throw failure('push_unavailable',503);
     const sub=validateSubscription(input?.subscription);if(sub.kind==='fcm'&&!this.fcmProject)throw failure('native_push_not_configured',503);
@@ -110,7 +118,8 @@ class NotificationPushService {
       const payload={v:1,binding:d.binding,id:n.id,title:'Panthorium',body:'มีการแจ้งเตือนใหม่ เปิด Panthorium เพื่อดูรายละเอียด',url:'/?notifications=1',silent:!settings.channels.sound};
       if(d.subscription.kind==='fcm') {
         if(!this.fcmProject)throw Error('native_push_unavailable');
-        const message={token:d.subscription.token,notification:{title:payload.title,body:payload.body},data:{notificationId:n.id,binding:d.binding},android:{priority:'high',ttl:'3600s',notification:{tag:n.id,channelId:settings.channels.sound?'panthorium_alerts':'panthorium_silent'}}};
+        const channelId=settings.channels.sound?'panthorium_alerts':d.subscription.popupChannels===2?'panthorium_popups_silent_v2':'panthorium_silent';
+        const message={token:d.subscription.token,notification:{title:payload.title,body:payload.body},data:{notificationId:n.id,binding:d.binding},android:{priority:'high',ttl:'3600s',notification:{tag:n.id,channel_id:channelId}}};
         if(this.sendFcm)await this.sendFcm(message);else { const client=await this.auth.getClient();await client.request({url:`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(this.fcmProject)}/messages:send`,method:'POST',data:{message},timeout:5000}); }
       }else await this.sendWeb(d.subscription,JSON.stringify(payload),{vapidDetails:this.vapid,TTL:3600,timeout:5000,urgency:'normal',topic:hash(n.id).slice(0,32)});
       await finish('accepted'); // provider acceptance is not proof of device receipt

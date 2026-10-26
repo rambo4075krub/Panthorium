@@ -117,6 +117,20 @@ fs.mkdirSync(path.dirname(activityPath), { recursive: true });
 let activity = fs.existsSync(activityPath)
   ? fs.readFileSync(activityPath, 'utf8')
   : `package ${appNamespace};\n\nimport com.getcapacitor.BridgeActivity;\n\npublic class MainActivity extends BridgeActivity {\n}\n`;
+const pushPlugin = fs.readFileSync(path.join(mobileRoot, 'native', 'PanthoriumNotificationsPlugin.java'), 'utf8')
+  .replace('package com.panthorium.browser;', `package ${appNamespace};`);
+fs.writeFileSync(path.join(path.dirname(activityPath), 'PanthoriumNotificationsPlugin.java'), pushPlugin);
+if (!activity.includes('registerPlugin(PanthoriumNotificationsPlugin.class)')) {
+  if (/\bonCreate\s*\(/.test(activity)) throw new Error('Merge notification plugin registration into the existing onCreate method.');
+  activity = activity.replace(/class\s+MainActivity\s+extends\s+BridgeActivity\s*\{/, match => match + `
+    @Override
+    public void onCreate(android.os.Bundle savedInstanceState) {
+        registerPlugin(PanthoriumNotificationsPlugin.class);
+        super.onCreate(savedInstanceState);
+    }
+`);
+  fs.writeFileSync(activityPath, activity);
+}
 const immersiveMarker = 'PANTHORIUM_IMMERSIVE_MODE';
 if (!activity.includes(immersiveMarker)) {
   if (!/class\s+MainActivity\s+extends\s+BridgeActivity\s*\{/.test(activity)) {

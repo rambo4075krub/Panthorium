@@ -3,7 +3,8 @@ const path=require('path');
 const fs=require('fs');
 const crypto=require('crypto');
 const {spawn}=require('child_process');
-const {app,BrowserWindow,session,ipcMain,net,dialog}=require('electron');
+const {app,BrowserWindow,session,ipcMain,net,dialog,Notification,Tray,Menu,nativeImage}=require('electron');
+const {createDesktopNotifications}=require('./notifications.cjs');
 const metadata=require('../package.json');
 const {createBrowserSecurity}=require('./browser-security.cjs');
 const {verifyManifest}=require('./update-signature.cjs');
@@ -25,6 +26,7 @@ function trustedOrigin(value){
   }
 }
 const browserSecurity=createBrowserSecurity({app,session,trustedOrigin,edition:EDITION});
+let desktopNotifications;
 function postTranscription(payload){
   return new Promise((resolve,reject)=>{
     const body=Buffer.from(JSON.stringify(payload));
@@ -46,7 +48,9 @@ function postTranscription(payload){
 function installVoiceBridge(){
   ipcMain.handle('panthorium:browser-account',(event,accountId)=>{
     if(!browserSecurity.isTrustedShellEvent(event))return {ok:false,error:'untrusted_origin'};
-    return browserSecurity.setAccount(event.sender,accountId);
+    const result=browserSecurity.setAccount(event.sender,accountId);
+    if(result.ok)desktopNotifications.setAccount(event.sender,accountId);
+    return result;
   });
   ipcMain.handle('panthorium:window-control', async (event, action) => {
     if (!trustedOrigin(event.senderFrame?.url || event.sender.getURL())) return {ok:false,error:'untrusted_origin'};
@@ -233,8 +237,11 @@ async function performUpdateCheck(options={}){
     return {ok:false,error:String(error.message||error)};
   }
 }
-function create(){const win=new BrowserWindow({width:1440,height:900,minWidth:960,minHeight:640,backgroundColor:'#050811',frame:false,title:PRODUCT_NAME,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,spellcheck:false,backgroundThrottling:false}});win.removeMenu();browserSecurity.registerShell(win.webContents);win.loadURL(START_URL);return win;}
+function create(){const win=new BrowserWindow({width:1440,height:900,minWidth:960,minHeight:640,backgroundColor:'#050811',frame:false,title:PRODUCT_NAME,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,spellcheck:false,backgroundThrottling:false}});win.removeMenu();browserSecurity.registerShell(win.webContents);desktopNotifications.attach(win);win.loadURL(START_URL);return win;}
 app.whenReady().then(()=>{
+  // Match the AppUserModelID installed on each edition's Start menu shortcut.
+  if(process.platform==='win32')app.setAppUserModelId('com.panthorium.browser.'+EDITION);
+  desktopNotifications=createDesktopNotifications({app,BrowserWindow,ipcMain,Notification,Tray,Menu,nativeImage,security:browserSecurity,iconPath:path.join(__dirname,'..','build','icon.png')});
   installVoiceBridge();
   browserSecurity.installSession(session.defaultSession);
   create();

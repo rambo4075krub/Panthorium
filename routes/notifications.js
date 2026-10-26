@@ -26,6 +26,7 @@ function createNotificationRouter(authService, notifications) {
     return input;
   };
   router.get('/push/config',reads,route(req=>{notifications.assertUser(req.user);return notifications.push?.config()||{ok:true,available:false,nativeAvailable:false};}));
+  router.get('/push/status',reads,route(req=>notifications.push.status(req.user,req.query.id)));
   router.post('/push/subscribe',writes,route(req=>notifications.push.subscribe(req.user,body(req,['subscription']))));
   router.delete('/push/subscribe',writes,route(req=>notifications.push.unsubscribe(req.user,body(req,['id']).id)));
   router.get('/settings',reads,route(req=>notifications.settings({user:req.user})));
