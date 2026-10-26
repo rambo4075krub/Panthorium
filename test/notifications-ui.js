@@ -152,6 +152,7 @@ const merge = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && ty
   assert.equal(settings.channels.browser,true);assert(deviceActive);
   assert.equal(w.document.querySelector('[data-notification-opt-in]'),null);
   const sends=()=>calls.filter(c=>c.url.endsWith('/send')).length;
+  w.PanthoriumPush.desktop=()=>true;
   root.querySelector('[data-notification-popup-test]').click();await tick();
   assert.equal(sends(),0,'stale device registration cannot be reported as a successful test');
   registeredDevice=true;
@@ -160,6 +161,19 @@ const merge = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && ty
   deviceActive=false;items.unshift(item('stale-registration','action.failed'));
   await w.PanthoriumNotifications.refresh();await tick();
   assert.equal(popupCalls,1,'stale background state cannot suppress foreground delivery');
+  w.PanthoriumPush.desktop=()=>false;
+  setting('channels.browser').click();await tick();
+  const setTimer=w.setTimeout.bind(w);w.setTimeout=(fn,ms,...args)=>setTimer(fn,ms===20000?1:ms,...args);
+  w.PanthoriumPush.enable=()=>new Promise(()=>{});
+  setting('channels.browser').click();await tick();await tick();
+  assert.equal(settings.channels.browser,true,'a stalled Web Push provider cannot block foreground popup opt-in');
+  assert.match(root.textContent,/เปิดป๊อปอัปขณะเปิดเว็บแล้ว/);
+  assert.equal(deviceActive,false,'foreground fallback must not claim background readiness');
+  registeredDevice=false;root.querySelector('[data-notification-popup-test]').click();await tick();
+  assert.equal(sends(),2);assert.match(root.textContent,/การรับเบื้องหลังยังไม่พร้อม/);
+  deviceActive=true;w.dispatchEvent(new w.Event('panthorium:push-changed'));
+  assert.equal(w.document.querySelector('[data-notification-opt-in]'),null,'late registration success clears the foreground-only offer');
+  w.setTimeout=setTimer;
   w.OS.state.user = null; w.dispatchEvent(new w.Event('panthorium:auth-changed'));
   assert.equal(w.PanthoriumNotifications.getState(), null);
   assert.equal(w.document.getElementById('panthorium-notification-bell'), null);
