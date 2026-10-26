@@ -3,6 +3,7 @@ const assert = require("node:assert/strict"), path = require("node:path"), fs = 
 const { randomUUID } = require("node:crypto"), { execFileSync } = require("node:child_process"), { chromium } = require("playwright");
 const { AuthService } = require("../services/authService"), { SocialRepository } = require("../services/socialRepository");
 const { SocialService } = require("../services/socialService"), { createSocialRouter } = require("../routes/social");
+const { OFFICIAL_CHANNELS } = require("../services/socialTv");
 async function until(fn, label) { const end = Date.now() + 15000; while (Date.now() < end) { if (await fn()) return; await new Promise(r => setTimeout(r, 80)); } throw Error(label); }
 (async () => {
   const users = Array.from({ length: 3 }, () => { const id = randomUUID(); return { id, sub: id, roles: ["user"], permissions: ["chat"] }; });
@@ -24,6 +25,7 @@ async function until(fn, label) { const end = Date.now() + 15000; while (Date.no
   try {
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ viewport: { width: 1280, height: 850 } });
+    await context.route("https://tv.trueid.net/th-th/embed/**", route => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Provider player fixture</title><p>Free TV player</p>" }));
     const pages = await Promise.all(users.map(() => context.newPage())), [provider, admin, viewer] = pages, errors = [];
     await context.route("https://media.example.org/**", async route => {
       const name = new URL(route.request().url()).pathname.slice(1);
@@ -37,11 +39,20 @@ async function until(fn, label) { const end = Date.now() + 15000; while (Date.no
       await page.goto("http://127.0.0.1:" + server.address().port); await page.evaluate(() => PanthoriumSocial.open("tv"));
     }
     const tv = provider.locator('[data-social="tv"]');
-    assert.equal(await tv.locator("[data-tv-channel]").count(), 3);
+    assert.equal(await tv.locator("[data-tv-channel]").count(), OFFICIAL_CHANNELS.length);
     assert.deepEqual(await provider.locator("[data-social-tab]").evaluateAll(nodes => nodes.map(n => n.firstChild.textContent)), ["Feed", "Short", "Watch", "Live", "TV", "Market", "Community", "Chat", "Connect", "Profile", "Friends"]);
     assert.equal(await provider.getByRole("button", { name: "Refresh", exact: true }).textContent(), "↻");
     assert.equal(await tv.getByRole("button", { name: "ตรวจสอบช่อง", exact: true }).count(), 0);
-    assert.equal(await tv.getByRole("link", { name: "▶ ชมสดที่เว็บไซต์สถานี", exact: true }).first().getAttribute("target"), "_blank");
+    assert.equal(await tv.getByRole("link", { name: "เปิดเว็บไซต์ต้นทาง", exact: true }).first().getAttribute("target"), "_blank");
+    const readyChannel = tv.locator('[data-tv-channel="tv:thaipbs"]');
+    await readyChannel.getByRole("button", { name: "▶ เล่นใน Panthorium", exact: true }).click();
+    const embedded = readyChannel.frameLocator("iframe").locator('iframe[title="TrueID Free TV player"]');
+    await embedded.waitFor();
+    assert.equal(await embedded.getAttribute("src"), "https://tv.trueid.net/th-th/embed/thaipbs");
+    assert((await embedded.getAttribute("allow")).includes("autoplay"));
+    await provider.locator('[data-social-tab="feed"]').click();
+    assert.equal(await readyChannel.locator("iframe").count(), 0, "free TV stops when switching tabs");
+    await provider.locator('[data-social-tab="tv"]').click();
     await tv.getByRole("button", { name: "เพิ่มช่อง TV", exact: true }).click();
     await tv.getByLabel("ชื่อช่อง", { exact: true }).fill("ช่องทดสอบสด");
     await tv.getByLabel("ผู้ให้บริการ / สถานี", { exact: true }).fill("สถานีทดสอบ");

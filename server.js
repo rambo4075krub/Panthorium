@@ -347,7 +347,7 @@ for (const script of [...shellScripts, "workspace-ui.css", "social-player.html",
         // Isolate external media permissions to this small, same-origin player.
         // The desktop shell keeps its original same-origin/blob-only policy.
         res.set("Referrer-Policy", "strict-origin-when-cross-origin");
-        res.set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob: https:; connect-src 'self' https:; frame-src https://www.youtube-nocookie.com; frame-ancestors 'self'; base-uri 'none'; object-src 'none'");
+        res.set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob: https:; connect-src 'self' https:; frame-src https://www.youtube-nocookie.com https://tv.trueid.net; frame-ancestors 'self'; base-uri 'none'; object-src 'none'");
       }
       res.sendFile(path.join(frontendRoot, script));
     } catch (error) {
