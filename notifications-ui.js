@@ -140,13 +140,15 @@
       toast.append(node('div', text), button('เปิดการแจ้งเตือน', () => { toast.remove(); open(); }));
       document.body.append(toast); setTimeout(() => toast.remove(), 7000);
     }
-    if (settings.channels?.browser && !window.PanthoriumPush?.active() && window.Notification?.permission === 'granted') {
-      try {
+    if (settings.channels?.browser) {
+      const fallback = () => { if (!current(s) || window.Notification?.permission !== 'granted' || window.PanthoriumPush?.native()) return; try {
         const n = new Notification('Panthorium', { body: text, tag: 'panthorium-' + s.uid, silent: true });
         s.browserNotices.add(n); n.onclose = () => s.browserNotices.delete(n);
         n.onclick = () => { n.close(); if (current(s)) { window.focus(); open(); } };
         setTimeout(() => { n.close(); s.browserNotices.delete(n); }, 15000);
-      } catch (_) { message('อุปกรณ์นี้แสดงป๊อปอัปเบราว์เซอร์ไม่ได้ • เปิดศูนย์แจ้งเตือนเพื่อดูรายการ'); }
+      } catch (_) { message('อุปกรณ์นี้แสดงป๊อปอัปไม่ได้ • ตรวจสิทธิ์แจ้งเตือนในการตั้งค่าอุปกรณ์'); } };
+      if(window.PanthoriumPush?.show) window.PanthoriumPush.show(latest,!settings.channels.sound).then(shown=>{if(!shown)fallback();}).catch(e=>{if(current(s))message(e.message);fallback();});
+      else fallback();
     }
     if (!busy()) {
       if (settings.channels?.sound) beep();
@@ -173,7 +175,7 @@
         s.items.forEach(item => s.seen.add(item.id));
         if (s.seen.size > 1000) s.seen = new Set(s.items.map(item => item.id));
         if (s.loaded) deliver(s, fresh);
-        s.loaded = true; render();
+        s.loaded = true; render(); offerDevice(s);
         return true;
       } catch (_) {
         if (current(s)) { s.error = true; message('โหลดการแจ้งเตือนไม่สำเร็จ • แตะรีเฟรชเพื่อลองอีกครั้ง'); }
@@ -220,11 +222,25 @@
     }
     return saveSettings({ events });
   }
+  const webDevice = () => !!window.PanthoriumPush && !window.PanthoriumPush.native() && !window.PanthoriumPush.desktop?.();
+  async function enableDevice() {
+    const pending=window.PanthoriumPush.enable();
+    if(!webDevice())return pending;
+    // A browser's Push provider can stall even after notification permission
+    // is granted. Keep foreground delivery available without claiming Push readiness.
+    let timer;
+    try{return await Promise.race([pending,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('การลงทะเบียนรับเบื้องหลังยังไม่ตอบกลับ กรุณาตรวจการเชื่อมต่อแล้วลองใหม่')),20000);})]);}
+    finally{clearTimeout(timer);}
+  }
   async function channel(key, value) {
     const s = session;
     if (!current(s)) return;
-    if (key === 'browser' && value && window.PanthoriumPush?.native()) {
-      try { await window.PanthoriumPush.enable(); } catch(e) { message(e.message); return; }
+    let backgroundWarning='';
+    if (key === 'browser' && value && window.PanthoriumPush) {
+      try { await enableDevice(); } catch(e) {
+        if(webDevice()&&window.Notification?.permission==='granted')backgroundWarning=e.message;
+        else{message(e.message);return;}
+      }
     } else if (key === 'browser' && value) {
       if (!window.Notification) { message('เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือนบนอุปกรณ์'); return; }
       try {
@@ -241,7 +257,42 @@
         audioContext ||= new Audio(); await audioContext.resume();
       } catch (_) { message('เปิดเสียงสัญญาณไม่สำเร็จ • แตะสวิตช์เพื่อลองอีกครั้ง'); return; }
     }
-    if (current(s)) await saveSettings({ channels: { [key]: value } });
+    if (current(s)) {
+      const saved=await saveSettings({ channels: { [key]: value } });
+      if(saved&&key==='browser'){
+        if(!value)await window.PanthoriumPush?.disconnect().catch(e=>message(e.message));
+        else if(!backgroundWarning)document.querySelector('[data-notification-opt-in]')?.remove();
+        if(backgroundWarning)message('เปิดป๊อปอัปขณะเปิดเว็บแล้ว • การรับเบื้องหลังยังไม่พร้อม: '+backgroundWarning);
+      }
+    }
+  }
+  function offerDevice(s) {
+    if(!current(s)||!s.settings?.enabled||!window.PanthoriumPush||window.PanthoriumPush.active()||document.querySelector('[data-notification-opt-in]'))return;
+    try{if(sessionStorage.getItem('panthorium-notification-offer')===s.uid)return;}catch{}
+    const prompt=node('div',null,{'data-notification-opt-in':'',role:'region','aria-label':'เปิดป๊อบอัพแจ้งเตือน'});
+    prompt.style.cssText='position:fixed;right:16px;bottom:48px;z-index:2147481999;max-width:min(340px,calc(100vw - 32px));box-sizing:border-box;padding:14px;border:1px solid #3aa89e;border-radius:13px;background:#102536;color:#eaf9ff;font:13px/1.5 system-ui';
+    prompt.append(node('div','รับป๊อบอัพข้อความและกิจกรรมบนอุปกรณ์นี้'),node('div','ต้องอนุญาตแจ้งเตือนและผูกอุปกรณ์กับบัญชีครั้งแรก',{class:'pn-muted'}));
+    const controls=node('div',null,{class:'pn-actions'});
+    controls.append(button('เปิดการแจ้งเตือน',async()=>{
+      if(!current(s)){prompt.remove();return;}
+      await channel('browser',true);
+      if(!current(s))return;
+      if(s.settings.channels.browser&&window.PanthoriumPush.active())prompt.remove();
+      else {const hint=prompt.querySelector('.pn-muted');hint.textContent=webDevice()&&s.settings.channels.browser&&window.Notification?.permission==='granted'?'เปิดป๊อปอัปขณะเปิดเว็บแล้ว • การรับเบื้องหลังยังไม่พร้อม':'ยังเปิดไม่สำเร็จ • เปิดตั้งค่าการแจ้งเตือนเพื่อตรวจสาเหตุหรืออัปเดตตัวแอพ';open();}
+    }),button('ภายหลัง',()=>{try{sessionStorage.setItem('panthorium-notification-offer',s.uid);}catch{}prompt.remove();}));
+    prompt.append(controls);document.body.append(prompt);
+  }
+  async function testPopup() {
+    const s=session;if(!current(s))return;
+    if(!s.settings.enabled||!s.settings.channels.browser){message('เปิดการแจ้งเตือนและช่องทางบนอุปกรณ์ก่อนส่งทดสอบ');return;}
+    if(quietNow(s.settings)){message('อยู่ในช่วงห้ามรบกวน • ปิดช่วงห้ามรบกวนก่อนทดสอบป๊อบอัพ');return;}
+    try{
+      const foregroundOnly=window.PanthoriumPush?.check && !(await window.PanthoriumPush.check()).registered;
+      if(foregroundOnly&&!(webDevice()&&window.Notification?.permission==='granted')){message('อุปกรณ์นี้ยังไม่ได้ลงทะเบียนหรือการลงทะเบียนหมดอายุ • เปิดสวิตช์บนอุปกรณ์อีกครั้ง');return;}
+      const sent=await request(s,'/send',{method:'POST',body:JSON.stringify({title:'ทดสอบป๊อบอัพ Panthorium',body:'ข้อความทดสอบการแจ้งเตือนจากบัญชีของคุณ',category:'system'})});
+      if(sent.alertsEnabled===false){message('บันทึกข้อความทดสอบแล้ว แต่หมวดการแจ้งเตือนระบบถูกปิดอยู่');return;}
+      if(current(s)){await refresh();message(foregroundOnly?'สร้างแจ้งเตือนทดสอบขณะเปิดเว็บแล้ว • การรับเบื้องหลังยังไม่พร้อม':'สร้างแจ้งเตือนทดสอบแล้ว • ตรวจป๊อบอัพบนอุปกรณ์ที่เปิดรับไว้ หากไม่ขึ้นให้ตรวจโหมดห้ามรบกวนและสิทธิ์ของระบบ');}
+    }catch(_){if(current(s))message('ส่งแจ้งเตือนทดสอบไม่สำเร็จ • ตรวจการเชื่อมต่อแล้วลองใหม่');}
   }
   async function unlockDeviceAudio() {
     const s = session;
@@ -295,16 +346,17 @@
     advanced.append(node('summary', 'ช่องทางและตัวเลือกเพิ่มเติม'));
     const advancedContent = node('div', null, { class: 'pn-advanced-content' }); advanced.append(advancedContent); host.append(advanced);
     const channels = node('section', null, { class: 'pn-card' }); channels.append(node('h3', 'ช่องทางรับการแจ้งเตือน'));
-    const defs = { inApp: ['ในแอป', 'แสดงข้อความเมื่อเปิด Panthorium'], browser: ['บนอุปกรณ์', 'ควบคุมป๊อปอัป • เปิดแจ้งเตือนแม้ปิดแอปบนอุปกรณ์นี้เพิ่มได้'], sound: ['เสียงสัญญาณ', 'เล่นเสียงสั้นเมื่อไม่มีการสนทนาหรือโทรอยู่'], voice: ['อ่านการแจ้งเตือนด้วยเสียง', 'อ่านเมื่อว่างจากการสนทนา ใช้เสียงที่อุปกรณ์รองรับ'] };
+    const defs = { inApp: ['ในแอป', 'แสดงข้อความเมื่อเปิด Panthorium'], browser: ['บนอุปกรณ์', 'เปิดป๊อบอัพและลงทะเบียนรับแจ้งเตือนบนอุปกรณ์นี้ในครั้งเดียว'], sound: ['เสียงสัญญาณ', 'เล่นเสียงสั้นเมื่อไม่มีการสนทนาหรือโทรอยู่'], voice: ['อ่านการแจ้งเตือนด้วยเสียง', 'อ่านเมื่อว่างจากการสนทนา ใช้เสียงที่อุปกรณ์รองรับ'] };
     for (const [key, [title, desc]] of Object.entries(defs)) channels.append(switchRow(title, desc, settings.channels?.[key], value => channel(key, value), 'channels.' + key));
     const pushActive=window.PanthoriumPush?.active()===true;
-    channels.append(switchRow('แจ้งเตือนแม้ปิดแอปบนอุปกรณ์นี้', pushActive?'ลงทะเบียนอุปกรณ์แล้ว • ต้องเปิดช่องทางบนอุปกรณ์และรายการที่ต้องการด้วย':'อนุญาต Push Notification เพื่อรับแจ้งเตือนเมื่อไม่ได้เปิด Panthorium',pushActive,async value=>{
+    channels.append(switchRow('แจ้งเตือนแม้ปิดแอปบนอุปกรณ์นี้', pushActive?(window.PanthoriumPush?.desktop?.()?'เปิดรับเบื้องหลังแล้ว • ปิดหน้าต่างจะย่อไปที่ถาดระบบ การออกจากโปรแกรมจะหยุดรับ':'ลงทะเบียนอุปกรณ์แล้ว • ต้องเปิดช่องทางบนอุปกรณ์และรายการที่ต้องการด้วย'):'อุปกรณ์นี้ยังไม่พร้อมรับเบื้องหลัง • เปิดสวิตช์เพื่อลงทะเบียน',pushActive,async value=>{
       try { if(!window.PanthoriumPush)throw Error('กรุณารีเฟรชเพื่อโหลดระบบแจ้งเตือน');
-        if(value){await window.PanthoriumPush.enable();if(current(s))await saveSettings({channels:{browser:true}});}
+        if(value){await enableDevice();if(current(s))await saveSettings({channels:{browser:true}});}
         else await window.PanthoriumPush.disconnect();
         for(const view of roots.values())view.signature='';render();
       }catch(e){message(e.message);}
     },'device.push'));
+    channels.append(button('ส่งป๊อบอัพทดสอบ',testPopup,{'data-notification-popup-test':''}));
     channels.append(button('เปิด/ทดสอบเสียงบนอุปกรณ์นี้', unlockDeviceAudio, { 'data-notification-audio-unlock': '' }));
     channels.append(node('p', audioContext?.state === 'running' ? 'เสียงสัญญาณพร้อมในหน้านี้ • เสียงอ่านขึ้นกับเสียงและสิทธิ์ของอุปกรณ์' : 'หลังเปิดหน้าใหม่ แตะทดสอบเสียงเพื่อเปิดเสียงบนอุปกรณ์นี้ สวิตช์เสียงเพียงอย่างเดียวไม่ได้ปลดล็อกเสียงของเบราว์เซอร์', { class: 'pn-muted' }));
     channels.append(node('p', 'Push ช่วยรับแจ้งเตือนเมื่อปิดแอป แต่การบังคับหยุดแอป ปิดสิทธิ์ ออฟไลน์ หรือโหมดประหยัดแบตเตอรี่อาจทำให้ล่าช้า เสียงตอนปิดแอปขึ้นกับระบบของอุปกรณ์', { class: 'pn-muted' })); advancedContent.append(channels);
@@ -428,6 +480,7 @@
     session = null; stopSpeaking();
     if (audioContext) { audioContext.close?.().catch?.(() => {}); audioContext = null; }
     document.querySelector('[data-notification-toast]')?.remove();
+    document.querySelector('[data-notification-opt-in]')?.remove();
     for (const view of roots.values()) { view.signature = ''; view.older = []; view.pageLoaded = false; view.nextCursor = null; view.advancedOpen = false; view.settings.replaceChildren(); view.history.replaceChildren(); view.historySummary.textContent = 'ประวัติการแจ้งเตือน'; view.historyDetails.open = false; }
     if (registered()) session = { uid: owner(), generation, controller: new AbortController(), items: [], unreadCount: 0, settings: null, settingsRevision: 0, seen: new Set(), loaded: false, browserNotices: new Set() };
     render();
@@ -435,7 +488,7 @@
   window.PanthoriumNotifications = { mount, open, refresh, readAloud, stopSpeaking, getState: () => current(session) ? { loaded: session.loaded, unreadCount: session.unreadCount, settings: session.settings ? JSON.parse(JSON.stringify(session.settings)) : null } : null };
   window.addEventListener('panthorium:auth-changed', () => { sync(true); refresh(); });
   window.addEventListener('panthorium:boot-complete', refresh);
-  window.addEventListener('panthorium:push-changed', () => { for(const view of roots.values())view.signature='';render(); });
+  window.addEventListener('panthorium:push-changed', () => { if(window.PanthoriumPush?.active())document.querySelector('[data-notification-opt-in]')?.remove();for(const view of roots.values())view.signature='';render(); });
   window.addEventListener('online', refresh);
   window.addEventListener('offline', () => { stopSpeaking(); message('ออฟไลน์ • รายการจะอัปเดตเมื่อเชื่อมต่ออีกครั้ง'); });
   window.addEventListener('panthorium:notifications-changed', async () => {

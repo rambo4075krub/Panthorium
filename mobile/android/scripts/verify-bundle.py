@@ -20,6 +20,11 @@ with zipfile.ZipFile(bundle) as archive:
     config = json.loads(archive.read("base/assets/capacitor.config.json"))
     if config.get("android", {}).get("webContentsDebuggingEnabled") is not False or config.get("server", {}).get("cleartext") is not False or config.get("android", {}).get("allowMixedContent") is not False or config.get("server", {}).get("url"):
         raise SystemExit("Unsafe configuration inside AAB")
+    if "alert" not in config.get("plugins", {}).get("PushNotifications", {}).get("presentationOptions", []):
+        raise SystemExit("AAB has no foreground notification presentation")
+    dex = [archive.read(n) for n in names if n.startswith("base/dex/") and n.endswith(".dex")]
+    if not any(b"PanthoriumNotificationsPlugin" in data and b"panthorium_popups_silent_v2" in data for data in dex):
+        raise SystemExit("AAB has no native popup channel implementation")
     bootstrap = archive.read("base/assets/public/panthorium-cloud-start.js").decode()
     if bootstrap != "'use strict';\nwindow.location.replace(" + json.dumps(receipt["startUrl"], separators=(",", ":")) + ");\n":
         raise SystemExit("AAB cloud origin differs from release receipt")

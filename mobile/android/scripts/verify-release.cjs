@@ -11,6 +11,11 @@ function verifyRelease(androidRoot, env = process.env) {
   const receipt = JSON.parse(read('panthorium-release-info.json'));
   if (config.server?.url || config.server?.cleartext !== false || config.android?.webContentsDebuggingEnabled !== false || config.android?.allowMixedContent !== false || config.loggingBehavior !== 'none') throw new Error('Unsafe release WebView configuration');
   if (JSON.stringify(config.server.allowNavigation) !== JSON.stringify([build.hostname])) throw new Error('Release navigation allowlist mismatch');
+  if (!config.plugins?.PushNotifications?.presentationOptions?.includes('alert')) throw new Error('Foreground notification presentation is missing');
+  const activity = read('app/src/main/java/com/panthorium/browser/MainActivity.java');
+  if (!activity.includes('registerPlugin(PanthoriumNotificationsPlugin.class)')) throw new Error('Native popup channel plugin is not registered');
+  const channels = read('app/src/main/java/com/panthorium/browser/PanthoriumNotificationsPlugin.java');
+  if (!channels.includes('panthorium_popups_silent_v2') || !channels.includes('silent.setSound(null, null)')) throw new Error('Native silent popup channel is missing');
   if (receipt.mode !== 'release' || receipt.startUrl !== build.startUrl || receipt.applicationId !== 'com.panthorium.browser' || receipt.versionCode !== Number(env.PANTHORIUM_VERSION_CODE) || receipt.versionName !== env.PANTHORIUM_VERSION_NAME || receipt.targetSdk !== 36) throw new Error('Release receipt mismatch');
   const expectedBootstrap = "'use strict';\nwindow.location.replace(" + JSON.stringify(build.startUrl) + ');\n';
   if (read('app/src/main/assets/public/panthorium-cloud-start.js') !== expectedBootstrap) throw new Error('Release bootstrap URL mismatch');

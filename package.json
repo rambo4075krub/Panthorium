@@ -23,7 +23,7 @@
     "check:social": "node --check social-media-source.js && node --check social-player.js && node --check services/socialTv.js && node --check services/socialRetention.js && node --check services/socialContent.js && node --check services/socialNotifications.js && node --check services/socialRepository.js && node --check services/socialService.js && node --check services/socialTools.js && node --check routes/social.js && node --check social-ui.js && node --check social-rtc.js && node --check contact-ui.js",
     "test:social:rtc": "node test/social-rtc-browser.js",
     "test:security": "node test/run-security-tests.js && node test/browser-security.js && node test/browser-account-isolation.js && node test/browser-update-signature.js",
-    "test:notifications": "node test/notification-push-client.js && node test/notification-push-worker.js && node test/notification-push.js && node test/notifications.js && node test/notification-tools.js && node test/notification-approval-ui.js && node test/notification-producers.js && node test/notifications-ui.js"
+    "test:notifications": "node test/notification-fcm-popup.js && node test/desktop-notifications.js && node test/notification-popup-client.js && node test/notification-push-client.js && node test/notification-push-worker.js && node test/notification-push.js && node test/notifications.js && node test/notification-tools.js && node test/notification-approval-ui.js && node test/notification-producers.js && node test/notifications-ui.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
@@ -65,7 +65,8 @@
     "asar": true,
     "files": [
       "electron/**/*",
-      "package.json"
+      "package.json",
+      "build/icon.png"
     ],
     "extraMetadata": {
       "main": "electron/main.cjs"
