@@ -3,6 +3,7 @@ const assert = require("node:assert/strict"), { randomUUID } = require("node:cry
 const { SocialRepository } = require("../services/socialRepository");
 const { SocialService } = require("../services/socialService");
 const { source, httpsUrl } = require("../social-media-source");
+const { OFFICIAL_CHANNELS } = require("../services/socialTv");
 async function suite(repo) {
   const [owner, viewer, admin] = Array.from({ length: 3 }, () => ({ sub: randomUUID(), roles: ["user"], permissions: ["chat"] }));
   admin.roles = ["administrator"]; admin.permissions.push("settings");
@@ -14,6 +15,13 @@ async function suite(repo) {
   assert.equal(source("youtube", "https://youtu.be/M7lc1UVf-VE").embedUrl, "https://www.youtube-nocookie.com/embed/M7lc1UVf-VE?playsinline=1");
   assert.equal(source("youtube", "https://www.youtube.com/live/M7lc1UVf-VE?si=tracking").url, "https://www.youtube.com/watch?v=M7lc1UVf-VE");
   for (const [type, url] of [["youtube", "https://youtube.com.evil.org/watch?v=M7lc1UVf-VE"], ["youtube", "https://www.youtube.com/@channel/live"], ["hls", "https://video.example.org/live.html"], ["iframe", "https://example.org"]]) assert.throws(() => source(type, url));
+  assert.equal(source("trueid", "https://tv.trueid.net/th-th/live/thaipbs?tracking=ignored").embedUrl, "https://tv.trueid.net/th-th/embed/thaipbs");
+  for (const url of ["https://tv.trueid.net.evil.org/th-th/embed/thaipbs", "https://tv.trueid.net/th-th/embed/premium-channel", "https://tv.trueid.net/account", "https://example.org/th-th/embed/thaipbs"])
+    assert.throws(() => source("trueid", url), /social_invalid_media_url/);
+  assert(OFFICIAL_CHANNELS.length > 3, "free TV is populated, not an empty provider directory");
+  assert.equal(new Set(OFFICIAL_CHANNELS.map(c => c.id)).size, OFFICIAL_CHANNELS.length);
+  assert(OFFICIAL_CHANNELS.every(c => c.source.type === "trueid" && new URL(c.source.embedUrl).origin === "https://tv.trueid.net"));
+  assert.deepEqual(OFFICIAL_CHANNELS.map(c => Number(c.number)), OFFICIAL_CHANNELS.map(c => Number(c.number)).sort((a,b) => a-b));
 
   const feed = (await write(owner, "publish", { module: "feed", text: "Feed image/text" })).record;
   const legacy = { ...feed, id: "legacy-feed:" + randomUUID(), kind: "watch" }; await repo.put(legacy);

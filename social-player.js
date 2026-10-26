@@ -6,9 +6,9 @@
     stream = window.PanthoriumMediaSource.source(params.get("type"), params.get("url"));
     if (stream.type === "website") throw Error("website_only");
   } catch (_) { status.textContent = "ลิงก์สื่อไม่ถูกต้อง กรุณากลับไปตรวจสอบชนิดสื่อและ URL"; return; }
-  if (stream.type === "youtube") {
-    const iframe = document.createElement("iframe"); iframe.title = "YouTube video player";
-    iframe.src = stream.embedUrl; iframe.allow = "fullscreen; picture-in-picture; encrypted-media";
+  if (["youtube", "trueid"].includes(stream.type)) {
+    const iframe = document.createElement("iframe"); iframe.title = stream.type === "trueid" ? "TrueID Free TV player" : "YouTube video player";
+    iframe.src = stream.embedUrl; iframe.allow = "autoplay; fullscreen; picture-in-picture; encrypted-media";
     iframe.referrerPolicy = "strict-origin-when-cross-origin"; iframe.allowFullscreen = true;
     document.body.append(iframe); return;
   }

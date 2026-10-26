@@ -1520,7 +1520,7 @@
       workspace.root.querySelectorAll("[data-social-player]").forEach(stopSourcePlayer);
       const frame = el("iframe", null, {
         src: "/social-player.html#" + new URLSearchParams({ type: source.type, url: source.url }),
-        title: title || "เครื่องเล่นวิดีโอ", allow: "fullscreen; picture-in-picture; encrypted-media", allowfullscreen: "",
+        title: title || "เครื่องเล่นวิดีโอ", allow: "autoplay; fullscreen; picture-in-picture; encrypted-media", allowfullscreen: "",
         referrerpolicy: "strict-origin-when-cross-origin",
       });
       box.append(frame); play.hidden = true;
@@ -1573,7 +1573,7 @@
     const version = v.renderVersion, mode = v.tvMode || "all";
     const data = await api(v, "/api/social/feed/tv?" + new URLSearchParams({ query: v.search.value, mode, ...(before ? { before } : {}) }));
     if (!current(v) || version !== v.renderVersion) return;
-    if (!before) section(v, "TV · ทีวีสด").append(el("p", "เลือกช่องเพื่อชมสดกับสถานี หรือเล่นสัญญาณที่ผู้ให้บริการอนุญาตใน Panthorium"));
+    if (!before) section(v, "TV · ทีวีสด").append(el("p", "เลือกช่องฟรีทีวีแล้วกดเล่นได้เลย • เครื่องเล่น TrueID อาจเริ่มแบบปิดเสียง แตะเปิดเสียงในเครื่องเล่นเพื่อรับฟัง"));
     if (!data.items.length && !before) section(v, mode === "mine" ? "ยังไม่มีช่องของคุณ" : mode === "review" ? "ไม่มีช่องรอตรวจสอบ" : "ไม่พบช่องในรายการนี้");
     const grid = el("div", null, { class: "social-tv-grid" }); v.content.append(grid);
     for (const channel of data.items) {
@@ -1585,6 +1585,7 @@
       }
       const card = el("article", null, { class: "social-card", "data-tv-channel": channel.id });
       card.append(el("h3", channel.name + (channel.number ? " · " + channel.number : "")), el("p", channel.provider + " · " + channel.category));
+      if (channel.source.type === "trueid") card.append(el("small", "พร้อมดูในแอป · เครื่องเล่น TrueID"));
       if (mode === "mine" || mode === "review") card.append(el("p", "สถานะ: " + ({ pending: "รอตรวจสอบ", approved: "เผยแพร่แล้ว", rejected: "ไม่ผ่านการตรวจสอบ" }[channel.status] || channel.status)));
       if (channel.reviewNote) card.append(el("p", "หมายเหตุ: " + channel.reviewNote));
       if (channel.source.type !== "website") sourcePlayer(v, channel.source, card, channel.name);

@@ -1,12 +1,27 @@
 "use strict";
 const { createHash, randomUUID } = require("node:crypto");
 const { httpsUrl, source } = require("../social-media-source");
-// Official destinations, checked 2026-10-26. A website listing does not imply rebroadcast permission.
+// Free TV through the provider's public embedded player; no media URL extraction or proxy.
 const OFFICIAL_CHANNELS = Object.freeze([
-  { id: "tv:thaipbs", name: "Thai PBS", provider: "Thai PBS", number: "3", category: "ข่าว / สาระ", websiteUrl: "https://www.thaipbs.or.th/live", scheduleUrl: "https://www.thaipbs.or.th/program/schedules/online" },
-  { id: "tv:ch7", name: "7HD", provider: "CH7ON", number: "35", category: "ทั่วไป", websiteUrl: "https://www.ch7.com/th/live/", scheduleUrl: "https://www.ch7.com/th/schedule/" },
-  { id: "tv:pptv", name: "PPTV HD 36", provider: "PPTV", number: "36", category: "ข่าว / กีฬา", websiteUrl: "https://www.pptvhd36.com/live", scheduleUrl: "https://www.pptvhd36.com/live" },
-].map(c => Object.freeze({ ...c, kind: "tv-channel", status: "approved", official: true, source: { type: "website", url: c.websiteUrl } })));
+  {"id": "tv:nbt", "name": "NBT 2HD", "provider": "กรมประชาสัมพันธ์", "number": "2", "category": "ข่าว / สาระ", "slug": "nbt"},
+  {"id": "tv:thaipbs", "name": "Thai PBS", "provider": "Thai PBS", "number": "3", "category": "ข่าว / สาระ", "slug": "thaipbs"},
+  {"id": "tv:tnn", "name": "TNN 16", "provider": "TNN", "number": "16", "category": "ข่าว", "slug": "tnn16"},
+  {"id": "tv:nation", "name": "Nation TV", "provider": "Nation TV", "number": "22", "category": "ข่าว", "slug": "nationtv"},
+  {"id": "tv:workpoint", "name": "Workpoint 23", "provider": "Workpoint", "number": "23", "category": "บันเทิง", "slug": "workpointtv"},
+  {"id": "tv:true4u", "name": "True4U", "provider": "True4U", "number": "24", "category": "บันเทิง / กีฬา", "slug": "true4u"},
+  {"id": "tv:ch8", "name": "ช่อง 8", "provider": "ช่อง 8", "number": "27", "category": "ทั่วไป", "slug": "ch8"},
+  {"id": "tv:mcot", "name": "9 MCOT HD", "provider": "MCOT", "number": "30", "category": "ข่าว / สาระ", "slug": "9mcot-hd"},
+  {"id": "tv:one31", "name": "one31", "provider": "one31", "number": "31", "category": "บันเทิง", "slug": "one-hd"},
+  {"id": "tv:thairath", "name": "ไทยรัฐ TV", "provider": "ไทยรัฐ", "number": "32", "category": "ข่าว / กีฬา", "slug": "thairathtv-hd"},
+  {"id": "tv:ch3", "name": "3HD", "provider": "3Plus", "number": "33", "category": "ทั่วไป", "slug": "ch3-hd"},
+  {"id": "tv:amarin", "name": "Amarin TV HD", "provider": "Amarin TV", "number": "34", "category": "ข่าว / บันเทิง", "slug": "amarintv-hd"},
+  {"id": "tv:ch7", "name": "7HD", "provider": "CH7ON", "number": "35", "category": "ทั่วไป", "slug": "ch7-hd"},
+  {"id": "tv:pptv", "name": "PPTV HD 36", "provider": "PPTV", "number": "36", "category": "ข่าว / กีฬา", "slug": "pptv-hd"},
+
+].map(({ slug, ...c }) => Object.freeze({ ...c, kind: "tv-channel", status: "approved", official: true,
+  websiteUrl: "https://tv.trueid.net/th-th/live/" + slug, scheduleUrl: "https://tv.trueid.net/th-th/live/" + slug,
+  source: source("trueid", "https://tv.trueid.net/th-th/live/" + slug), playbackProvider: "TrueID",
+})));
 const fail = (code, status = 400) => { throw Object.assign(Error(code), { code, status, sideEffectNotApplied: true }); };
 const admin = user => user.roles?.includes("administrator") && user.permissions?.includes("settings");
 const text = (value, max, required = false) => {
