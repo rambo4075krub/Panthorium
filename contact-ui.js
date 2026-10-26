@@ -7,7 +7,7 @@
     if (!root) return;
     root.querySelector('[data-contact-note]').textContent = guest()
       ? 'เข้าสู่ระบบเพื่อแชทกับแอดมินและติดตามคำตอบ หรือส่งอีเมลถึงเราได้ทันที'
-      : 'ส่งข้อความถึงแอดมินโดยตรง และติดตามคำตอบได้ใน Talk';
+      : 'ส่งข้อความถึงแอดมินโดยตรง และติดตามคำตอบได้ใน Chat';
   }
   function open() {
     const existing = document.querySelector('[data-panthorium-contact]');

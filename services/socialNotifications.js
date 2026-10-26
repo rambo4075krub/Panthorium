@@ -160,7 +160,7 @@ class SocialNotifications {
   }
   async list(uid, before, module) {
     await this.service.purgeExpiredMessages({ force: false });
-    if (module && !["watch", "short", "live", "market", "community", "talk", "connect", "profile", "friends"].includes(module))
+    if (module && !["feed", "short", "watch", "live", "tv", "market", "community", "talk", "connect", "profile", "friends"].includes(module))
       throw Object.assign(Error("social_invalid_module"), { status: 400 });
     const repo = this.service.repo;
     if (!await repo.get("notification-init:" + uid)) await repo.transaction(tx => this.seed(tx, uid));

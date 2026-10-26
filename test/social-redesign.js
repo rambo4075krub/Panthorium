@@ -17,16 +17,16 @@ async function suite(repo) {
   await assert.rejects(()=>s.media({user:b,recordId:"profile:"+a.sub,fileId:image.id}),/social_not_found/);
   assert.equal((await s.profile(a)).bio,"Private bio 0");
   await assert.rejects(()=>write(a,"profile",{name:"Alice",fileIds:[video.id]}),/social_image_required/);
-  const post=(await write(a,"publish",{module:"watch",text:"Image and text",fileIds:[image.id]})).record;
-  await write(a,"publish",{module:"watch",text:"Text only"});
-  await assert.rejects(()=>write(a,"publish",{module:"watch",fileIds:[video.id]}),/social_watch_images_only/);
+  const post=(await write(a,"publish",{module:"feed",text:"Image and text",fileIds:[image.id]})).record;
+  await write(a,"publish",{module:"feed",text:"Text only"});
+  await assert.rejects(()=>write(a,"publish",{module:"feed",fileIds:[video.id]}),/social_feed_images_only/);
   await assert.rejects(()=>write(a,"publish",{module:"short",text:"Missing video"}),/social_video_required/);
   const clip=(await write(a,"publish",{module:"short",fileIds:[video.id]})).record;
   const legacy={...clip,id:"legacy:"+randomUUID(),kind:"watch"}; await repo.put(legacy);
   const comment=(await write(b,"comment",{recordId:legacy.id,text:"Original comment"})).record;
   const shorts=(await s.read({user:b,module:"short"})).items;
   assert(shorts.some(r=>r.id===clip.id)&&shorts.some(r=>r.id===legacy.id));
-  assert(!(await s.read({user:b,module:"watch"})).items.some(r=>r.files.some(f=>f.contentType.startsWith("video/"))));
+  assert(!(await s.read({user:b,module:"feed"})).items.some(r=>r.files.some(f=>f.contentType.startsWith("video/"))));
   const old=(await s.read({user:b,recordId:legacy.id})); assert.equal(old.record.module,"short");assert.equal(old.items[0].id,comment.id);
   await write(a,"edit",{recordId:legacy.id,audience:"private"});
   assert(!(await s.read({user:b,module:"short"})).items.some(r=>r.id===legacy.id));
@@ -85,12 +85,12 @@ async function suite(repo) {
   // Filtering happens before pagination even when many newer notices belong to a different menu.
   for(let i=0;i<35;i++) await write(b,"comment",{recordId:post.id,text:"Watch comment "+i});
   for(let i=0;i<36;i++) await write(b,"comment",{recordId:clip.id,text:"Short comment "+i});
-  let page=await s.notifications.list(a.sub,undefined,"watch");
-  assert.equal(page.items.length,30);assert(page.items.every(n=>n.module==="watch"));assert.equal(page.counts.watch,35);
-  const older=await s.notifications.list(a.sub,page.nextCursor,"watch");assert.equal(older.items.length,5);
+  let page=await s.notifications.list(a.sub,undefined,"feed");
+  assert.equal(page.items.length,30);assert(page.items.every(n=>n.module==="feed"));assert.equal(page.counts.feed,35);
+  const older=await s.notifications.list(a.sub,page.nextCursor,"feed");assert.equal(older.items.length,5);
   assert(!older.items.some(n=>page.items.some(x=>x.id===n.id)));
   const shortCount=page.counts.short;await s.notifications.read(a.sub,page.items.map(n=>n.id));
-  page=await s.notifications.list(a.sub,undefined,"short");assert.equal(page.counts.short,shortCount);assert.equal(page.counts.watch,5);
+  page=await s.notifications.list(a.sub,undefined,"short");assert.equal(page.counts.short,shortCount);assert.equal(page.counts.feed,5);
   await assert.rejects(()=>s.notifications.list(a.sub,undefined,"unknown"),/social_invalid_module/);
   const admin={...d,roles:["administrator"],permissions:["chat","settings"]};
   await write(admin,"moderate",{recordId:"profile:"+a.sub,hidden:true,reason:"Fixture"});
