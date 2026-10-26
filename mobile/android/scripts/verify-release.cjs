@@ -14,6 +14,9 @@ function verifyRelease(androidRoot, env = process.env) {
   if (!config.plugins?.PushNotifications?.presentationOptions?.includes('alert')) throw new Error('Foreground notification presentation is missing');
   const activity = read('app/src/main/java/com/panthorium/browser/MainActivity.java');
   if (!activity.includes('registerPlugin(PanthoriumNotificationsPlugin.class)')) throw new Error('Native popup channel plugin is not registered');
+  if (!activity.includes('PanthoriumCloudBridge.install(getBridge());')) throw new Error('Cloud notification bridge is not installed');
+  const cloudBridge = read('app/src/main/java/com/panthorium/browser/PanthoriumCloudBridge.java');
+  if (!cloudBridge.includes('CLOUD_ORIGIN = ' + JSON.stringify(new URL(build.startUrl).origin) + ';') || !cloudBridge.includes('Collections.singleton(CLOUD_ORIGIN)')) throw new Error('Cloud notification bridge origin mismatch');
   const channels = read('app/src/main/java/com/panthorium/browser/PanthoriumNotificationsPlugin.java');
   if (!channels.includes('panthorium_popups_silent_v2') || !channels.includes('silent.setSound(null, null)')) throw new Error('Native silent popup channel is missing');
   if (receipt.mode !== 'release' || receipt.startUrl !== build.startUrl || receipt.applicationId !== 'com.panthorium.browser' || receipt.versionCode !== Number(env.PANTHORIUM_VERSION_CODE) || receipt.versionName !== env.PANTHORIUM_VERSION_NAME || receipt.targetSdk !== 36) throw new Error('Release receipt mismatch');

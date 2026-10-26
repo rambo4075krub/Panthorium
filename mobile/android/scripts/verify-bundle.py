@@ -25,6 +25,8 @@ with zipfile.ZipFile(bundle) as archive:
     dex = [archive.read(n) for n in names if n.startswith("base/dex/") and n.endswith(".dex")]
     if not any(b"PanthoriumNotificationsPlugin" in data and b"panthorium_popups_silent_v2" in data for data in dex):
         raise SystemExit("AAB has no native popup channel implementation")
+    if not any(b"PanthoriumCloudBridge" in data and b"addDocumentStartJavaScript" in data and b"https://panthorium.net" in data for data in dex):
+        raise SystemExit("AAB has no production-origin native bridge")
     bootstrap = archive.read("base/assets/public/panthorium-cloud-start.js").decode()
     if bootstrap != "'use strict';\nwindow.location.replace(" + json.dumps(receipt["startUrl"], separators=(",", ":")) + ");\n":
         raise SystemExit("AAB cloud origin differs from release receipt")

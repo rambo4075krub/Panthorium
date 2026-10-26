@@ -65,6 +65,8 @@ export PANTHORIUM_MOBILE_START_URL=https://panthorium.net/
 
 Capacitor documents `server.url` as a live-reload setting. The release therefore bundles only the existing Browser bootstrap page and a tiny generated navigation script, then visits the exact allowlisted cloud origin. Release mode does not use `server.url`. The AI and application interfaces still come from Panthorium Cloud. This makes the wrapper's navigation policy explicit; it does not guarantee Play approval or every WebView behavior on every device.
 
+On modern WebViews, Capacitor 8.5.2 injects its runtime only at its initial app origin (`https://localhost` in release mode). `allowNavigation` alone does not export native plugins after the cloud navigation. `PanthoriumCloudBridge` installs the same runtime and required plugins at document start on exactly the validated cloud origin. This restores the native notification permission/channel path before the cloud scripts select a notification provider. It does not enable WebView debugging or expose the bridge to arbitrary origins. Older WebViews retain Capacitor's existing HTML-response injection.
+
 `prepare-android.js` preserves the existing icons and immersive layout. It installs an idempotent Gradle signing policy, a release manifest overlay, the production bootstrap, and a preparation receipt. The release overlay disables debugging, cleartext traffic, and Android backup of the shell. The release Gradle policy targets API 36 and refuses release tasks without explicit release preparation and signing credentials.
 
 For local signing, supply `PANTHORIUM_UPLOAD_KEYSTORE_PATH` as an absolute path outside the repository plus the three password/alias environment variables above. Do not put values into a command committed to Git or a shared terminal history. After generation and sync, run:
@@ -91,6 +93,17 @@ node test/android-immersive.js
 ```
 
 These cover production URL spoofing/staging rejection, debug-asset refusal, version bounds, signing-policy insertion, bootstrap integrity, idempotency, and preservation of the existing shell interface. They do not compile an APK/AAB or prove Play readiness.
+
+For the cloud-navigation regression, use a disposable generated Android tree with release environment variables, run `cap sync android` and `scripts/prepare-android.js`, then:
+
+```sh
+node test/prepare-cloud-bridge-device.cjs
+unset PANTHORIUM_ANDROID_BUILD
+cd android
+./gradlew --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.panthorium.browser.CloudBridgeInstrumentedTest
+```
+
+This installs a separate `com.panthorium.browser.bridgecheck` debug application with the release bootstrap and debugging disabled in the WebView. It never replaces the Play app, requests an FCM token, or reads the user's app data. The test loads the production document, checks plugin availability, creates notification channels through the real native bridge, and verifies that an untrusted origin cannot access it. Remove only the diagnostic application and its `.test` package afterwards. Real Play delivery, notification permission, and visible popups still need verification on the signed application.
 
 With a full JDK (`keytool` and `jarsigner`), run the signing integration tests:
 

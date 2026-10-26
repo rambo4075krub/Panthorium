@@ -1,0 +1,30 @@
+'use strict';
+// Use only in a disposable generated Android tree, after release preparation.
+// The different application ID protects the installed Play app and its data.
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const root = path.resolve(process.argv[2] || path.join(__dirname, '../android'));
+const appId = 'com.panthorium.browser.bridgecheck';
+const config = JSON.parse(fs.readFileSync(path.join(root, 'app/src/main/assets/capacitor.config.json'), 'utf8'));
+assert(!config.server?.url && config.android?.webContentsDebuggingEnabled === false, 'Prepare release configuration first');
+assert.deepEqual(config.server?.allowNavigation, ['panthorium.net']);
+const gradlePath = path.join(root, 'app/build.gradle');
+let gradle = fs.readFileSync(gradlePath, 'utf8');
+assert(/applicationId\s+['"]com\.panthorium\.browser(?:\.bridgecheck)?['"]/.test(gradle), 'Unexpected application ID');
+gradle = gradle.replace(/applicationId\s+['"]com\.panthorium\.browser(?:\.bridgecheck)?['"]/, `applicationId '${appId}'`);
+const kotlin = 'androidTestImplementation platform("org.jetbrains.kotlin:kotlin-bom:1.8.22")';
+if (!gradle.includes(kotlin)) gradle += '\ndependencies { ' + kotlin + ' }\n';
+fs.writeFileSync(gradlePath, gradle);
+const firebasePath = path.join(root, 'app/google-services.json');
+const firebase = JSON.parse(fs.readFileSync(firebasePath, 'utf8'));
+for (const client of firebase.client) client.client_info.android_client_info.package_name = appId;
+fs.writeFileSync(firebasePath, JSON.stringify(firebase, null, 2) + '\n');
+const stringsPath = path.join(root, 'app/src/main/res/values/strings.xml');
+let strings = fs.readFileSync(stringsPath, 'utf8');
+strings = strings.replace(/(<string name="(?:app_name|title_activity_main)">)[^<]*/g, '$1Panthorium Bridge Check');
+fs.writeFileSync(stringsPath, strings);
+const testPath = path.join(root, 'app/src/androidTest/java/com/panthorium/browser/CloudBridgeInstrumentedTest.java');
+fs.mkdirSync(path.dirname(testPath), { recursive: true });
+fs.copyFileSync(path.join(__dirname, 'native/CloudBridgeInstrumentedTest.java'), testPath);
+console.log('Prepared isolated com.panthorium.browser.bridgecheck instrumentation (no FCM registration).');
