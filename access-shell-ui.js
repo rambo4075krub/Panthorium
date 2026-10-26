@@ -165,7 +165,14 @@
       });
       const registeredIds = new Set(['sentinel', 'voice-identity', ...registered.map(el => el.dataset.appId)]);
       const minimized = entries.filter(el => el.dataset.minimizedWindow && registeredIds.has(el.dataset.minimizedWindow));
-      const safeEntries = [...new Set([sentinel, isGuest ? voice : null, ...registered, ...minimized].filter(Boolean))];
+      let safeEntries = [...new Set([sentinel, isGuest ? voice : null, ...registered, ...minimized].filter(Boolean))];
+      // The menu layout owns ordering. Preserve its existing order while
+      // filtering access, otherwise the two observers keep moving Guest's
+      // registration entry back and forth and starve clicks/rendering.
+      if (window.PanthoriumStartMenuUI?.keepPinnedLast) {
+        const allowed = new Set(safeEntries);
+        safeEntries = [...entries.filter(entry => allowed.has(entry)), ...safeEntries.filter(entry => !entries.includes(entry))];
+      }
       if (apps.children.length !== safeEntries.length || safeEntries.some((entry, index) => apps.children[index] !== entry)) apps.replaceChildren(...safeEntries);
     } else if (apps) menu.querySelectorAll('#sm-apps > *').forEach(el => { el.style.display = ''; });
     if (!isGuest) apps?.querySelectorAll('[data-app-id="account-register"], [data-app-id="account-login"]').forEach(el => el.remove());
@@ -229,7 +236,12 @@
     }
     restrictWindows();
   }
-  const scheduleSync = () => requestAnimationFrame(sync);
+  let syncQueued = false;
+  const scheduleSync = () => {
+    if (syncQueued) return;
+    syncQueued = true;
+    requestAnimationFrame(() => { syncQueued = false; sync(); });
+  };
   for (const name of ['panthorium:auth-changed', 'panthorium:apps-changed', 'panthorium:desktop-ready', 'panthorium:boot-complete', 'focus']) window.addEventListener(name, scheduleSync);
   window.addEventListener('panthorium:update-status', renderUpdateStatus);
   document.addEventListener('DOMContentLoaded', scheduleSync, { once: true });
