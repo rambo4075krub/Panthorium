@@ -58,6 +58,17 @@ async function main() {
         assert.equal(d.getElementById('panthorium-browser-download'), download, 'download control is preserved');
         assert.equal(d.getElementById('btn-settings-quick').hidden, true, 'old footer Settings is replaced by the category');
       }
+      // Access filtering and curated ordering must agree once the menu is idle.
+      // Previously Guest registration bounced between second and last place on
+      // every animation frame, queuing more work whenever the menu was opened.
+      let mutations = 0;
+      const observer = new w.MutationObserver(records => { mutations += records.length; });
+      observer.observe(d.getElementById('sm-apps'), { childList: true, subtree: true });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const settled = mutations;
+      await new Promise(resolve => setTimeout(resolve, 100));
+      observer.disconnect();
+      assert.equal(mutations, settled, role + ': access and layout observers stop reordering the idle menu');
     }
     const settings = d.querySelector('[data-start-group="settings"]');
     settings.querySelector('[data-start-group-toggle]').click();
