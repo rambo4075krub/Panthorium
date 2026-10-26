@@ -19,7 +19,7 @@ assert.throws(() => resolveBuildConfig({ ...release, PANTHORIUM_VERSION_CODE: '2
 assert.throws(() => resolveBuildConfig({ ...release, PANTHORIUM_VERSION_NAME: "0.3.1'; injected()" }), /semver/);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'panthorium-release-'));
 const write = (relative, value) => { const target = path.join(root, relative); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, value); };
-const config = { loggingBehavior: 'none', android: { webContentsDebuggingEnabled: false, allowMixedContent: false }, server: { cleartext: false, allowNavigation: ['panthorium.net'], androidScheme: 'https' } };
+const config = { plugins: { PushNotifications: { presentationOptions: ['badge', 'sound', 'alert'] } }, loggingBehavior: 'none', android: { webContentsDebuggingEnabled: false, allowMixedContent: false }, server: { cleartext: false, allowNavigation: ['panthorium.net'], androidScheme: 'https' } };
 const sourceIndex = '<!doctype html><html><head><title>Browser shell</title></head><body>Unchanged interface</body></html>';
 function prepare(env = release) {
   return spawnSync(process.execPath, [path.join(__dirname, '../scripts/prepare-android.js'), root], { encoding: 'utf8', env: { ...process.env, ...env } });
@@ -32,6 +32,12 @@ try {
   const first = prepare(); assert.equal(first.status, 0, first.stderr);
   assert.equal(verifyRelease(root, release).versionCode, 30001);
   const second = prepare(); assert.equal(second.status, 0, second.stderr);
+  const activity=fs.readFileSync(path.join(root,'app/src/main/java/com/panthorium/browser/MainActivity.java'),'utf8');
+  assert.equal((activity.match(/registerPlugin\(PanthoriumNotificationsPlugin.class\)/g)||[]).length,1);
+  assert(activity.indexOf('registerPlugin(')<activity.indexOf('super.onCreate('));
+  write('app/src/main/assets/capacitor.config.json', JSON.stringify({...config,plugins:{}}));
+  assert.throws(()=>verifyRelease(root,release),/Foreground notification/);
+  write('app/src/main/assets/capacitor.config.json', JSON.stringify(config));
   const firebase=JSON.parse(fs.readFileSync(path.join(root,'app/google-services.json'),'utf8'));
   assert.equal(firebase.project_info.project_id,'project-0f6aa7d0-6055-420f-842');
   assert.equal(firebase.client[0].client_info.android_client_info.package_name,'com.panthorium.browser');

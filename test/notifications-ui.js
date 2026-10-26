@@ -138,10 +138,33 @@ const merge = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && ty
   assert.equal(contexts, 1, 'explicit device test unlocks stored sound preference after reload');
   assert.match(spoken.at(-1).text, /ทดสอบเสียง/);
   assert.match(root.textContent, /ส่งเสียงทดสอบแล้ว/);
+  let deviceActive=false, registrations=0, popupCalls=0, registeredDevice=false;
+  w.PanthoriumPush={active:()=>deviceActive,native:()=>false,desktop:()=>false,
+    enable:async()=>{registrations++;deviceActive=true;},disconnect:async()=>{deviceActive=false;},
+    show:async()=>{popupCalls++;return true;},check:async()=>({registered:registeredDevice})};
+  await w.PanthoriumNotifications.refresh();
+  assert(w.document.querySelector('[data-notification-opt-in]'),'inactive devices get a permission-free opt-in card');
+  assert.equal(registrations,0,'loading cannot register a device or prompt for permission');
+  setting('channels.browser').click();await tick();
+  assert.equal(settings.channels.browser,false);
+  setting('channels.browser').click();await tick();
+  assert.equal(registrations,1,'one channel action also registers the device');
+  assert.equal(settings.channels.browser,true);assert(deviceActive);
+  assert.equal(w.document.querySelector('[data-notification-opt-in]'),null);
+  const sends=()=>calls.filter(c=>c.url.endsWith('/send')).length;
+  root.querySelector('[data-notification-popup-test]').click();await tick();
+  assert.equal(sends(),0,'stale device registration cannot be reported as a successful test');
+  registeredDevice=true;
+  root.querySelector('[data-notification-popup-test]').click();await tick();
+  assert.equal(sends(),1,'test uses the authenticated self-notification endpoint');
+  deviceActive=false;items.unshift(item('stale-registration','action.failed'));
+  await w.PanthoriumNotifications.refresh();await tick();
+  assert.equal(popupCalls,1,'stale background state cannot suppress foreground delivery');
   w.OS.state.user = null; w.dispatchEvent(new w.Event('panthorium:auth-changed'));
   assert.equal(w.PanthoriumNotifications.getState(), null);
   assert.equal(w.document.getElementById('panthorium-notification-bell'), null);
   assert.equal(closed, 1, 'logout closes notification audio context');
+  assert.equal(w.document.querySelector('[data-notification-opt-in]'),null,'account changes remove opt-in cards');
   dom.window.close();
   console.log('Notifications UI: ordered event switches, independent persisted choices, keyboard focus, category migration, delivery filters, permissions, privacy, quiet hours and account isolation passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

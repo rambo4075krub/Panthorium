@@ -60,13 +60,21 @@ Social notifications contain generic text and are checked against current source
 - `TEST_DATABASE_URL=... node test/notifications-postgres.js`: real PostgreSQL migration, concurrent updates, deduplication, persistence, and ownership. Use only a disposable test database.
 - `npm run check`, `npm test`, and `npm run test:postgres` include the new checks alongside existing regressions.
 
-## Background Push (implementation in progress)
+## Background Push and native popups
 
 `notificationPushService` registers up to ten devices per account in PostgreSQL. VAPID keys are generated once and stored server-side, shared across instances and restarts. Web clients explicitly subscribe through the service worker; Android uses the Capacitor Push Notifications plugin and Firebase Cloud Messaging HTTP v1 with runtime service-account credentials. No service-account key is shipped to a client.
 
 Push respects the master switch, browser channel, individual event switches, quiet hours, current account authorization, and current Social source visibility. Payloads intentionally contain generic text only. Notification titles, messages, sender identities, authentication tokens, and account IDs are never included in lock-screen payloads. Automatic spoken reading is still a foreground feature; background sound is controlled by OS channels and device settings.
 
 The persistent delivery ledger recovers notification commits, leases batches across instances, retries temporary failures up to five attempts, and retires expired endpoints. Provider acceptance is not a device-delivery receipt. A network failure after provider acceptance may retry; stable tags/topics reduce repeated visible notifications. Events from before device opt-in are not replayed. Subscriptions expire after 90 days; an opted-in client refreshes registration on boot, reconnect, or foreground return, at most once per hour, without requesting permission again. Sign-out/account changes revoke registrations; a capability permits revocation even after the login token expires. Already accepted generic OS notifications cannot be recalled remotely.
+
+The **บนอุปกรณ์** switch now performs device registration as part of enabling the channel. An opt-in card offers registration without requesting OS permission automatically. Cached device data is not proof of readiness: registration must succeed in the current session, and the test button checks an authenticated, owner-scoped subscription status before creating an immediate self-notification. The test result describes creation, not physical receipt.
+
+Web foreground popups use `ServiceWorkerRegistration.showNotification`, including Android browsers that do not implement the `Notification` constructor. Foreground and remote deliveries share a stable tag and generic lock-screen copy.
+
+The updated Android binary enables Capacitor foreground presentation and registers a high-importance, explicitly silent `panthorium_popups_silent_v2` channel. Existing low-importance channels cannot be upgraded by JavaScript; the new channel ID therefore requires an app update. New clients advertise the channel version when subscribing, while older clients retain their existing channel IDs. The backend uses the HTTP v1 `channel_id` field. Users' OS channel settings and Do Not Disturb still take precedence.
+
+The updated desktop binary uses trusted-shell IPC for native popups, with an AppUserModelID matching the installed edition's shortcut. Opting in keeps the signed-in renderer running in the system tray when the window closes; it polls the authorized inbox every 30 seconds while hidden. The tray menu can reopen the window or explicitly quit. Quitting, signing out, or changing accounts disables this background session. It does not claim delivery after explicit quit or when the computer is asleep/offline. IPC accepts only a validated notification ID and sound flag, displays generic content, and deduplicates within the session.
 
 Deployment requirements:
 - PostgreSQL initializes the push tables and persistent VAPID key automatically.

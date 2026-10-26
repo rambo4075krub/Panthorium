@@ -10,5 +10,8 @@ contextBridge.exposeInMainWorld('panthoriumDesktop',Object.freeze({
   controlWindow:action=>ipcRenderer.invoke('panthorium:window-control',action),
   getAppInfo:()=>ipcRenderer.invoke('panthorium:app-info'),
   getUpdateStatus:()=>ipcRenderer.invoke('panthorium:update-status'),
-  checkForUpdates:()=>ipcRenderer.invoke('panthorium:check-updates')
+  checkForUpdates:()=>ipcRenderer.invoke('panthorium:check-updates'),
+  setNotificationBackground:enabled=>ipcRenderer.invoke('panthorium:notification-background',enabled),
+  showNotification:notice=>ipcRenderer.invoke('panthorium:notification-show',notice)
 }));
+ipcRenderer.on('panthorium:open-notifications',()=>window.dispatchEvent(new Event('panthorium:open-notifications')));

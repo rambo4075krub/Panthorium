@@ -8,6 +8,9 @@ const config: CapacitorConfig = {
   appName: 'Panthorium Browser',
   webDir: 'www',
   loggingBehavior: build.loggingBehavior,
+  plugins: {
+    PushNotifications: { presentationOptions: ['badge', 'sound', 'alert'] }
+  },
   server: {
     // Release starts from a bundled Browser bootstrap, then visits our exact
     // cloud origin. Capacitor server.url remains a debug/live-reload setting.
