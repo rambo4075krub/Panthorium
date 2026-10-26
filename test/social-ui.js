@@ -31,14 +31,14 @@ const { SocialRepository } = require("../services/socialRepository");
         user,
         action: "publish",
         input: {
-          module: "watch",
+          module: "feed",
           title: "<img src=x onerror=alert(1)>",
           text: "<script>oops</script>",
         },
       })
     ).record;
     const second = (await service.write({ user, action: "publish",
-      input: { module: "watch", text: "Second post" } })).record;
+      input: { module: "feed", text: "Second post" } })).record;
     await service.write({ user, action: "comment", input: { recordId: item.id, text: "First post comment <script>safe</script>" } });
     await service.write({ user, action: "comment", input: { recordId: second.id, text: "Second post comment" } });
     const dom = new JSDOM(
@@ -131,11 +131,13 @@ const { SocialRepository } = require("../services/socialRepository");
     w.document.dispatchEvent(new w.Event("DOMContentLoaded"));
     assert.equal(
       w.document.querySelectorAll('[data-start-group="social"] .sm-app').length,
-      9,
-      role + " gets nine apps",
+      11,
+      role + " gets eleven apps",
     );
     for (const mod of [
+      "feed",
       "watch",
+      "tv",
       "community",
       "talk",
       "market",
@@ -146,16 +148,16 @@ const { SocialRepository } = require("../services/socialRepository");
       "friends",
     ])
       await w.PanthoriumSocial.open(mod);
-    assert.equal(w.document.querySelectorAll("[data-social]").length, 9);
+    assert.equal(w.document.querySelectorAll("[data-social]").length, 11);
     assert.equal(w.document.querySelectorAll(".window").length, 1);
-    await w.PanthoriumSocial.open("watch");
+    await w.PanthoriumSocial.open("feed");
     assert.equal(
       w.document.querySelector("img"),
       null,
       "user text cannot become markup",
     );
     assert.match(
-      w.document.querySelector('[data-social="watch"]').textContent,
+      w.document.querySelector('[data-social="feed"]').textContent,
       /<script>oops<\/script>/,
     );
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -183,10 +185,10 @@ const { SocialRepository } = require("../services/socialRepository");
     assert.match(postCard.querySelector('[data-social-comments]').textContent, /New inline comment/);
     assert.equal(inlineText.value, '');
     assert((await service.read({ user, recordId: item.id })).items.some(x => x.text === 'New inline comment'));
-    await w.PanthoriumSocial.open("watch", { recordId: item.id });
+    await w.PanthoriumSocial.open("feed", { recordId: item.id });
     assert(w.document.querySelector("[data-social-messages]"));
     assert(w.document.querySelector(`[data-record-id="${item.id}"] [data-social-comments]`), 'direct post link retains the post above its comments');
-    const c = w.document.querySelector('[data-social="watch"]');
+    const c = w.document.querySelector('[data-social="feed"]');
     [...c.querySelectorAll("button")]
       .find((b) => b.textContent === "สร้างโพสต์")
       .click();
@@ -200,7 +202,7 @@ const { SocialRepository } = require("../services/socialRepository");
     );
     await new Promise((r) => setTimeout(r, 30));
     assert(
-      (await service.read({ user, module: "watch" })).items.some(
+      (await service.read({ user, module: "feed" })).items.some(
         (x) => x.text === "created from real UI",
       ),
     );
@@ -246,7 +248,7 @@ const { SocialRepository } = require("../services/socialRepository");
     dom.window.close();
   }
   console.log(
-    "Social UI: User/Admin nine-tab singleton menu, actual service publish, safe rendering, account switch and guest denial passed",
+    "Social UI: User/Admin eleven-tab singleton menu, actual service publish, safe rendering, account switch and guest denial passed",
   );
 })().catch((e) => {
   console.error(e);

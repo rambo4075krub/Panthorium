@@ -1,15 +1,17 @@
 (function () {
   "use strict";
   const specs = [
-    ["watch", "Watch", "ภาพและข้อความ", "▧"],
-    ["short", "Short", "วิดีโอและ Reels", "▶"],
+    ["feed", "Feed", "ภาพและข้อความ", "▧"],
+    ["short", "Short", "วิดีโอสั้นและ Reels", "▶"],
+    ["watch", "Watch", "วิดีโอยาวและภาพยนตร์", "▷"],
     ["live", "Live", "ถ่ายทอดสด", "◉"],
+    ["tv", "TV", "ทีวีสดและผู้ให้บริการ", "▣"],
     ["market", "Market", "ร้านค้า", "▣"],
     ["community", "Community", "แชตกลุ่ม", "◌"],
-    ["talk", "Talk", "แชตส่วนตัว", "☏"],
+    ["talk", "Chat", "แชตส่วนตัว", "☏"],
     ["connect", "Connect", "หาคู่ 18+", "♡"],
     ["profile", "Profile", "โปรไฟล์ส่วนตัว", "◯"],
-    ["friends", "Add Friends", "ค้นหาเพื่อน", "+"],
+    ["friends", "Friends", "ค้นหาเพื่อน", "+"],
   ];
   const WINDOW_ID = "social-media";
   let workspace;
@@ -49,7 +51,11 @@
     files_quota_exceeded: "พื้นที่คลาวด์เต็ม กรุณาจัดการไฟล์หรือแพ็กเกจ",
     file_too_large: "ไฟล์เกินขนาดที่ระบบรองรับ 20 MB",
     social_video_required: "Short ต้องแนบวิดีโอ MP4 หรือ WebM",
-    social_watch_images_only: "Watch รองรับภาพและข้อความ กรุณาโพสต์วิดีโอใน Short",
+    social_feed_images_only: "Feed รองรับภาพและข้อความ กรุณาโพสต์วิดีโอใน Short หรือ Watch",
+    social_long_video_required: "Watch ต้องแนบวิดีโอ หรือเพิ่มลิงก์วิดีโอ",
+    social_invalid_media_url: "กรุณาใช้ลิงก์ HTTPS สาธารณะให้ตรงกับชนิดสื่อ เช่น YouTube, .mp4 หรือ .m3u8",
+    social_invalid_tv_channel: "กรุณากรอกชื่อช่อง ผู้ให้บริการ และช่องทางติดต่อให้ครบ",
+    social_tv_rights_required: "กรุณายืนยันสิทธิ์ในการเผยแพร่ช่องและสัญญาณ",
     social_image_required: "โปรไฟล์รองรับรูป PNG, JPEG, WebP หรือ GIF",
     social_forbidden: "คุณไม่มีสิทธิ์ดำเนินการกับรายการนี้",
     social_friend_request_not_pending: "คำขอนี้ได้รับการจัดการแล้ว กรุณารีเฟรช",
@@ -281,10 +287,11 @@
     };
     return getFiles;
   }
-  const watchPost = (v, record) => ["watch", "community"].includes(record.kind) && (record.module === "watch" || v.module === "watch");
-  const feedPost = (v, record) => ["watch", "short", "listing", "live"].includes(record.kind) || (record.kind === "community" && ["watch", "short"].includes(record.module || v.module));
+  const watchPost = (v, record) => ["feed", "watch", "community"].includes(record.kind) && (record.module === "feed" || v.module === "feed");
+  const feedPost = (v, record) => ["feed", "video", "watch", "short", "listing", "live"].includes(record.kind) || (record.kind === "community" && ["feed", "short"].includes(record.module || v.module));
   async function media(v, record, container) {
     const compact = feedPost(v, record);
+    if (record.source) { sourcePlayer(v, record.source, container, record.title || "Watch"); container.append(externalLink("เปิดเว็บไซต์ต้นทาง", record.source.url)); }
     for (const file of record.files || []) {
       const item = el("div", null, { class: "social-media" });
       if (!compact) item.append(el("small", file.name));
@@ -311,7 +318,7 @@
         }
         preview.replaceChildren(view);
       };
-      if (compact || ["watch", "short", "listing", "connect"].includes(record.kind) || (record.kind === "group-message" && /^(image\/(png|jpeg|webp|gif)|video\/|audio\/)/.test(file.contentType))) {
+      if (compact || ["feed", "video", "watch", "short", "listing", "connect"].includes(record.kind) || (record.kind === "group-message" && /^(image\/(png|jpeg|webp|gif)|video\/|audio\/)/.test(file.contentType))) {
         preview.textContent = "กำลังโหลดสื่อ…";
         // Load independently so a slow attachment never blocks the feed or its controls.
         show().catch(() => {
@@ -413,8 +420,8 @@
       ),
       form = el("form");
     card.append(form);
-    const watch = v.module === "watch";
-    const title = ["watch", "short"].includes(v.module) ? null : input(form, v.module === "market" ? "ชื่อสินค้า" : "ชื่อเรื่อง", "text"),
+    const watch = v.module === "feed";
+    const title = ["feed", "short"].includes(v.module) ? null : input(form, v.module === "market" ? "ชื่อสินค้า" : "ชื่อเรื่อง", "text"),
       text = input(form, "รายละเอียด", "textarea"),
       audience = select(form, "ผู้ที่ดูได้", watch ? [["public", "สาธารณะ"], ["friends", "เพื่อน"]] : [
         ["public", "สาธารณะ"],
@@ -423,6 +430,12 @@
       ]);
     if (title) title.maxLength = 200;
     text.maxLength = 8000;
+    let sourceType, sourceUrl;
+    if (v.module === "watch") {
+      form.append(el("p", "วิดีโอยาว รายการ และภาพยนตร์ • แนบไฟล์ตามโควตาคลาวด์ หรือใช้ลิงก์วิดีโอที่คุณมีสิทธิ์เผยแพร่"));
+      sourceType = select(form, "แหล่งวิดีโอ", [["youtube", "YouTube"], ["video", "MP4 / WebM"], ["hls", "HLS (.m3u8)"]]);
+      sourceUrl = input(form, "ลิงก์วิดีโอ (ไม่ต้องกรอกหากแนบไฟล์)", "url"); sourceUrl.maxLength = 2000;
+    }
     let price, stock;
     if (v.module === "market") {
       price = input(form, "ราคา (บาท)", "number");
@@ -432,7 +445,7 @@
       stock.min = 1;
     }
     if (watch) form.append(el("p", "ภาพ ข้อความ และ GIF"));
-    if (["short", "market"].includes(v.module)) { audience.value = "public"; audience.disabled = true; form.append(el("p", v.module === "short" ? "วิดีโอสั้น ยาว และ Reels • สาธารณะ" : "ร้านค้าสาธารณะ")); }
+    if (["short", "market"].includes(v.module)) { audience.value = "public"; audience.disabled = true; form.append(el("p", v.module === "short" ? "วิดีโอสั้นและ Reels • สาธารณะ" : "ร้านค้าสาธารณะ")); }
     const groupId = v.groupId;
     v.groupId = null;
     if (groupId) {
@@ -448,6 +461,7 @@
       v.module === "market" ? "listing" : "publish",
       () => ({
         module: v.module,
+        ...(sourceUrl?.value ? { sourceType: sourceType.value, sourceUrl: sourceUrl.value } : {}),
         title: title?.value || "",
         text: text.value,
         audience: groupId ? "group" : audience.value,
@@ -463,7 +477,7 @@
       () => groupId ? detail(v, groupId) : feed(v),
     );
     submit.textContent = v.module === "market" ? "ลงสินค้า" : "เผยแพร่";
-    if (["watch", "short", "market"].includes(v.module)) composeActions(v, form, submit);
+    if (["feed", "short", "watch", "market"].includes(v.module)) composeActions(v, form, submit);
   }
   function composeActions(v, form, submit) {
     const actions = el("div", null, { class: "social-compose-actions" });
@@ -633,7 +647,7 @@
     const actions = compact ? el("div", null, { class: "social-post-actions" }) : c;
     c.append(
       el("small", r.author?.name || "สมาชิก"),
-      ...(["watch", "short"].includes(r.module || v.module) && !r.title ? [] : [el("h3", r.title || r.name || (r.kind === "thread" ? "Talk" : r.module === "short" || r.kind === "short" ? "วิดีโอ" : "โพสต์"))]),
+      ...(["feed", "short"].includes(r.module || v.module) && !r.title ? [] : [el("h3", r.title || r.name || (r.kind === "thread" ? "Chat" : r.module === "short" || r.kind === "short" ? "วิดีโอ" : "โพสต์"))]),
       el("p", r.text || r.bio || ""),
     );
     if (r.kind === "connect") {
@@ -704,7 +718,7 @@
         }
       }
     }
-    if (["watch", "short", "community", "listing", "live"].includes(r.kind)) {
+    if (["feed", "video", "watch", "short", "community", "listing", "live"].includes(r.kind)) {
       const like = button(v, (r.liked ? "♥" : "♡") + " " + (r.likeCount || 0), async () => {
         const result = await write(v, "like", { recordId: r.id });
         if (!compact) return feed(v);
@@ -731,18 +745,18 @@
       dropdown.addEventListener("focusout", event => { if (!dropdown.contains(event.relatedTarget)) close(false); });
       extra.addEventListener("click", event => { if (event.target.closest("button")) close(false); });
     }
-    if (r.module === "short" || r.kind === "short")
+    if (["short", "watch"].includes(r.module) || ["short", "video"].includes(r.kind))
       extra.append(
         button(v, "เพิ่มลงเพลย์ลิสต์", () => collections(v, "playlist", r.id)),
       );
     if (
       r.ownerId === v.uid &&
-      ["community", "watch", "short", "listing"].includes(r.kind)
+      ["community", "feed", "video", "watch", "short", "listing"].includes(r.kind)
     )
       extra.append(button(v, "แก้ไข", () => edit(v, r)));
     if (
       r.ownerId === v.uid &&
-      ["community", "watch", "short", "listing"].includes(r.kind)
+      ["community", "feed", "video", "watch", "short", "listing"].includes(r.kind)
     )
       extra.append(
         button(v, "ลบ", async () => {
@@ -763,7 +777,7 @@
         button(v, "ขอสนทนากับเจ้าของ", async () => {
           const t = await write(v, "thread", {
             userId: r.ownerId,
-            title: r.title || "Talk",
+            title: r.title || "Chat",
           });
           await open("talk", { recordId: t.record.id });
         }),
@@ -835,7 +849,7 @@
         }),
       ),
     );
-    if (["watch", "short", "community", "listing", "live"].includes(r.kind))
+    if (["feed", "video", "watch", "short", "community", "listing", "live"].includes(r.kind))
       inlineComments(v, r, c, commentData, compact ? commentToggle : null);
   }
   async function detail(v, id, reset = true) {
@@ -845,11 +859,11 @@
     const data = await api(v, "/api/social/records/" + encodeURIComponent(id));
     if (!current(v) || v.detail !== id || version !== v.renderVersion) return;
     const r = data.record;
-    if (r.module && r.module !== v.module && ["watch", "short", "community", "listing", "thread", "live"].includes(r.kind)) {
+    if (r.module && r.module !== v.module && ["feed", "video", "watch", "short", "community", "listing", "thread", "live"].includes(r.kind)) {
       v.detail = null;
       return open(r.module, { recordId: id });
     }
-    if (["watch", "short", "community", "listing", "live"].includes(r.kind)) {
+    if (["feed", "video", "watch", "short", "community", "listing", "live"].includes(r.kind)) {
       await window.PanthoriumSocial.renderCard(v, r, v.content, data);
       return;
     }
@@ -894,7 +908,7 @@
     const log = el("div", null, { "data-social-messages": id });
     if (r.kind === "thread" && v.module === "talk") {
       log.className = "social-thread-log";
-      card.append(el("p", "ข้อความใน Talk จะลบอัตโนมัติหลัง 3 วัน"));
+      card.append(el("p", "ข้อความใน Chat จะลบอัตโนมัติหลัง 3 วัน"));
     }
     card.append(log);
     if (["thread", "live"].includes(r.kind)) {
@@ -905,7 +919,7 @@
     if (
       r.kind === "thread" ||
       r.kind === "live" ||
-      ["community", "watch", "short", "listing"].includes(r.kind)
+      ["community", "feed", "video", "watch", "short", "listing"].includes(r.kind)
     ) {
       const f = el("form"),
         text = input(
@@ -1309,7 +1323,7 @@
       f = el("form");
     c.append(f);
     const watch = watchPost(v, r);
-    const title = ["watch", "short"].includes(r.module || v.module) ? null : input(f, r.kind === "listing" ? "ชื่อสินค้า" : "ชื่อเรื่อง", "text", r.title),
+    const title = ["feed", "short"].includes(r.module || v.module) ? null : input(f, r.kind === "listing" ? "ชื่อสินค้า" : "ชื่อเรื่อง", "text", r.title),
       text = input(f, "เนื้อหา", "textarea", r.text),
       audience = select(
         f,
@@ -1322,12 +1336,18 @@
         r.audience,
       );
     if (r.audience === "group") audience.disabled = true;
+    let sourceType, sourceUrl;
+    if (r.kind === "video") {
+      sourceType = select(f, "แหล่งวิดีโอ", [["youtube", "YouTube"], ["video", "MP4 / WebM"], ["hls", "HLS (.m3u8)"]], r.source?.type || "youtube");
+      sourceUrl = input(f, "ลิงก์วิดีโอ (ไม่ต้องกรอกหากแนบไฟล์)", "url", r.source?.url || ""); sourceUrl.maxLength = 2000;
+    }
     const submit = bindForm(
       v,
       f,
       "edit",
       () => ({
         recordId: r.id,
+        ...(sourceUrl ? { sourceType: sourceType.value, sourceUrl: sourceUrl.value } : {}),
         title: title?.value ?? r.title,
         text: text.value,
         ...(r.audience === "group" ? {} : { audience: audience.value }),
@@ -1489,7 +1509,110 @@
       if (current(v)) v.timer = setTimeout(() => poll(v), 4000);
     }
   }
+  function stopSourcePlayer(box) {
+    box.querySelector("iframe")?.remove();
+    const play = box.querySelector("[data-play-source]");
+    if (play) play.hidden = false;
+  }
+  function sourcePlayer(v, source, parent, title) {
+    const box = el("div", null, { class: "social-source-player", "data-social-player": "" });
+    const play = button(v, "▶ เล่นใน Panthorium", () => {
+      workspace.root.querySelectorAll("[data-social-player]").forEach(stopSourcePlayer);
+      const frame = el("iframe", null, {
+        src: "/social-player.html#" + new URLSearchParams({ type: source.type, url: source.url }),
+        title: title || "เครื่องเล่นวิดีโอ", allow: "fullscreen; picture-in-picture; encrypted-media", allowfullscreen: "",
+        referrerpolicy: "strict-origin-when-cross-origin",
+      });
+      box.append(frame); play.hidden = true;
+    });
+    play.dataset.playSource = ""; box.append(play); parent.append(box);
+  }
+  function externalLink(label, url) {
+    // Only the server-validated public destination is rendered; never execute submitted HTML.
+    let safe;
+    try { safe = new URL(url); } catch (_) { return el("span", "ยังไม่มีลิงก์"); }
+    if (safe.protocol !== "https:" || safe.username || safe.password) return el("span", "ลิงก์ไม่ถูกต้อง");
+    return el("a", label, { href: safe.href, target: "_blank", rel: "noopener noreferrer" });
+  }
+  async function tvForm(v, record = {}) {
+    clear(v);
+    const panel = section(v, record.id ? "แก้ไขช่อง TV" : "เพิ่มช่อง TV สำหรับผู้ให้บริการ"), form = el("form");
+    panel.append(el("p", "กรอกข้อมูลสถานีและแหล่งรับชม ผู้ดูแลจะตรวจสอบสิทธิ์และทดสอบสัญญาณก่อนเผยแพร่ช่อง"), form);
+    const name = input(form, "ชื่อช่อง", "text", record.name || ""), provider = input(form, "ผู้ให้บริการ / สถานี", "text", record.provider || "");
+    name.required = provider.required = true; name.maxLength = 100; provider.maxLength = 120;
+    const number = input(form, "หมายเลขช่อง (ถ้ามี)", "text", record.number || ""); number.maxLength = 10;
+    const category = input(form, "หมวดรายการ", "text", record.category || "ทั่วไป"); category.maxLength = 80;
+    const website = input(form, "เว็บไซต์ทางการ / หน้าชมสด", "url", record.websiteUrl || ""); website.required = true; website.maxLength = 2000;
+    const schedule = input(form, "ลิงก์ผังรายการ (ถ้ามี)", "url", record.scheduleUrl || ""); schedule.maxLength = 2000;
+    const type = select(form, "รูปแบบการรับชม", [["website", "เปิดเว็บไซต์สถานี"], ["youtube", "YouTube Live / วิดีโอ"], ["hls", "HLS (.m3u8)"], ["video", "MP4 / WebM"]], record.source?.type || "website");
+    const url = input(form, "ลิงก์สัญญาณ / วิดีโอ", "url", record.source?.type === "website" ? "" : record.source?.url || ""); url.maxLength = 2000;
+    const syncSource = () => { url.required = type.value !== "website"; url.parentElement.hidden = type.value === "website"; }; type.onchange = syncSource; syncSource();
+    const contact = input(form, "ช่องทางติดต่อผู้ให้บริการ (เฉพาะผู้ดูแลเห็น)", "text", record.contact || ""); contact.required = true; contact.maxLength = 200;
+    const guide = el("details"), summary = el("summary", "วิธีเชื่อมต่อช่องและข้อกำหนดสัญญาณ");
+    guide.append(summary, el("p", "เว็บไซต์: ใช้หน้าชมสดทางการ ไม่ต้องดึงสัญญาณจากหน้าเว็บ • YouTube: ใช้ลิงก์วิดีโอหรือ Live ที่เปิดให้ฝัง • HLS: ให้สถานีส่ง HTTPS .m3u8 และเปิด CORS ให้ Panthorium รวมถึงไฟล์ย่อย • ช่องที่ต้องล็อกอิน ชำระเงิน หรือใช้ DRM ให้เปิดผ่านเว็บไซต์ผู้ให้บริการ"),
+      externalLink("คู่มือฝังวิดีโอ YouTube", "https://developers.google.com/youtube/player_parameters"), el("p", "การแก้ไขช่องจะส่งให้ตรวจสอบอีกครั้ง ลิงก์ต้องเปิดรับชมได้โดยไม่ส่งรหัสผ่านหรือ stream key"));
+    form.append(guide);
+    const rights = input(form, "ฉันเป็นผู้ให้บริการหรือได้รับอนุญาตให้เผยแพร่ช่องและใช้สัญญาณนี้", "checkbox"); rights.required = true;
+    const preview = el("div");
+    form.append(button(v, "ทดสอบการรับชม", () => {
+      preview.replaceChildren();
+      if (type.value === "website") preview.append(externalLink("เปิดหน้าชมสด", website.value));
+      else sourcePlayer(v, { type: type.value, url: url.value }, preview, name.value || "ทดสอบช่อง");
+    }), preview);
+    const submit = bindForm(v, form, "tv-save", () => ({
+      ...(record.id ? { recordId: record.id } : {}), name: name.value, provider: provider.value, number: number.value,
+      category: category.value, websiteUrl: website.value, scheduleUrl: schedule.value,
+      sourceType: type.value, sourceUrl: type.value === "website" ? website.value : url.value,
+      contact: contact.value, rightsConfirmed: rights.checked,
+    }), async () => { v.tvMode = "mine"; v.search.value = ""; await tvCatalog(v); status(v, "ส่งช่องแล้ว รอผู้ดูแลตรวจสอบก่อนเผยแพร่"); });
+    submit.textContent = "ส่งช่องให้ตรวจสอบ";
+    form.append(button(v, "ยกเลิก", () => tvCatalog(v)));
+  }
+  async function tvCatalog(v, before) {
+    if (!before) { clear(v); status(v, ""); v.tvProviders = new Set(); }
+    const version = v.renderVersion, mode = v.tvMode || "all";
+    const data = await api(v, "/api/social/feed/tv?" + new URLSearchParams({ query: v.search.value, mode, ...(before ? { before } : {}) }));
+    if (!current(v) || version !== v.renderVersion) return;
+    if (!before) section(v, "TV · ทีวีสด").append(el("p", "เลือกช่องเพื่อชมสดกับสถานี หรือเล่นสัญญาณที่ผู้ให้บริการอนุญาตใน Panthorium"));
+    if (!data.items.length && !before) section(v, mode === "mine" ? "ยังไม่มีช่องของคุณ" : mode === "review" ? "ไม่มีช่องรอตรวจสอบ" : "ไม่พบช่องในรายการนี้");
+    const grid = el("div", null, { class: "social-tv-grid" }); v.content.append(grid);
+    for (const channel of data.items) {
+      if (mode === "providers") {
+        if (v.tvProviders.has(channel.provider)) continue;
+        v.tvProviders.add(channel.provider);
+        grid.append(button(v, channel.provider, () => { v.tvMode = "all"; v.search.value = channel.provider; return tvCatalog(v); }));
+        continue;
+      }
+      const card = el("article", null, { class: "social-card", "data-tv-channel": channel.id });
+      card.append(el("h3", channel.name + (channel.number ? " · " + channel.number : "")), el("p", channel.provider + " · " + channel.category));
+      if (mode === "mine" || mode === "review") card.append(el("p", "สถานะ: " + ({ pending: "รอตรวจสอบ", approved: "เผยแพร่แล้ว", rejected: "ไม่ผ่านการตรวจสอบ" }[channel.status] || channel.status)));
+      if (channel.reviewNote) card.append(el("p", "หมายเหตุ: " + channel.reviewNote));
+      if (channel.source.type !== "website") sourcePlayer(v, channel.source, card, channel.name);
+      const links = el("div", null, { class: "social-tv-links" });
+      links.append(externalLink(channel.source.type === "website" ? "▶ ชมสดที่เว็บไซต์สถานี" : "เปิดเว็บไซต์ต้นทาง", channel.websiteUrl));
+      if (channel.scheduleUrl) links.append(externalLink("ผังรายการ", channel.scheduleUrl));
+      card.append(links);
+      if (channel.status === "approved") card.append(button(v, channel.favorite ? "★ ลบจากช่องโปรด" : "☆ เพิ่มช่องโปรด", async () => {
+        await write(v, "tv-favorite", { recordId: channel.id, enabled: !channel.favorite }); await tvCatalog(v);
+      }));
+      if (channel.canEdit) card.append(button(v, "แก้ไขช่อง", () => tvForm(v, channel)));
+      if (data.canReview && mode === "review") {
+        card.append(el("p", "ติดต่อ: " + channel.contact), el("p", "ตรวจสอบสิทธิ์กับผู้ให้บริการและทดสอบสัญญาณก่อนอนุมัติ"));
+        const note = input(card, "หมายเหตุการตรวจสอบ"); note.maxLength = 1000;
+        for (const [state, label] of [["approved", "อนุมัติช่อง"], ["rejected", "ไม่อนุมัติ"]]) card.append(button(v, label, async () => {
+          await write(v, "tv-review", { recordId: channel.id, status: state, reviewNote: note.value }); await tvCatalog(v);
+        }));
+      }
+      if (channel.canEdit || (data.canReview && !channel.official)) card.append(button(v, "ลบช่อง", async () => {
+        if (!window.confirm("ลบช่อง " + channel.name + " ออกจากรายการหรือไม่?")) return;
+        await write(v, "tv-delete", { recordId: channel.id }); await tvCatalog(v);
+      }));
+      grid.append(card);
+    }
+    if (data.nextCursor) v.content.append(button(v, "โหลดช่องเพิ่มเติม", () => tvCatalog(v, data.nextCursor)));
+  }
   async function feed(v, before, mode) {
+    if (v.module === "tv") return tvCatalog(v, before);
     if (v.module === "community") return community(v);
     if (v.module === "profile") return profile(v);
     if (v.module === "friends") return people(v);
@@ -1592,7 +1715,7 @@
       .social-compose-actions,.social-comment-actions{display:flex;align-items:center;gap:8px}.social-compose-actions>button:last-child{margin-left:auto}
       .social-comments{border-top:1px solid #304252;margin-top:16px;padding-top:12px}.social-message{padding:12px;border-bottom:1px solid #304252}.social-app small{color:#acbfce;overflow-wrap:anywhere}.social-app [role=status]{color:#ffb26e}.social-app [role=status]:empty{display:none}
       .social-thread-log{display:flex;flex-direction:column;gap:10px;margin:16px 0}.social-thread-log .social-message{border:1px solid #304252;border-radius:14px;max-width:85%;min-width:0;align-self:flex-start;background:#172634}.social-thread-log .social-message[data-direction=outgoing]{align-self:flex-end;background:#203e55;border-color:#3d647f}.social-thread-log .social-message p{margin:8px 0}.social-chat-preview{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.social-toolbar [data-group-menu]::after{content:' ▾'}.social-toolbar [data-group-menu][aria-expanded=true]{border-color:#ee984e;background:#263343}.social-toolbar .social-back{margin-left:auto}
-      .social-media{margin:10px 0}.social-media img,.social-media video{display:block;max-width:100%;max-height:560px;border-radius:10px}.social-media audio{max-width:100%}.social-media pre{white-space:pre-wrap;max-height:420px;overflow:auto}
+      .social-source-player iframe{display:block;border:0;width:100%;height:clamp(220px,45vw,500px);background:#09111a;border-radius:10px}.social-tv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px}.social-tv-grid .social-card{margin:0}.social-tv-links{display:flex;flex-wrap:wrap;gap:8px}.social-tv-links a{display:inline-block;padding:10px;border:1px solid #496779;border-radius:9px;background:#172634;color:#c4e5ff;text-decoration:none}.social-tv-links a:hover{background:#263e51}.social-tv-links a:focus-visible{outline:2px solid #ff9f43;outline-offset:2px}.social-source-player+a{display:inline-block;color:#a4d5ff;margin:8px 0}.social-media{margin:10px 0}.social-media img,.social-media video{display:block;max-width:100%;max-height:560px;border-radius:10px}.social-media audio{max-width:100%}.social-media pre{white-space:pre-wrap;max-height:420px;overflow:auto}
       .social-video-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.social-video-grid video{width:100%;max-height:400px;background:#000}
       .social-message-receipt{display:inline-block;margin:4px 8px;color:#9bb1c9;font-size:18px;font-weight:600}.social-message-receipt[data-delivery=read]{letter-spacing:-6px;padding-right:6px;color:#66d0ff}
       .social-activity{border-bottom:1px solid #263b4b;margin-bottom:10px}.social-activity summary{background:transparent;padding:7px 3px;min-height:32px;font-size:13px}.social-activity article{padding:10px;border-bottom:1px solid #263b4b}.social-activity article[data-unread=true]{border-left:3px solid #ff9f43}.social-activity p{margin:4px 0}.social-activity [data-activity-items]{max-height:330px;overflow:auto}
@@ -1610,8 +1733,8 @@
       tab.setAttribute("role", "tab"); tab.setAttribute("aria-controls", "social-page-" + id); tab.setAttribute("aria-selected", "false"); tab.title = thai;
       tab.append(moduleBadge(id)); nav.append(tab);
     }
-    const refresh = button(shell, "Refresh", () => refreshView(views.get(workspace?.active)));
-    refresh.title = "รีเฟรชเมนูที่เปิดอยู่"; nav.append(refresh);
+    const refresh = button(shell, "↻", () => refreshView(views.get(workspace?.active)));
+    refresh.title = "รีเฟรชเมนูที่เปิดอยู่"; refresh.setAttribute("aria-label", "Refresh"); refresh.dataset.socialRefresh = ""; nav.append(refresh);
     nav.addEventListener("keydown", event => {
       if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key) || event.target.getAttribute("role") !== "tab") return;
       event.preventDefault(); const tabs = [...nav.querySelectorAll('[role="tab"]')], index = tabs.indexOf(event.target);
@@ -1626,6 +1749,7 @@
     shell.root.closest(".window").dataset.socialActive = module;
     for (const [id, v] of views) {
       v.root.hidden = id !== module;
+      if (id !== module) v.root.querySelectorAll("[data-social-player]").forEach(stopSourcePlayer);
       if (id !== module) v.root.querySelectorAll("video,audio").forEach(media => { if (!media.srcObject) media.pause(); });
     }
     for (const tab of shell.root.querySelectorAll("[data-social-tab]")) {
@@ -1638,16 +1762,23 @@
   function moduleTools(v) {
     const toolbar = v.root.querySelector("[data-social-toolbar]");
     v.search = el("input"); v.search.value = "";
-    if (["watch", "short", "live", "market", "talk", "connect"].includes(v.module)) {
+    if (["feed", "short", "watch", "live", "tv", "market", "talk", "connect"].includes(v.module)) {
       const form = el("form"), q = input(form, "ค้นหารายการ");
       q.placeholder = "ค้นหาใน " + specs.find(s => s[0] === v.module)[1];
       q.parentElement.firstChild.textContent = ""; q.setAttribute("aria-label", "ค้นหารายการ");
       v.search = q; form.append(el("button", "ค้นหา", { type: "submit" }));
       form.onsubmit = event => { event.preventDefault(); feed(v).catch(error => status(v, friendly(error))); }; toolbar.append(form);
     }
-    if (["watch", "short", "market"].includes(v.module)) toolbar.append(button(v, v.module === "market" ? "ลงสินค้า" : v.module === "short" ? "โพสต์วิดีโอ" : "สร้างโพสต์", () => compose(v)));
+    if (["feed", "short", "watch", "market"].includes(v.module)) toolbar.append(button(v, v.module === "market" ? "ลงสินค้า" : ["short", "watch"].includes(v.module) ? "โพสต์วิดีโอ" : "สร้างโพสต์", () => compose(v)));
     if (["live", "market", "talk"].includes(v.module)) toolbar.append(button(v, "รายการทั้งหมด", () => feed(v)));
-    if (v.module === "short") toolbar.append(button(v, "เพลย์ลิสต์", () => collections(v, "playlist")));
+    if (["short", "watch"].includes(v.module)) toolbar.append(button(v, "เพลย์ลิสต์", () => collections(v, "playlist")));
+    if (v.module === "tv") {
+      for (const [mode, label] of [["all", "ช่องทั้งหมด"], ["favorites", "ช่องโปรด"], ["providers", "ผู้ให้บริการ"], ["mine", "ช่องของฉัน"]])
+        toolbar.append(button(v, label, () => { v.tvMode = mode; v.search.value = ""; return tvCatalog(v); }));
+      toolbar.append(button(v, "เพิ่มช่อง TV", () => tvForm(v)));
+      if (os().state.user.roles?.includes("administrator") && os().state.user.permissions?.includes("settings"))
+        toolbar.append(button(v, "ตรวจสอบช่อง", () => { v.tvMode = "review"; return tvCatalog(v); }));
+    }
     if (v.module === "community") {
       v.communityButtons = ["mine", "all", "create"].map((mode, i) => {
         const b = button(v, ["กลุ่มของฉัน", "กลุ่มทั้งหมด", "สร้างกลุ่ม"][i], () => {
@@ -1687,7 +1818,7 @@
     else await feed(v);
     await refreshNotifications();
   }
-  async function open(module = "watch", options = {}) {
+  async function open(module = "feed", options = {}) {
     if (!allowed()) throw Error("account_required");
     if (!specs.some(s => s[0] === module)) throw Error("social_invalid_module");
     const shell = ensureWorkspace();
@@ -1736,7 +1867,7 @@
   const notificationBadge = () => el("span", "", { class: "social-notification-badge", "data-social-notification-count": "", hidden: "" });
   // Owner-requested tab and Start Menu markers: keep exactly 1 until explicitly removed in a later update.
   // These do not mark real activity as read or change server notification totals.
-  const pinnedNotifications = Object.freeze({ watch: 1, profile: 1 });
+  const pinnedNotifications = Object.freeze({ feed: 1, profile: 1 });
   function notificationBadges() {
     const data = notificationState?.data || {};
     const pinnedTotal = allowed() ? Object.values(pinnedNotifications).reduce((sum, count) => sum + count, 0) : 0;
@@ -1816,7 +1947,7 @@
     return n.polling;
   }
   async function showNotifications(v) {
-    if (!v || !current(v)) { await open(workspace?.active || "watch"); v = views.get(workspace.active); }
+    if (!v || !current(v)) { await open(workspace?.active || "feed"); v = views.get(workspace.active); }
     v.root.querySelector(".social-activity").open = true; await loadActivity(v);
   }
   function syncNotifications() {
@@ -1888,6 +2019,7 @@
   }
   window.PanthoriumSocial = {
     open,
+    openChat: () => open("talk"),
     renderMenu: menu,
     showNotifications,
     refreshNotifications,

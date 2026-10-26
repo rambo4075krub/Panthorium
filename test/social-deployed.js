@@ -9,7 +9,7 @@ const fs = require("node:fs");
     assert.equal(r.status, 200);
     const html = await r.text();
     assert(html.includes("window.PanthoriumSocial?.renderMenu?.()"), path + " missing Social menu rebuild hook");
-    assert(html.includes("social-ui.js?v=social-navigation-talk-20261020"), path + " missing Watch cache version");
+    assert(html.includes("social-ui.js?v=social-feed-watch-tv-20261026"), path + " missing Watch cache version");
     for (const file of ["social-ui.js", "social-rtc.js", "contact-ui.js"])
       assert(html.includes(file), path + " missing " + file);
   }
@@ -19,6 +19,9 @@ const fs = require("node:fs");
     "access-shell-ui.js",
     "social-ui.js",
     "social-rtc.js",
+    "social-media-source.js",
+    "social-player.js",
+    "social-player.html",
     "voice-window-catalog.js",
   ]) {
     const r = await fetch(base + "/" + file);
@@ -34,6 +37,9 @@ const fs = require("node:fs");
     "/api/social/profile",
     "/api/social/friends",
     "/api/social/feed/short",
+    "/api/social/feed/feed",
+    "/api/social/feed/watch",
+    "/api/social/feed/tv",
     "/api/social/inbox",
     "/api/social/notifications",
     "/api/social/reports",
@@ -44,6 +50,9 @@ const fs = require("node:fs");
       path + " must require authentication",
     );
   assert.equal((await fetch(base + "/api/social/support", { method: "POST" })).status, 401, "support chat requires authentication");
+  const player = await fetch(base + "/social-player.html");
+  assert(player.headers.get("content-security-policy").includes("frame-ancestors 'self'"));
+  assert.equal((await fetch(base + "/vendor/hls.min.js")).status, 200);
   assert.equal((await fetch(base + "/api/social/records/unavailable/read", { method: "POST" })).status, 401, "read receipts require authentication");
   assert.equal((await fetch(base + "/api/social/notifications/read", { method: "POST" })).status, 401, "notification acknowledgements require authentication");
   console.log(

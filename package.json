@@ -19,8 +19,8 @@
     "test:mcp": "node test/mcp-oauth.js && node test/mcp-tools.js && node test/mcp-http.js && node test/mcp-connect-ui.js",
     "check:studio": "node --check services/creativeStudioRepository.js && node --check services/creativeStudioService.js && node --check services/creativeStudioTools.js && node --check services/officeArtifactService.js && node --check routes/creativeStudio.js && node --check creative-studio-ui.js && node --check test/creative-studio-deployed.js && node --check test/creative-studio-postgres.js && node --check services/studioEditorService.js && node --check studio-editor-ui.js && node --check office-suite-core.js && node --check office-suite-ui.js && node --check services/officeSuiteService.js",
     "test:studio": "node test/creative-studio.js && node test/creative-studio-repository.js && node test/creative-studio-http.js && node test/creative-studio-function-calling.js && node test/creative-studio-ui.js && node test/office-artifacts.js && node test/media-image-to-video.js && node test/studio-editor.js && node test/studio-editor-ui.js && node test/office-suite.js && node test/office-suite-ui.js",
-    "test:social": "node test/social-navigation.js && node test/social-watch.js && node test/social-redesign.js && node test/social-groups.js && node test/social-notifications.js && node test/social-service.js && node test/social-http.js && node test/social-ui.js && node test/social-start-menu.js && node test/social-tools.js && node test/contact-support.js && node test/contact-menu-ui.js",
-    "check:social": "node --check services/socialRetention.js && node --check services/socialContent.js && node --check services/socialNotifications.js && node --check services/socialRepository.js && node --check services/socialService.js && node --check services/socialTools.js && node --check routes/social.js && node --check social-ui.js && node --check social-rtc.js && node --check contact-ui.js",
+    "test:social": "node test/social-tv.js && node test/social-navigation.js && node test/social-watch.js && node test/social-redesign.js && node test/social-groups.js && node test/social-notifications.js && node test/social-service.js && node test/social-http.js && node test/social-ui.js && node test/social-start-menu.js && node test/social-tools.js && node test/contact-support.js && node test/contact-menu-ui.js",
+    "check:social": "node --check social-media-source.js && node --check social-player.js && node --check services/socialTv.js && node --check services/socialRetention.js && node --check services/socialContent.js && node --check services/socialNotifications.js && node --check services/socialRepository.js && node --check services/socialService.js && node --check services/socialTools.js && node --check routes/social.js && node --check social-ui.js && node --check social-rtc.js && node --check contact-ui.js",
     "test:social:rtc": "node test/social-rtc-browser.js",
     "test:security": "node test/run-security-tests.js && node test/browser-security.js && node test/browser-account-isolation.js && node test/browser-update-signature.js",
     "test:notifications": "node test/notification-push-client.js && node test/notification-push-worker.js && node test/notification-push.js && node test/notifications.js && node test/notification-tools.js && node test/notification-approval-ui.js && node test/notification-producers.js && node test/notifications-ui.js"
@@ -35,6 +35,7 @@
     "express-rate-limit": "^7.4.1",
     "google-auth-library": "^11.1.0",
     "helmet": "^8.0.0",
+    "hls.js": "1.7.3",
     "htmlparser2": "10.0.0",
     "ipaddr.js": "2.2.0",
     "jsonwebtoken": "^9.0.2",

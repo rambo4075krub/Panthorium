@@ -22,10 +22,10 @@ async function until(fn, label) { const end = Date.now() + 16000; while (Date.no
   for (const [i, user] of users.entries()) await write(user, "profile", { name: ["ปานเทพ", "เพื่อนทดสอบ", "ผู้ชมทดสอบ"][i], discoverable: true });
   const request = (await write(friend, "friend-request", { userId: owner.sub })).record;
   await write(owner, "friend-review", { recordId: request.id, accept: true });
-  const post = (await write(owner, "publish", { module: "watch", text: "ภาพเคลื่อนไหวแสดงทันทีใน Watch", fileIds: [gif.id] })).record;
+  const post = (await write(owner, "publish", { module: "feed", text: "ภาพเคลื่อนไหวแสดงทันทีใน Watch", fileIds: [gif.id] })).record;
   // Old Community records still live in Watch and must auto-display media too.
   const legacy = { ...post, id: "legacy:" + randomUUID(), kind: "community", text: "GIF จากโพสต์เดิม" }; await repo.put(legacy);
-  const textPost = (await write(owner, "publish", { module: "watch", text: "ข้อความ <img src=x onerror=alert(1)> แสดงตามที่เขียน" })).record;
+  const textPost = (await write(owner, "publish", { module: "feed", text: "ข้อความ <img src=x onerror=alert(1)> แสดงตามที่เขียน" })).record;
   const short = (await write(owner, "publish", { module: "short", text: "คลิปวิดีโอใน Short", fileIds: [video.id] })).record;
   const listing = (await write(owner, "listing", { title: "สินค้าทดสอบ", text: "รายละเอียดสินค้า", priceSatang: 12900, stock: 3, fileIds: [gif.id] })).record;
   const app = express(); app.use(express.json()); app.use("/api/social", createSocialRouter(auth, service));
@@ -43,9 +43,9 @@ async function until(fn, label) { const end = Date.now() + 16000; while (Date.no
     for (const [i, page] of pages.entries()) {
       page.on("pageerror", error => errors.push(error.message)); page.on("dialog", dialog => dialog.accept());
       await page.addInitScript(({ user, token }) => { window.OS = { state: { user }, config: { backendUrl: location.origin, accessToken: token }, windows: new Map() }; }, { user: users[i], token: auth.signAccessToken(users[i]) });
-      await page.goto("http://127.0.0.1:" + server.address().port); await page.evaluate(() => PanthoriumSocial.open("watch"));
+      await page.goto("http://127.0.0.1:" + server.address().port); await page.evaluate(() => PanthoriumSocial.open("feed"));
     }
-    const watch = author.locator('[data-social="watch"]'), card = id => watch.locator('[data-record-id="' + id + '"]');
+    const watch = author.locator('[data-social="feed"]'), card = id => watch.locator('[data-record-id="' + id + '"]');
     for (const item of [post, legacy]) await until(async () => card(item.id).locator("img").evaluate(img => img.complete && img.naturalWidth > 0), "inline GIF rendered");
     assert.equal(await watch.getByText(gif.name, { exact: true }).count(), 0);
     assert.equal(await watch.getByRole("button", { name: /เปิดไฟล์|ดูตัวอย่าง|ดาวน์โหลดต้นฉบับ/ }).count(), 0);
@@ -66,7 +66,7 @@ async function until(fn, label) { const end = Date.now() + 16000; while (Date.no
     await original.getByRole("button", { name: "ความคิดเห็น 1", exact: true }).waitFor();
     assert.equal(await original.locator("[data-comment-id] script").count(), 0);
     const ownComment = (await service.read({ user: owner, recordId: post.id })).items[0];
-    await reader.evaluate(id => PanthoriumSocial.open("watch", { recordId: id }), post.id);
+    await reader.evaluate(id => PanthoriumSocial.open("feed", { recordId: id }), post.id);
     const readerCard = reader.locator('[data-record-id="' + post.id + '"]');
     await readerCard.getByRole("button", { name: "ความคิดเห็น 1", exact: true }).click();
     await readerCard.locator("[data-comment-id]").waitFor(); assert.equal(await readerCard.getByRole("button", { name: "ลบความคิดเห็น", exact: true }).count(), 0);
@@ -87,7 +87,7 @@ async function until(fn, label) { const end = Date.now() + 16000; while (Date.no
     await readerCard.getByRole("button", { name: "ยกเลิก", exact: true }).click();
     assert(!await readerCard.getByLabel("เหตุผลที่รายงาน", { exact: true }).isVisible());
     // Create/cancel and real friends-only publishing through the form.
-    const before = (await service.read({ user: owner, module: "watch" })).items.length;
+    const before = (await service.read({ user: owner, module: "feed" })).items.length;
     await watch.getByRole("button", { name: "สร้างโพสต์", exact: true }).click();
     assert.equal(await watch.getByLabel("ชื่อเรื่อง", { exact: true }).count(), 0);
     const audience = watch.getByLabel("ผู้ที่ดูได้", { exact: true }); assert(await audience.isEnabled());
@@ -95,17 +95,17 @@ async function until(fn, label) { const end = Date.now() + 16000; while (Date.no
     const publishBox = await watch.getByRole("button", { name: "เผยแพร่", exact: true }).boundingBox(), cancelBox = await watch.getByRole("button", { name: "ยกเลิก", exact: true }).boundingBox();
     assert(Math.abs(publishBox.y - cancelBox.y) < 2 && cancelBox.x > publishBox.x + publishBox.width);
     await watch.getByLabel("รายละเอียด", { exact: true }).fill("ต้องไม่ถูกเผยแพร่"); await watch.getByRole("button", { name: "ยกเลิก", exact: true }).click();
-    assert.equal((await service.read({ user: owner, module: "watch" })).items.length, before);
+    assert.equal((await service.read({ user: owner, module: "feed" })).items.length, before);
     await watch.getByRole("button", { name: "สร้างโพสต์", exact: true }).click(); await watch.getByLabel("รายละเอียด", { exact: true }).fill("โพสต์สำหรับเพื่อนเท่านั้น");
     await watch.getByLabel("ผู้ที่ดูได้", { exact: true }).selectOption("friends"); await watch.locator("form details>summary").click();
     await watch.getByRole("checkbox", { name: gif.name, exact: true }).check();
     await watch.getByRole("button", { name: "เผยแพร่", exact: true }).click();
     let friendsPost;
-    await until(async () => { friendsPost = (await service.read({ user: owner, module: "watch" })).items.find(item => item.text === "โพสต์สำหรับเพื่อนเท่านั้น"); return !!friendsPost; }, "friends post published");
+    await until(async () => { friendsPost = (await service.read({ user: owner, module: "feed" })).items.find(item => item.text === "โพสต์สำหรับเพื่อนเท่านั้น"); return !!friendsPost; }, "friends post published");
     assert.equal(friendsPost.title, ""); assert.equal(friendsPost.audience, "friends");
-    await reader.evaluate(id => PanthoriumSocial.open("watch", { recordId: id }), friendsPost.id);
+    await reader.evaluate(id => PanthoriumSocial.open("feed", { recordId: id }), friendsPost.id);
     await reader.locator('[data-record-id="' + friendsPost.id + '"] img').waitFor();
-    await guest.locator('[data-social-tab="watch"]').click(); await guest.getByRole("button", { name: "Refresh", exact: true }).click();
+    await guest.locator('[data-social-tab="feed"]').click(); await guest.getByRole("button", { name: "Refresh", exact: true }).click();
     assert.equal(await guest.locator('[data-record-id="' + friendsPost.id + '"]').count(), 0);
     const denied = await guest.evaluate(async ({ id, file }) => {
       const headers = { Authorization: "Bearer " + OS.config.accessToken };
@@ -114,8 +114,8 @@ async function until(fn, label) { const end = Date.now() + 16000; while (Date.no
     await card(friendsPost.id).getByRole("button", { name: "ตัวเลือกโพสต์", exact: true }).click(); await card(friendsPost.id).getByRole("button", { name: "แก้ไข", exact: true }).click();
     assert.equal(await watch.getByLabel("ชื่อเรื่อง", { exact: true }).count(), 0);
     await watch.getByLabel("ผู้ที่ดูได้", { exact: true }).selectOption("public"); await watch.getByRole("button", { name: "บันทึก", exact: true }).click();
-    await until(async () => (await service.read({ user: outsider, module: "watch" })).items.some(item => item.id === friendsPost.id), "public edit restores access");
-    await author.evaluate(id => PanthoriumSocial.open("watch", { recordId: id }), post.id);
+    await until(async () => (await service.read({ user: outsider, module: "feed" })).items.some(item => item.id === friendsPost.id), "public edit restores access");
+    await author.evaluate(id => PanthoriumSocial.open("feed", { recordId: id }), post.id);
     await card(post.id).getByRole("button", { name: "ความคิดเห็น 0", exact: true }).click(); await card(post.id).getByLabel("เขียนความคิดเห็น", { exact: true }).fill("แสดงความคิดเห็นที่นี่");
     for (const width of [1280, 390, 320]) {
       await author.setViewportSize({ width, height: 900 });
@@ -143,7 +143,7 @@ async function until(fn, label) { const end = Date.now() + 16000; while (Date.no
       if (process.env.SOCIAL_WATCH_SCREENSHOT) await author.screenshot({ path: process.env.SOCIAL_WATCH_SCREENSHOT + "-" + width + ".png" });
       await author.keyboard.press("Escape");
     }
-    for (const module of ["watch", "profile"]) assert.equal(await author.locator('[data-social-tab="' + module + '"] [data-social-module-count]').textContent(), "1");
+    for (const module of ["feed", "profile"]) assert.equal(await author.locator('[data-social-tab="' + module + '"] [data-social-module-count]').textContent(), "1");
     // The same card controls in Short and Market preserve video playback and ordering.
     await author.setViewportSize({ width: 1280, height: 900 });
     for (const [module, item] of [["short", short], ["market", listing]]) {
