@@ -16,7 +16,7 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
   const write=(user,action,input)=>social.write({user,action,input,requestId:randomUUID()});
   await write(a,"profile",{name:"ปานเทพ",bio:"ข้อมูลส่วนตัวของฉัน",discoverable:true,fileIds:[image.id]});
   await write(b,"profile",{name:"เพื่อนทดสอบ",bio:"ไม่เผยแพร่",discoverable:true});
-  const post=(await write(a,"publish",{module:"watch",title:"ยินดีต้อนรับสู่ Watch",text:"พื้นที่แชร์ภาพและข้อความ",fileIds:[image.id]})).record;
+  const post=(await write(a,"publish",{module:"feed",title:"ยินดีต้อนรับสู่ Watch",text:"พื้นที่แชร์ภาพและข้อความ",fileIds:[image.id]})).record;
   const app=express();app.use(express.json());app.use("/api/social",createSocialRouter(auth,social));
   app.get("/api/files",(_,res)=>res.json({ok:true,files:[image],usedBytes:68,maxBytes:1048576}));
   for(const file of ["social-ui.js","start-menu-ui.js","voice-window-catalog.js","voice-command-client.js"])app.get("/"+file,(_,res)=>res.sendFile(path.join(__dirname,"..",file)));
@@ -31,13 +31,13 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
       page.on("pageerror",e=>errors.push(e.message));
       await page.addInitScript(({user,token})=>{window.OS={state:{user},config:{backendUrl:location.origin,accessToken:token},windows:new Map()};},{user:users[i],token:auth.signAccessToken(users[i])});
       await page.goto("http://127.0.0.1:"+server.address().port);
-      await page.evaluate(()=>PanthoriumSocial.open("watch"));
+      await page.evaluate(()=>PanthoriumSocial.open("feed"));
     }
-    const order=["Watch","Short","Live","Market","Community","Talk","Connect","Profile","Add Friends","Refresh"];
+    const order=["Feed","Short","Watch","Live","TV","Market","Community","Chat","Connect","Profile","Friends","↻"];
     assert.deepEqual(await sender.locator(".social-tabs>button").evaluateAll(nodes=>nodes.map(n=>n.firstChild.textContent)),order);
     assert.equal(await sender.locator(".social-shell h1,.social-shell h2,#social-notification-bell,[data-social-open-notifications]").count(),0);
     await sender.bringToFront();
-    const watch=sender.locator('[data-social="watch"]');
+    const watch=sender.locator('[data-social="feed"]');
     await watch.getByRole("button",{name:"สร้างโพสต์",exact:true}).click();
     await watch.getByLabel("รายละเอียด",{exact:true}).fill("ร่างที่ยังไม่ได้เผยแพร่");
     for(const id of ["short","live","market","community","talk","connect","profile","friends"]){
@@ -46,7 +46,7 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
       assert.equal(await sender.locator(".window").count(),1);
       assert.equal(await sender.locator("[data-social]:visible").count(),1);
     }
-    for (const id of ["watch", "short", "market"]) {
+    for (const id of ["feed", "short", "market"]) {
       const bar = sender.locator('[data-social="'+id+'"] .social-toolbar');
       assert.equal(await bar.getByText("เครื่องมือที่เชื่อมงาน", { exact: true }).count(), 0);
       assert.equal(await bar.getByRole("button", { name: "รายการทั้งหมด", exact: true, includeHidden: true }).count(), id === "market" ? 1 : 0);
@@ -64,7 +64,7 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
     await profile.getByLabel("ชื่อที่แสดง", { exact: true }).waitFor();
     assert.equal(await profile.getByRole("button", { name: "กลับ", exact: true }).isVisible(), false);
     assert.deepEqual(await sender.locator('[data-social="friends"] .social-toolbar button').allTextContents(), ["ค้นหาเพื่อน", "บัญชีที่บล็อก"]);
-    await sender.locator('[data-social-tab="watch"]').click();
+    await sender.locator('[data-social-tab="feed"]').click();
     assert.equal(await watch.getByLabel("รายละเอียด",{exact:true}).inputValue(),"ร่างที่ยังไม่ได้เผยแพร่");
     // The shared window catalog must select the requested tab, including via voice navigation.
     const voice=await sender.evaluate(()=>PanthoriumVoiceCommands.windowAction("open_social_short"));assert.equal(voice.ok,true);
@@ -95,21 +95,21 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
     await reader.locator('[data-social="talk"] [data-message-id]').evaluate(node=>node.scrollIntoView({block:"center"}));
     const first=(await social.read({user:b,recordId:thread.id})).items[0];
     await until(async()=>!!(await repo.get(first.id)).readAt,"visible message read");
-    await reader.locator('[data-social-tab="watch"]').click();
+    await reader.locator('[data-social-tab="feed"]').click();
     const hidden=(await write(a,"message",{recordId:thread.id,text:"ยังไม่ได้อ่านในแท็บที่ซ่อน"})).record;
     await reader.evaluate(()=>PanthoriumSocial.refreshNotifications());await pause(4500);
     assert.equal((await repo.get(hidden.id)).readAt,undefined,"hidden tab never reads messages");
     assert.equal(await reader.locator('[data-social-tab="talk"] [data-social-module-count]').textContent(),"1");
     await write(b,"comment",{recordId:post.id,text:"ความคิดเห็นใหม่"});
-    await sender.evaluate(()=>PanthoriumSocial.refreshNotifications());await sender.evaluate(()=>PanthoriumSocial.open("watch"));
+    await sender.evaluate(()=>PanthoriumSocial.refreshNotifications());await sender.evaluate(()=>PanthoriumSocial.open("feed"));
     await sender.evaluate(()=>PanthoriumSocial.showNotifications());
     const activities=watch.locator('[data-activity-items]');
     await activities.getByText("เพื่อนทดสอบ • แสดงความคิดเห็นในโพสต์ของคุณ",{exact:true}).waitFor();
     assert(!await activities.getByText(/ตอบรับคำขอเป็นเพื่อน/).count());
     await activities.getByRole("button",{name:"อ่านทั้งหมดในหน้านี้",exact:true}).click();
-    await until(async()=> ((await social.notifications.list(a.sub,undefined,"watch")).counts.watch || 0)===0,"Watch activity acknowledged on server");
+    await until(async()=> ((await social.notifications.list(a.sub,undefined,"feed")).counts.feed || 0)===0,"Watch activity acknowledged on server");
     await sender.evaluate(()=>PanthoriumSocial.refreshNotifications());
-    for (const module of ["watch", "profile"]) {
+    for (const module of ["feed", "profile"]) {
       const badge=sender.locator('[data-social-tab="'+module+'"] [data-social-module-count]');
       assert.equal(await badge.textContent(),"1","owner-requested tab marker stays pinned after reading");
       assert(await badge.isVisible());
@@ -130,19 +130,19 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
     await until(async()=>!!(await repo.get("connect:"+a.sub))?.enabled,"Connect opt-in");assert.equal((await repo.get("connect:"+a.sub)).name,"ปานเทพ");
     for(const width of [390,320]){
       await sender.setViewportSize({width,height:800});
-      for(const id of ["watch","short","live","market","community","talk","connect","profile","friends"]){
+      for(const id of ["feed","short","live","market","community","talk","connect","profile","friends"]){
         await sender.evaluate(id=>PanthoriumSocial.open(id),id);
         assert(await sender.locator('[data-social="'+id+'"]').evaluate(n=>n.scrollWidth<=n.clientWidth+1),"no content overflow "+id+" "+width);
       }
       assert(await sender.locator('.social-tabs').evaluate(n=>n.scrollWidth>n.clientWidth&&getComputedStyle(n).overflowX==='auto'),"horizontal tab scrolling");
       await sender.locator('.social-tabs button').last().scrollIntoViewIfNeeded();assert(await sender.getByRole('button',{name:'Refresh',exact:true}).isVisible());
     }
-    await sender.evaluate(()=>PanthoriumSocial.open("watch"));await sender.getByRole("button",{name:"Refresh",exact:true}).click();
+    await sender.evaluate(()=>PanthoriumSocial.open("feed"));await sender.getByRole("button",{name:"Refresh",exact:true}).click();
     await watch.locator('[data-record-id="'+post.id+'"] img').waitFor();
     if(process.env.SOCIAL_REDESIGN_SCREENSHOT){await sender.screenshot({path:process.env.SOCIAL_REDESIGN_SCREENSHOT+"-mobile.png"});await sender.setViewportSize({width:1280,height:850});await sender.screenshot({path:process.env.SOCIAL_REDESIGN_SCREENSHOT+"-desktop.png"});}
     await sender.evaluate(()=>{OS.state.user={sub:'guest:test',roles:['guest'],permissions:[]};window.dispatchEvent(new Event('panthorium:auth-changed'));});
     assert.equal(await sender.locator('.social-shell').count(),0);assert.equal(await sender.evaluate(()=>OS.windows.size),0);
     assert.deepEqual(errors,[]);
-    console.log("Social redesign browser: nine tabs/one window, ordered scrolling nav, preserved drafts, voice switching, friend request/acceptance/chat, hidden unread receipts, scoped notices, consented profile sync, mobile layouts and logout cleanup passed");
+    console.log("Social redesign browser: eleven tabs/one window, ordered scrolling nav, preserved drafts, voice switching, friend request/acceptance/chat, hidden unread receipts, scoped notices, consented profile sync, mobile layouts and logout cleanup passed");
   }finally{await browser?.close();server.closeAllConnections();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

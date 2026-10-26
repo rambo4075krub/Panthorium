@@ -8,10 +8,10 @@ async function suite(repo){
  const service=new SocialService({repository:repo,files:{findObject:async(uid,id)=>{assert.equal(uid,owner.sub);return id===video.id?video:gif;},preview:async()=>({body:Buffer.from("GIF89a"),contentType:"image/gif"})}});
  const write=(user,action,input)=>service.write({user,action,input,requestId:randomUUID()});
  for(const [i,user] of [owner,friend,other].entries())await write(user,"profile",{name:["Owner","Friend","Other"][i],discoverable:true});
- const post=(await write(owner,"publish",{module:"watch",text:"Friends only",audience:"friends",fileIds:[gif.id]})).record;
+ const post=(await write(owner,"publish",{module:"feed",text:"Friends only",audience:"friends",fileIds:[gif.id]})).record;
  assert.equal(post.title,""); assert.equal((await service.read({user:owner,recordId:post.id})).record.commentCount,0);
  const deny=async(user)=>{
-  assert(!(await service.read({user,module:"watch"})).items.some(p=>p.id===post.id));
+  assert(!(await service.read({user,module:"feed"})).items.some(p=>p.id===post.id));
   await assert.rejects(()=>service.read({user,recordId:post.id}),/social_not_found/);
   await assert.rejects(()=>service.media({user,recordId:post.id,fileId:gif.id}),/social_not_found/);
   await assert.rejects(()=>write(user,"comment",{recordId:post.id,text:"outside"}),/social_not_found/);
@@ -19,7 +19,7 @@ async function suite(repo){
  await deny(friend);await write(friend,"follow",{userId:owner.sub});await deny(friend);
  const request=(await write(friend,"friend-request",{userId:owner.sub})).record;await deny(friend);
  await write(owner,"friend-review",{recordId:request.id,accept:true});
- assert((await service.read({user:friend,module:"watch"})).items.some(p=>p.id===post.id));
+ assert((await service.read({user:friend,module:"feed"})).items.some(p=>p.id===post.id));
  assert.equal((await service.media({user:friend,recordId:post.id,fileId:gif.id})).contentType,"image/gif");
  const first=(await write(friend,"comment",{recordId:post.id,text:"Comment <script>safe</script>"})).record;
  assert.equal((await service.read({user:owner,recordId:post.id})).record.commentCount,1);
@@ -33,7 +33,7 @@ async function suite(repo){
  await write(owner,"edit",{recordId:post.id,audience:"public"});
  assert.equal((await service.read({user:other,recordId:post.id})).record.commentCount,1);
  const legacy={...post,id:"legacy:"+randomUUID(),kind:"community",audience:"public"};await repo.put(legacy);
- assert.equal((await service.read({user:other,recordId:legacy.id})).record.module,"watch");
+ assert.equal((await service.read({user:other,recordId:legacy.id})).record.module,"feed");
  // Accurate count across pages, moderation, deletion and per-viewer blocks.
  for(let i=0;i<205;i++)await repo.put({...surviving,id:String(Date.now()+i).padStart(16,"0")+"-"+randomUUID(),parentId:legacy.id,ownerId:i<100?friend.sub:other.sub,text:"Comment "+i});
  let page=await service.read({user:owner,recordId:legacy.id});assert.equal(page.items.length,100);assert.equal(page.record.commentCount,205);assert(page.nextCursor);

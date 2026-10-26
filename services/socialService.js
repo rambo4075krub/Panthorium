@@ -5,7 +5,9 @@ const { expiresAt, expired, expiredResult } = require("./socialRetention");
 const { randomUUID, createHash, createHmac } = require("node:crypto");
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const MODULES = ["watch", "short", "live", "market", "community", "talk", "connect"];
+const MODULES = ["feed", "short", "watch", "live", "tv", "market", "community", "talk", "connect"];
+const tv = require("./socialTv");
+const { source: mediaSource } = require("../social-media-source");
 const friendId = (a, b) => "friend:" + key(...[a, b].sort());
 const fail = (code, status = 400) => {
   throw Object.assign(Error(code), {
@@ -161,7 +163,7 @@ class SocialService {
       return true;
     }
     if (record.kind === "order") return record.members.includes(userId);
-    if (["watch", "short", "community", "listing", "live"].includes(record.kind))
+    if (["feed", "video", "watch", "short", "community", "listing", "live"].includes(record.kind))
       return (
         record.ownerId === userId ||
         record.audience === "public" ||
@@ -219,6 +221,7 @@ class SocialService {
     if (!MODULES.includes(module)) fail("social_invalid_module");
     await this.purgeExpiredMessages({ force: false });
     query = str(query, 200).toLowerCase();
+    if (module === "tv" && !recordId) return tv.read(this, user, { query, mode, before });
     if (recordId) {
       const r = await this.requireRecord(this.repo, uid, recordId);
       if (r.kind === "group") return this.readGroup(uid, r, before);
@@ -272,13 +275,13 @@ class SocialService {
       return { ok: true, items: [], optInRequired: true };
     const threads = module === "talk" || connectChats;
     const candidates = threads ? await this.repo.threadPage({ member: uid, connect: connectChats, before }) : await this.repo.list({
-      ...(["watch", "short"].includes(module) ? { kinds: ["watch", "short", "community"] } : { kind }),
+      ...(["feed", "watch", "short"].includes(module) ? { kinds: module === "watch" ? ["video"] : ["feed", "watch", "short", "community"] } : { kind }),
       ...(module === "talk" || connectChats ? { member: uid } : {}),
       before,
       limit: 100,
     });
     for (const r of candidates) {
-      if (["watch", "short"].includes(module) && moduleFor(r) !== module) continue;
+      if (["feed", "watch", "short"].includes(module) && moduleFor(r) !== module) continue;
       if (r.kind === "thread" && (r.context === "connect") !== connectChats) continue;
       if (
         !(await this.allowed(this.repo, uid, r)) ||
@@ -335,7 +338,7 @@ class SocialService {
         ? { id: latest.id, text: latest.text?.slice(0, 160) || "", ownerId: latest.ownerId, createdAt: latest.createdAt, attachmentCount: latest.files?.length || 0 }
         : null;
     }
-    if (["watch", "short", "community", "listing", "live"].includes(r.kind)) out.commentCount = await this.repo.commentCount(r.id, uid, r.kind === "live" ? "live-chat" : "comment");
+    if (["feed", "video", "watch", "short", "community", "listing", "live"].includes(r.kind)) out.commentCount = await this.repo.commentCount(r.id, uid, r.kind === "live" ? "live-chat" : "comment");
     if (r.kind === "thread" && r.context === "connect") out.author = (await this.messageView({ ownerId: r.ownerId }, r)).author;
     if (r.kind === "thread" && r.context === "support") {
       out.author = (await this.messageView({ ownerId: r.ownerId }, r)).author;
@@ -351,7 +354,7 @@ class SocialService {
         !!(await this.repo.get("interest:" + key(r.ownerId, uid))) &&
         !!(await this.repo.get("interest:" + key(uid, r.ownerId)));
     }
-    if (["watch", "short", "community", "listing", "live"].includes(r.kind)) {
+    if (["feed", "video", "watch", "short", "community", "listing", "live"].includes(r.kind)) {
       out.liked = !!(await this.repo.get("like:" + key(uid, r.id)));
     }
     return out;
@@ -533,6 +536,7 @@ class SocialService {
   }
   async mutate(repo, uid, action, a, files, user) {
     let record;
+    if (["tv-save", "tv-review", "tv-delete", "tv-favorite"].includes(action)) return tv.mutate(this, repo, user, action, a);
     if (action === "profile") {
       const name = str(a.name, 80);
       if (!name) fail("social_name_required");
@@ -551,22 +555,25 @@ class SocialService {
       if (connect?.enabled && connect.syncProfile) await repo.put({ ...connect, name, bio: record.bio, files });
     } else if (action === "publish" || action === "listing") {
       if (!(await repo.get("profile:" + uid))) fail("social_profile_required");
-      const kind = action === "listing" ? "listing" : a.module;
-      if (!["community", "watch", "short", "listing"].includes(kind))
+      const kind = action === "listing" ? "listing" : a.module === "watch" ? "video" : a.module;
+      if (!["community", "feed", "video", "short", "listing"].includes(kind))
         fail("social_invalid_module");
       const title = str(a.title || "", 200),
         text = str(a.text || "", 8000);
-      if (!title && !text && !files.length) fail("social_empty_post");
+      const source = kind === "video" && a.sourceUrl ? mediaSource(a.sourceType, a.sourceUrl) : null;
+      if (source && !["youtube", "video", "hls"].includes(source.type)) fail("social_invalid_media_url");
+      if (!title && !text && !files.length && !source) fail("social_empty_post");
+      if (kind === "video" && !source && !files.some(f => /^video\/(mp4|webm)$/.test(f.contentType))) fail("social_long_video_required");
       if (
         kind === "short" &&
         !files.some((f) => /^video\/(mp4|webm)$/.test(f.contentType))
       )
         fail("social_video_required");
-      if (kind === "watch" && files.some(f => !/^image\/(png|jpeg|webp|gif)$/.test(f.contentType))) fail("social_watch_images_only");
+      if (kind === "feed" && files.some(f => !/^image\/(png|jpeg|webp|gif)$/.test(f.contentType))) fail("social_feed_images_only");
       const audience = a.audience || "public";
       if (!["public", "friends", "followers", "private", "group"].includes(audience))
         fail("social_invalid_audience");
-      record = row(kind, uid, { title, text, files, audience, likeCount: 0 });
+      record = row(kind, uid, { title, text, files, audience, likeCount: 0, ...(source ? { source } : {}) });
       if (audience === "group") {
         const g = await this.requireRecord(repo, uid, a.groupId, "group");
         if (kind !== "community" || !g.members.includes(uid))
@@ -594,11 +601,18 @@ class SocialService {
       record = await this.requireRecord(repo, uid, a.recordId);
       if (
         record.ownerId !== uid ||
-        !["watch", "short", "community", "listing"].includes(record.kind)
+        !["feed", "video", "watch", "short", "community", "listing"].includes(record.kind)
       )
         fail("social_forbidden", 403);
       record.title = str(a.title ?? record.title, 200);
       record.text = str(a.text ?? record.text, 8000);
+      if (record.kind === "video" && a.sourceUrl !== undefined) {
+        const source = a.sourceUrl ? mediaSource(a.sourceType, a.sourceUrl) : null;
+        if (source && !["youtube", "video", "hls"].includes(source.type)) fail("social_invalid_media_url");
+        if (!source && !record.files.some(f => /^video\/(mp4|webm)$/.test(f.contentType))) fail("social_long_video_required");
+        if (source) record.source = source;
+        else delete record.source;
+      }
       if (a.audience) {
         if (
           !["public", "friends", "followers", "private"].includes(a.audience) ||
@@ -670,7 +684,7 @@ class SocialService {
       record = await this.requireRecord(repo, uid, a.recordId, "playlist");
       if (action === "playlist-add") {
         const target = await this.requireRecord(repo, uid, a.targetId);
-        if (moduleFor(target) !== "short") fail("social_video_required");
+        if (!["short", "watch"].includes(moduleFor(target))) fail("social_video_required");
         if (record.recordIds.length >= 200) fail("social_playlist_limit");
         if (!record.recordIds.includes(target.id))
           record.recordIds.push(target.id);
@@ -678,7 +692,7 @@ class SocialService {
         record.recordIds = record.recordIds.filter((x) => x !== a.targetId);
     } else if (action === "comment" || action === "like") {
       const target = await this.requireRecord(repo, uid, a.recordId);
-      if (!["watch", "short", "community", "listing", "live"].includes(target.kind) || (target.kind === "live" && action !== "like"))
+      if (!["feed", "video", "watch", "short", "community", "listing", "live"].includes(target.kind) || (target.kind === "live" && action !== "like"))
         fail("social_invalid_target");
       if (action === "comment") {
         const text = str(a.text, 2000);
@@ -766,7 +780,7 @@ class SocialService {
         uid,
         {
           id: rid,
-          title: str(a.title || (a.context === "connect" ? "บทสนทนา Connect" : "Talk"), 200),
+          title: str(a.title || (a.context === "connect" ? "บทสนทนา Connect" : "Chat"), 200),
           context: a.context === "connect" ? "connect" : "social",
           status: a.context === "connect" || friends ? "accepted" : "pending",
         },
@@ -1010,7 +1024,7 @@ class SocialService {
       if (
         !record ||
         record.ownerId !== uid ||
-        !["watch", "short", "community", "listing", "comment", "message", "group-message", "live-chat"].includes(
+        !["feed", "video", "watch", "short", "community", "listing", "comment", "message", "group-message", "live-chat"].includes(
           record.kind,
         )
       )
@@ -1019,6 +1033,7 @@ class SocialService {
       record.files = [];
       record.text = "";
       record.title = "";
+      delete record.source;
     } else if (action === "report") {
       await this.requireRecord(repo, uid, a.recordId);
       record = row("report", uid, {
@@ -1036,6 +1051,8 @@ class SocialService {
       if (
         !record ||
         ![
+          "feed",
+          "video",
           "watch",
           "short",
           "profile",

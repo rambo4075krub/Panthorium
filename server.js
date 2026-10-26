@@ -336,11 +336,19 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-studio-ui.js", "social-rtc.js", "social-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "live-voice-client.js"];
-for (const script of [...shellScripts, "workspace-ui.css"]) {
+const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-studio-ui.js", "social-rtc.js", "social-media-source.js", "social-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "live-voice-client.js"];
+app.get("/vendor/hls.min.js", (req, res) => res.type("application/javascript").sendFile(require.resolve("hls.js/dist/hls.min.js")));
+
+for (const script of [...shellScripts, "workspace-ui.css", "social-player.html", "social-player.js"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
       res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      if (script === "social-player.html") {
+        // Isolate external media permissions to this small, same-origin player.
+        // The desktop shell keeps its original same-origin/blob-only policy.
+        res.set("Referrer-Policy", "strict-origin-when-cross-origin");
+        res.set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob: https:; connect-src 'self' https:; frame-src https://www.youtube-nocookie.com; frame-ancestors 'self'; base-uri 'none'; object-src 'none'");
+      }
       res.sendFile(path.join(frontendRoot, script));
     } catch (error) {
       next(error);

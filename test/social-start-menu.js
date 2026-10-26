@@ -5,7 +5,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { JSDOM, VirtualConsole } = require("jsdom");
 const read = (file) => fs.readFileSync(path.join(__dirname, "..", file), "utf8");
-const modules = ["watch", "short", "live", "market", "community", "talk", "connect", "profile", "friends"];
+const modules = ["feed", "short", "watch", "live", "tv", "market", "community", "talk", "connect", "profile", "friends"];
 
 (async () => {
   for (const role of ["user", "administrator"]) {

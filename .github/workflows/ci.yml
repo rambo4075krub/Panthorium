@@ -91,6 +91,7 @@ jobs:
           node test/notifications-browser.js
           node test/social-redesign-browser.js
           node test/social-watch-browser.js
+          node test/social-tv-browser.js
           node test/office-suite-browser.js
       - name: Speaker service contract tests
         run: |

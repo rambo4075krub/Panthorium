@@ -49,6 +49,8 @@ const fields = {
     ...string("Who can read the post"),
     enum: ["public", "friends", "followers", "private", "group"],
   },
+  sourceType: { ...string("Watch external video source"), enum: ["youtube", "video", "hls"] },
+  sourceUrl: string("HTTPS video URL supplied by the user for Watch; do not invent or scrape stream URLs"),
   fileIds: {
     type: "ARRAY",
     description:

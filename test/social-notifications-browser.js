@@ -53,11 +53,14 @@ async function until(check, message) { const end = Date.now() + 16000; while (Da
     assert.equal(await reader.locator("[data-social]").count(), 0);
     assert.equal(await reader.locator('[data-app-id="social-talk"] [data-social-module-count]').textContent(), "1");
     assert.equal(await reader.locator('[data-start-group="social"] .sm-group-label [data-social-notification-count]').textContent(), "3");
-    for (const module of ["watch", "profile"]) {
+    for (const module of ["feed", "profile"]) {
       const marker = reader.locator('[data-app-id="social-' + module + '"] [data-social-module-count]');
       assert.equal(await marker.textContent(), "1");
       assert.equal(await marker.getAttribute("hidden"), null);
     }
+    const watchMarker = reader.locator('[data-app-id="social-watch"] [data-social-module-count]');
+    assert.equal(await watchMarker.textContent(), "0", "new long-video Watch has no pinned Feed marker");
+    assert.notEqual(await watchMarker.getAttribute("hidden"), null);
     await openAlerts(reader);
     const panel = reader.locator('[data-social="talk"] [data-activity-items]');
     await panel.getByText("ปานเทพ <img src=x onerror=alert(1)> • ส่งคำขอสนทนาถึงคุณ", { exact: true }).waitFor();

@@ -17,7 +17,14 @@ const { app } = require("../server");
       if (publicResponse.status !== 200 || !(await publicResponse.text()).includes('Panthorium Browser')) throw new Error('public policy unavailable: ' + route);
       if (publicResponse.headers.get('set-cookie')) throw new Error('public notice must not create a session');
     }
-    const shell = await (await fetch(base + '/')).text();
+    const shellResponse = await fetch(base + '/');
+    const shell = await shellResponse.text();
+    if (!shellResponse.headers.get('content-security-policy')?.includes("media-src 'self' blob:;")) throw new Error('desktop media policy widened');
+    const player = await fetch(base + '/social-player.html');
+    if (player.status !== 200 || !player.headers.get('content-security-policy')?.includes("frame-ancestors 'self'")) throw new Error('isolated player cannot be embedded by Panthorium');
+    if (!player.headers.get('content-security-policy')?.includes("media-src 'self' blob: https:")) throw new Error('player cannot load provider media');
+    if (player.headers.get('referrer-policy') !== 'strict-origin-when-cross-origin') throw new Error('YouTube embed origin referrer missing');
+    for (const file of ['social-player.js', 'social-media-source.js', 'vendor/hls.min.js']) if ((await fetch(base + '/' + file)).status !== 200) throw new Error('missing player asset ' + file);
     const releaseResponse = await fetch(base + '/app-release.json');
     if (releaseResponse.status !== 200 || !releaseResponse.headers.get('cache-control')?.includes('no-store')) throw new Error('public update metadata must bypass caches');
     const release = await releaseResponse.json();
