@@ -3,12 +3,13 @@ name: Build Panthorium Browser
 
 on:
   push:
-    branches: [staging]
+    branches: [main]
     paths:
       - "electron/**"
       - "package.json"
       - "package-lock.json"
       - "scripts/create-browser-update-manifests.js"
+      - "scripts/desktop-release-version.js"
       - "test/security-*.js"
       - "panthorium-logo*.svg"
       - "panthorium-logo*.png"
@@ -19,18 +20,29 @@ permissions:
   contents: read
 
 concurrency:
-  group: panthorium-browser-staging
+  group: panthorium-browser-production
   cancel-in-progress: false
 
 jobs:
   security:
-    if: github.ref == 'refs/heads/staging'
+    if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/security-scan.yml
     with:
       scan-container: false
+  version:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - id: version
+        run: node scripts/desktop-release-version.js >> "$GITHUB_OUTPUT"
   desktop-installer:
-    if: github.ref == 'refs/heads/staging'
-    needs: security
+    if: github.ref == 'refs/heads/main'
+    needs: [security, version]
     strategy:
       fail-fast: false
       matrix:
@@ -55,7 +67,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - name: Checkout staging
+      - name: Checkout reviewed main
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
@@ -79,9 +91,10 @@ jobs:
         shell: bash
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          DESKTOP_RELEASE_VERSION: ${{ needs.version.outputs.release }}
         run: |
           for attempt in 1 2 3; do
-            if npx --no-install electron-builder ${{ matrix.target }} --publish never -c.appId=com.panthorium.browser.${{ matrix.edition }} -c.productName="Panthorium Browser ${{ matrix.edition }}" -c.nsis.shortcutName="Panthorium Browser ${{ matrix.edition }}" -c.extraMetadata.panthoriumEdition=${{ matrix.edition }} -c.artifactName='Panthorium-Browser-${{ matrix.edition }}-${version}-${{ matrix.platform }}-${arch}.${ext}'; then
+            if npx --no-install electron-builder ${{ matrix.target }} --publish never -c.appId=com.panthorium.browser.${{ matrix.edition }} -c.productName="Panthorium Browser ${{ matrix.edition }}" -c.nsis.shortcutName="Panthorium Browser ${{ matrix.edition }}" -c.extraMetadata.panthoriumEdition=${{ matrix.edition }} -c.extraMetadata.version="$DESKTOP_RELEASE_VERSION" -c.artifactName='Panthorium-Browser-${{ matrix.edition }}-${version}-${{ matrix.platform }}-${arch}.${ext}'; then
               exit 0
             fi
             echo "electron-builder failed; retry $attempt/3"
@@ -98,8 +111,8 @@ jobs:
           retention-days: 14
 
   publish-staging-release:
-    if: github.ref == 'refs/heads/staging'
-    needs: desktop-installer
+    if: github.ref == 'refs/heads/main'
+    needs: [desktop-installer, version]
     # Build/install scripts run in separate read-only jobs without release secrets.
     permissions:
       contents: write
@@ -127,17 +140,18 @@ jobs:
         # Provision a private key only after its public key is committed to
         # electron/update-trust.json. The signer fails closed without both.
         env:
+          PANTHORIUM_DESKTOP_RELEASE_VERSION: ${{ needs.version.outputs.release }}
           PANTHORIUM_UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.PANTHORIUM_UPDATE_SIGNING_PRIVATE_KEY }}
           PANTHORIUM_UPDATE_SIGNING_KEY_ID: ${{ vars.PANTHORIUM_UPDATE_SIGNING_KEY_ID }}
         run: node scripts/create-browser-update-manifests.js dist
 
-      - name: Publish staging browser release
+      - name: Publish browser release (legacy updater URL)
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: staging
-          name: Panthorium Browser (Staging)
-          prerelease: true
-          make_latest: false
+          name: Panthorium Browser
+          prerelease: false
+          make_latest: true
           files: dist/*
           fail_on_unmatched_files: true
           overwrite_files: true

@@ -11,7 +11,7 @@ const {fetchBounded}=require('./update-download.cjs');
 const updateTrust=require('./update-trust.json');
 const EDITION=metadata.panthoriumEdition==='admin'?'admin':'user';
 const PRODUCT_NAME='Panthorium Browser '+(EDITION==='admin'?'Admin':'User');
-const START_URL=process.env.PANTHORIUM_URL||('https://panthorium-backend-staging-124818950958.asia-southeast1.run.app'+(EDITION==='admin'?'/admin':'/'));
+const START_URL=process.env.PANTHORIUM_URL||('https://panthorium.net'+(EDITION==='admin'?'/admin':'/'));
 app.setPath('userData',path.join(app.getPath('appData'),'Panthorium-Browser-'+EDITION));
 const API_ORIGIN=new URL(START_URL).origin;
 const HOSTS=new Set(['www.youtube.com','www.facebook.com','line.me','www.tiktok.com','www.instagram.com','x.com']);
@@ -139,6 +139,7 @@ function applyUpdateInstaller(target,platform){
   return false;
 }
 let updateInstallBusy=false;
+let deferredUpdateVersion=null;
 async function checkForUpdates(options={}){
   if(options.checkOnly)return performUpdateCheck(options);
   if(updateInstallBusy)return {ok:false,error:'update_in_progress'};
@@ -179,13 +180,21 @@ async function performUpdateCheck(options={}){
     if(!trustedUpdateUrl(asset.url))throw new Error('untrusted_update_url');
     // Rendering the Start Menu must never download an installer or open a dialog.
     if(options.checkOnly)return {ok:true,upToDate:false,available:true,current,remote,platform,installable:signature.ok,verificationError:signature.ok?null:signature.error};
+    if(!manual && deferredUpdateVersion===remote)return {ok:true,deferred:true,current,remote,platform};
     const expected=asset.size;
     if(!Number.isSafeInteger(expected)||expected<=0||expected>250*1024*1024)throw new Error('update_size_invalid');
-    const binary=await fetchBounded(net.fetch.bind(net),asset.url,{maxBytes:expected,timeoutMs:300000,prefix:'update'});
+    const target=path.join(app.getPath('userData'),'updates',path.basename(asset.name));
+    let binary;
+    try {
+      if(fs.statSync(target).size===expected){
+        const cached=fs.readFileSync(target);
+        if(crypto.createHash('sha256').update(cached).digest('hex')===asset.sha256)binary=cached;
+      }
+    }catch(_){}
+    if(!binary)binary=await fetchBounded(net.fetch.bind(net),asset.url,{maxBytes:expected,timeoutMs:300000,prefix:'update'});
     if(binary.length!==expected)throw new Error('update_size_mismatch');
     const digest=crypto.createHash('sha256').update(binary).digest('hex');
     if(digest!==asset.sha256)throw new Error('update_checksum_failed');
-    const target=path.join(app.getPath('userData'),'updates',path.basename(asset.name));
     fs.mkdirSync(path.dirname(target),{recursive:true});
     fs.writeFileSync(target,binary,{mode:0o700});
     const platformLabel=platform==='windows'?'Windows':platform==='macos'?'macOS':'Linux';
@@ -209,6 +218,7 @@ async function performUpdateCheck(options={}){
       applyUpdateInstaller(target,platform);
       return {ok:true,updated:true,current,remote,platform};
     }
+    deferredUpdateVersion=remote;
     return {ok:true,deferred:true,current,remote,platform};
   }catch(error){
     console.warn('[Panthorium Update]',error.message);
@@ -229,7 +239,7 @@ app.whenReady().then(()=>{
   browserSecurity.installSession(session.defaultSession);
   create();
   setTimeout(()=>checkForUpdates({manual:false}),15000);
-  setInterval(()=>checkForUpdates({manual:false}),6*60*60*1000).unref();
+  setInterval(()=>checkForUpdates({manual:false}),60*1000).unref();
   app.on('activate',()=>{if(!BrowserWindow.getAllWindows().length)create();});
 });
 app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit();});

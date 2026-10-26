@@ -18,6 +18,13 @@ const { app } = require("../server");
       if (publicResponse.headers.get('set-cookie')) throw new Error('public notice must not create a session');
     }
     const shell = await (await fetch(base + '/')).text();
+    const releaseResponse = await fetch(base + '/app-release.json');
+    if (releaseResponse.status !== 200 || !releaseResponse.headers.get('cache-control')?.includes('no-store')) throw new Error('public update metadata must bypass caches');
+    const release = await releaseResponse.json();
+    if (!/^[a-zA-Z0-9._-]{1,160}$/.test(release.release) || !shell.includes('data-panthorium-release="' + release.release + '"')) throw new Error('update baseline must identify the HTML actually served');
+    if (!shell.includes('/app-update-client.js') || shell.indexOf('/app-update-client.js') > shell.indexOf('/access-shell-ui.js')) throw new Error('shared updater must load before the menu');
+    const updateClient = await fetch(base + '/app-update-client.js');
+    if (updateClient.status !== 200 || !updateClient.headers.get('cache-control')?.includes('no-store')) throw new Error('update client must bypass caches');
     if (shell.indexOf('/privacy-notice.js') < 0 || shell.indexOf('/privacy-notice.js') > shell.indexOf('/privacy-policy-ui.js')) throw new Error('shared policy must load before policy UI');
     let r = await fetch(base + "/api/health");
     if (r.status !== 200) throw new Error("health failed");

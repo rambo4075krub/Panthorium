@@ -4,6 +4,9 @@
   const restrictedLabels = /ตั้งค่า|Settings|Security|AI Platform|Sentinel Agent|Agent Automation|Memory|Multi-Agent|Integrations|Learning Lab|Training Lab|Production Intelligence|Governance|Sentinel Control|User Management/i;
   const desktop = () => window.panthoriumDesktop;
   const electron = () => desktop()?.isElectron === true;
+  const android = () => window.Capacitor?.getPlatform?.() === 'android' || /PanthoriumAndroid/.test(navigator.userAgent);
+  const installed = () => electron() || android() || window.Capacitor?.isNativePlatform?.() === true;
+  const playUrl = 'https://play.google.com/store/apps/details?id=com.panthorium.browser';
   const auth = () => window.PanthoriumAuth;
   const user = () => typeof OS !== 'undefined' ? OS.state.user : null;
   const guest = () => !user() || user().roles?.includes('guest');
@@ -19,6 +22,8 @@
     el.textContent = `
       #start-menu .browser-action{display:block;width:calc(100% - 24px);margin:0 12px 12px;padding:12px 10px;border:1px solid rgba(0,255,204,.22);border-radius:10px;background:rgba(0,255,204,.06);color:inherit;font:inherit;text-align:center;cursor:pointer;text-decoration:none;box-sizing:border-box;}
       #start-menu .browser-action:disabled{cursor:default;opacity:.7;}
+      #start-menu .browser-action [data-update-label]{display:block;font-weight:700;}
+      #start-menu .browser-action [data-update-message]{display:block;margin-top:4px;font-size:12px;opacity:.8;}
       body[data-panthorium-role="user"] #btn-settings-quick,body[data-panthorium-role="guest"] #btn-settings-quick{display:none!important;}
       body[data-panthorium-role="guest"][data-panthorium-browser="desktop"] #sm-apps{display:block!important;}
       #start-menu .sm-footer{display:flex;gap:8px;}
@@ -61,17 +66,20 @@
     const button = document.getElementById('panthorium-browser-update');
     if (!button) return;
     button.disabled = installing || !!checking;
-    button.textContent = installing ? 'กำลังเตรียมอัปเดตบราวเซอร์' : checking && !updateStatus ? 'กำลังตรวจสอบเวอร์ชั่น' : !updateStatus?.ok ? 'ตรวจสอบอัปเดตอีกครั้ง' : updateStatus.available ? 'อัปเดต Panthorium Browser' : 'ปัจจุบันเป็นเวอร์ชันล่าสุดแล้ว';
+    if (!button.querySelector('[data-update-label]')) button.innerHTML = '<span data-update-label>อัพเดท</span><small data-update-message role="status" aria-live="polite"></small>';
+    const web = window.PanthoriumUpdates?.state?.();
+    const message = installing ? 'กำลังเตรียมอัพเดท' : checking ? 'กำลังตรวจสอบเวอร์ชั่น' : web?.available ? 'มีเวอร์ชั่นเว็บใหม่พร้อมอัพเดท' : !updateStatus?.ok ? 'ตรวจสอบไม่สำเร็จ กดเพื่อลองอัพเดท' : updateStatus.storeCheck ? 'ตรวจสอบและอัพเดทผ่าน Google Play' : updateStatus.available ? 'มีเวอร์ชั่นใหม่พร้อมอัพเดท' : 'เป็นเวอร์ชั่นล่าสุดแล้ว';
+    button.querySelector('[data-update-message]').textContent = message;
     button.dataset.state = installing ? 'installing' : !updateStatus?.ok ? 'unknown' : updateStatus.available ? 'available' : 'current';
-    button.title = button.textContent;
+    button.title = 'อัพเดท — ' + message;
   }
   async function refreshUpdateStatus(force = false) {
-    if (!electron()) return;
+    if (!installed()) return;
     if (checking) return checking;
     if (!force && lastChecked && Date.now() - lastChecked < 60000) return updateStatus;
     checking = (async () => {
       try {
-        const result = desktop()?.getUpdateStatus ? await desktop().getUpdateStatus() : await legacyStatus();
+        const result = android() ? { ok: true, available: true, storeCheck: true } : electron() ? (desktop()?.getUpdateStatus ? await desktop().getUpdateStatus() : await legacyStatus()) : { ok: false };
         updateStatus = { ...result, available: result?.available === true || (!!result?.current && !!result?.remote && newer(result.current, result.remote)) };
       } catch (_) { updateStatus = { ok: false }; }
       finally { lastChecked = Date.now(); }
@@ -83,17 +91,34 @@
   }
   async function updateBrowser() {
     if (installing) return;
+    if (android()) {
+      // A user gesture opens the verified store destination even on older APKs
+      // without an app-version bridge. Never claim their binary is current.
+      window.location.assign(playUrl);
+      return;
+    }
+    if (window.PanthoriumUpdates?.state?.().available) {
+      await window.PanthoriumUpdates.apply({ manual: true });
+      return;
+    }
     const status = await refreshUpdateStatus(true);
-    if (!status?.ok || !status.available) return;
+    if (status?.ok && !status.available) {
+      await window.PanthoriumUpdates?.check?.({ manual: true });
+      if (window.PanthoriumUpdates?.state?.().available) await window.PanthoriumUpdates.apply({ manual: true });
+      return;
+    }
     if (!desktop()?.checkForUpdates) {
-      window.open('/browser-download.html' + (admin() ? '?edition=admin' : ''), '_blank', 'noopener');
+      window.location.assign('/browser-download.html' + (admin() ? '?edition=admin' : ''));
       return;
     }
     installing = true;
     renderUpdateStatus();
     try {
       const result = await desktop().checkForUpdates();
-      if (!result?.ok) updateStatus = { ok: false };
+      if (!result?.ok) {
+        updateStatus = { ok: false };
+        window.location.assign('/browser-download.html' + (admin() ? '?edition=admin' : ''));
+      }
       else updateStatus = { ...result, available: !!result.deferred || (!!result.current && !!result.remote && newer(result.current, result.remote)) };
     } catch (_) { updateStatus = { ok: false }; }
     finally { installing = false; renderUpdateStatus(); }
@@ -116,7 +141,7 @@
     const menu = document.getElementById('start-menu');
     if (!menu) return;
     style();
-    const isGuest = guest(), isDesktop = electron(), isStaff = staff();
+    const isGuest = guest(), isDesktop = electron(), isInstalled = installed(), isStaff = staff();
     document.body.dataset.panthoriumRole = isGuest ? 'guest' : admin() ? 'admin' : 'user';
     document.body.dataset.panthoriumBrowser = isDesktop ? 'desktop' : 'web';
     restrictedLaunchers.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = isStaff ? '' : 'none'; });
@@ -176,17 +201,17 @@
       logout.title = 'ออกจากระบบ';
       logout.onclick = () => auth()?.logout?.();
     }
-    if (isDesktop) {
+    if (isInstalled) {
       // Every installed edition uses the same update controls.
       document.getElementById('panthorium-browser-download')?.remove();
       let update = document.getElementById('panthorium-browser-update');
       if (!update) { update = document.createElement('button'); update.id = 'panthorium-browser-update'; update.type = 'button'; update.className = 'browser-action'; update.onclick = updateBrowser; menu.appendChild(update); }
       renderUpdateStatus();
       refreshUpdateStatus();
-    } else if (!isDesktop) {
+    } else {
       document.getElementById('panthorium-browser-update')?.remove();
     }
-    if (!isDesktop) {
+    if (!isInstalled) {
       document.getElementById('panthorium-browser-update')?.remove();
       let download = document.getElementById('panthorium-browser-download');
       if (!download) {
@@ -206,6 +231,7 @@
   }
   const scheduleSync = () => requestAnimationFrame(sync);
   for (const name of ['panthorium:auth-changed', 'panthorium:apps-changed', 'panthorium:desktop-ready', 'panthorium:boot-complete', 'focus']) window.addEventListener(name, scheduleSync);
+  window.addEventListener('panthorium:update-status', renderUpdateStatus);
   document.addEventListener('DOMContentLoaded', scheduleSync, { once: true });
   document.getElementById('start-btn')?.addEventListener('click', scheduleSync);
   scheduleSync();

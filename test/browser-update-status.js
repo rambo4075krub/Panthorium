@@ -15,7 +15,7 @@ const source = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'ut
   for (const edition of ['admin', 'user']) for (const platform of ['win32', 'darwin', 'linux']) {
     const handlers = new Map(), requests = [];
     let dialogs = 0, remote = '15.0.5', fail = false;
-    const origin = 'https://panthorium-backend-staging-124818950958.asia-southeast1.run.app';
+    const origin = 'https://panthorium.net';
     const electron = {
       app: { isPackaged: true, getVersion: () => '15.0.4', getPath: () => '/tmp', setPath() {}, whenReady: () => ({ then() {} }), on() {} },
       ipcMain: { handle: (name, fn) => handlers.set(name, fn) },

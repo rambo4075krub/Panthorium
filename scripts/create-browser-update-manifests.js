@@ -10,6 +10,8 @@ const signingKeyId=process.env.PANTHORIUM_UPDATE_SIGNING_KEY_ID;
 // Validate provisioning before writing any release metadata.
 signManifest({probe:true},signingKey,signingKeyId,updateTrust);
 const directory=path.resolve(process.argv[2]||'dist');
+const releaseVersion = process.env.PANTHORIUM_DESKTOP_RELEASE_VERSION || metadata.version;
+if (!/^\d+\.\d+\.\d+$/.test(releaseVersion)) throw new Error('Invalid desktop release version');
 const releaseBase='https://github.com/rambo4075krub/Panthorium/releases/download/staging/';
 
 function detectPlatform(name){
@@ -42,13 +44,13 @@ if(!fs.existsSync(directory))throw new Error('dist directory missing: '+director
 const files=fs.readdirSync(directory).sort((a,b)=>a.localeCompare(b));
 for(const edition of ['admin','user']){
   const manifest={
-    version:metadata.version,
+    version:releaseVersion,
     edition,
     releasedAt:new Date().toISOString(),
     assets:{}
   };
   for(const name of files){
-    if(!name.startsWith('Panthorium-Browser-'+edition+'-'))continue;
+    if(!name.startsWith('Panthorium-Browser-'+edition+'-'+releaseVersion+'-'))continue;
     const platform=detectPlatform(name);
     if(!platform)continue;
     const bytes=fs.readFileSync(path.join(directory,name));
@@ -63,9 +65,9 @@ for(const edition of ['admin','user']){
       manifest.assets[platform]=asset;
     }
   }
-  if(!manifest.assets.windows)throw new Error('missing Windows '+edition+' installer');
+  for(const platform of ['windows','macos','linux'])if(!manifest.assets[platform])throw new Error('missing '+platform+' '+edition+' installer for '+releaseVersion);
   const out=path.join(directory,'Panthorium-Browser-'+edition+'-update.json');
   fs.writeFileSync(out,JSON.stringify(signManifest(manifest,signingKey,signingKeyId,updateTrust),null,2)+'\n');
   console.log('wrote',path.basename(out),'platforms',Object.keys(manifest.assets).sort().join(','));
 }
-console.log('Panthorium update manifests created for version',metadata.version);
+console.log('Panthorium update manifests created for version',releaseVersion);

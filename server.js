@@ -336,7 +336,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-studio-ui.js", "social-rtc.js", "social-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "live-voice-client.js"];
+const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-studio-ui.js", "social-rtc.js", "social-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "live-voice-client.js"];
 for (const script of [...shellScripts, "workspace-ui.css"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
@@ -348,9 +348,15 @@ for (const script of [...shellScripts, "workspace-ui.css"]) {
   });
 }
 
+const appRelease = String(process.env.K_REVISION || process.env.PANTHORIUM_RELEASE || require("./package.json").version).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160);
+app.get("/app-release.json", (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.json({ release: appRelease });
+});
+
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
-  html = html.replace('<body>', '<body data-gemini-live-enabled="' + (process.env.GEMINI_LIVE_ENABLED === "1" ? "true" : "false") + '" data-ai-mode="' + (process.env.PANTHORIUM_AI_MODE === "gemini-live-only" ? "gemini-live-only" : "legacy") + '" data-voice-identity-required="' + (config.biometricGateEnabled ? "true" : "false") + '">');
+  html = html.replace('<body>', '<body data-panthorium-release="' + appRelease + '" data-gemini-live-enabled="' + (process.env.GEMINI_LIVE_ENABLED === "1" ? "true" : "false") + '" data-ai-mode="' + (process.env.PANTHORIUM_AI_MODE === "gemini-live-only" ? "gemini-live-only" : "legacy") + '" data-voice-identity-required="' + (config.biometricGateEnabled ? "true" : "false") + '">');
   const version = `${require("./package.json").version}-workspace-ux-20261015`;
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
