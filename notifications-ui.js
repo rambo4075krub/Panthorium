@@ -275,7 +275,7 @@
     host.append(master);
     const eventList = node('section', null, { class: 'pn-card pn-event-list', 'data-notification-event-list': '', 'aria-label': 'เลือกรายการที่ต้องการแจ้งเตือน' });
     const columns = node('div', null, { class: 'pn-event-columns' });
-    columns.append(node('h3', 'รายการแจ้งเตือน'), node('span', 'เปิด–ปิด'));
+    columns.append(node('h3', 'รายการแจ้งเตือน'), node('span', 'ปิด-เปิด'));
     eventList.append(columns, node('p', 'เลือกรายการที่ต้องการรับแจ้งเตือน • บันทึกอัตโนมัติ', { class: 'pn-muted' }));
     let group, lastCategory;
     for (const entry of eventEntries()) {
@@ -308,7 +308,7 @@
     channels.append(button('เปิด/ทดสอบเสียงบนอุปกรณ์นี้', unlockDeviceAudio, { 'data-notification-audio-unlock': '' }));
     channels.append(node('p', audioContext?.state === 'running' ? 'เสียงสัญญาณพร้อมในหน้านี้ • เสียงอ่านขึ้นกับเสียงและสิทธิ์ของอุปกรณ์' : 'หลังเปิดหน้าใหม่ แตะทดสอบเสียงเพื่อเปิดเสียงบนอุปกรณ์นี้ สวิตช์เสียงเพียงอย่างเดียวไม่ได้ปลดล็อกเสียงของเบราว์เซอร์', { class: 'pn-muted' }));
     channels.append(node('p', 'Push ช่วยรับแจ้งเตือนเมื่อปิดแอป แต่การบังคับหยุดแอป ปิดสิทธิ์ ออฟไลน์ หรือโหมดประหยัดแบตเตอรี่อาจทำให้ล่าช้า เสียงตอนปิดแอปขึ้นกับระบบของอุปกรณ์', { class: 'pn-muted' })); advancedContent.append(channels);
-    const types = node('section', null, { class: 'pn-card' }); types.append(node('h3', 'เปิด–ปิดทั้งหมวด'));
+    const types = node('section', null, { class: 'pn-card' }); types.append(node('h3', 'ปิด-เปิดทั้งหมวด'));
     for (const [key, [title, desc]] of Object.entries(CATEGORIES)) types.append(switchRow(title, desc, settings.categories?.[key], value => saveSettings({ categories: { [key]: value } }), 'categories.' + key));
     advancedContent.append(types);
     const privacy = node('section', null, { class: 'pn-card' }); privacy.append(node('h3', 'ความเป็นส่วนตัวและการขอแจ้งเตือน'));
