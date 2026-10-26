@@ -48,7 +48,7 @@ const merge = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && ty
   assert.equal(history.open, false); assert.equal(advanced().open, false);
   assert(eventList.compareDocumentPosition(history) & w.Node.DOCUMENT_POSITION_FOLLOWING, 'event choices precede collapsed history');
   assert.deepEqual([...eventList.querySelectorAll('[data-notification-event]')].map(row => row.dataset.notificationEvent), catalog.entries.map(row => row.id), 'all concrete notification rows follow the shared fixed order');
-  assert.match(eventList.querySelector('.pn-event-columns').textContent, /รายการแจ้งเตือนเปิด–ปิด/);
+  assert.match(eventList.querySelector('.pn-event-columns').textContent, /รายการแจ้งเตือนปิด-เปิด/);
   advanced().open = true;
   setting('events.operation_succeeded').focus(); setting('events.operation_succeeded').click(); await tick();
   assert.equal(settings.events.operation_succeeded, false); assert.equal(settings.events.operation_failed, true, 'success and failure choices are independent');
