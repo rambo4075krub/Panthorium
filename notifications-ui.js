@@ -222,11 +222,25 @@
     }
     return saveSettings({ events });
   }
+  const webDevice = () => !!window.PanthoriumPush && !window.PanthoriumPush.native() && !window.PanthoriumPush.desktop?.();
+  async function enableDevice() {
+    const pending=window.PanthoriumPush.enable();
+    if(!webDevice())return pending;
+    // A browser's Push provider can stall even after notification permission
+    // is granted. Keep foreground delivery available without claiming Push readiness.
+    let timer;
+    try{return await Promise.race([pending,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('การลงทะเบียนรับเบื้องหลังยังไม่ตอบกลับ กรุณาตรวจการเชื่อมต่อแล้วลองใหม่')),20000);})]);}
+    finally{clearTimeout(timer);}
+  }
   async function channel(key, value) {
     const s = session;
     if (!current(s)) return;
+    let backgroundWarning='';
     if (key === 'browser' && value && window.PanthoriumPush) {
-      try { await window.PanthoriumPush.enable(); } catch(e) { message(e.message); return; }
+      try { await enableDevice(); } catch(e) {
+        if(webDevice()&&window.Notification?.permission==='granted')backgroundWarning=e.message;
+        else{message(e.message);return;}
+      }
     } else if (key === 'browser' && value) {
       if (!window.Notification) { message('เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือนบนอุปกรณ์'); return; }
       try {
@@ -247,7 +261,8 @@
       const saved=await saveSettings({ channels: { [key]: value } });
       if(saved&&key==='browser'){
         if(!value)await window.PanthoriumPush?.disconnect().catch(e=>message(e.message));
-        else document.querySelector('[data-notification-opt-in]')?.remove();
+        else if(!backgroundWarning)document.querySelector('[data-notification-opt-in]')?.remove();
+        if(backgroundWarning)message('เปิดป๊อปอัปขณะเปิดเว็บแล้ว • การรับเบื้องหลังยังไม่พร้อม: '+backgroundWarning);
       }
     }
   }
@@ -263,7 +278,7 @@
       await channel('browser',true);
       if(!current(s))return;
       if(s.settings.channels.browser&&window.PanthoriumPush.active())prompt.remove();
-      else {const hint=prompt.querySelector('.pn-muted');hint.textContent='ยังเปิดไม่สำเร็จ • เปิดตั้งค่าการแจ้งเตือนเพื่อตรวจสาเหตุหรืออัปเดตตัวแอพ';open();}
+      else {const hint=prompt.querySelector('.pn-muted');hint.textContent=webDevice()&&s.settings.channels.browser&&window.Notification?.permission==='granted'?'เปิดป๊อปอัปขณะเปิดเว็บแล้ว • การรับเบื้องหลังยังไม่พร้อม':'ยังเปิดไม่สำเร็จ • เปิดตั้งค่าการแจ้งเตือนเพื่อตรวจสาเหตุหรืออัปเดตตัวแอพ';open();}
     }),button('ภายหลัง',()=>{try{sessionStorage.setItem('panthorium-notification-offer',s.uid);}catch{}prompt.remove();}));
     prompt.append(controls);document.body.append(prompt);
   }
@@ -272,10 +287,11 @@
     if(!s.settings.enabled||!s.settings.channels.browser){message('เปิดการแจ้งเตือนและช่องทางบนอุปกรณ์ก่อนส่งทดสอบ');return;}
     if(quietNow(s.settings)){message('อยู่ในช่วงห้ามรบกวน • ปิดช่วงห้ามรบกวนก่อนทดสอบป๊อบอัพ');return;}
     try{
-      if(window.PanthoriumPush?.check && !(await window.PanthoriumPush.check()).registered){message('อุปกรณ์นี้ยังไม่ได้ลงทะเบียนหรือการลงทะเบียนหมดอายุ • เปิดสวิตช์บนอุปกรณ์อีกครั้ง');return;}
+      const foregroundOnly=window.PanthoriumPush?.check && !(await window.PanthoriumPush.check()).registered;
+      if(foregroundOnly&&!(webDevice()&&window.Notification?.permission==='granted')){message('อุปกรณ์นี้ยังไม่ได้ลงทะเบียนหรือการลงทะเบียนหมดอายุ • เปิดสวิตช์บนอุปกรณ์อีกครั้ง');return;}
       const sent=await request(s,'/send',{method:'POST',body:JSON.stringify({title:'ทดสอบป๊อบอัพ Panthorium',body:'ข้อความทดสอบการแจ้งเตือนจากบัญชีของคุณ',category:'system'})});
       if(sent.alertsEnabled===false){message('บันทึกข้อความทดสอบแล้ว แต่หมวดการแจ้งเตือนระบบถูกปิดอยู่');return;}
-      if(current(s)){await refresh();message('สร้างแจ้งเตือนทดสอบแล้ว • ตรวจป๊อบอัพบนอุปกรณ์ที่เปิดรับไว้ หากไม่ขึ้นให้ตรวจโหมดห้ามรบกวนและสิทธิ์ของระบบ');}
+      if(current(s)){await refresh();message(foregroundOnly?'สร้างแจ้งเตือนทดสอบขณะเปิดเว็บแล้ว • การรับเบื้องหลังยังไม่พร้อม':'สร้างแจ้งเตือนทดสอบแล้ว • ตรวจป๊อบอัพบนอุปกรณ์ที่เปิดรับไว้ หากไม่ขึ้นให้ตรวจโหมดห้ามรบกวนและสิทธิ์ของระบบ');}
     }catch(_){if(current(s))message('ส่งแจ้งเตือนทดสอบไม่สำเร็จ • ตรวจการเชื่อมต่อแล้วลองใหม่');}
   }
   async function unlockDeviceAudio() {
@@ -335,7 +351,7 @@
     const pushActive=window.PanthoriumPush?.active()===true;
     channels.append(switchRow('แจ้งเตือนแม้ปิดแอปบนอุปกรณ์นี้', pushActive?(window.PanthoriumPush?.desktop?.()?'เปิดรับเบื้องหลังแล้ว • ปิดหน้าต่างจะย่อไปที่ถาดระบบ การออกจากโปรแกรมจะหยุดรับ':'ลงทะเบียนอุปกรณ์แล้ว • ต้องเปิดช่องทางบนอุปกรณ์และรายการที่ต้องการด้วย'):'อุปกรณ์นี้ยังไม่พร้อมรับเบื้องหลัง • เปิดสวิตช์เพื่อลงทะเบียน',pushActive,async value=>{
       try { if(!window.PanthoriumPush)throw Error('กรุณารีเฟรชเพื่อโหลดระบบแจ้งเตือน');
-        if(value){await window.PanthoriumPush.enable();if(current(s))await saveSettings({channels:{browser:true}});}
+        if(value){await enableDevice();if(current(s))await saveSettings({channels:{browser:true}});}
         else await window.PanthoriumPush.disconnect();
         for(const view of roots.values())view.signature='';render();
       }catch(e){message(e.message);}
@@ -472,7 +488,7 @@
   window.PanthoriumNotifications = { mount, open, refresh, readAloud, stopSpeaking, getState: () => current(session) ? { loaded: session.loaded, unreadCount: session.unreadCount, settings: session.settings ? JSON.parse(JSON.stringify(session.settings)) : null } : null };
   window.addEventListener('panthorium:auth-changed', () => { sync(true); refresh(); });
   window.addEventListener('panthorium:boot-complete', refresh);
-  window.addEventListener('panthorium:push-changed', () => { for(const view of roots.values())view.signature='';render(); });
+  window.addEventListener('panthorium:push-changed', () => { if(window.PanthoriumPush?.active())document.querySelector('[data-notification-opt-in]')?.remove();for(const view of roots.values())view.signature='';render(); });
   window.addEventListener('online', refresh);
   window.addEventListener('offline', () => { stopSpeaking(); message('ออฟไลน์ • รายการจะอัปเดตเมื่อเชื่อมต่ออีกครั้ง'); });
   window.addEventListener('panthorium:notifications-changed', async () => {
