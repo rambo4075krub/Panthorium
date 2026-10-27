@@ -38,7 +38,7 @@
   }
   if (stream.type === "trueid") {
     const iframe = document.createElement("iframe"); iframe.title = "TrueID Free TV player";
-    const url = new URL(stream.embedUrl); url.searchParams.set("autoplay", "1"); url.searchParams.set("muted", "1");
+    const url = new URL(stream.embedUrl); url.searchParams.set("autoplay", "true"); url.searchParams.set("muted", "true");
     iframe.src = url.href; iframe.allow = "autoplay; fullscreen; picture-in-picture; encrypted-media";
     iframe.referrerPolicy = "strict-origin-when-cross-origin"; iframe.allowFullscreen = true; document.body.append(iframe);
     // Provider retains control of its player, advertising and regional rights.

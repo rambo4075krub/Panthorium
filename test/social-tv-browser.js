@@ -49,7 +49,7 @@ async function until(fn, label) { const end = Date.now() + 15000; while (Date.no
     assert.equal(await readyChannel.getByRole("button", { name: "▶ เล่นใน Panthorium", exact: true }).count(),0);
     const embedded = readyChannel.frameLocator("iframe").locator('iframe[title="TrueID Free TV player"]');
     await embedded.waitFor();
-    assert.equal(await embedded.getAttribute("src"), "https://tv.trueid.net/th-th/embed/thaipbs?autoplay=1&muted=1");
+    assert.equal(await embedded.getAttribute("src"), "https://tv.trueid.net/th-th/embed/thaipbs?autoplay=true&muted=true");
     assert((await embedded.getAttribute("allow")).includes("autoplay"));
     await provider.locator('[data-social-tab="feed"]').click();
     assert.equal(await readyChannel.locator("iframe").count(), 0, "free TV stops when switching tabs");

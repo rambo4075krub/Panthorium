@@ -48,7 +48,7 @@ const { createSocialRouter } = require('../routes/social');
     await staff.evaluate(() => PanthoriumContact.open());
     await staff.getByRole('button', { name: 'แชทกับเรา', exact: true }).click();
     await staff.getByRole('heading', { name: 'ผู้สอบถาม', exact: true }).waitFor();
-    await staff.getByRole('button', { name: 'เปิดบทสนทนา', exact: true }).click();
+    await staff.locator('[data-social="talk"] [data-record-id]').click();
     await staff.getByLabel('ข้อความ', { exact: true }).fill('แอดมินได้รับเรื่องแล้ว');
     await staff.getByRole('button', { name: 'ส่ง', exact: true }).click();
     await customer.getByText('แอดมินได้รับเรื่องแล้ว', { exact: true }).waitFor();
