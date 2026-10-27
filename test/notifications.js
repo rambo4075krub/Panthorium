@@ -17,6 +17,11 @@ async function suite(repository,label) {
   const service = new NotificationService({repository,now:()=>now});
   await service.init();
   assert.deepEqual((await service.settings({user})).settings,DEFAULT_SETTINGS);
+  assert.equal(DEFAULT_SETTINGS.channels.inApp,false);
+  await service.updateSettings({user,patch:{channels:{inApp:true}}});
+  await service.updateSettings({user,patch:{channels:{sound:true}}});
+  assert.equal((await service.settings({user})).settings.channels.inApp,true,'explicit opt-in survives unrelated writes');
+  await service.updateSettings({user,patch:{channels:{inApp:false,sound:false}}});
   const guests = [{...user,sub:'guest:abc'},{...user,sub:'guest_abc'},{...user,roles:['guest']},{...user,isGuest:true},{...user,permissions:[]}];
   for (const guest of guests) {
     await assert.rejects(()=>service.list({user:guest}),/notifications_requires_account/);
@@ -28,7 +33,7 @@ async function suite(repository,label) {
   await service.updateSettings({user,patch:{channels:{voice:true},categories:{social:false},quietHours:{enabled:true,start:'21:30'}}});
   await service.updateSettings({user,patch:{channels:{sound:true}}});
   const settings=(await service.settings({user})).settings;
-  assert.equal(settings.channels.voice,true);assert.equal(settings.channels.sound,true);assert.equal(settings.channels.inApp,true);
+  assert.equal(settings.channels.voice,true);assert.equal(settings.channels.sound,true);assert.equal(settings.channels.inApp,false);
   assert.equal(settings.quietHours.start,'21:30');assert.equal(settings.quietHours.end,'07:00');
   assert.deepEqual((await service.settings({user:other})).settings,DEFAULT_SETTINGS);
   const first = await service.send({user,title:'One',body:'Private body',requestId:'stable-request'});

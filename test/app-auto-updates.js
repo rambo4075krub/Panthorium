@@ -25,7 +25,9 @@ async function clientScenario(run, { hidden = false } = {}) {
 (async () => {
   await clientScenario(async ({ w, setNext, reloads }) => {
     assert.equal(w.PanthoriumUpdates.state().available, false);
-    setNext('revision-b'); await w.PanthoriumUpdates.check(); assert.equal(reloads(), 1);
+    let notices=0;w.PanthoriumNotifications={announceUpdate:async notice=>{assert.equal(notice.version,'revision-b');assert.equal(reloads(),0);notices++;}};
+    setNext('revision-b'); await w.PanthoriumUpdates.check(); assert.equal(reloads(), 1);assert.equal(notices,1,'announcement saved before reload');
+    w.PanthoriumNotifications=null;
     await w.PanthoriumUpdates.check(); assert.equal(reloads(), 1, 'no duplicate reload while applying');
   });
   await clientScenario(async ({ w, setNext, show, requests, reloads }) => {

@@ -1053,9 +1053,9 @@
     posts.append(button(v, "โพสต์ในกลุ่ม", async () => { v.groupId = r.id; await compose(v); }));
     for (const post of data.posts || []) await window.PanthoriumSocial.renderCard(v, post, posts);
   }
-  function messageVisible(v, node) {
+  function messageVisible(v, node, container = v.messageLog) {
     if (!current(v) || document.visibilityState !== "visible" || !document.hasFocus() ||
-        !v.messageLog?.contains(node) || !v.root.contains(v.messageLog)) return false;
+        !container?.contains(node) || !v.root.contains(container)) return false;
     const win = v.root.closest(".window");
     const z = Number(getComputedStyle(win).zIndex) || 0;
     for (const other of document.querySelectorAll(".window"))
@@ -1075,7 +1075,7 @@
   }
   function scheduleRead(v) {
     clearTimeout(v.readTimer);
-    v.readTimer = setTimeout(() => acknowledgeVisible(v), 150);
+    v.readTimer = setTimeout(() => { acknowledgeVisible(v); acknowledgeActivity(v); }, 150);
   }
   async function acknowledgeVisible(v) {
     if (v.readBusy || !current(v) || !v.messageLog?.isConnected || !v.detail) return;
@@ -1862,24 +1862,29 @@
   let notificationState;
   function notificationStyles() {
     if (document.getElementById("social-notification-style")) return;
-    document.head.append(el("style", '.social-notification-badge{display:inline-block;min-width:19px;padding:1px 5px;margin-left:6px;border-radius:20px;background:#ff9f43;color:#101820;font:700 11px/18px system-ui;text-align:center}.social-notification-badge[hidden]{display:none!important}', { id: "social-notification-style" }));
+    document.head.append(el("style", '.social-notification-badge{display:inline-block;flex:0 0 auto!important;width:auto!important;min-width:19px;max-width:max-content;padding:1px 5px;margin-left:6px;border-radius:20px;background:#ff9f43;color:#101820;font:700 11px/18px system-ui;text-align:center}.social-notification-badge[hidden]{display:none!important}', { id: "social-notification-style" }));
   }
   const moduleBadge = module => el("span", "", { class: "social-notification-badge", "data-social-module-count": module, hidden: "" });
   const notificationBadge = () => el("span", "", { class: "social-notification-badge", "data-social-notification-count": "", hidden: "" });
-  // Owner-requested tab and Start Menu markers: keep exactly 1 until explicitly removed in a later update.
-  // These do not mark real activity as read or change server notification totals.
-  const pinnedNotifications = Object.freeze({ feed: 1, profile: 1 });
   function notificationBadges() {
-    const data = notificationState?.data || {};
-    const pinnedTotal = allowed() ? Object.values(pinnedNotifications).reduce((sum, count) => sum + count, 0) : 0;
+    const data = allowed() ? notificationState?.data || {} : {};
     for (const node of document.querySelectorAll("[data-social-notification-count],[data-social-module-count]")) {
-      const launcher = node.closest("[data-social-tab], #sm-apps [data-app-id]");
-      const pinned = allowed() && launcher ? pinnedNotifications[node.dataset.socialModuleCount] : undefined;
       const aggregate = node.hasAttribute("data-social-notification-count");
-      const count = pinned ?? (aggregate ? (data.unreadCount || 0) + pinnedTotal : data.counts?.[node.dataset.socialModuleCount] || 0);
+      const count = Math.max(0, Number(aggregate ? data.unreadCount : data.counts?.[node.dataset.socialModuleCount]) || 0);
       node.textContent = count > 99 ? "99+" : String(count); node.hidden = count === 0;
-      node.setAttribute("aria-label", count + (pinned !== undefined ? " การแจ้งเตือนปักหมุด" : aggregate && pinnedTotal ? " การแจ้งเตือน รวมรายการปักหมุด" : " การแจ้งเตือนยังไม่อ่าน"));
+      node.setAttribute("aria-label", count + " การแจ้งเตือนยังไม่อ่าน");
     }
+  }
+  async function acknowledgeActivity(v) {
+    if (v.activityReadBusy || !current(v) || !v.root.querySelector(".social-activity")?.open) return;
+    const panel = v.root.querySelector("[data-activity-items]");
+    const ids = [...panel.querySelectorAll('[data-notification-id][data-unread="true"]')]
+      .filter(row => messageVisible(v, row, panel)).map(row => row.dataset.notificationId).slice(0, 100);
+    if (!ids.length) return;
+    v.activityReadBusy = true;
+    try { await readNotifications(v, ids); }
+    catch (_) { /* Keep the count until the server confirms; retry on visibility, scroll or polling. */ }
+    finally { v.activityReadBusy = false; }
   }
   async function readNotifications(v, ids) {
     if (!ids.length) return;
@@ -1922,7 +1927,7 @@
         if (focused) [...panel.querySelectorAll("[data-notification-focus]")].find(node => node.dataset.notificationFocus === focused)?.focus({ preventScroll: true });
       } catch (error) {
         if (current(v) && panel?.isConnected) panel.replaceChildren(el("p", "โหลดกิจกรรมไม่สำเร็จ"), button(v, "ลองอีกครั้ง", () => loadActivity(v, before)));
-      } finally { v.activityBusy = null; }
+      } finally { v.activityBusy = null; scheduleRead(v); }
     })();
     return v.activityBusy;
   }

@@ -1,6 +1,15 @@
 (() => {
   const logo = '/panthorium-logo.svg?v=original-orange-20261015';
   const logoUrl = logo;
+  const fallback = '/panthorium-logo.png?v=original-orange-20261015';
+  function useFallback(image) {
+    if (image?.tagName !== 'IMG' || image.dataset.panthoriumLogoFallback) return;
+    let url; try { url = new URL(image.src, location.href); } catch (_) { return; }
+    if (url.origin !== location.origin || !/^\/panthorium-logo(?:-mark)?\.svg$/.test(url.pathname)) return;
+    image.dataset.panthoriumLogoFallback = 'true';
+    image.src = fallback;
+  }
+  document.addEventListener('error', event => useFallback(event.target), true);
 
   function installLogoStyles() {
     if (document.getElementById('panthorium-logo-fit-style')) return;
@@ -36,7 +45,7 @@
       image.alt = 'Panthorium';
       container.replaceChildren(image);
     }
-    if (image.getAttribute('src') !== logo) image.src = logo;
+    if (!image.dataset.panthoriumLogoFallback && image.getAttribute('src') !== logo) image.src = logo;
     image.draggable = false;
     container.classList.add('panthorium-logo-frame');
   }
@@ -47,6 +56,9 @@
     // Use the approved artwork inside the existing circular shell frames.
     document.querySelectorAll('.login-avatar, .sm-avatar, .about-logo, [data-panthorium-logo-frame]')
       .forEach(ensureLogo);
+    document.querySelectorAll('img').forEach(image => {
+      if(image.complete && image.naturalWidth === 0) useFallback(image);
+    });
   }
 
   applyBranding();

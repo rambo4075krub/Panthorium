@@ -33,7 +33,7 @@ const eventCatalog = require('../notification-event-catalog');
       service.updateSettings({user,patch:{privacyPreview:true}})
     ]);
     const settings=(await service.settings({user})).settings;
-    assert.equal(settings.channels.voice,true);assert.equal(settings.channels.sound,true);assert.equal(settings.channels.inApp,true);
+    assert.equal(settings.channels.voice,true);assert.equal(settings.channels.sound,true);assert.equal(settings.channels.inApp,false);
     assert.equal(settings.categories.social,false);assert.equal(settings.categories.operations,false);assert.equal(settings.categories.security,true);
     assert.equal(settings.events.operation_succeeded,false);assert.equal(settings.events.operation_started,false);assert.equal(settings.events.operation_failed,true,'concurrent per-event patches preserve siblings');
     assert.deepEqual((await service.settings({user:other})).settings.events,eventCatalog.defaults);

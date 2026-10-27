@@ -142,7 +142,7 @@
     }
     if (settings.channels?.browser) {
       const fallback = () => { if (!current(s) || window.Notification?.permission !== 'granted' || window.PanthoriumPush?.native()) return; try {
-        const n = new Notification('Panthorium', { body: text, tag: 'panthorium-' + s.uid, silent: true });
+        const n = new Notification('Panthorium', { body: text, icon: '/panthorium-logo.png', tag: 'panthorium-' + s.uid, silent: true });
         s.browserNotices.add(n); n.onclose = () => s.browserNotices.delete(n);
         n.onclick = () => { n.close(); if (current(s)) { window.focus(); open(); } };
         setTimeout(() => { n.close(); s.browserNotices.delete(n); }, 15000);
@@ -485,8 +485,28 @@
     if (registered()) session = { uid: owner(), generation, controller: new AbortController(), items: [], unreadCount: 0, settings: null, settingsRevision: 0, seen: new Set(), loaded: false, browserNotices: new Set() };
     render();
   }
-  window.PanthoriumNotifications = { mount, open, refresh, readAloud, stopSpeaking, getState: () => current(session) ? { loaded: session.loaded, unreadCount: session.unreadCount, settings: session.settings ? JSON.parse(JSON.stringify(session.settings)) : null } : null };
-  window.addEventListener('panthorium:auth-changed', () => { sync(true); refresh(); });
+  const updatePending = new Map(), updateSent = new Set();
+  async function announceUpdate(notice) {
+    const s=session; if(!current(s)||!notice)return false;
+    const key=JSON.stringify([s.uid,notice.platform,notice.version]);
+    if(updateSent.has(key))return true;
+    if(updatePending.has(key))return updatePending.get(key);
+    const pending=(async()=>{try{
+      await request(s,'/updates',{method:'POST',body:JSON.stringify(notice)});
+      if(!current(s))return false;
+      updateSent.add(key);
+      try { if(sessionStorage.getItem('pt_update_notice')===JSON.stringify(notice))sessionStorage.removeItem('pt_update_notice'); } catch(_){}
+      return true;
+    }catch(_){return false;}finally{updatePending.delete(key);}})();
+    updatePending.set(key,pending);return pending;
+  }
+  function pendingUpdate() {
+    try { const notice=JSON.parse(sessionStorage.getItem('pt_update_notice')||'null');if(notice)announceUpdate(notice); } catch(_){}
+  }
+  window.addEventListener('panthorium:boot-complete',pendingUpdate);
+  window.addEventListener('online',pendingUpdate);
+  window.PanthoriumNotifications = { announceUpdate, mount, open, refresh, readAloud, stopSpeaking, getState: () => current(session) ? { loaded: session.loaded, unreadCount: session.unreadCount, settings: session.settings ? JSON.parse(JSON.stringify(session.settings)) : null } : null };
+  window.addEventListener('panthorium:auth-changed', () => { sync(true); refresh(); pendingUpdate(); });
   window.addEventListener('panthorium:boot-complete', refresh);
   window.addEventListener('panthorium:push-changed', () => { if(window.PanthoriumPush?.active())document.querySelector('[data-notification-opt-in]')?.remove();for(const view of roots.values())view.signature='';render(); });
   window.addEventListener('online', refresh);
@@ -508,6 +528,6 @@
   window.addEventListener('pageshow', event => { if (event.persisted) { sync(true); refresh(); } });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
   document.addEventListener('click', event => { if (event.target?.closest?.('#desktop-voice,#global-voice,.chat-mic')) stopSpeaking(); }, true);
-  const boot = () => { styles(); sync(); refresh(); };
+  const boot = () => { styles(); sync(); refresh(); pendingUpdate(); };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true }); else boot();
 })();

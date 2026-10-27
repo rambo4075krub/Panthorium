@@ -50,7 +50,7 @@ const dom = new JSDOM(`<!doctype html><html><head></head><body>
   <div class="login-avatar" style="width:90px;height:90px;border-radius:50%;border:2px solid #00ffcc"><img data-panthorium-logo src="/panthorium-logo.svg" alt="Panthorium"></div>
   <div class="sm-avatar" style="width:40px;height:40px;border-radius:50%;border:1px solid #00ffcc"></div>
   <div class="about-logo" style="width:80px;height:80px;border-radius:50%;border:2px solid #00ffcc"></div>
-</body></html>`, { runScripts: 'outside-only', pretendToBeVisual: true });
+</body></html>`, { url:'https://panthorium.net/', runScripts: 'outside-only', pretendToBeVisual: true });
 try {
   const w = dom.window;
   w.eval(branding);
@@ -65,6 +65,13 @@ try {
     assert(frame.querySelector('img[data-panthorium-logo]'), selector + ' contains the original logo');
     assert(frame.classList.contains('panthorium-logo-frame'));
   }
+  const shared = w.document.querySelector('.sm-avatar img');
+  shared.dispatchEvent(new w.Event('error'));
+  assert(shared.src.includes('panthorium-logo.png'), 'failed SVG uses the existing PNG');
+  w.PanthoriumBranding.refresh();
+  assert(shared.src.includes('panthorium-logo.png'), 'branding refresh does not restart the failed SVG request');
+  const fallbackUrl=shared.src;shared.dispatchEvent(new w.Event('error'));
+  assert.equal(shared.src,fallbackUrl,'fallback errors do not loop');
   assert.equal(restartFrame.style.width, '120px', 'restart logo keeps its original size');
 } finally {
   dom.window.close();
