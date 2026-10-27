@@ -101,18 +101,18 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
     assert.equal((await repo.get(hidden.id)).readAt,undefined,"hidden tab never reads messages");
     assert.equal(await reader.locator('[data-social-tab="talk"] [data-social-module-count]').textContent(),"1");
     await write(b,"comment",{recordId:post.id,text:"ความคิดเห็นใหม่"});
+    await sender.bringToFront();
     await sender.evaluate(()=>PanthoriumSocial.refreshNotifications());await sender.evaluate(()=>PanthoriumSocial.open("feed"));
     await sender.evaluate(()=>PanthoriumSocial.showNotifications());
     const activities=watch.locator('[data-activity-items]');
     await activities.getByText("เพื่อนทดสอบ • แสดงความคิดเห็นในโพสต์ของคุณ",{exact:true}).waitFor();
     assert(!await activities.getByText(/ตอบรับคำขอเป็นเพื่อน/).count());
-    await activities.getByRole("button",{name:"อ่านทั้งหมดในหน้านี้",exact:true}).click();
     await until(async()=> ((await social.notifications.list(a.sub,undefined,"feed")).counts.feed || 0)===0,"Watch activity acknowledged on server");
     await sender.evaluate(()=>PanthoriumSocial.refreshNotifications());
     for (const module of ["feed", "profile"]) {
       const badge=sender.locator('[data-social-tab="'+module+'"] [data-social-module-count]');
-      assert.equal(await badge.textContent(),"1","owner-requested tab marker stays pinned after reading");
-      assert(await badge.isVisible());
+      assert.equal(await badge.textContent(),"0","read activity has no remaining badge");
+      assert(!await badge.isVisible());
     }
     assert.equal(await sender.locator('[data-social-tab="friends"] [data-social-module-count]').textContent(),"1");
     await sender.evaluate(()=>PanthoriumSocial.open("connect"));

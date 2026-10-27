@@ -5,7 +5,7 @@ const eventCatalog = require('../notification-event-catalog');
 
 const CATEGORY_LABELS = Object.freeze({ system: 'ระบบ', security: 'ความปลอดภัยและบัญชี', operations: 'การดำเนินการ', reminders: 'การเตือนและกำหนดเวลา', calendar: 'ปฏิทิน', files: 'ไฟล์และเอกสาร', social: 'Social Media', billing: 'แพ็กเกจและชำระเงิน', ai: 'Sentinel AI' });
 const DEFAULT_SETTINGS = Object.freeze({ enabled: true,
-  channels: Object.freeze({ inApp: true, browser: false, sound: false, voice: false }),
+  channels: Object.freeze({ inApp: false, browser: false, sound: false, voice: false }),
   categories: Object.freeze(Object.fromEntries(Object.keys(CATEGORY_LABELS).map(key => [key,true]))),
   events: eventCatalog.defaults,
   quietHours: Object.freeze({ enabled: false, start: '22:00', end: '07:00', timeZone: 'Asia/Bangkok' }),
@@ -123,6 +123,14 @@ class NotificationService {
       await this.push.tick(userId).catch(()=>{});
     }
     return saved.deletedAt ? null : publicItem(saved);
+  }
+  async announceUpdate({ user, platform, version } = {}) {
+    const userId = this.assertUser(user);
+    if (!['web', 'desktop'].includes(platform) || typeof version !== 'string' || !/^[a-zA-Z0-9._-]{1,160}$/.test(version)) throw failure('invalid_update_notification');
+    const notification = await this.publish({userId, category:'system', type:'app.update_available',
+      title:'มีอัปเดต Panthorium', body:platform === 'desktop' ? 'Panthorium Browser รุ่น ' + version + ' พร้อมอัปเดต เปิดเมนูอัปเดตเพื่อดำเนินการ' : 'ระบบเว็บมีอัปเดตใหม่ ระบบจะโหลดให้อัตโนมัติเมื่อไม่มีงานค้างที่ยังไม่บันทึก',
+      sourceId:platform + ':' + version, sensitive:false});
+    return {ok:true,notification};
   }
   async send({ user,title,body='',category='system',requestId } = {}) {
     const userId = this.assertUser(user);

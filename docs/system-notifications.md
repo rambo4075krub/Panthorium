@@ -2,11 +2,11 @@
 
 Panthorium's notification center is part of **ตั้งค่า → ตั้งค่าการแจ้งเตือน**. It combines account-scoped event history, delivery switches, and the existing verified-email reminder form. No new paid notification provider is required.
 
-The settings page starts with an ordered vertical list of 48 notification events. Each row has its Thai name on the left and its own on/off switch on the right. Work started, work succeeded, work failed, new messages, incoming calls, and other events can be selected independently. Delivery options and history are collapsed below the list so they do not displace the controls.
+The settings page starts with an ordered vertical list of notification events. Each row has its Thai name on the left and its own on/off switch on the right. Work started, work succeeded, work failed, new messages, incoming calls, and other events can be selected independently. Delivery options and history are collapsed below the list so they do not displace the controls.
 
 ## Delivery and controls
 
-- In-app delivery starts enabled. Browser notifications, sound, and automatic speech start disabled and require the appropriate device permission or audio activation.
+- In-app delivery starts disabled until the user enables it. Browser notifications, sound, and automatic speech also start disabled and require the appropriate device permission or audio activation. Saved channel preferences remain in effect.
 - Master, category, individual event, and channel switches control popups and automatic audio. They do not erase history or cancel independently approved email reminders. The advanced section retains category controls; turning on one event in a disabled category preserves the disabled state of sibling events.
 - `notification-event-catalog.js` is shared by the server, settings page, delivery filtering, and voice tool schemas. Event choices are persisted as a strictly validated `settings.events` map. Existing preferences without this map keep their prior category behavior.
 - Quiet hours use the saved IANA timezone, including overnight intervals. Equal start/end times mean quiet all day. Muted activity stays available in history.
@@ -98,3 +98,9 @@ The owner subsequently approved and applied the following production configurati
 Firebase, FCM, Firebase Installations and Cloud Scheduler APIs are enabled. The production runtime configuration was verified on revision `panthorium-backend-00195-dul` receiving 100% traffic. The existing Scheduler was resumed on 2026-10-26 at 08:41 Asia/Bangkok. Scheduler execution logs show authenticated endpoint HTTP 200 responses at `2026-10-26T01:41:51.456886679Z` and `2026-10-26T01:42:13.499811536Z`.
 
 This proves the production retry trigger executes; it does not prove a physical device received a push. The Android 1.0.1 versionCode 3 release is available on both Internal and closed Alpha tracks. Real closed-app receipt still requires device acceptance. Staging Scheduler provisioning remains unapplied: automatic approval review rejected enabling its API and creating its service account. The GitHub deployment identity also lacks Scheduler access; its historical verification-workflow failure must not be described as a delivery failure or a successful activation.
+
+In-app toasts default to off for accounts without a saved channel preference. Explicit saved choices are retained across sessions and unrelated settings changes. Notification history remains available.
+
+Detected web releases and desktop binary updates create the per-account `app.update_available` event. The update event has its own switch and uses the existing popup, quiet-hour and privacy rules. Source identity includes platform and version, so retries and multiple tabs do not create duplicate history entries. Web update notices are persisted before automatic reload; a session-scoped pending notice retries after sign-in or reconnection. Android cloud-page updates use the same web path; Google Play binary availability is still checked in Play and is not inferred from a generic store link.
+
+Social Media Start Menu and tab badges use server-confirmed unread totals for each module and their aggregate; zero is hidden, with no permanent Feed/Profile markers. Opening the activity panel acknowledges only rows actually visible in the focused foreground window, as does the existing chat read-receipt flow. Collapsed panels, hidden tabs and offscreen rows remain unread. Counts change after server acknowledgement and survive reload/account changes; these badges do not depend on the in-app toast channel.

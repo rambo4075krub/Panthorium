@@ -1,0 +1,20 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {NotificationService}=require('../services/notificationService');
+const {NotificationRepository}=require('../services/notificationRepository');
+(async()=>{
+ const repository=new NotificationRepository({allowMemory:true});
+ const service=new NotificationService({repository});await service.init();
+ const a={sub:'update-a',permissions:['chat']}, b={sub:'update-b',permissions:['chat']};
+ const notice={user:a,platform:'web',version:'revision-2'};
+ const first=await service.announceUpdate(notice), again=await service.announceUpdate(notice);
+ assert.equal(first.notification.id,again.notification.id);
+ assert.equal(first.notification.eventKey,'app_update');
+ assert.equal((await service.list({user:a})).items.length,1);
+ assert.equal((await service.list({user:b})).items.length,0);
+ await assert.rejects(()=>service.announceUpdate({...notice,user:{...a,sub:'guest:test'}}));
+ await assert.rejects(()=>service.announceUpdate({...notice,version:'https://evil.invalid/'}));
+ await service.updateSettings({user:a,patch:{events:{app_update:false}}});
+ assert.equal((await service.settings({user:a})).settings.events.app_update,false);
+ console.log('Update notices: per-user persistence, retry deduplication, guest rejection and independent preference passed');
+})().catch(e=>{console.error(e);process.exitCode=1;});

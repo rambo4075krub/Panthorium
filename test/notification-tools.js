@@ -52,7 +52,7 @@ async function main() {
   assert.equal((await notifications.settings({ user: owner })).settings.channels.voice, false);
   const saved = await functions.confirm({ user: owner, call: settingsCall, actionId: settingsProposal.actionId, approvalHash: settingsProposal.confirmation.approvalHash });
   assert.equal(saved.output.settings.channels.voice, true); assert.equal(saved.output.settings.askBeforeNotify, false);
-  assert.equal(saved.output.settings.channels.inApp, true); assert.equal((await notifications.settings({ user: other })).settings.channels.voice, false);
+  assert.equal(saved.output.settings.channels.inApp, false); assert.equal((await notifications.settings({ user: other })).settings.channels.voice, false);
   const eventCall = { name: send.name, id: 'event-settings', args: { action: 'settings', patch: { events: { operation_succeeded: false } } } };
   const eventProposal = await functions.execute({ user: owner, call: eventCall, source: 'gemini-live', requestId: 'event-settings', requireCallId: true });
   assert.equal(eventProposal.requiresConfirmation, true);

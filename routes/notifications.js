@@ -37,6 +37,7 @@ function createNotificationRouter(authService, notifications) {
   }));
   router.post('/read',writes,route(req=>notifications.markRead({user:req.user,...body(req,['ids','all'])})));
   router.delete('/',writes,route(req=>notifications.remove({user:req.user,...body(req,['ids'])})));
+  router.post('/updates',writes,route(req=>notifications.announceUpdate({user:req.user,...body(req,['platform','version'])})));
   router.post('/send',writes,route(req=>notifications.send({user:req.user,...body(req,['title','body','category']),requestId:req.get('Idempotency-Key')||undefined})));
   return router;
 }

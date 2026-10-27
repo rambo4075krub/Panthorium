@@ -83,6 +83,9 @@
         updateStatus = { ...result, available: result?.available === true || (!!result?.current && !!result?.remote && newer(result.current, result.remote)) };
       } catch (_) { updateStatus = { ok: false }; }
       finally { lastChecked = Date.now(); }
+      if(updateStatus.ok && updateStatus.available && !updateStatus.storeCheck && updateStatus.remote) {
+        window.PanthoriumNotifications?.announceUpdate?.({platform:'desktop',version:updateStatus.remote});
+      }
       return updateStatus;
     })();
     renderUpdateStatus();

@@ -8,6 +8,7 @@
   // One ordered catalog for settings, delivery and voice tools. These are observed
   // events already produced by the application, not promises of new monitoring.
   const rows = [
+    ['app_update', 'system', 'มีอัปเดต Panthorium', 'แจ้งเมื่อระบบตรวจพบเวอร์ชันใหม่พร้อมอัปเดต', ['app.update_available']],
     ['self_notification', 'system', 'แจ้งเตือนที่ฉันขอให้ส่ง', 'รายการที่สั่งให้ Sentinel ส่งถึงคุณทันที', ['user.requested']],
     ['system_notice', 'system', 'ข้อความแจ้งเตือนทั่วไปของระบบ', 'ข้อความจากระบบที่ไม่มีประเภทเฉพาะ', ['system.notice']],
     ['security_login', 'security', 'มีการเข้าสู่ระบบบัญชี', 'แจ้งเมื่อบัญชีของคุณเข้าสู่ระบบสำเร็จ', ['auth.login_success']],

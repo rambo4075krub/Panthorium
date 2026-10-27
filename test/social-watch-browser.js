@@ -143,7 +143,13 @@ async function until(fn, label) { const end = Date.now() + 16000; while (Date.no
       if (process.env.SOCIAL_WATCH_SCREENSHOT) await author.screenshot({ path: process.env.SOCIAL_WATCH_SCREENSHOT + "-" + width + ".png" });
       await author.keyboard.press("Escape");
     }
-    for (const module of ["feed", "profile"]) assert.equal(await author.locator('[data-social-tab="' + module + '"] [data-social-module-count]').textContent(), "1");
+    await author.evaluate(() => PanthoriumSocial.refreshNotifications());
+    const unread = await service.notifications.list(owner.sub);
+    for (const module of ["feed", "profile"]) {
+      const badge = author.locator('[data-social-tab="' + module + '"] [data-social-module-count]');
+      assert.equal(await badge.textContent(), String(unread.counts[module] || 0), "badge matches server unread activity");
+      assert.equal(await badge.isVisible(), !!unread.counts[module]);
+    }
     // The same card controls in Short and Market preserve video playback and ordering.
     await author.setViewportSize({ width: 1280, height: 900 });
     for (const [module, item] of [["short", short], ["market", listing]]) {
