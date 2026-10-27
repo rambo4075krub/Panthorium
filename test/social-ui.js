@@ -131,8 +131,8 @@ const { SocialRepository } = require("../services/socialRepository");
     w.document.dispatchEvent(new w.Event("DOMContentLoaded"));
     assert.equal(
       w.document.querySelectorAll('[data-start-group="social"] .sm-app').length,
-      11,
-      role + " gets eleven apps",
+      12,
+      role + " gets twelve apps",
     );
     for (const mod of [
       "feed",
@@ -212,7 +212,7 @@ const { SocialRepository } = require("../services/socialRepository");
     await w.PanthoriumSocial.refresh();
     await new Promise(resolve => setTimeout(resolve, 10));
     const watch = w.document.querySelector('[data-record-id="watch-fixture"]');
-    assert(watch.querySelector('video[controls][playsinline]'));
+    assert(watch.querySelector('video[playsinline]')); assert.equal(watch.querySelector('video').controls, false);
     assert(!watch.querySelector('video').autoplay);
     assert(watch.querySelector('img[alt="ภาพในโพสต์"]'));
     assert.equal(watch.querySelector('pre').textContent, '<script>plain text</script>');

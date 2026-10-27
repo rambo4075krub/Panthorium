@@ -36,7 +36,9 @@
     write,
     render,
     status,
+    stream: preparedStream,
   }) {
+    if (active?.id === id) return;
     await stop();
     const turn = ++generation;
     window.PanthoriumLiveVoice?.stop?.();
@@ -61,7 +63,7 @@
       const config = await read("/api/social/rtc/" + encodeURIComponent(id));
       if (!valid()) return;
       if (kind !== "live" || owner === uid) {
-        const stream = await navigator.mediaDevices.getUserMedia({
+        const stream = preparedStream || await navigator.mediaDevices.getUserMedia({
           audio: true,
           video: video
             ? {
@@ -82,6 +84,7 @@
         local.playsInline = true;
         local.srcObject = stream;
         render.append(local);
+        local.play().catch(() => {});
       }
       status(
         config.relayConfigured
@@ -235,6 +238,7 @@
         e.name === "NotAllowedError" ? "กรุณาอนุญาตกล้อง/ไมโครโฟน" : e.message,
       );
       if (active === state) await stop();
+      throw e;
     }
   }
   window.PanthoriumSocialRTC = {

@@ -83,6 +83,7 @@ jobs:
         run: |
           npx --no-install playwright install --with-deps --only-shell chromium
           node test/guest-start-menu-browser.js
+          node test/social-experience-browser.js
           node test/social-rtc-browser.js
           node test/social-messages-browser.js
           node test/social-groups-browser.js

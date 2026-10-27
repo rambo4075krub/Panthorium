@@ -38,7 +38,7 @@ async function suite(repo) {
   await write(viewer, "comment", { recordId: film.id, text: "Film comment" });
   await write(viewer, "like", { recordId: film.id });
   assert.equal((await s.read({ user: owner, recordId: film.id })).record.commentCount, 1);
-  assert((await s.notifications.list(owner.sub, undefined, "watch")).items.some(n => n.type === "comment"));
+  assert((await s.notifications.list(owner.sub, undefined, "notifications")).items.some(n => n.type === "comment"));
   const playlist = (await write(owner, "playlist-create", { title: "Films" })).record;
   await write(owner, "playlist-add", { recordId: playlist.id, targetId: film.id });
   assert((await s.read({ user: owner, recordId: playlist.id })).items.some(r => r.id === film.id));

@@ -5,7 +5,7 @@ async function suite(repo){
  await repo.init();const [owner,friend,other]=Array.from({length:3},()=>({sub:randomUUID(),roles:["user"],permissions:["chat"]}));
  const gif={id:randomUUID(),name:"animation.gif",size:90,contentType:"image/gif"};
  const video={id:randomUUID(),name:"clip.webm",size:150,contentType:"video/webm"};
- const service=new SocialService({repository:repo,files:{findObject:async(uid,id)=>{assert.equal(uid,owner.sub);return id===video.id?video:gif;},preview:async()=>({body:Buffer.from("GIF89a"),contentType:"image/gif"})}});
+ const service=new SocialService({repository:repo,files:{findObject:async(uid,id)=>{assert.equal(uid,owner.sub);return id===video.id?video:gif;},preview:async(uid,id)=>({body:id===video.id?require("./social-video-fixture")():Buffer.from("GIF89a"),contentType:id===video.id?"video/webm":"image/gif"})}});
  const write=(user,action,input)=>service.write({user,action,input,requestId:randomUUID()});
  for(const [i,user] of [owner,friend,other].entries())await write(user,"profile",{name:["Owner","Friend","Other"][i],discoverable:true});
  const post=(await write(owner,"publish",{module:"feed",text:"Friends only",audience:"friends",fileIds:[gif.id]})).record;

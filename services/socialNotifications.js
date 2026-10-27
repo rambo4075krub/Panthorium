@@ -25,6 +25,24 @@ class SocialNotifications {
       return emit(repo, "like", { id: "like:" + hash(uid, target.id) }, uid, target.ownerId, target.id);
     }
     if (!r) return;
+    if (["publish", "listing", "live-start"].includes(action)) {
+      const recipients = new Set();
+      let before;
+      do {
+        const relations = await repo.list({ kinds: ["follow", "friend"], before, limit: 200 });
+        for (const relation of relations) {
+          if (relation.kind === "follow" && relation.targetId === uid) recipients.add(relation.ownerId);
+          if (relation.kind === "friend" && relation.status === "accepted" && relation.members.includes(uid))
+            relation.members.filter(id => id !== uid).forEach(id => recipients.add(id));
+        }
+        before = relations.length === 200 ? relations.at(-1).id : null;
+      } while (before);
+      for (const recipient of recipients) if (await this.service.allowed(repo, recipient, r)) await emit(repo, "new-post", r, uid, recipient);
+    }
+    if (action === "share") {
+      const target = await repo.get(r.parentId);
+      return emit(repo, "share", r, uid, target.ownerId, target.id);
+    }
     if (action === "friend-request" && r.status === "pending") {
       await emit(repo, "friend-request", { id: r.eventId }, r.requesterId, r.recipientId, r.id);
     } else if (action === "friend-review") {
@@ -137,8 +155,9 @@ class SocialNotifications {
       const expected = type === "friend-request" ? "pending" : type.slice(7);
       if (r.kind !== "friend" || r.eventId !== n.sourceId || r.status !== expected) return null;
     }
+    if (type === "new-post" && r.kind === "live" && (r.status !== "live" || Date.parse(r.heartbeatAt) < Date.now() - 60000)) return null;
     if (type === "follow" && !await repo.get(n.sourceId)) return null;
-    if (type === "like" && !await repo.get(n.sourceId)) return null;
+    if (["like", "share"].includes(type) && !await repo.get(n.sourceId)) return null;
     if (type === "connect-match" && (!await repo.get("interest:" + hash(uid, n.actorId)) || !await repo.get("interest:" + hash(n.actorId, uid)))) return null;
     const context = thread?.context === "connect" || type === "connect-match" ? "connect" : "social";
     const name = moderation ? "ระบบดูแลชุมชน" : (await s.messageView({ ownerId: n.actorId }, { context }, names[context])).author.name;
@@ -148,19 +167,24 @@ class SocialNotifications {
       "group-request": "ขอเข้าร่วมกลุ่ม “" + r.title + "”", "group-accepted": "อนุมัติให้คุณเข้าร่วมกลุ่ม “" + r.title + "” แล้ว",
       "group-declined": "ไม่อนุมัติคำขอเข้าร่วมกลุ่ม “" + r.title + "”", "group-message": "ส่งข้อความใหม่ในกลุ่ม “" + target.title + "”",
       message: "ส่งข้อความใหม่ถึงคุณ", call: r.video ? "กำลังวิดีโอคอลหาคุณ" : "กำลังโทรหาคุณ", "call-missed": "สายที่ไม่ได้รับ",
+      "new-post": "เผยแพร่โพสต์ใหม่", share: "แชร์โพสต์ของคุณ",
       comment: "แสดงความคิดเห็นในโพสต์ของคุณ", like: "ถูกใจโพสต์ของคุณ", follow: "เริ่มติดตามคุณ",
       "order-requested": "ส่งคำขอสั่งซื้อใหม่", "order-accepted": "ยืนยันคำสั่งซื้อแล้ว", "order-fulfilled": "ดำเนินการคำสั่งซื้อเสร็จแล้ว", "order-cancelled": "ยกเลิกคำสั่งซื้อแล้ว",
       "connect-match": "สนใจตรงกับคุณใน Connect", "live-ended": "จบการถ่ายทอดสดแล้ว", "moderation-hidden": "ซ่อนเนื้อหาของคุณ", "moderation-restored": "คืนการแสดงเนื้อหาของคุณแล้ว",
     };
     if (!labels[type]) return null;
     module = context === "connect" ? "connect" : type === "follow" ? "friends" : moduleFor(target);
+    const destination = module;
+    // Post counters contain new posts only. Conversation/group notices retain their own destinations.
+    if (["like", "comment", "share"].includes(type)) module = "notifications";
+    else if (["feed", "short", "watch", "live", "tv", "market", "profile"].includes(module) && type !== "new-post") module = "notifications";
     return { id: n.id, type, name, text: labels[type], createdAt: n.createdAt, readAt,
-      target: moderation && r.hidden ? null : { module, ...(["friends", "profile"].includes(module) ? {} : { recordId: target.id }), ...(r.kind === "order" ? { orders: true } : {}) },
+      target: moderation && r.hidden ? null : { module: destination, ...(["friends", "profile"].includes(destination) ? {} : { recordId: target.id }), ...(r.kind === "order" ? { orders: true } : {}) },
       ...(moderation ? { reason: r.moderation?.reason || "" } : {}), module };
   }
   async list(uid, before, module) {
     await this.service.purgeExpiredMessages({ force: false });
-    if (module && !["feed", "short", "watch", "live", "tv", "market", "community", "talk", "connect", "profile", "friends"].includes(module))
+    if (module && !["feed", "short", "watch", "live", "tv", "market", "community", "talk", "connect", "profile", "friends", "notifications"].includes(module))
       throw Object.assign(Error("social_invalid_module"), { status: 400 });
     const repo = this.service.repo;
     if (!await repo.get("notification-init:" + uid)) await repo.transaction(tx => this.seed(tx, uid));
@@ -188,16 +212,37 @@ class SocialNotifications {
     }
     if (items.length > 30) { items.pop(); nextCursor = items.at(-1).id; }
     let unreadCount = 0, unreadCursor;
-    const counts = {};
+    const counts = {}, recordCounts = {};
     do {
       const page = await repo.notificationPage({ owner: uid, unread: true, before: unreadCursor, limit: 200 });
       for (const n of page) {
         const visible = await visibleNotice(n);
-        if (visible && !visible.readAt) { unreadCount++; counts[visible.module] = (counts[visible.module] || 0) + 1; }
+        if (visible && !visible.readAt) { unreadCount++; counts[visible.module] = (counts[visible.module] || 0) + 1; if (["community", "talk", "connect"].includes(visible.module) && visible.target?.recordId) recordCounts[visible.target.recordId] = (recordCounts[visible.target.recordId] || 0) + 1; }
       }
       unreadCursor = page.length === 200 ? page.at(-1) : null;
     } while (unreadCursor);
-    return { ok: true, items, nextCursor, unreadCount, counts };
+    return { ok: true, items, nextCursor, unreadCount, counts, recordCounts };
+  }
+  async readSection(uid, { module, recordIds, through }) {
+    if (!["feed", "short", "watch", "live", "market", "community", "talk", "connect", "friends", "notifications"].includes(module) || !Number.isFinite(Date.parse(through)) || Date.parse(through) > Date.now() + 1000 || (recordIds !== undefined && (!Array.isArray(recordIds) || recordIds.length > 100 || recordIds.some(id => typeof id !== "string" || id.length > 200))))
+      throw Object.assign(Error("social_invalid_notifications"), { status: 400 });
+    if (!["notifications", "friends", "connect"].includes(module) && !recordIds?.length) return { ok: true };
+    return this.service.repo.transaction(async repo => {
+      let cursor;
+      do {
+        const page = await repo.notificationPage({ owner: uid, unread: true, before: cursor, limit: 200 });
+        for (const n of page) {
+          const visible = await this.view(repo, uid, n);
+          if (visible?.module === module && Date.parse(n.createdAt) <= Date.parse(through) && (!recordIds || recordIds.includes(visible.target?.recordId))) {
+            // Chat message receipts are acknowledged by visibility of the actual messages.
+            if (["message", "group-message"].includes(visible.type)) continue;
+            await repo.put({ ...n, readAt: new Date().toISOString() });
+          }
+        }
+        cursor = page.length === 200 ? page.at(-1) : null;
+      } while (cursor);
+      return { ok: true };
+    });
   }
   async read(uid, ids) {
     if (!Array.isArray(ids) || !ids.length || ids.length > 100 || ids.some(x => typeof x !== "string" || !/^notification:[a-f0-9]{64}$/.test(x)))

@@ -40,15 +40,16 @@ async function until(fn, label) { const end = Date.now() + 15000; while (Date.no
     }
     const tv = provider.locator('[data-social="tv"]');
     assert.equal(await tv.locator("[data-tv-channel]").count(), OFFICIAL_CHANNELS.length);
-    assert.deepEqual(await provider.locator("[data-social-tab]").evaluateAll(nodes => nodes.map(n => n.firstChild.textContent)), ["Feed", "Short", "Watch", "Live", "TV", "Market", "Community", "Chat", "Connect", "Profile", "Friends"]);
+    assert.deepEqual(await provider.locator("[data-social-tab]").evaluateAll(nodes => nodes.map(n => n.firstChild.textContent)), ["Feed", "Short", "Watch", "Live", "TV", "Market", "Community", "Chat", "Connect", "Profile", "Friends", "🔔 การแจ้งเตือนรวม"]);
     assert.equal(await provider.getByRole("button", { name: "Refresh", exact: true }).textContent(), "↻");
     assert.equal(await tv.getByRole("button", { name: "ตรวจสอบช่อง", exact: true }).count(), 0);
     assert.equal(await tv.getByRole("link", { name: "เปิดเว็บไซต์ต้นทาง", exact: true }).first().getAttribute("target"), "_blank");
     const readyChannel = tv.locator('[data-tv-channel="tv:thaipbs"]');
-    await readyChannel.getByRole("button", { name: "▶ เล่นใน Panthorium", exact: true }).click();
+    await readyChannel.scrollIntoViewIfNeeded();
+    assert.equal(await readyChannel.getByRole("button", { name: "▶ เล่นใน Panthorium", exact: true }).count(),0);
     const embedded = readyChannel.frameLocator("iframe").locator('iframe[title="TrueID Free TV player"]');
     await embedded.waitFor();
-    assert.equal(await embedded.getAttribute("src"), "https://tv.trueid.net/th-th/embed/thaipbs");
+    assert.equal(await embedded.getAttribute("src"), "https://tv.trueid.net/th-th/embed/thaipbs?autoplay=1&muted=1");
     assert((await embedded.getAttribute("allow")).includes("autoplay"));
     await provider.locator('[data-social-tab="feed"]').click();
     assert.equal(await readyChannel.locator("iframe").count(), 0, "free TV stops when switching tabs");
@@ -73,7 +74,7 @@ async function until(fn, label) { const end = Date.now() + 15000; while (Date.no
     await viewer.getByRole("button", { name: "Refresh", exact: true }).click();
     const shown = viewer.locator('[data-tv-channel="' + channel.id + '"]'); await shown.waitFor();
     assert(!(await shown.textContent()).includes("private@example.org"));
-    await shown.getByRole("button", { name: "▶ เล่นใน Panthorium", exact: true }).click();
+    await shown.scrollIntoViewIfNeeded();
     const stream = shown.frameLocator("iframe").locator("video");
     await until(async () => stream.evaluate(v => v.readyState >= 2), "HLS stream decodes in Chromium").catch(async e => { console.error(await stream.evaluate(v => ({ readyState: v.readyState, networkState: v.networkState, error: v.error?.message, status: document.getElementById("status").textContent, hls: Hls.isSupported(), codec: MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E"') }))); throw e; });
     await stream.evaluate(v => v.play());
@@ -94,7 +95,7 @@ async function until(fn, label) { const end = Date.now() + 15000; while (Date.no
     await watch.getByLabel("ลิงก์วิดีโอ (ไม่ต้องกรอกหากแนบไฟล์)", { exact: true }).fill("https://media.example.org/long.webm");
     await watch.getByRole("button", { name: "เผยแพร่", exact: true }).click();
     await watch.getByRole("heading", { name: "วิดีโอยาวทดสอบ", exact: true }).waitFor();
-    await watch.getByRole("button", { name: "▶ เล่นใน Panthorium", exact: true }).click();
+    await watch.locator("[data-social-player]").scrollIntoViewIfNeeded();
     await until(async () => watch.frameLocator("iframe").locator("video").evaluate(v => v.readyState >= 2), "Watch video loads");
     const ids = ["feed", "short", "watch", "live", "tv", "market", "community", "talk", "connect", "profile", "friends"];
     for (const width of [390, 320]) {
