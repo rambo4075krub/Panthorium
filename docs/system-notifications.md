@@ -2,11 +2,11 @@
 
 Panthorium's notification center is part of **ตั้งค่า → ตั้งค่าการแจ้งเตือน**. It combines account-scoped event history, delivery switches, and the existing verified-email reminder form. No new paid notification provider is required.
 
-The settings page starts with an ordered vertical list of 48 notification events. Each row has its Thai name on the left and its own on/off switch on the right. Work started, work succeeded, work failed, new messages, incoming calls, and other events can be selected independently. Delivery options and history are collapsed below the list so they do not displace the controls.
+The settings page starts with an ordered vertical list of notification events. Each row has its Thai name on the left and its own on/off switch on the right. Work started, work succeeded, work failed, new messages, incoming calls, and other events can be selected independently. Delivery options and history are collapsed below the list so they do not displace the controls.
 
 ## Delivery and controls
 
-- In-app delivery starts enabled. Browser notifications, sound, and automatic speech start disabled and require the appropriate device permission or audio activation.
+- In-app delivery starts disabled until the user enables it. Browser notifications, sound, and automatic speech also start disabled and require the appropriate device permission or audio activation. Saved channel preferences remain in effect.
 - Master, category, individual event, and channel switches control popups and automatic audio. They do not erase history or cancel independently approved email reminders. The advanced section retains category controls; turning on one event in a disabled category preserves the disabled state of sibling events.
 - `notification-event-catalog.js` is shared by the server, settings page, delivery filtering, and voice tool schemas. Event choices are persisted as a strictly validated `settings.events` map. Existing preferences without this map keep their prior category behavior.
 - Quiet hours use the saved IANA timezone, including overnight intervals. Equal start/end times mean quiet all day. Muted activity stays available in history.
