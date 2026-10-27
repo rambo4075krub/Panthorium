@@ -65,6 +65,11 @@
         if (!validRelease(data.release)) throw Error('invalid_release');
         if (!validRelease(current)) current = data.release;
         latest = data.release; ok = true; publish();
+        if (state().available) {
+          const notice = {platform:'web',version:latest};
+          try { sessionStorage.setItem('pt_update_notice', JSON.stringify(notice)); } catch (_) {}
+          await window.PanthoriumNotifications?.announceUpdate?.(notice);
+        }
         if (!manual) await apply();
       } catch (_) { ok = false; publish(); }
       finally { checking = null; }

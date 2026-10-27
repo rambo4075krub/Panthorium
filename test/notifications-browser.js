@@ -92,6 +92,11 @@ async function until(check, message) {
       await refresh(); return result;
     };
 
+    assert.equal(await setting("channels.inApp").getAttribute("aria-checked"), "false", "in-app defaults off");
+    await advanced.evaluate(element => { element.open = true; });
+    await setting("channels.inApp").click();
+    await until(() => setting("channels.inApp").getAttribute("aria-checked").then(value => value === "true"), "explicit in-app opt-in");
+    await advanced.evaluate(element => { element.open = false; });
     assert.equal(await historyDetails.evaluate(element => element.open), false, "history starts collapsed beneath settings");
     assert.equal(await advanced.evaluate(element => element.open), false, "advanced channels do not precede the event list");
     const eventList = root.locator("[data-notification-event-list]");

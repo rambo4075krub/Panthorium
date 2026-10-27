@@ -45,21 +45,22 @@ async function until(check, message) { const end = Date.now() + 16000; while (Da
       assert.equal(await page.locator('[data-social="talk"] .social-activity').count(), 1);
       assert.equal(await page.locator('#social-notification-bell,[data-social-open-notifications],#social-notification-center').count(), 0, "no global notification button or panel");
       const badge = page.locator('[data-social-tab="talk"] [data-social-module-count]');
-      assert.equal(Number(await badge.textContent()) + 2, Number(await count(page).textContent()));
+      const sum = await page.locator('#sm-apps [data-social-module-count]').evaluateAll(nodes => nodes.reduce((total, node) => total + Number(node.textContent), 0));
+      assert.equal(sum, Number(await count(page).textContent()), "heading sums actual per-menu unread activity");
     };
     assert.equal(await reader.locator('#social-notification-bell').count(), 0);
     const thread = (await write(a, "thread", { userId: b.id })).record;
-    await until(async () => (await count(reader).textContent()) === "3", "request visible without opening any Social app");
+    await until(async () => (await count(reader).textContent()) === "1", "request visible without opening any Social app");
     assert.equal(await reader.locator("[data-social]").count(), 0);
     assert.equal(await reader.locator('[data-app-id="social-talk"] [data-social-module-count]').textContent(), "1");
-    assert.equal(await reader.locator('[data-start-group="social"] .sm-group-label [data-social-notification-count]').textContent(), "3");
+    assert.equal(await reader.locator('[data-start-group="social"] .sm-group-label [data-social-notification-count]').textContent(), "1");
     for (const module of ["feed", "profile"]) {
       const marker = reader.locator('[data-app-id="social-' + module + '"] [data-social-module-count]');
-      assert.equal(await marker.textContent(), "1");
-      assert.equal(await marker.getAttribute("hidden"), null);
+      assert.equal(await marker.textContent(), "0");
+      assert.notEqual(await marker.getAttribute("hidden"), null);
     }
     const watchMarker = reader.locator('[data-app-id="social-watch"] [data-social-module-count]');
-    assert.equal(await watchMarker.textContent(), "0", "new long-video Watch has no pinned Feed marker");
+    assert.equal(await watchMarker.textContent(), "0", "Watch has no badge without unread activity");
     assert.notEqual(await watchMarker.getAttribute("hidden"), null);
     await openAlerts(reader);
     const panel = reader.locator('[data-social="talk"] [data-activity-items]');
@@ -69,7 +70,7 @@ async function until(check, message) { const end = Date.now() + 16000; while (Da
     await panel.getByRole("button", { name: "เปิดรายการ", exact: true }).click();
     await reader.getByRole("button", { name: "รับคำขอ", exact: true }).click();
     await until(async () => (await repo.get(thread.id)).status === "accepted", "request accepted from notification");
-    await until(async () => (await count(sender).textContent()) === "3", "sender notified of acceptance");
+    await until(async () => (await count(sender).textContent()) === "1", "sender notified of acceptance");
     await sender.bringToFront(); await openAlerts(sender);
     await sender.getByText("เพื่อน • ตอบรับคำขอสนทนาของคุณแล้ว", { exact: true }).waitFor();
     await sender.locator('[data-social="talk"] [data-activity-items]').getByRole("button", { name: "เปิดรายการ", exact: true }).click();
@@ -77,14 +78,32 @@ async function until(check, message) { const end = Date.now() + 16000; while (Da
     await sender.getByLabel("ข้อความ", { exact: true }).fill("ทดสอบข้อความใหม่");
     await sender.getByRole("button", { name: "ส่ง", exact: true }).click();
     const message = (await service.read({ user: a, recordId: thread.id })).items[0];
-    await until(async () => (await count(reader).textContent()) === "3", "new message alerts when Talk is closed");
+    await until(async () => (await count(reader).textContent()) === "1", "new message alerts when Talk is closed");
     assert.equal((await repo.get(message.id)).readAt, undefined);
-    await openAlerts(reader);
-    await panel.getByRole("button", { name: "อ่านทั้งหมดในหน้านี้", exact: true }).click();
-    await until(async () => (await count(reader).textContent()) === "2", "reading alerts leaves only the two pinned markers");
+    const post = (await write(b, "publish", {module:"feed", title:"รูปและข้อความ", text:"โพสต์ทดสอบ"})).record;
+    await write(a, "comment", {recordId:post.id, text:"ความคิดเห็นใหม่"});
+    await reader.evaluate(() => PanthoriumSocial.refreshNotifications());
+    assert.equal(await count(reader).textContent(), "2", "two modules add up to the heading");
+    assert.equal(await reader.locator('[data-app-id="social-feed"] [data-social-module-count]').textContent(), "1");
+    await reader.locator('[data-start-group-toggle="social"]').click();
+    for (const width of [390,320]) {
+      await reader.setViewportSize({width,height:760});
+      const badge = reader.locator('[data-app-id="social-feed"] [data-social-module-count]');
+      const box = await badge.boundingBox();
+      assert(box && box.width < 50 && box.x + box.width <= width, "badge stays compact on mobile");
+    }
+    if (process.env.SOCIAL_MENU_BADGE_SCREENSHOT) await reader.screenshot({path:process.env.SOCIAL_MENU_BADGE_SCREENSHOT});
+    await reader.bringToFront(); await openAlerts(reader);
+    await until(async () => (await count(reader).textContent()) === "1", "reading Chat leaves unread Feed untouched");
+    await reader.evaluate(() => PanthoriumSocial.open("feed"));
+    await pause(300);
+    assert.equal(await count(reader).textContent(), "1", "opening a menu does not read collapsed activity");
+    await reader.evaluate(() => PanthoriumSocial.showNotifications());
+    await until(async () => (await count(reader).textContent()) === "0", "viewing activity clears the real unread count");
+    assert.notEqual(await count(reader).getAttribute("hidden"), null, "zero badge is hidden");
     assert.equal((await repo.get(message.id)).readAt, undefined, "notification read is separate from chat read");
     await reader.reload(); await reader.evaluate(() => PanthoriumSocial.refreshNotifications());
-    assert((await count(reader).textContent()) === "2", "read state and pinned markers survive reload");
+    assert((await count(reader).textContent()) === "0", "read state survives reload without phantom badges");
     await reader.bringToFront(); await openAlerts(reader);
     const messageRow = panel.locator("article").filter({ hasText: "ส่งข้อความใหม่ถึงคุณ" });
     await messageRow.getByRole("button", { name: "เปิดรายการ", exact: true }).click();
