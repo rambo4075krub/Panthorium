@@ -7,7 +7,7 @@ async function suite(repo) {
   await repo.init();
   const [a,b,c,d] = Array.from({length:4}, () => ({sub:randomUUID(),roles:["user"],permissions:["chat"]}));
   const image = {id:randomUUID(), name:"photo.png",size:12,contentType:"image/png"}, video = {id:randomUUID(),name:"clip.mp4",size:30,contentType:"video/mp4"};
-  const files = {findObject:async (uid,id) => { const file = [image,video].find(f => f.id===id); if(uid!==a.sub||!file) throw Error("file_not_found"); return file; }, preview:async()=>({body:Buffer.from("image")})};
+  const files = {findObject:async (uid,id) => { const file = [image,video].find(f => f.id===id); if(uid!==a.sub||!file) throw Error("file_not_found"); return file; }, preview:async(uid,id)=>({body:id===video.id?require("./social-video-fixture")():Buffer.from("image")})};
   const s = new SocialService({repository:repo,files});
   const write = (user,action,input={}) => s.write({user,action,input,requestId:randomUUID()});
   for (const [i,user] of [a,b,c,d].entries()) await write(user,"profile",{name:["Alice","Betty","Carl","Doris"][i],bio:"Private bio "+i,discoverable:true,...(i===0?{fileIds:[image.id]}:{})});
@@ -85,16 +85,17 @@ async function suite(repo) {
   // Filtering happens before pagination even when many newer notices belong to a different menu.
   for(let i=0;i<35;i++) await write(b,"comment",{recordId:post.id,text:"Watch comment "+i});
   for(let i=0;i<36;i++) await write(b,"comment",{recordId:clip.id,text:"Short comment "+i});
-  let page=await s.notifications.list(a.sub,undefined,"feed");
-  assert.equal(page.items.length,30);assert(page.items.every(n=>n.module==="feed"));assert.equal(page.counts.feed,35);
-  const older=await s.notifications.list(a.sub,page.nextCursor,"feed");assert.equal(older.items.length,5);
+  let page=await s.notifications.list(a.sub,undefined,"notifications");
+  assert.equal(page.items.length,30);assert(page.items.every(n=>n.module==="notifications"));
+  assert.equal(page.counts.feed || 0,0); assert.equal(page.counts.short || 0,0);
+  const older=await s.notifications.list(a.sub,page.nextCursor,"notifications"); assert.equal(older.items.length,30);
   assert(!older.items.some(n=>page.items.some(x=>x.id===n.id)));
-  const shortCount=page.counts.short;await s.notifications.read(a.sub,page.items.map(n=>n.id));
-  page=await s.notifications.list(a.sub,undefined,"short");assert.equal(page.counts.short,shortCount);assert.equal(page.counts.feed,5);
+  const total=page.counts.notifications;await s.notifications.read(a.sub,page.items.map(n=>n.id));
+  page=await s.notifications.list(a.sub,undefined,"notifications");assert.equal(page.counts.notifications,total-30);
   await assert.rejects(()=>s.notifications.list(a.sub,undefined,"unknown"),/social_invalid_module/);
   const admin={...d,roles:["administrator"],permissions:["chat","settings"]};
   await write(admin,"moderate",{recordId:"profile:"+a.sub,hidden:true,reason:"Fixture"});
-  assert.equal((await s.notifications.list(a.sub,undefined,"profile")).items[0].target,null);
+  assert.equal((await s.notifications.list(a.sub,undefined,"notifications")).items[0].target,null);
   assert.equal((await s.people({user:d,query:"Alice"})).items.length,0);
   await write(a,"profile",{name:"Updated Alice",discoverable:true});
   assert.equal((await repo.get("profile:"+a.sub)).hidden,true,"editing a profile does not undo moderation");

@@ -98,7 +98,9 @@ async function until(fn, label) { const end = Date.now() + 16000; while (Date.no
     assert.equal((await service.read({ user: owner, module: "feed" })).items.length, before);
     await watch.getByRole("button", { name: "สร้างโพสต์", exact: true }).click(); await watch.getByLabel("รายละเอียด", { exact: true }).fill("โพสต์สำหรับเพื่อนเท่านั้น");
     await watch.getByLabel("ผู้ที่ดูได้", { exact: true }).selectOption("friends"); await watch.locator("form details>summary").click();
+    await watch.getByRole("button", { name: "แนบไฟล์จากคลาวด์", exact: true }).click();
     await watch.getByRole("checkbox", { name: gif.name, exact: true }).check();
+    await watch.getByRole("button", { name: "เสร็จสิ้น", exact: true }).click();
     await watch.getByRole("button", { name: "เผยแพร่", exact: true }).click();
     let friendsPost;
     await until(async () => { friendsPost = (await service.read({ user: owner, module: "feed" })).items.find(item => item.text === "โพสต์สำหรับเพื่อนเท่านั้น"); return !!friendsPost; }, "friends post published");

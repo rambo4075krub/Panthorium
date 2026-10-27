@@ -104,7 +104,7 @@ async function until(check, label) {
     const previewReply = (await write(b, "message", { recordId: thread.id, text: "รายการแชทอัปเดตเอง" })).record;
     await until(async () => await conversation.locator(".social-chat-preview").textContent() === previewReply.text, "chat list updates without opening conversation");
     assert.equal((await repository.get(previewReply.id)).readAt, undefined, "preview does not mark a message read");
-    await conversation.getByRole("button", { name: "เปิดบทสนทนา", exact: true }).click();
+    await conversation.click();
 
     // Loading a page of messages is not equivalent to viewing each message.
     for (let i=0;i<18;i++) await write(a, "message", { recordId: thread.id, text: "ข้อความทดสอบ " + i });

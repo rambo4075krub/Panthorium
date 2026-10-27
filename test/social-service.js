@@ -37,7 +37,7 @@ async function suite(repository) {
       reads++;
       return {
         ...(await files.findObject(uid, id)),
-        body: Buffer.from("private"),
+        body: id === video ? require("./social-video-fixture")() : Buffer.from("private"),
       };
     },
     download: async (owner, id, viewer) => {

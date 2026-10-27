@@ -12,6 +12,7 @@
     ["connect", "Connect", "หาคู่ 18+", "♡"],
     ["profile", "Profile", "โปรไฟล์ส่วนตัว", "◯"],
     ["friends", "Friends", "ค้นหาเพื่อน", "+"],
+    ["notifications", "การแจ้งเตือนรวม", "ไลค์ ความคิดเห็น แชร์ และกิจกรรมอื่น", "🔔"],
   ];
   const WINDOW_ID = "social-media";
   let workspace;
@@ -50,7 +51,8 @@
     social_not_found: "ไม่พบรายการหรือไม่มีสิทธิ์เข้าถึง",
     files_quota_exceeded: "พื้นที่คลาวด์เต็ม กรุณาจัดการไฟล์หรือแพ็กเกจ",
     file_too_large: "ไฟล์เกินขนาดที่ระบบรองรับ 20 MB",
-    social_video_required: "Short ต้องแนบวิดีโอ MP4 หรือ WebM",
+    social_video_required: "Short ต้องแนบวิดีโอ MP4 หรือ WebM จำนวน 1 ไฟล์",
+    social_short_duration: "Short ต้องเป็นวิดีโอที่อ่านได้และยาวไม่เกิน 1 นาที กรุณาใช้ Watch สำหรับวิดีโอยาว",
     social_feed_images_only: "Feed รองรับภาพและข้อความ กรุณาโพสต์วิดีโอใน Short หรือ Watch",
     social_long_video_required: "Watch ต้องแนบวิดีโอ หรือเพิ่มลิงก์วิดีโอ",
     social_invalid_media_url: "กรุณาใช้ลิงก์ HTTPS สาธารณะให้ตรงกับชนิดสื่อ เช่น YouTube, .mp4 หรือ .m3u8",
@@ -164,7 +166,11 @@
     return n;
   }
   function clear(v) {
+    v.pendingCamera?.getTracks().forEach(track => track.stop()); v.pendingCamera = null;
+    v.viewer?.close(); v.autoplayObserver?.disconnect(); v.autoplayItems = new Map(); v.videoEntries = []; v.videoNextCursor = null; v.recordOrder = new Map(); v.mediaLoads = new Set();
+    v.content.querySelectorAll("video,audio").forEach(node => { if (!node.srcObject) node.pause(); });
     v.renderVersion = (v.renderVersion || 0) + 1;
+    v.noticeThrough = new Date().toISOString();
     v.readObserver?.disconnect();
     clearTimeout(v.readTimer);
     v.readSeen = new Set();
@@ -207,6 +213,7 @@
         requestId = crypto.randomUUID();
         if (after) await after(out);
       } catch (e) {
+        v.pendingCamera?.getTracks().forEach(track => track.stop()); v.pendingCamera = null;
         status(v, friendly(e));
       } finally {
         submit.disabled = false;
@@ -215,83 +222,241 @@
     return submit;
   }
   async function attachments(v, form, initial = []) {
-    const details = el("details"),
-      summary = el("summary", "แนบไฟล์จากคลาวด์ / อัปโหลด"),
-      list = el("div");
-    details.append(summary, list);
-    form.append(details);
-    const selected = new Set(initial);
-    const render = async () => {
-      list.replaceChildren();
-      const data = await api(v, "/api/files");
-      if (!current(v)) return;
-      list.append(
-        el(
-          "p",
-          `พื้นที่ ${Math.round(data.usedBytes / 1048576)} / ${Math.round(data.maxBytes / 1048576)} MB · แชร์ไฟล์เดิม ไม่ทำสำเนา`,
-        ),
-      );
-      for (const f of data.files || []) {
-        const label = el("label", f.name),
-          check = el("input");
-        check.type = "checkbox";
-        check.checked = selected.has(f.id);
-        check.onchange = () => {
-          if (check.checked && selected.size >= 6) {
-            check.checked = false;
-            status(v, "แนบได้สูงสุด 6 ไฟล์");
-            return;
+    const selected = new Map(initial.map(id => [id, { id, name: "ไฟล์ที่เลือก" }]));
+    const wrap = el("div", null, { class: "social-attachments" }), menu = el("details"), summary = el("summary", "+", { "aria-label": "แนบไฟล์", role: "button" });
+    const choices = el("div", null, { class: "social-attachment-menu" }), chosen = el("div", null, { "data-selected-files": "" });
+    const upload = el("input", null, { type: "file", hidden: "", "aria-label": "อัปโหลด" });
+    if (v.module === "short") upload.accept = "video/mp4,video/webm";
+    else if (v.module === "feed") upload.accept = "image/png,image/jpeg,image/webp,image/gif";
+    menu.append(summary, choices); wrap.append(menu, chosen, upload); form.append(wrap);
+    const changed = () => {
+      chosen.replaceChildren();
+      for (const f of selected.values()) chosen.append(button(v, f.name + " ×", () => { selected.delete(f.id); changed(); }));
+      form.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    const add = file => { if (!selected.has(file.id) && selected.size >= 6) throw Error("แนบได้สูงสุด 6 ไฟล์"); selected.set(file.id, file); changed(); };
+    choices.append(button(v, "แนบไฟล์จากคลาวด์", async () => {
+      menu.open = false;
+      const dialog = el("dialog", null, { class: "social-file-picker", "aria-label": "เลือกไฟล์จากคลาวด์" });
+      const list = el("div", "กำลังโหลด…"), query = el("input", null, { type: "search", placeholder: "ค้นหาไฟล์", "aria-label": "ค้นหาไฟล์" });
+      const close = () => { dialog.close?.(); dialog.remove(); summary.focus(); };
+      dialog.append(el("h3", "เลือกไฟล์จากคลาวด์"), query, list, button(v, "เสร็จสิ้น", close)); v.root.append(dialog);
+      dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
+      if (dialog.showModal) dialog.showModal(); else dialog.setAttribute("open", "");
+      try {
+        const data = await api(v, "/api/files");
+        if (!dialog.isConnected || !current(v)) return;
+        const render = () => {
+          list.replaceChildren();
+          for (const f of data.files || []) {
+            if (!f.name.toLowerCase().includes(query.value.toLowerCase())) continue;
+            const label = el("label", null, { class: "social-checkbox" }), check = el("input", null, { type: "checkbox" }); check.checked = selected.has(f.id);
+            check.onchange = () => { try { check.checked ? add(f) : (selected.delete(f.id), changed()); } catch(e) { check.checked = false; status(v, friendly(e)); } };
+            label.append(check, el("span", f.name)); list.append(label);
           }
-          check.checked ? selected.add(f.id) : selected.delete(f.id);
-          form.dispatchEvent(new Event("input", { bubbles: true }));
+          if (!list.children.length) list.append(el("p", "ไม่พบไฟล์"));
         };
-        label.prepend(check);
-        list.append(label);
-      }
-    };
-    const upload = input(details, "อัปโหลดเข้าพื้นที่ของฉัน", "file");
-    details.append(
-      button(v, "อัปโหลดไฟล์", async () => {
-        const file = upload.files[0];
-        if (!file) return;
+        query.oninput = render; render();
+      } catch(e) { list.textContent = friendly(e); }
+    }), button(v, "อัปโหลด", () => { menu.open = false; upload.click(); }));
+    upload.addEventListener("change", async () => {
+      menu.open = false;
+      const file = upload.files?.[0]; if (!file) return;
+      try {
+        if (selected.size >= 6) throw Error("แนบได้สูงสุด 6 ไฟล์");
         if (file.size > 20 * 1024 * 1024) throw Error("file_too_large");
-        const result = await api(v, "/api/files", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/octet-stream",
-            "X-File-Name": encodeURIComponent(file.name),
-            "X-File-Content-Type": file.type || "application/octet-stream",
-          },
-          body: file,
-        });
-        if (selected.size < 6) selected.add(result.file.id);
-        form.dispatchEvent(new Event("input", { bubbles: true }));
-        await render();
-      }),
-    );
-    let loaded = false;
-    details.addEventListener("toggle", () => {
-      if (details.open && !loaded) {
-        loaded = true;
-        render().catch((e) => {
-          loaded = false;
-          status(v, friendly(e));
-        });
-      }
+        if (!window.confirm("ต้องการอัพโหลดไฟล์หรือไม่")) return;
+        upload.disabled = true;
+        const result = await api(v, "/api/files", { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(file.name), "X-File-Content-Type": file.type || "application/octet-stream" }, body: file });
+        if (current(v) && form.isConnected) add(result.file);
+      } catch(e) { status(v, friendly(e)); }
+      finally { upload.disabled = false; upload.value = ""; }
     });
-    const getFiles = () => [...selected];
-    getFiles.reset = () => {
-      selected.clear();
-      list.querySelectorAll('input[type="checkbox"]').forEach(node => { node.checked = false; });
-      upload.value = "";
-    };
+    changed();
+    const getFiles = () => [...selected.keys()];
+    getFiles.reset = () => { selected.clear(); changed(); upload.value = ""; };
     return getFiles;
   }
   const watchPost = (v, record) => ["feed", "watch", "community"].includes(record.kind) && (record.module === "feed" || v.module === "feed");
   const feedPost = (v, record) => ["feed", "video", "watch", "short", "listing", "live"].includes(record.kind) || (record.kind === "community" && ["feed", "short"].includes(record.module || v.module));
+  function playQuietly(node) { try { const pending = node.play(); pending?.catch(() => {}); } catch (_) {} }
+  function mediaCommand(entry, action, value) {
+    if (entry.node.tagName === "VIDEO") {
+      if (action === "play") { entry.node.muted = value !== false; playQuietly(entry.node); }
+      if (action === "pause") entry.node.pause();
+      if (action === "seek" && Number.isFinite(value)) entry.node.currentTime = value;
+    } else {
+      if (["play", "pause"].includes(action)) { entry.node.dataset.playing = String(action === "play"); entry.node.dataset.muted = String(value !== false); }
+      if (action === "play") entry.mount?.();
+      entry.node.querySelector("iframe")?.contentWindow?.postMessage({ channel: "panthorium-player", action, value }, location.origin);
+    }
+  }
+  function watchInline(v, entry) {
+    v.videoEntries ||= []; v.videoEntries.push(entry);
+    v.videoEntries.sort((a,b) => (v.recordOrder?.get(a.record?.id) || 0) - (v.recordOrder?.get(b.record?.id) || 0));
+    if (!window.IntersectionObserver) return;
+    v.autoplayItems ||= new Map(); v.autoplayItems.set(entry.node, { entry, ratio: 0 });
+    const update = () => {
+      if (!current(v) || v.viewer) return;
+      const eligible = !v.root.hidden && document.visibilityState === "visible";
+      const best = eligible ? [...v.autoplayItems.values()].filter(x => x.ratio >= .25 && x.entry.node.isConnected).sort((a,b) => b.ratio - a.ratio)[0]?.entry : null;
+      for (const { entry: item, ratio } of v.autoplayItems.values()) mediaCommand(item, (v.module === "tv" ? eligible && ratio >= .25 : item === best) ? "play" : "pause", true);
+    };
+    if (!v.autoplayObserver) {
+      v.autoplayObserver = new IntersectionObserver(changes => {
+        for (const change of changes) { const item = v.autoplayItems.get(change.target); if (item) item.ratio = change.intersectionRatio; }
+        update();
+      }, { root: v.root, threshold: [0,.25,.5,.75,1] });
+      v.updatePlayback = update;
+    }
+    v.autoplayObserver.observe(entry.node);
+  }
+  function attachVideo(v, r, node, mount) {
+    const entry = { record: r, node, mount };
+    const launch = () => openVideo(v, entry);
+    if (node.tagName === "VIDEO") {
+      node.controls = false; node.muted = true; node.loop = r.module === "short"; node.setAttribute("aria-label", "ดูวิดีโอเต็มจอ"); node.tabIndex = 0;
+      node.addEventListener("click", launch);
+      node.addEventListener("keydown", e => { if (["Enter", " "].includes(e.key)) { e.preventDefault(); launch(); } });
+    } else {
+      const cover = button(v, "", launch); cover.className = "social-video-open"; cover.setAttribute("aria-label", "ดูวิดีโอเต็มจอ"); node.append(cover);
+    }
+    watchInline(v, entry);
+  }
+  async function sharePost(v, r) {
+    const url = location.origin + location.pathname + "#social=" + (r.module || v.module) + "&record=" + encodeURIComponent(r.id);
+    try {
+      if (navigator.share) await navigator.share({ title: r.title || "Panthorium", url });
+      else { await navigator.clipboard.writeText(url); status(v, "คัดลอกลิงก์แล้ว ผู้เปิดต้องมีสิทธิ์เข้าถึง"); }
+      await write(v, "share", { recordId: r.id });
+    } catch (e) { if (e.name !== "AbortError") throw e; }
+  }
+  async function likePost(v, r, enabled) {
+    if (r.likeBusy || (enabled === true && r.liked)) return;
+    r.likeBusy = true;
+    try {
+      const out = await write(v, "like", { recordId: r.id, ...(enabled === true ? { enabled: true } : {}) });
+      r.likeCount = out.likeCount ?? Math.max(0, (r.likeCount || 0) + (out.liked === r.liked ? 0 : out.liked ? 1 : -1)); r.liked = out.liked;
+      for (const like of v.root.querySelectorAll("[data-like-record]")) if (like.dataset.likeRecord === r.id) {
+        like.textContent = (r.liked ? "♥" : "♡") + " " + r.likeCount;
+        like.setAttribute("aria-label", "ถูกใจ " + r.likeCount); like.setAttribute("aria-pressed", String(r.liked));
+      }
+    } finally { r.likeBusy = false; }
+  }
+  function openVideo(v, initial) {
+    if (!current(v) || v.viewer) return;
+    const dialog = el("dialog", null, { class: "social-viewer", "aria-label": "เครื่องเล่นวิดีโอเต็มจอ" });
+    const stage = el("div", null, { class: "social-viewer-stage" }), surface = el("div", null, { class: "social-video-surface", "aria-label": "แตะเพื่อแสดงหรือซ่อนปุ่ม แตะสองครั้งเพื่อถูกใจ" });
+    const hud = el("div", null, { class: "social-video-hud" }), side = el("div", null, { class: "social-video-side" }), bottom = el("div", null, { class: "social-video-bottom" });
+    const drawer = el("section", null, { class: "social-video-drawer", hidden: "" });
+    let entry, placeholder, hideTimer, tapTimer, lastTap = 0, gesture, lastWheel = 0, navigating = false, closed = false;
+    const focusBefore = document.activeElement;
+    const restore = () => {
+      if (!entry) return;
+      mediaCommand(entry, "pause");
+      if (placeholder?.isConnected) placeholder.replaceWith(entry.node);
+      if (entry.node.tagName === "VIDEO") { entry.node.muted = true; entry.node.ontimeupdate = null; }
+    };
+    const close = () => {
+      if (closed) return; closed = true;
+      clearTimeout(hideTimer); clearTimeout(tapTimer); restore();
+      if (document.fullscreenElement === dialog) document.exitFullscreen?.().catch(() => {});
+      dialog.close?.(); dialog.remove(); v.viewer = null;
+      focusBefore?.focus?.({ preventScroll: true }); v.updatePlayback?.();
+    };
+    v.viewer = { close, pause: () => entry && mediaCommand(entry, "pause") }; v.root.append(dialog);
+    const visible = show => { hud.hidden = !show; clearTimeout(hideTimer); if (show && drawer.hidden) hideTimer = setTimeout(() => { if (!hud.contains(document.activeElement)) hud.hidden = true; }, 3500); };
+    const control = (text, label, fn) => { const b = button(v, text, fn); b.setAttribute("aria-label", label);
+      if (label === "ความคิดเห็น") b.innerHTML = '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M4 3h16v13H9l-5 5V3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+      return b; };
+    hud.append(control("←", "กลับ", close)); hud.firstChild.className = "social-video-back";
+    const panel = render => { drawer.replaceChildren(control("×", "ปิดรายละเอียด", () => { drawer.hidden = true; visible(true); })); drawer.hidden = false; visible(true); render(drawer); };
+    const progress = el("input", null, { type: "range", min: "0", max: "1000", value: "0", step: "1", "aria-label": "ตำแหน่งวิดีโอ" });
+    const clock = el("span", "0:00 / 0:00"), playback = control("Ⅱ", "เล่นหรือหยุดชั่วคราว", () => {
+      if (entry.node.tagName === "VIDEO") mediaCommand(entry, entry.node.paused ? "play" : "pause", false);
+      else mediaCommand(entry, "toggle", false);
+      visible(true);
+    });
+    let duration = 0;
+    const time = n => Number.isFinite(n) ? Math.floor(n / 60) + ":" + String(Math.floor(n % 60)).padStart(2,"0") : "0:00";
+    const tick = (currentTime, total, paused) => { if (!Number.isFinite(total)) total = entry?.record.files?.find(file => file.durationSeconds)?.durationSeconds || 0; duration = total; clock.textContent = time(currentTime) + " / " + time(total); progress.value = total > 0 ? String(currentTime / total * 1000) : "0"; progress.disabled = !Number.isFinite(total) || total <= 0; playback.textContent = paused ? "▷" : "Ⅱ"; };
+    progress.oninput = () => { mediaCommand(entry, "seek", Number(progress.value) / 1000 * duration); visible(true); };
+    const more = control("⌃", "ตัวเลือกวิดีโอ", () => panel(parent => {
+      for (const file of entry.record.files || []) parent.append(button(v, "ดาวน์โหลด " + file.name, async () => {
+        const blob = await api(v, "/api/social/records/" + encodeURIComponent(entry.record.id) + "/files/" + encodeURIComponent(file.id) + "?download=1", {}, true);
+        if (!current(v)) return; const url = URL.createObjectURL(blob); v.urls.add(url);
+        const a = el("a", "ดาวน์โหลด", { href: url, download: file.name }); parent.append(a); a.click(); a.remove();
+      }));
+      if (entry.record.source) parent.append(externalLink("เปิดเว็บไซต์ต้นทาง", entry.record.source.url));
+      parent.append(button(v, "เพิ่มลงเพลย์ลิสต์", () => { const id = entry.record.id; close(); return collections(v, "playlist", id); }));
+      if (entry.record.ownerId !== v.uid) {
+        const reason = input(parent, "เหตุผลที่รายงาน", "textarea");
+        parent.append(button(v, "รายงาน", async () => { if (!reason.value.trim()) { reason.focus(); return; } await write(v, "report", { recordId: entry.record.id, reason: reason.value.trim() }); reason.value = ""; parent.append(el("p", "ส่งรายงานแล้ว")); }));
+      }
+    }));
+    const transport = el("div", null, { class: "social-video-transport" }); transport.append(playback, clock, progress, more);
+    const show = next => {
+      if (closed || !next?.node.isConnected) return;
+      restore(); entry = next; drawer.hidden = true;
+      placeholder = el("div", null, { class: "social-video-placeholder" }); placeholder.style.height = Math.max(200, entry.node.getBoundingClientRect().height) + "px";
+      entry.node.replaceWith(placeholder); stage.replaceChildren(entry.node); side.replaceChildren(); bottom.replaceChildren();
+      const r = entry.record;
+      const avatar = control((r.author?.name || "สมาชิก").slice(0,1), "ผู้โพสต์ " + (r.author?.name || "สมาชิก"), () => panel(parent => {
+        parent.append(el("h3", r.author?.name || "สมาชิก"));
+        if (r.ownerId !== v.uid) parent.append(button(v, "ติดตาม", async () => { await write(v, "follow", { userId: r.ownerId }); parent.append(el("p", "ติดตามแล้ว")); }));
+      })); avatar.className = "social-video-avatar";
+      if (r.author?.avatarUrl) api(v, r.author.avatarUrl, {}, true).then(blob => {
+        if (!current(v) || !avatar.isConnected) return; const url = URL.createObjectURL(blob); v.urls.add(url); avatar.replaceChildren(el("img", null, { src: url, alt: r.author.name }));
+      }).catch(() => {});
+      const like = control((r.liked ? "♥" : "♡") + " " + (r.likeCount || 0), "ถูกใจ " + (r.likeCount || 0), () => likePost(v, r)); like.dataset.likeRecord = r.id; like.setAttribute("aria-pressed", String(!!r.liked));
+      side.append(avatar, control("↗", "แชร์", () => sharePost(v, r)), control("☏", "ความคิดเห็น", () => panel(parent => inlineComments(v, r, parent))), like);
+      if (r.text || r.title) { const description = control([r.title, r.text].filter(Boolean).join("\n"), "ดูรายละเอียดวิดีโอ", () => panel(parent => parent.append(el("p", [r.title,r.text].filter(Boolean).join("\n"))))); description.className = "social-video-description"; bottom.append(description); }
+      bottom.append(transport); tick(0,0,false);
+      if (entry.node.tagName === "VIDEO") { entry.node.ontimeupdate = () => tick(entry.node.currentTime, entry.node.duration, entry.node.paused); }
+      mediaCommand(entry, "play", false); visible(true);
+    };
+    const navigate = async direction => {
+      if (navigating || closed || !drawer.hidden) return;
+      navigating = true;
+      try {
+        const index = v.videoEntries.indexOf(entry);
+        if (direction > 0 && index === v.videoEntries.length - 1 && v.videoNextCursor) { await feed(v, v.videoNextCursor); await Promise.allSettled([...(v.mediaLoads || [])]); }
+        const next = v.videoEntries[index + direction]; if (next) show(next);
+      } catch(e) { status(v, friendly(e)); } finally { navigating = false; }
+    };
+    const tap = () => {
+      const now = Date.now();
+      if (now - lastTap < 300) { clearTimeout(tapTimer); lastTap = 0; likePost(v, entry.record, true).catch(e => status(v, friendly(e))); surface.classList.add("social-liked"); setTimeout(() => surface.classList.remove("social-liked"), 650); }
+      else { lastTap = now; tapTimer = setTimeout(() => visible(hud.hidden), 300); }
+    };
+    surface.addEventListener("pointerdown", e => { gesture = { x:e.clientX, y:e.clientY, id:e.pointerId }; surface.setPointerCapture(e.pointerId); });
+    surface.addEventListener("pointerup", e => {
+      if (!gesture) return; const dy=e.clientY-gesture.y, dx=e.clientX-gesture.x; gesture=null;
+      if (Math.abs(dy)>65 && Math.abs(dy)>Math.abs(dx)) { clearTimeout(tapTimer); lastTap=0; navigate(dy<0?1:-1); }
+      else if (Math.abs(dy)<15 && Math.abs(dx)<15) tap();
+    });
+    surface.addEventListener("pointercancel", () => { gesture=null; });
+    dialog.addEventListener("wheel", e => { if (!drawer.hidden || e.target.closest("input")) return; e.preventDefault(); if (Math.abs(e.deltaY)>20 && Date.now()-lastWheel>650) { lastWheel=Date.now(); navigate(e.deltaY>0?1:-1); } }, { passive:false });
+    dialog.addEventListener("keydown", e => {
+      if (e.target.matches("input,textarea,select")) return;
+      if (["ArrowDown","ArrowUp"].includes(e.key)) { e.preventDefault(); navigate(e.key==="ArrowDown"?1:-1); }
+      if (e.key===" ") { e.preventDefault(); playback.click(); }
+    });
+    dialog.addEventListener("cancel", e => { e.preventDefault(); close(); });
+    hud.addEventListener("pointerdown", () => visible(true));
+    const onState = event => { if (event.origin !== location.origin || event.source !== entry?.node.querySelector?.("iframe")?.contentWindow || event.data?.channel !== "panthorium-player-state") return; tick(event.data.time,event.data.duration,event.data.paused); };
+    window.addEventListener("message", onState, { signal:v.controller.signal });
+    dialog.addEventListener("close", () => window.removeEventListener("message", onState), { once:true });
+    hud.append(side,bottom); dialog.append(stage,surface,hud,drawer);
+    dialog.showModal(); show(initial);
+    // Use native fullscreen where available, with the full-viewport dialog as a fallback.
+    dialog.requestFullscreen?.().catch(() => {});
+    dialog.focus();
+  }
+
   async function media(v, record, container) {
     const compact = feedPost(v, record);
-    if (record.source) { sourcePlayer(v, record.source, container, record.title || "Watch"); container.append(externalLink("เปิดเว็บไซต์ต้นทาง", record.source.url)); }
+    if (record.source) { sourcePlayer(v, record.source, container, record.title || "Watch", record); container.append(externalLink("เปิดเว็บไซต์ต้นทาง", record.source.url)); }
     for (const file of record.files || []) {
       const item = el("div", null, { class: "social-media" });
       if (!compact) item.append(el("small", file.name));
@@ -317,14 +482,16 @@
           if (!current(v) || !item.isConnected) return;
         }
         preview.replaceChildren(view);
+        if (view.tagName === "VIDEO" && ["short", "watch"].includes(record.module || v.module)) attachVideo(v, record, view);
       };
       if (compact || ["feed", "video", "watch", "short", "listing", "connect"].includes(record.kind) || (record.kind === "group-message" && /^(image\/(png|jpeg|webp|gif)|video\/|audio\/)/.test(file.contentType))) {
         preview.textContent = "กำลังโหลดสื่อ…";
         // Load independently so a slow attachment never blocks the feed or its controls.
-        show().catch(() => {
+        const loading = show().catch(() => {
           if (!current(v) || !item.isConnected) return;
           preview.replaceChildren(el("p", "โหลดสื่อไม่สำเร็จ"), button(v, "ลองโหลดอีกครั้ง", show));
         });
+        v.mediaLoads ||= new Set(); v.mediaLoads.add(loading); loading.finally(() => v.mediaLoads.delete(loading));
       } else {
         preview.append(button(v, "เปิดไฟล์ / ดูตัวอย่าง", show));
       }
@@ -351,7 +518,7 @@
       container.append(item);
     }
   }
-  async function profile(v) {
+  async function profileSettings(v) {
     clear(v);
     const data = await api(v, "/api/social/profile");
     if (!current(v)) return;
@@ -369,7 +536,7 @@
     name.maxLength = 80;
     bio.maxLength = 1000;
     const getFiles = await attachments(v, form, (data.profile?.files || []).map(file => file.id));
-    form.append(el("p", "แนบรูปโปรไฟล์ได้ ข้อมูลและรูปในหน้านี้เปิดดูได้เฉพาะคุณ"));
+    form.append(el("p", "แนบรูปโปรไฟล์ได้ รูปแรกใช้เป็นรูปผู้โพสต์สำหรับผู้ที่มีสิทธิ์ดูโพสต์ของคุณ"));
     bindForm(
       v,
       form,
@@ -380,12 +547,12 @@
         discoverable: visible.checked,
         fileIds: getFiles(),
       }),
-      () => profile(v),
+      () => profileSettings(v),
     );
     f.append(
       el(
         "p",
-        "ชื่อที่แสดงใช้กำกับโพสต์และข้อความ ส่วนข้อมูลโปรไฟล์และรูปจะไม่เผยแพร่ หากเปิดการซิงค์ Connect จะแชร์เฉพาะข้อมูลที่ยินยอมไว้ใน Connect",
+        "ชื่อที่แสดงและรูปแรกใช้กำกับโพสต์ ส่วนข้อมูลเกี่ยวกับฉันยังเป็นส่วนตัว หากเปิดการซิงค์ Connect จะแชร์เฉพาะข้อมูลที่ยินยอมไว้ใน Connect",
       ),
     );
     if (os()?.state?.user?.roles?.includes("administrator"))
@@ -507,9 +674,7 @@
   }
   async function people(v) {
     clear(v);
-    const card = section(v, "ค้นหาเพื่อน"), form = el("form"), q = input(form, "ชื่อที่แสดงอย่างน้อย 2 ตัวอักษร"), results = el("div");
-    card.append(el("p", "ค้นหาได้เฉพาะชื่อที่เจ้าของอนุญาต หน้าโปรไฟล์และข้อมูลส่วนตัวยังคงเป็นส่วนตัว"), form, results);
-    const submit = el("button", "ค้นหาเพื่อน", { type: "submit" }); form.append(submit);
+    const card = section(v, "เพื่อน"), q = v.search, results = el("div"); card.append(results);
     const contacts = el("section", null, { "data-social-friends": "" }); v.content.append(contacts);
     const renderPerson = (p, parent, reload) => {
       const row = el("article", null, { class: "social-card", "data-friend-id": p.id }); row.append(el("h4", p.name));
@@ -522,13 +687,14 @@
       for (const person of data.items) renderPerson(person, results, async () => { await search(); await v.refreshFriends?.(); });
       if (!data.items.length) results.append(el("p", "ไม่พบชื่อที่อนุญาตให้ค้นหา"));
     };
-    form.onsubmit = async event => { event.preventDefault(); submit.disabled = true; try { await search(); } catch (error) { status(v, friendly(error)); } finally { submit.disabled = false; } };
+    if (q.value.trim()) await search();
     v.refreshFriends = async (before) => {
+      v.noticeThrough = new Date().toISOString();
       const data = await api(v, "/api/social/friends" + (before ? "?before=" + encodeURIComponent(before) : ""));
       if (!current(v) || !contacts.isConnected) return;
       if (!before) contacts.replaceChildren(el("h3", "เพื่อนและคำขอเป็นเพื่อน"));
       if (!data.items.length && !before) contacts.append(el("p", "ยังไม่มีเพื่อนหรือคำขอ"));
-      for (const relation of data.items) renderPerson({ id: relation.userId, name: relation.name, friendship: relation }, contacts, () => v.refreshFriends());
+      for (const relation of [...data.items].sort((a,b) => Number(b.status === "pending" && b.direction === "incoming") - Number(a.status === "pending" && a.direction === "incoming"))) renderPerson({ id: relation.userId, name: relation.name, friendship: relation }, contacts, () => v.refreshFriends());
       if (data.nextCursor) contacts.append(button(v, "โหลดเพื่อนเพิ่มเติม", async () => { await v.refreshFriends(data.nextCursor); }));
     };
     await v.refreshFriends();
@@ -633,13 +799,17 @@
       "data-record-id": r.id,
     });
     parent.append(c);
+    v.recordOrder ||= new Map(); if (!v.recordOrder.has(r.id)) v.recordOrder.set(r.id, v.recordOrder.size);
     if (r.kind === "thread") {
       const latest = r.lastMessage;
       c.append(el("h3", r.peer?.name || "สมาชิก"),
         el("p", latest ? (latest.ownerId === v.uid ? "คุณ: " : "") + (latest.text || "ไฟล์แนบ " + latest.attachmentCount + " ไฟล์")
           : r.status === "pending" ? "รอรับคำขอสนทนา" : r.status === "declined" ? "คำขอสนทนาถูกปฏิเสธ" : "เริ่มสนทนา", { class: "social-chat-preview" }));
       if (latest) c.append(el("small", new Date(latest.createdAt).toLocaleString("th-TH")));
-      c.append(button(v, "เปิดบทสนทนา", () => detail(v, r.id)));
+      c.setAttribute("role", "button"); c.tabIndex = 0; c.setAttribute("aria-label", "เปิดแชท " + (r.peer?.name || "สมาชิก"));
+      c.append(recordBadge(r.id));
+      c.addEventListener("click", () => detail(v, r.id).catch(e => status(v, friendly(e))));
+      c.addEventListener("keydown", event => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); c.click(); } });
       return;
     }
     const compact = feedPost(v, r);
@@ -719,16 +889,12 @@
       }
     }
     if (["feed", "video", "watch", "short", "community", "listing", "live"].includes(r.kind)) {
-      const like = button(v, (r.liked ? "♥" : "♡") + " " + (r.likeCount || 0), async () => {
-        const result = await write(v, "like", { recordId: r.id });
-        if (!compact) return feed(v);
-        r.likeCount = Math.max(0, (r.likeCount || 0) + (result.liked ? 1 : -1)); r.liked = result.liked;
-        like.textContent = (r.liked ? "♥" : "♡") + " " + r.likeCount;
-        like.setAttribute("aria-label", "ถูกใจ " + r.likeCount); like.setAttribute("aria-pressed", String(r.liked));
-      });
+      const like = button(v, (r.liked ? "♥" : "♡") + " " + (r.likeCount || 0), () => likePost(v, r));
+      like.dataset.likeRecord = r.id;
       like.setAttribute("aria-label", "ถูกใจ " + (r.likeCount || 0)); like.setAttribute("aria-pressed", String(!!r.liked));
       commentToggle = compact ? el("button", "ความคิดเห็น " + (r.commentCount || 0), { type: "button", "data-comment-toggle": r.id }) : button(v, "ความคิดเห็น", () => c.querySelector("[data-social-comment-input]")?.focus());
-      actions.append(like, commentToggle);
+      const share = button(v, "↗", () => sharePost(v, r)); share.setAttribute("aria-label", "แชร์");
+      actions.append(like, commentToggle, share);
       if (compact) c.append(actions);
     }
     let extra = c;
@@ -855,6 +1021,8 @@
   async function detail(v, id, reset = true) {
     if (reset) clear(v);
     v.detail = id;
+    v.noticeThrough = new Date().toISOString();
+    scheduleRead(v);
     const version = v.renderVersion;
     const data = await api(v, "/api/social/records/" + encodeURIComponent(id));
     if (!current(v) || v.detail !== id || version !== v.renderVersion) return;
@@ -1261,16 +1429,17 @@
       bindForm(v, form, "group-create", () => ({ title: title.value, privacy: privacy.value, text: description.value }), out => detail(v, out.record.id));
       return;
     }
-    const data = await api(v, "/api/social/collections/group?scope=" + mode + (before ? "&before=" + encodeURIComponent(before) : ""));
+    const data = await api(v, "/api/social/collections/group?scope=" + mode + "&query=" + encodeURIComponent(v.search.value) + (before ? "&before=" + encodeURIComponent(before) : ""));
     if (!current(v) || version !== v.renderVersion || !panel.isConnected) return;
     if (!data.items.length && !before) panel.append(el("p", mode === "mine" ? "คุณยังไม่ได้เข้าร่วมกลุ่ม เลือกกลุ่มทั้งหมดเพื่อค้นหากลุ่ม หรือสร้างกลุ่มของคุณ" : "ยังไม่มีกลุ่ม"));
     for (const r of data.items) {
       const c = el("article", null, { class: "social-card", "data-group-id": r.id });
-      c.append(el("h4", r.title), el("p", groupSummary(r)),
+      c.append(el("h4", r.title), recordBadge(r.id), el("p", r.text || ""), el("p", groupSummary(r)),
         el("small", r.membership === "member" ? "เป็นสมาชิกแล้ว" : r.membership === "pending" ? "รออนุมัติคำขอ" : ""),
         button(v, "เปิด", () => detail(v, r.id)));
       panel.append(c);
     }
+    notificationBadges();
     if (data.nextCursor) {
       const more = button(v, "โหลดกลุ่มเพิ่มเติม", async () => { await community(v, mode, data.nextCursor); more.remove(); });
       panel.append(more);
@@ -1400,7 +1569,7 @@
       if (r.id === selectedId) { c.dataset.selectedOrder = "true"; c.style.borderColor = "#ff9f43"; c.scrollIntoView?.({ block: "nearest" }); }
     }
   }
-  async function startRTC(v, r) {
+  async function startRTC(v, r, preparedStream) {
     v.rtc.replaceChildren();
     v.rtc.hidden = false;
     v.sessionId = r.id;
@@ -1419,6 +1588,7 @@
     );
     await window.PanthoriumSocialRTC.start({
       id: r.id,
+      stream: preparedStream,
       kind: r.kind,
       owner: r.ownerId,
       uid: v.uid,
@@ -1510,22 +1680,22 @@
     }
   }
   function stopSourcePlayer(box) {
-    box.querySelector("iframe")?.remove();
-    const play = box.querySelector("[data-play-source]");
-    if (play) play.hidden = false;
+    box.dataset.playing = "false"; box.querySelector("iframe")?.remove();
   }
-  function sourcePlayer(v, source, parent, title) {
+  function sourcePlayer(v, source, parent, title, record) {
     const box = el("div", null, { class: "social-source-player", "data-social-player": "" });
-    const play = button(v, "▶ เล่นใน Panthorium", () => {
-      workspace.root.querySelectorAll("[data-social-player]").forEach(stopSourcePlayer);
+    const mount = () => {
+      if (box.querySelector("iframe")) return;
       const frame = el("iframe", null, {
-        src: "/social-player.html#" + new URLSearchParams({ type: source.type, url: source.url }),
-        title: title || "เครื่องเล่นวิดีโอ", allow: "autoplay; fullscreen; picture-in-picture; encrypted-media", allowfullscreen: "",
-        referrerpolicy: "strict-origin-when-cross-origin",
+        src: "/social-player.html#" + new URLSearchParams({ type: source.type, url: source.url, autoplay: "1", muted: "1", controls: record ? "0" : "1" }),
+        title: title || "เครื่องเล่นวิดีโอ", allow: "autoplay; fullscreen; picture-in-picture; encrypted-media", allowfullscreen: "", referrerpolicy: "strict-origin-when-cross-origin",
       });
-      box.append(frame); play.hidden = true;
-    });
-    play.dataset.playSource = ""; box.append(play); parent.append(box);
+      frame.onload = () => { frame.contentWindow.postMessage({ channel: "panthorium-player", action: box.dataset.playing === "false" ? "pause" : "play", value: box.dataset.muted !== "false" }, location.origin); };
+      box.prepend(frame);
+    };
+    parent.append(box);
+    if (record) attachVideo(v, record, box, mount);
+    else { const entry = { node: box, mount }; watchInline(v, entry); }
   }
   function externalLink(label, url) {
     // Only the server-validated public destination is rendered; never execute submitted HTML.
@@ -1615,7 +1785,7 @@
   async function feed(v, before, mode) {
     if (v.module === "tv") return tvCatalog(v, before);
     if (v.module === "community") return community(v);
-    if (v.module === "profile") return profile(v);
+    if (v.module === "notifications") return notificationPage(v);
     if (v.module === "friends") return people(v);
     if (mode) v.feedMode = mode;
     if (!before) {
@@ -1644,11 +1814,13 @@
       section(v, "ยังไม่มีรายการ").append(
         el("p", "เริ่มสร้างรายการของคุณ หรือค้นหาผู้ใช้เพื่อเชื่อมต่อ"),
       );
+    v.videoNextCursor = data.nextCursor;
     for (const r of data.items) {
       if (!current(v) || version !== v.renderVersion) return;
       await card(v, r, v.content);
     }
     if (!current(v) || version !== v.renderVersion) return;
+    notificationBadges(); scheduleRead(v);
     if (data.nextCursor)
       v.content.append(
         button(v, "โหลดรายการก่อนหน้า", async () => {
@@ -1670,7 +1842,7 @@
         if (!latest.items.length) section(v, "ยังไม่มีรายการ");
         if (latest.nextCursor) v.content.append(button(v, "โหลดรายการก่อนหน้า", () => feed(v, latest.nextCursor)));
         if (focused) [...v.content.querySelectorAll("[data-record-id]")].find(c => c.dataset.recordId === focused)?.querySelector("button")?.focus({ preventScroll: true });
-        v.root.scrollTop = scroll;
+        v.root.scrollTop = scroll; notificationBadges();
       };
     } else if (before) v.refreshThreads = null;
   }
@@ -1684,6 +1856,8 @@
   }
   function disposeWorkspace() {
     for (const v of views.values()) {
+      v.pendingCamera?.getTracks().forEach(track => track.stop());
+      v.viewer?.close(); v.autoplayObserver?.disconnect();
       v.controller.abort(); clearTimeout(v.timer); clearTimeout(v.readTimer); v.readObserver?.disconnect();
       for (const url of v.urls) URL.revokeObjectURL(url);
       if (v.sessionId) window.PanthoriumSocialRTC?.stop();
@@ -1721,6 +1895,10 @@
       .social-message-receipt{display:inline-block;margin:4px 8px;color:#9bb1c9;font-size:18px;font-weight:600}.social-message-receipt[data-delivery=read]{letter-spacing:-6px;padding-right:6px;color:#66d0ff}
       .social-activity{border-bottom:1px solid #263b4b;margin-bottom:10px}.social-activity summary{background:transparent;padding:7px 3px;min-height:32px;font-size:13px}.social-activity article{padding:10px;border-bottom:1px solid #263b4b}.social-activity article[data-unread=true]{border-left:3px solid #ff9f43}.social-activity p{margin:4px 0}.social-activity [data-activity-items]{max-height:330px;overflow:auto}
       @media(max-width:540px){.social-app{padding:10px}.social-tabs{padding:6px 8px}.social-tabs button{padding:8px 11px}.social-card{padding:12px}.social-toolbar{align-items:stretch}.social-toolbar form{flex:1 1 100%;min-width:0}.social-toolbar form label{flex:1;min-width:0}.social-toolbar input{min-width:0;width:100%!important}.social-tools{margin-left:0!important}}
+
+      .social-search{display:flex;align-items:center;gap:4px;max-width:100%}.social-toolbar .social-search form{position:relative;flex:0 1 300px;width:300px;max-width:calc(100vw - 85px)}.social-toolbar .social-search input{width:100%!important;padding-right:65px;margin:0!important}.social-search form button{position:absolute;right:3px;top:3px;bottom:3px;min-height:0;border:0;background:transparent;padding:4px 8px}.social-attachments{position:relative}.social-attachments summary{width:42px;height:42px;display:grid;place-items:center;font-size:28px;cursor:pointer;list-style:none;border:1px solid #33495b;border-radius:10px}.social-attachment-menu{position:absolute;z-index:25;display:flex;flex-direction:column;padding:6px;background:#152332;border:1px solid #496779;border-radius:12px}.social-file-picker{width:min(90vw,540px);max-height:80vh;overflow:auto;background:#101c28;color:#edf2f7;border:1px solid #496779;border-radius:14px;padding:20px}.social-file-picker::backdrop{background:#0009}.social-card[role=button]{cursor:pointer}.social-card[role=button]:focus-visible{outline:2px solid #ffb26e}.social-notification-badge{vertical-align:middle}
+
+      .social-source-player{position:relative;min-height:220px;background:#000}.social-video-open{position:absolute;inset:0;width:100%;height:100%;margin:0!important;opacity:0;z-index:2}.social-media video{cursor:pointer;width:100%}.social-viewer{position:fixed;inset:0;width:100vw;max-width:none;height:100dvh;max-height:none;margin:0;padding:0;border:0;background:#000;color:#fff;overflow:hidden}.social-viewer::backdrop{background:#000}.social-viewer-stage,.social-video-surface,.social-video-hud{position:absolute;inset:0}.social-viewer-stage video,.social-viewer-stage .social-source-player,.social-viewer-stage iframe{width:100%;height:100%;max-height:none;border-radius:0;object-fit:contain}.social-viewer-stage .social-video-open{display:none}.social-video-surface{z-index:2;touch-action:none}.social-video-hud{z-index:3;pointer-events:none}.social-video-hud button,.social-video-hud input{pointer-events:auto}.social-viewer button{background:transparent!important;border:0!important;color:#fff;font-size:24px;text-shadow:0 2px 5px #000;min-width:44px;min-height:44px}.social-video-back{position:absolute;top:max(12px,env(safe-area-inset-top));left:12px}.social-video-side{position:absolute;top:max(20px,env(safe-area-inset-top));right:12px;display:flex;align-items:center;flex-direction:column;gap:15px}.social-video-avatar{border-radius:50%;width:48px;height:48px;padding:0!important;overflow:hidden}.social-video-avatar img{width:100%;height:100%;object-fit:cover}.social-video-bottom{position:absolute;bottom:max(12px,env(safe-area-inset-bottom));left:12px;right:12px}.social-viewer .social-video-description{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap;font-size:15px;text-align:left;max-width:calc(100% - 65px);padding:6px;line-height:1.5}.social-video-transport{display:flex;align-items:center;gap:8px;text-shadow:0 1px 4px #000}.social-video-transport input{min-width:0;flex:1;accent-color:#ff9f43;padding:0!important}.social-video-transport span{font-size:12px;white-space:nowrap}.social-video-drawer{position:absolute;z-index:5;bottom:0;left:0;right:0;max-height:72%;overflow:auto;padding:18px;background:#101c28;color:#edf2f7}.social-video-drawer>button:first-child{float:right}.social-video-drawer button{font-size:16px}.social-video-drawer p{white-space:pre-wrap;overflow-wrap:anywhere}.social-liked::after{content:'♥';position:absolute;top:42%;left:42%;color:#ff496c;font-size:90px;filter:drop-shadow(0 2px 10px #000)}
     </style><nav class="social-tabs" role="tablist" aria-label="Social Media"></nav><div class="social-pages"></div></div>`;
     if (typeof window.createWindow !== "function") throw Error("window_system_unavailable");
     window.createWindow(WINDOW_ID, "Social Media", markup, { width: 1040, height: 740, onClose: disposeWorkspace });
@@ -1729,7 +1907,7 @@
     const shell = workspace = { uid: uid(), root, controller: new AbortController() };
     const nav = root.querySelector(".social-tabs");
     for (const [id, label, thai] of specs) {
-      const tab = button(shell, label, () => open(id));
+      const tab = button(shell, id === "notifications" ? "🔔 " + label : label, () => open(id));
       tab.dataset.socialTab = id; tab.id = "social-tab-" + id;
       tab.setAttribute("role", "tab"); tab.setAttribute("aria-controls", "social-page-" + id); tab.setAttribute("aria-selected", "false"); tab.title = thai;
       tab.append(moduleBadge(id)); nav.append(tab);
@@ -1750,7 +1928,8 @@
     shell.root.closest(".window").dataset.socialActive = module;
     for (const [id, v] of views) {
       v.root.hidden = id !== module;
-      if (id !== module) v.root.querySelectorAll("[data-social-player]").forEach(stopSourcePlayer);
+      if (id === module) v.updatePlayback?.();
+      if (id !== module) { v.viewer?.close(); v.root.querySelectorAll("[data-social-player]").forEach(stopSourcePlayer); }
       if (id !== module) v.root.querySelectorAll("video,audio").forEach(media => { if (!media.srcObject) media.pause(); });
     }
     for (const tab of shell.root.querySelectorAll("[data-social-tab]")) {
@@ -1763,12 +1942,16 @@
   function moduleTools(v) {
     const toolbar = v.root.querySelector("[data-social-toolbar]");
     v.search = el("input"); v.search.value = "";
-    if (["feed", "short", "watch", "live", "tv", "market", "talk", "connect"].includes(v.module)) {
-      const form = el("form"), q = input(form, "ค้นหารายการ");
-      q.placeholder = "ค้นหาใน " + specs.find(s => s[0] === v.module)[1];
-      q.parentElement.firstChild.textContent = ""; q.setAttribute("aria-label", "ค้นหารายการ");
-      v.search = q; form.append(el("button", "ค้นหา", { type: "submit" }));
-      form.onsubmit = event => { event.preventDefault(); feed(v).catch(error => status(v, friendly(error))); }; toolbar.append(form);
+    if (v.module !== "notifications") {
+      const box = el("div", null, { class: "social-search" });
+      const toggle = button(v, "", () => { form.hidden = !form.hidden; toggle.setAttribute("aria-expanded", String(!form.hidden)); if (!form.hidden) q.focus(); });
+      toggle.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15 15 6 6" stroke="currentColor" stroke-width="2"/></svg>';
+      toggle.setAttribute("aria-label", "ค้นหา"); toggle.setAttribute("aria-expanded", "false");
+      const form = el("form", null, { hidden: "", role: "search" }), q = el("input", null, { type: "search", "aria-label": "ค้นหารายการ", placeholder: "ค้นหาใน " + specs.find(s => s[0] === v.module)[1] });
+      const submit = el("button", "ค้นหา", { type: "submit" }); v.search = q; form.append(q, submit);
+      form.onsubmit = event => { event.preventDefault(); feed(v).catch(error => status(v, friendly(error))); };
+      form.addEventListener("keydown", event => { if (event.key === "Escape") { form.hidden = true; toggle.setAttribute("aria-expanded", "false"); toggle.focus(); } });
+      box.append(toggle, form); toolbar.append(box);
     }
     if (["feed", "short", "watch", "market"].includes(v.module)) toolbar.append(button(v, v.module === "market" ? "ลงสินค้า" : ["short", "watch"].includes(v.module) ? "โพสต์วิดีโอ" : "สร้างโพสต์", () => compose(v)));
     if (["live", "market", "talk"].includes(v.module)) toolbar.append(button(v, "รายการทั้งหมด", () => feed(v)));
@@ -1795,25 +1978,41 @@
     if (v.module === "connect") {
       toolbar.append(button(v, "ตั้งค่า Connect", () => connectSettings(v)), button(v, "ค้นหาคู่", () => feed(v, null, "discover")), button(v, "บทสนทนา Connect", () => feed(v, null, "chats")));
     }
-    if (v.module === "friends") toolbar.append(button(v, "ค้นหาเพื่อน", () => people(v)));
+
     if (["profile", "friends"].includes(v.module)) toolbar.append(button(v, "บัญชีที่บล็อก", () => collections(v, "block")));
     if (v.module === "live") toolbar.append(button(v, "เริ่มไลฟ์", async () => {
       clear(v); const form = el("form"), title = input(form, "ชื่อไลฟ์");
       section(v, "เริ่มถ่ายทอดสด • ผู้ชมพร้อมกันสูงสุด 8 คน").append(form);
       title.maxLength = 200;
       const audience = select(form, "ผู้ที่ดูได้", [["public", "สาธารณะ"]]); audience.disabled = true;
-      const submit = bindForm(v, form, "live-start", () => ({ title: title.value }), async out => { await startRTC(v, out.record); await detail(v, out.record.id); });
+      let camera;
+      const submit = bindForm(v, form, "live-start", async () => {
+        if (!navigator.mediaDevices?.getUserMedia) throw Error("กรุณาเปิดผ่าน HTTPS และอนุญาตกล้อง/ไมโครโฟน");
+        // Acquire permission before publishing a live room, so a permission dialog cannot expire it.
+        camera?.getTracks().forEach(track => track.stop());
+        try { camera = await navigator.mediaDevices.getUserMedia({ audio: true, video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 20 } } }); }
+        catch (e) { throw Error(e.name === "NotAllowedError" ? "กรุณาอนุญาตกล้อง/ไมโครโฟนในตั้งค่าแอปหรือเบราว์เซอร์" : "เปิดกล้องไม่ได้ กรุณาปิดแอปอื่นที่ใช้กล้องแล้วลองอีกครั้ง"); }
+        if (!current(v) || !form.isConnected || v.root.hidden) { camera.getTracks().forEach(track => track.stop()); camera = null; throw Error("ยกเลิกการเปิดกล้องแล้ว กรุณาเริ่มไลฟ์ใหม่"); }
+        v.pendingCamera = camera;
+        return { title: title.value };
+      }, async out => {
+        try { await startRTC(v, out.record, camera); v.pendingCamera = null; camera = null; await detail(v, out.record.id); }
+        catch(e) { v.sessionId = null; v.rtc.hidden = true; throw e; }
+      });
+
       submit.textContent = "เริ่มถ่ายทอดสด"; composeActions(v, form, submit);
     }));
     if (v.module === "profile") {
-      v.blockedBack = button(v, "กลับ", () => profile(v));
+      toolbar.append(button(v, "ตั้งค่าโปรไฟล์", () => profileSettings(v)));
+      toolbar.append(toolbar.querySelector(".social-search"));
+      v.blockedBack = button(v, "กลับ", () => feed(v));
       v.blockedBack.className = "social-back"; v.blockedBack.hidden = true; toolbar.append(v.blockedBack);
     }
   }
   async function refreshView(v) {
     if (!v || !current(v)) return;
     if (v.detail) await detail(v, v.detail);
-    else if (v.module === "profile") await profile(v);
+    else if (v.module === "notifications") await notificationPage(v);
     else if (v.module === "friends") await people(v);
     else if (v.module === "community") await community(v, v.communityMode || "mine");
     else await feed(v);
@@ -1827,21 +2026,20 @@
     if (!v || !current(v)) {
       created = true;
       const root = el("div", null, { class: "social-app", "data-social": module, id: "social-page-" + module, role: "tabpanel", "aria-labelledby": "social-tab-" + module });
-      root.innerHTML = '<div class="social-toolbar" data-social-toolbar></div><details class="social-activity"><summary>กิจกรรมในเมนูนี้ </summary><div data-activity-items></div></details><p role="status" aria-live="polite"></p><div data-social-incoming></div><section data-social-rtc hidden></section><div data-social-content></div>';
+      root.innerHTML = '<div class="social-toolbar" data-social-toolbar></div><p role="status" aria-live="polite"></p><div data-social-incoming></div><section data-social-rtc hidden></section><div data-social-content></div>';
       shell.root.querySelector(".social-pages").append(root);
       v = { uid: uid(), root, module, controller: new AbortController(), urls: new Set(), sourceFileIds: [], status: root.querySelector("[role=status]"), content: root.querySelector("[data-social-content]"), incoming: root.querySelector("[data-social-incoming]"), rtc: root.querySelector("[data-social-rtc]") };
       views.set(module, v); moduleTools(v);
-      root.querySelector(".social-activity summary").append(moduleBadge(module));
-      root.querySelector(".social-activity").addEventListener("toggle", () => { if (root.querySelector(".social-activity").open) loadActivity(v); });
       root.addEventListener("scroll", () => scheduleRead(v), { capture: true, signal: v.controller.signal });
       root.addEventListener("pointerup", () => scheduleRead(v), { signal: v.controller.signal });
       document.addEventListener("pointerdown", event => {
         root.querySelectorAll(".social-post-menu[open]").forEach(menu => { if (!menu.contains(event.target)) menu.open = false; });
       }, { signal: v.controller.signal });
       window.addEventListener("focus", () => scheduleRead(v), { signal: v.controller.signal });
-      document.addEventListener("visibilitychange", () => scheduleRead(v), { signal: v.controller.signal });
+      document.addEventListener("visibilitychange", () => { scheduleRead(v); if (document.visibilityState === "hidden") v.viewer?.pause(); v.updatePlayback?.(); }, { signal: v.controller.signal });
     }
     activate(module);
+    v.noticeThrough = new Date().toISOString();
     try {
       if (options.support) await support(v);
       else if (options.orders) await orders(v, options.recordId);
@@ -1856,6 +2054,7 @@
     } catch (error) { status(v, friendly(error)); }
     if (created && ["talk", "live", "community", "connect"].includes(module)) poll(v);
     if (!created && v.module === "friends") await v.refreshFriends?.();
+    if (!created && v.module === "notifications") await notificationPage(v);
     notificationBadges(); loadActivity(v); scheduleRead(v);
     return v.root;
   }
@@ -1865,72 +2064,69 @@
     document.head.append(el("style", '.social-notification-badge{display:inline-block;flex:0 0 auto!important;width:auto!important;min-width:19px;max-width:max-content;padding:1px 5px;margin-left:6px;border-radius:20px;background:#ff9f43;color:#101820;font:700 11px/18px system-ui;text-align:center}.social-notification-badge[hidden]{display:none!important}', { id: "social-notification-style" }));
   }
   const moduleBadge = module => el("span", "", { class: "social-notification-badge", "data-social-module-count": module, hidden: "" });
+  const recordBadge = id => el("span", "", { class: "social-notification-badge", "data-social-record-count": id, hidden: "" });
   const notificationBadge = () => el("span", "", { class: "social-notification-badge", "data-social-notification-count": "", hidden: "" });
   function notificationBadges() {
     const data = allowed() ? notificationState?.data || {} : {};
-    for (const node of document.querySelectorAll("[data-social-notification-count],[data-social-module-count]")) {
+    for (const node of document.querySelectorAll("[data-social-notification-count],[data-social-module-count],[data-social-record-count]")) {
       const aggregate = node.hasAttribute("data-social-notification-count");
-      const count = Math.max(0, Number(aggregate ? data.unreadCount : data.counts?.[node.dataset.socialModuleCount]) || 0);
+      const count = Math.max(0, Number(node.hasAttribute("data-social-record-count") ? data.recordCounts?.[node.dataset.socialRecordCount] : aggregate ? data.unreadCount : data.counts?.[node.dataset.socialModuleCount]) || 0);
       node.textContent = count > 99 ? "99+" : String(count); node.hidden = count === 0;
       node.setAttribute("aria-label", count + " การแจ้งเตือนยังไม่อ่าน");
     }
   }
   async function acknowledgeActivity(v) {
-    if (v.activityReadBusy || !current(v) || !v.root.querySelector(".social-activity")?.open) return;
-    const panel = v.root.querySelector("[data-activity-items]");
-    const ids = [...panel.querySelectorAll('[data-notification-id][data-unread="true"]')]
-      .filter(row => messageVisible(v, row, panel)).map(row => row.dataset.notificationId).slice(0, 100);
-    if (!ids.length) return;
+    if (v.activityReadBusy || !current(v) || v.root.hidden || document.visibilityState !== "visible" || !document.hasFocus()) return;
+    const module = v.module;
+    let recordIds;
+    if (["feed", "short", "watch", "live", "market"].includes(module)) recordIds = [...v.content.querySelectorAll("[data-record-id]")].filter(row => messageVisible(v, row, v.content)).map(row => row.dataset.recordId);
+    else if (["talk", "community"].includes(module)) recordIds = v.detail ? [v.detail] : [];
+    else if (!["notifications", "friends", "connect"].includes(module)) return;
+    if (recordIds && !recordIds.length) return;
+    const data = notificationState?.data;
+    if (!data?.counts?.[module]) return;
+    const through = v.noticeThrough || new Date().toISOString();
     v.activityReadBusy = true;
-    try { await readNotifications(v, ids); }
-    catch (_) { /* Keep the count until the server confirms; retry on visibility, scroll or polling. */ }
+    try {
+      await api(v, "/api/social/notifications/read-section", { method: "POST", body: JSON.stringify({ module, recordIds: recordIds?.slice(0,100), through }) });
+      await refreshNotifications();
+    } catch (_) { /* Retry without clearing an unconfirmed count. */ }
     finally { v.activityReadBusy = false; }
   }
   async function readNotifications(v, ids) {
     if (!ids.length) return;
     await api(v, "/api/social/notifications/read", { method: "POST", body: JSON.stringify({ ids }) });
-    await refreshNotifications(); await loadActivity(v, v.activityCursor);
+    await refreshNotifications();
   }
-  async function loadActivity(v, before = null) {
-    if (!v || !current(v)) return;
-    if (v.activityBusy) return v.activityBusy;
-    v.activityBusy = (async () => {
-      const panel = v.root.querySelector("[data-activity-items]");
-      try {
-        const data = await api(v, "/api/social/notifications?module=" + v.module + (before ? "&before=" + encodeURIComponent(before) : ""));
-        if (!current(v) || !panel?.isConnected) return;
-        const signature = JSON.stringify([data.items, data.nextCursor, before]);
-        if (v.activitySignature === signature) return;
-        v.activitySignature = signature; v.activityCursor = before;
-        const focused = panel.contains(document.activeElement) ? document.activeElement.dataset.notificationFocus : null;
-        panel.replaceChildren();
-        if (!data.items.length) panel.append(el("p", "ยังไม่มีกิจกรรมใหม่ในเมนูนี้"));
-        const unread = data.items.filter(item => !item.readAt).map(item => item.id);
-        if (unread.length) panel.append(button(v, "อ่านทั้งหมดในหน้านี้", () => readNotifications(v, unread)));
-        for (const item of data.items) {
-          const row = el("article", null, { "data-notification-id": item.id, "data-unread": String(!item.readAt) });
-          row.append(el("p", item.name + " • " + item.text), el("small", new Date(item.createdAt).toLocaleString("th-TH")));
-          if (item.reason) row.append(el("p", item.reason));
-          if (item.target) {
-            const go = button(v, "เปิดรายการ", async () => {
-              if (!item.readAt) await readNotifications(v, [item.id]);
-              v.root.querySelector(".social-activity").open = false;
-              await open(item.target.module, item.target);
-              if (item.target.module === "friends") await people(views.get("friends"));
-            }); go.dataset.notificationFocus = item.id; row.append(go);
-          }
-          if (!item.readAt) { const mark = button(v, "อ่านแล้ว", () => readNotifications(v, [item.id])); mark.dataset.notificationFocus = "read:" + item.id; row.append(mark); }
-          panel.append(row);
-        }
-        if (before) panel.append(button(v, "รายการล่าสุด", () => loadActivity(v)));
-        if (data.nextCursor) panel.append(button(v, "รายการก่อนหน้า", () => loadActivity(v, data.nextCursor)));
-        if (focused) [...panel.querySelectorAll("[data-notification-focus]")].find(node => node.dataset.notificationFocus === focused)?.focus({ preventScroll: true });
-      } catch (error) {
-        if (current(v) && panel?.isConnected) panel.replaceChildren(el("p", "โหลดกิจกรรมไม่สำเร็จ"), button(v, "ลองอีกครั้ง", () => loadActivity(v, before)));
-      } finally { v.activityBusy = null; scheduleRead(v); }
-    })();
-    return v.activityBusy;
+  async function notificationPage(v, before) {
+    if (!before) { clear(v); v.noticeThrough = new Date().toISOString(); }
+    const data = await api(v, "/api/social/notifications?module=notifications" + (before ? "&before=" + encodeURIComponent(before) : ""));
+    if (!current(v)) return;
+    if (!before) v.lastNotice = data.items[0]?.id || null;
+    if (!data.items.length && !before) section(v, "ยังไม่มีการแจ้งเตือน");
+    // Social interactions are prominent; service/moderation notices remain reachable separately.
+    let other;
+    for (const item of data.items) {
+      let parent = v.content;
+      if (!["like", "comment", "share"].includes(item.type)) {
+        if (!other) { other = el("details"); other.append(el("summary", "กิจกรรมอื่นและการดูแลชุมชน")); v.content.append(other); }
+        parent = other;
+      }
+      const row = el("article", null, { class: "social-card", "data-notification-id": item.id, "data-unread": String(!item.readAt) });
+      row.append(el("p", item.name + " • " + item.text), el("small", new Date(item.createdAt).toLocaleString("th-TH")));
+      if (item.reason) row.append(el("p", item.reason));
+      if (item.target) {
+        row.tabIndex = 0; row.setAttribute("role", "button");
+        const go = async () => { if (!item.readAt) await readNotifications(v, [item.id]); await open(item.target.module, item.target); };
+        row.addEventListener("click", () => go().catch(e => status(v, friendly(e))));
+        row.addEventListener("keydown", e => { if (["Enter", " "].includes(e.key)) { e.preventDefault(); row.click(); } });
+      }
+      parent.append(row);
+    }
+    if (data.nextCursor) v.content.append(button(v, "รายการก่อนหน้า", () => notificationPage(v, data.nextCursor)));
+    await acknowledgeActivity(v);
   }
+  async function loadActivity(v) { if (v && current(v)) scheduleRead(v); }
   async function refreshNotifications() {
     const n = notificationState;
     if (!n || !current(n)) return;
@@ -1943,7 +2139,13 @@
         const changed = JSON.stringify(n.data) !== JSON.stringify(data);
         n.data = data; n.error = ""; notificationBadges();
         const v = views.get(workspace?.active);
-        if (changed && v) { await loadActivity(v, v.activityCursor); if (v.module === "friends") await v.refreshFriends?.(); }
+        if (changed && v) {
+          await loadActivity(v, v.activityCursor); if (v.module === "friends") await v.refreshFriends?.();
+          if (v.module === "notifications") {
+            const latest = data.items.find(item => item.module === "notifications")?.id;
+            if (latest && latest !== v.lastNotice) setTimeout(() => { if (current(v) && !v.root.hidden) notificationPage(v).catch(e => status(v, friendly(e))); }, 0);
+          }
+        }
       } catch (error) { n.error = "notification_unavailable"; }
       finally {
         n.polling = null;
@@ -1952,10 +2154,7 @@
     })();
     return n.polling;
   }
-  async function showNotifications(v) {
-    if (!v || !current(v)) { await open(workspace?.active || "feed"); v = views.get(workspace.active); }
-    v.root.querySelector(".social-activity").open = true; await loadActivity(v);
-  }
+  async function showNotifications() { return open("notifications"); }
   function syncNotifications() {
     if (notificationState && !current(notificationState)) {
       notificationState.controller.abort(); clearTimeout(notificationState.timer); notificationState = null; notificationBadges();

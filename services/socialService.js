@@ -5,7 +5,7 @@ const { expiresAt, expired, expiredResult } = require("./socialRetention");
 const { randomUUID, createHash, createHmac } = require("node:crypto");
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const MODULES = ["feed", "short", "watch", "live", "tv", "market", "community", "talk", "connect"];
+const MODULES = ["feed", "short", "watch", "live", "tv", "market", "community", "talk", "connect", "profile"];
 const tv = require("./socialTv");
 const { source: mediaSource } = require("../social-media-source");
 const friendId = (a, b) => "friend:" + key(...[a, b].sort());
@@ -258,6 +258,12 @@ class SocialService {
         nextCursor: source.length === 100 ? source.at(-1).id : null,
       };
     }
+    if (module === "profile") {
+      const candidates = await this.repo.list({ owner: uid, kinds: ["feed", "watch", "short", "video", "community", "listing", "live"], before, limit: 100 });
+      const items = [];
+      for (const r of candidates) if (await this.allowed(this.repo, uid, r) && (!query || [r.title, r.text].join(" ").toLowerCase().includes(query))) items.push(await this.decorate(r, uid));
+      return { ok: true, items, nextCursor: candidates.length === 100 ? candidates.at(-1).id : null };
+    }
     let items = [];
     const connectChats = module === "connect" && mode === "chats";
     const kind = connectChats ? "thread" : {
@@ -316,6 +322,16 @@ class SocialService {
       if (threads && query && ![decorated.peer?.name, decorated.lastMessage?.text].join(" ").toLowerCase().includes(query)) continue;
       items.push(decorated);
     }
+    if (["short", "watch"].includes(module)) {
+      // Rank only the current, access-checked page; stable cursor still follows creation order.
+      const scores = new Map();
+      for (const item of items) {
+        const friend = (await this.repo.get(friendId(uid, item.ownerId)))?.status === "accepted";
+        const followed = !!await this.repo.get("follow:" + key(uid, item.ownerId));
+        scores.set(item.id, (followed ? 8 : 0) + (friend ? 4 : 0) + Math.min(3, Math.log2(1 + (item.likeCount || 0))) + (item.liked ? 1 : 0));
+      }
+      items.sort((a, b) => scores.get(b.id) - scores.get(a.id) || b.id.localeCompare(a.id));
+    }
     return {
       ok: true,
       items,
@@ -329,6 +345,7 @@ class SocialService {
     if (r.kind === "message") return this.messageView(r, await this.repo.get(r.parentId));
     const p = await this.repo.get("profile:" + r.ownerId);
     const out = { ...r, module: moduleFor(r), author: this.publicProfile(p) };
+    if (["feed", "watch", "video", "short", "community", "listing", "live"].includes(r.kind) && out.author && p.files?.some(f => /^image\//.test(f.contentType))) out.author.avatarUrl = "/api/social/records/" + encodeURIComponent(r.id) + "/avatar";
     delete out._latestMessage; delete out._activityAt;
     if (r.kind === "thread") {
       const other = r.members.find(id => id !== uid);
@@ -489,6 +506,14 @@ class SocialService {
     ].includes(action)
       ? await this.attachments(uid, input.fileIds)
       : [];
+    if (action === "publish" && input.module === "short") {
+      const videos = prepared.filter(file => /^video\/(mp4|webm)$/.test(file.contentType));
+      if (videos.length !== 1 || prepared.length !== 1) fail("social_video_required");
+      try {
+        const file = await this.files.preview(uid, videos[0].id);
+        prepared[0].durationSeconds = await require("./socialVideo").shortDuration(file.body);
+      } catch (_) { fail("social_short_duration"); }
+    }
     const fingerprint = key(action, JSON.stringify(input));
     if (requestId && !/^[\w:.-]{1,160}$/.test(requestId))
       fail("social_invalid_request_id");
@@ -690,6 +715,10 @@ class SocialService {
           record.recordIds.push(target.id);
       } else
         record.recordIds = record.recordIds.filter((x) => x !== a.targetId);
+    } else if (action === "share") {
+      const target = await this.requireRecord(repo, uid, a.recordId);
+      if (!["feed", "video", "watch", "short", "community", "listing", "live"].includes(target.kind)) fail("social_forbidden", 403);
+      record = row("share", uid, {}, target.id);
     } else if (action === "comment" || action === "like") {
       const target = await this.requireRecord(repo, uid, a.recordId);
       if (!["feed", "video", "watch", "short", "community", "listing", "live"].includes(target.kind) || (target.kind === "live" && action !== "like"))
@@ -701,6 +730,7 @@ class SocialService {
       } else {
         const rid = "like:" + key(uid, target.id),
           old = await repo.get(rid);
+        if (old && a.enabled === true) return { ok: true, liked: true, likeCount: target.likeCount || 0 };
         if (old) await repo.remove(rid);
         else await repo.put(row("like", uid, { id: rid }, target.id));
         target.likeCount = Math.max(
@@ -708,7 +738,7 @@ class SocialService {
           (target.likeCount || 0) + (old ? -1 : 1),
         );
         await repo.put(target);
-        return { ok: true, liked: !old };
+        return { ok: true, liked: !old, likeCount: target.likeCount };
       }
     } else if (action === "friend-request") {
       if (!UUID.test(a.userId) || a.userId === uid || await this.blocked(repo, uid, a.userId)) fail("social_not_found", 404);
@@ -1161,6 +1191,13 @@ class SocialService {
       orders: await this.repo.list({ kind: "order", member: uid, limit: 100 }),
     };
   }
+  async avatar({ user, recordId }) {
+    const uid = account(user), r = await this.requireRecord(this.repo, uid, recordId);
+    if (!["feed", "watch", "video", "short", "community", "listing", "live"].includes(r.kind)) fail("social_not_found", 404);
+    const p = await this.repo.get("profile:" + r.ownerId), file = p?.files?.find(f => /^image\/(png|jpeg|webp|gif)$/.test(f.contentType));
+    if (!file) fail("social_not_found", 404);
+    return this.files.preview(r.ownerId, file.id);
+  }
   async media({ user, recordId, fileId, download = false }) {
     const uid = account(user),
       r = await this.requireRecord(this.repo, uid, recordId);
@@ -1173,10 +1210,11 @@ class SocialService {
       ? this.files.download(r.ownerId, fileId, uid)
       : this.files.preview(r.ownerId, fileId);
   }
-  async collections({ user, kind, scope, before }) {
+  async collections({ user, kind, scope, before, query = "" }) {
     const uid = account(user);
     if (!["group", "playlist", "block"].includes(kind))
       fail("social_invalid_collection");
+    query = str(query, 200).toLowerCase();
     const records = await this.repo.list({
       kind,
       ...(kind === "group" ? scope === "mine" ? { member: uid } : {} : { owner: uid }),
@@ -1184,7 +1222,7 @@ class SocialService {
       limit: 100,
     });
     const items = [];
-    for (const record of records) if (await this.allowed(this.repo, uid, record))
+    for (const record of records) if (await this.allowed(this.repo, uid, record) && (!query || [record.title, record.text].join(" ").toLowerCase().includes(query)))
       items.push(kind === "group" ? await this.groupView(this.repo, record, uid) : record);
     return { ok: true, items, nextCursor: records.length === 100 ? records.at(-1).id : null };
   }

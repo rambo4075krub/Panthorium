@@ -59,7 +59,7 @@ function createSocialRouter(auth, service) {
     "/collections/:kind",
     reads,
     route((req) =>
-      service.collections({ user: req.user, kind: req.params.kind, scope: req.query.scope, before: req.query.before }),
+      service.collections({ user: req.user, kind: req.params.kind, scope: req.query.scope, before: req.query.before, query: req.query.query }),
     ),
   );
   r.get(
@@ -68,6 +68,13 @@ function createSocialRouter(auth, service) {
     route((req) => service.inbox({ user: req.user })),
   );
   r.get("/notifications", reads, route(req => service.notifications.list(account(req.user), req.query.before, req.query.module)));
+  r.post("/notifications/read-section", writes, route(req => service.notifications.readSection(account(req.user), req.body || {})));
+  r.get("/records/:id/avatar", reads, async (req, res, next) => {
+    try {
+      const file = await service.avatar({ user: req.user, recordId: req.params.id });
+      res.set("X-Content-Type-Options", "nosniff"); res.type(file.contentType); res.send(file.body);
+    } catch (e) { next(e); }
+  });
   r.post("/notifications/read", writes, route(req => service.notifications.read(account(req.user), req.body?.ids)));
   r.get(
     "/reports",
