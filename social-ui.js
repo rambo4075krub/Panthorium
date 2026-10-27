@@ -366,7 +366,9 @@
     };
     v.viewer = { close, pause: () => entry && mediaCommand(entry, "pause") }; v.root.append(dialog);
     const visible = show => { hud.hidden = !show; clearTimeout(hideTimer); if (show && drawer.hidden) hideTimer = setTimeout(() => { if (!hud.contains(document.activeElement)) hud.hidden = true; }, 3500); };
-    const control = (text, label, fn) => { const b = button(v, text, fn); b.setAttribute("aria-label", label); return b; };
+    const control = (text, label, fn) => { const b = button(v, text, fn); b.setAttribute("aria-label", label);
+      if (label === "ความคิดเห็น") b.innerHTML = '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M4 3h16v13H9l-5 5V3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+      return b; };
     hud.append(control("←", "กลับ", close)); hud.firstChild.className = "social-video-back";
     const panel = render => { drawer.replaceChildren(control("×", "ปิดรายละเอียด", () => { drawer.hidden = true; visible(true); })); drawer.hidden = false; visible(true); render(drawer); };
     const progress = el("input", null, { type: "range", min: "0", max: "1000", value: "0", step: "1", "aria-label": "ตำแหน่งวิดีโอ" });
@@ -377,7 +379,7 @@
     });
     let duration = 0;
     const time = n => Number.isFinite(n) ? Math.floor(n / 60) + ":" + String(Math.floor(n % 60)).padStart(2,"0") : "0:00";
-    const tick = (currentTime, total, paused) => { duration = total; clock.textContent = time(currentTime) + " / " + time(total); progress.value = total > 0 ? String(currentTime / total * 1000) : "0"; progress.disabled = !Number.isFinite(total) || total <= 0; playback.textContent = paused ? "▷" : "Ⅱ"; };
+    const tick = (currentTime, total, paused) => { if (!Number.isFinite(total)) total = entry?.record.files?.find(file => file.durationSeconds)?.durationSeconds || 0; duration = total; clock.textContent = time(currentTime) + " / " + time(total); progress.value = total > 0 ? String(currentTime / total * 1000) : "0"; progress.disabled = !Number.isFinite(total) || total <= 0; playback.textContent = paused ? "▷" : "Ⅱ"; };
     progress.oninput = () => { mediaCommand(entry, "seek", Number(progress.value) / 1000 * duration); visible(true); };
     const more = control("⌃", "ตัวเลือกวิดีโอ", () => panel(parent => {
       for (const file of entry.record.files || []) parent.append(button(v, "ดาวน์โหลด " + file.name, async () => {

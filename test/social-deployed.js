@@ -9,7 +9,7 @@ const fs = require("node:fs");
     assert.equal(r.status, 200);
     const html = await r.text();
     assert(html.includes("window.PanthoriumSocial?.renderMenu?.()"), path + " missing Social menu rebuild hook");
-    assert(html.includes("social-ui.js?v=social-free-tv-20261026"), path + " missing Watch cache version");
+    assert(html.includes("social-ui.js?v=social-experience-20261027"), path + " missing Watch cache version");
     for (const file of ["social-ui.js", "social-rtc.js", "contact-ui.js"])
       assert(html.includes(file), path + " missing " + file);
   }
@@ -35,6 +35,7 @@ const fs = require("node:fs");
   for (const path of [
     "/api/social/feed/community",
     "/api/social/profile",
+    "/api/social/feed/profile",
     "/api/social/friends",
     "/api/social/feed/short",
     "/api/social/feed/feed",
@@ -56,6 +57,7 @@ const fs = require("node:fs");
   assert.equal((await fetch(base + "/vendor/hls.min.js")).status, 200);
   assert.equal((await fetch(base + "/api/social/records/unavailable/read", { method: "POST" })).status, 401, "read receipts require authentication");
   assert.equal((await fetch(base + "/api/social/notifications/read", { method: "POST" })).status, 401, "notification acknowledgements require authentication");
+  assert.equal((await fetch(base + "/api/social/notifications/read-section", { method: "POST" })).status, 401, "section acknowledgement requires authentication");
   console.log(
     "Deployed Social: both shells, exact single-window/RTC assets and protected APIs passed. Public posts and real user messages were not created.",
   );
