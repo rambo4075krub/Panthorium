@@ -43,6 +43,10 @@ class SocialNotifications {
       const target = await repo.get(r.parentId);
       return emit(repo, "share", r, uid, target.ownerId, target.id);
     }
+    if (action === "report") {
+      const target = await repo.get(r.targetId);
+      return emit(repo, "reported", r, uid, target.ownerId, target.id);
+    }
     if (action === "friend-request" && r.status === "pending") {
       await emit(repo, "friend-request", { id: r.eventId }, r.requesterId, r.recipientId, r.id);
     } else if (action === "friend-review") {
@@ -160,7 +164,7 @@ class SocialNotifications {
     if (["like", "share"].includes(type) && !await repo.get(n.sourceId)) return null;
     if (type === "connect-match" && (!await repo.get("interest:" + hash(uid, n.actorId)) || !await repo.get("interest:" + hash(n.actorId, uid)))) return null;
     const context = thread?.context === "connect" || type === "connect-match" ? "connect" : "social";
-    const name = moderation ? "ระบบดูแลชุมชน" : (await s.messageView({ ownerId: n.actorId }, { context }, names[context])).author.name;
+    const name = moderation || type === "reported" ? "ระบบดูแลชุมชน" : (await s.messageView({ ownerId: n.actorId }, { context }, names[context])).author.name;
     const labels = {
       "thread-request": "ส่งคำขอสนทนาถึงคุณ", "thread-accepted": "ตอบรับคำขอสนทนาของคุณแล้ว", "thread-declined": "ปฏิเสธคำขอสนทนาของคุณ",
       "friend-request": "ส่งคำขอเป็นเพื่อน", "friend-accepted": "ตอบรับคำขอเป็นเพื่อนแล้ว", "friend-declined": "ปฏิเสธคำขอเป็นเพื่อน",
@@ -171,12 +175,13 @@ class SocialNotifications {
       comment: "แสดงความคิดเห็นในโพสต์ของคุณ", like: "ถูกใจโพสต์ของคุณ", follow: "เริ่มติดตามคุณ",
       "order-requested": "ส่งคำขอสั่งซื้อใหม่", "order-accepted": "ยืนยันคำสั่งซื้อแล้ว", "order-fulfilled": "ดำเนินการคำสั่งซื้อเสร็จแล้ว", "order-cancelled": "ยกเลิกคำสั่งซื้อแล้ว",
       "connect-match": "สนใจตรงกับคุณใน Connect", "live-ended": "จบการถ่ายทอดสดแล้ว", "moderation-hidden": "ซ่อนเนื้อหาของคุณ", "moderation-restored": "คืนการแสดงเนื้อหาของคุณแล้ว",
+      reported: "ได้รับรายงานเกี่ยวกับเนื้อหาของคุณ รายงานนี้ยังไม่ใช่ผลการตัดสิน",
     };
     if (!labels[type]) return null;
     module = context === "connect" ? "connect" : type === "follow" ? "friends" : moduleFor(target);
     const destination = module;
     // Post counters contain new posts only. Conversation/group notices retain their own destinations.
-    if (["like", "comment", "share"].includes(type)) module = "notifications";
+    if (["like", "comment", "share", "reported", "moderation-hidden", "moderation-restored"].includes(type)) module = "notifications";
     else if (["feed", "short", "watch", "live", "tv", "market", "profile"].includes(module) && type !== "new-post") module = "notifications";
     return { id: n.id, type, name, text: labels[type], createdAt: n.createdAt, readAt,
       target: moderation && r.hidden ? null : { module: destination, ...(["friends", "profile"].includes(destination) ? {} : { recordId: target.id }), ...(r.kind === "order" ? { orders: true } : {}) },

@@ -11,3 +11,5 @@ Live now acquires camera/microphone permission before creating the room, plays t
 Validation: npm run check; npm test; Social RTC, messages, groups, notifications, redesign, Watch and TV real-browser tests; new social-experience API and browser acceptance tests. Provider fixtures verify embedding/lifecycle and direct HLS/video decoding, not whether a third-party TV provider honors autoplay on every device.
 
 TrueID embeds require `autoplay=true` (the numeric value `1` is ignored). Real Microsoft Edge checks of Thai PBS, Channel 3 HD and Channel 7 HD verified advancing decoded frames with muted automatic playback. Other providers and devices retain their own autoplay policies.
+
+Reports notify the content owner in the bell's additional-activity section without revealing the reporter's identity or explanation. The notice explicitly distinguishes a received report from a moderation decision.

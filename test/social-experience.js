@@ -17,6 +17,9 @@ async function suite(repo) {
   await write(b,"comment",{recordId:post.id,text:"hello"});await write(b,"share",{recordId:post.id});
   let notices=await service.notifications.list(a.sub,undefined,"notifications");assert.deepEqual(notices.items.filter(n=>n.target?.recordId===post.id).map(n=>n.type).sort(),["comment","like","share"]);assert.equal(notices.counts.feed||0,0);assert(notices.items.every(n=>n.target.module==="feed"));
   const through=new Date().toISOString();await service.notifications.readSection(a.sub,{module:"notifications",through});assert.equal((await service.notifications.list(a.sub)).counts.notifications||0,0);
+  await write(b,"report",{recordId:post.id,reason:"Confidential reporter explanation"});
+  const reported=(await service.notifications.list(a.sub,undefined,"notifications")).items.find(n=>n.type==="reported");
+  assert.equal(reported.name,"ระบบดูแลชุมชน");assert.equal(reported.target.recordId,post.id);assert.equal(reported.module,"notifications");assert(!JSON.stringify(reported).includes("Confidential reporter explanation"));assert(!JSON.stringify(reported).includes(b.sub));
   await service.notifications.readSection(b.sub,{module:"feed",recordIds:[post.id],through:new Date().toISOString()});assert.equal((await service.notifications.list(b.sub)).counts.feed||0,0);assert.equal((await service.notifications.list(c.sub)).counts.feed,1);
   const group=(await write(a,"group-create",{title:"Community",text:"A searchable description",privacy:"open"})).record;await write(b,"group-join",{recordId:group.id});
   const msg=(await write(a,"group-message",{recordId:group.id,text:"group unread"})).record;
