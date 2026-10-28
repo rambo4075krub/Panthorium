@@ -59,10 +59,6 @@ jobs:
         env:
           PANTHORIUM_TEST_PUBLIC_WEB_LIVE: '1'
         run: node test/public-web-live.js
-      - name: Real PostgreSQL foundation and organization integration
-        run: npm run test:postgres
-        env:
-          TEST_DATABASE_URL: postgres://postgres:panthorium_ci_only@127.0.0.1:5432/panthorium_ci
       - name: Install media test dependency
         timeout-minutes: 5
         run: |
@@ -77,12 +73,17 @@ jobs:
             sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg
           fi
           ffmpeg -version
+      - name: Real PostgreSQL foundation and organization integration
+        run: npm run test:postgres
+        env:
+          TEST_DATABASE_URL: postgres://postgres:panthorium_ci_only@127.0.0.1:5432/panthorium_ci
       - name: Run tests including security regressions
         run: npm test
       - name: Social media real browser audio and video
         run: |
           npx --no-install playwright install --with-deps --only-shell chromium
           node test/guest-start-menu-browser.js
+          node test/social-experience-browser.js
           node test/social-rtc-browser.js
           node test/social-messages-browser.js
           node test/social-groups-browser.js

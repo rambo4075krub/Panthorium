@@ -77,6 +77,7 @@ async function until(check, label) { const end = Date.now() + 16000; while (Date
     await request.getByRole("button", { name: "อนุมัติ", exact: true }).click();
     await until(async () => await reader.locator("[data-group-composer]").count() === 1, "approval refreshes the waiting member automatically");
     assert.equal(await visitor.locator("[data-group-composer]").count(), 0);
+    creator.on("dialog", dialog => dialog.accept());
     const composer = creator.locator("[data-group-composer]");
     await composer.getByLabel("ข้อความในกลุ่ม", { exact: true }).fill("ข้อความพร้อมรูป วิดีโอ และเอกสาร");
     await composer.locator("summary").click();
@@ -84,8 +85,7 @@ async function until(check, label) { const end = Date.now() + 16000; while (Date
     const video = execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=64x64:d=0.4:r=5", "-c:v", "libvpx", "-f", "webm", "pipe:1"]);
     for (const file of [{ name: "photo.png", mimeType: "image/png", buffer: png }, { name: "clip.webm", mimeType: "video/webm", buffer: video }, { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("group document") }]) {
       await composer.locator('input[type="file"]').setInputFiles(file);
-      await composer.getByRole("button", { name: "อัปโหลดไฟล์", exact: true }).click();
-      await composer.getByLabel(file.name, { exact: true }).waitFor();
+      await composer.getByRole("button", { name: file.name + " ×", exact: true }).waitFor();
     }
     assert.equal(stored.length, 3);
     await composer.getByRole("button", { name: "ส่ง", exact: true }).click();

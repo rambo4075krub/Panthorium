@@ -33,7 +33,7 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
       await page.goto("http://127.0.0.1:"+server.address().port);
       await page.evaluate(()=>PanthoriumSocial.open("feed"));
     }
-    const order=["Feed","Short","Watch","Live","TV","Market","Community","Chat","Connect","Profile","Friends","↻"];
+    const order=["Feed","Short","Watch","Live","TV","Market","Community","Chat","Connect","Profile","Friends","🔔 การแจ้งเตือนรวม","↻"];
     assert.deepEqual(await sender.locator(".social-tabs>button").evaluateAll(nodes=>nodes.map(n=>n.firstChild.textContent)),order);
     assert.equal(await sender.locator(".social-shell h1,.social-shell h2,#social-notification-bell,[data-social-open-notifications]").count(),0);
     await sender.bringToFront();
@@ -53,7 +53,7 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
     }
     const community = sender.locator('[data-social="community"]');
     assert.equal(await community.locator('[data-group-menu="mine"]').getAttribute("aria-expanded"), "true");
-    assert.deepEqual(await community.locator(".social-toolbar button").allTextContents(), ["กลุ่มของฉัน", "กลุ่มทั้งหมด", "สร้างกลุ่ม"]);
+    assert.deepEqual(await community.locator(".social-toolbar>button").allTextContents(), ["กลุ่มของฉัน", "กลุ่มทั้งหมด", "สร้างกลุ่ม"]);
     await sender.evaluate(()=>PanthoriumSocial.open("profile"));
     const profile = sender.locator('[data-social="profile"]');
     await profile.getByRole("button", { name: "บัญชีที่บล็อก", exact: true }).click();
@@ -61,9 +61,11 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
     const blocked = await profile.getByRole("button", { name: "บัญชีที่บล็อก", exact: true }).boundingBox(), profileBack = await profile.getByRole("button", { name: "กลับ", exact: true }).boundingBox();
     assert(Math.abs(blocked.y-profileBack.y)<2 && profileBack.x>blocked.x);
     await profile.getByRole("button", { name: "กลับ", exact: true }).click();
+    await profile.locator("[data-record-id]").first().waitFor();
+    await profile.getByRole("button", { name: "ตั้งค่าโปรไฟล์", exact: true }).click();
     await profile.getByLabel("ชื่อที่แสดง", { exact: true }).waitFor();
     assert.equal(await profile.getByRole("button", { name: "กลับ", exact: true }).isVisible(), false);
-    assert.deepEqual(await sender.locator('[data-social="friends"] .social-toolbar button').allTextContents(), ["ค้นหาเพื่อน", "บัญชีที่บล็อก"]);
+    assert.deepEqual(await sender.locator('[data-social="friends"] .social-toolbar>button').allTextContents(), ["บัญชีที่บล็อก"]);
     await sender.locator('[data-social-tab="feed"]').click();
     assert.equal(await watch.getByLabel("รายละเอียด",{exact:true}).inputValue(),"ร่างที่ยังไม่ได้เผยแพร่");
     // The shared window catalog must select the requested tab, including via voice navigation.
@@ -73,8 +75,9 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
     assert.equal(await watch.locator('.social-toolbar').getByRole("button",{name:"เพลย์ลิสต์",exact:true}).count(),0);
     await sender.evaluate(()=>PanthoriumSocial.open("friends"));
     const friends=sender.locator('[data-social="friends"]');
-    await friends.getByLabel("ชื่อที่แสดงอย่างน้อย 2 ตัวอักษร").fill("เพื่อน");
-    await friends.locator('form').getByRole("button",{name:"ค้นหาเพื่อน",exact:true}).click();
+    await friends.getByRole("button", {name:"ค้นหา",exact:true}).first().click();
+    await friends.getByLabel("ค้นหารายการ").fill("เพื่อน");
+    await friends.locator('form').getByRole("button",{name:"ค้นหา",exact:true}).click();
     await friends.getByRole("button",{name:"เพิ่มเพื่อน",exact:true}).click();
     await until(async()=> (await social.friends({user:b})).items.length===1,"friend request saved");
     await reader.evaluate(()=>PanthoriumSocial.refreshNotifications());
@@ -85,7 +88,7 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
     await rf.getByRole("button",{name:"รับคำขอเป็นเพื่อน",exact:true}).click();
     await until(async()=> (await social.friends({user:a})).items[0].status==="accepted","friend accepted");
     await sender.evaluate(()=>PanthoriumSocial.refreshNotifications());
-    await sender.locator('[data-social-tab="friends"] [data-social-module-count]').getByText("1",{exact:true}).waitFor();
+    await until(async()=> (await social.friends({user:a})).items[0].status === "accepted", "acceptance shown");
     await sender.locator('[data-social-friends]').getByRole("button",{name:"ส่งข้อความ",exact:true}).click();
     const talk=sender.locator('[data-social="talk"]');await talk.getByLabel("ข้อความ",{exact:true}).fill("ข้อความจากเพื่อน");
     await talk.getByRole("button",{name:"ส่ง",exact:true}).click();
@@ -104,10 +107,10 @@ async function until(fn,label){const end=Date.now()+16000;while(Date.now()<end){
     await sender.bringToFront();
     await sender.evaluate(()=>PanthoriumSocial.refreshNotifications());await sender.evaluate(()=>PanthoriumSocial.open("feed"));
     await sender.evaluate(()=>PanthoriumSocial.showNotifications());
-    const activities=watch.locator('[data-activity-items]');
+    const activities=sender.locator('[data-social="notifications"] [data-social-content]');
     await activities.getByText("เพื่อนทดสอบ • แสดงความคิดเห็นในโพสต์ของคุณ",{exact:true}).waitFor();
     assert(!await activities.getByText(/ตอบรับคำขอเป็นเพื่อน/).count());
-    await until(async()=> ((await social.notifications.list(a.sub,undefined,"feed")).counts.feed || 0)===0,"Watch activity acknowledged on server");
+    await until(async()=> ((await social.notifications.list(a.sub,undefined,"notifications")).counts.notifications || 0)===0,"Watch activity acknowledged on server");
     await sender.evaluate(()=>PanthoriumSocial.refreshNotifications());
     for (const module of ["feed", "profile"]) {
       const badge=sender.locator('[data-social-tab="'+module+'"] [data-social-module-count]');
