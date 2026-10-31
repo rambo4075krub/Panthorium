@@ -40,6 +40,13 @@ class ProviderManager {
   vertexToken = "";
   vertexTokenExpiresAt = 0;
   constructor() {
+    this.localOnly = process.env.PANTHORIUM_AI_MODE === "local-only";
+    if (this.localOnly) {
+      this.local = new (require("./localLlmProvider").LocalLlmProvider)();
+      this.liveOnly = false; this.keys = {}; this.priority = ["local"];
+      this.models = { local: this.local.model }; this.vertex = {}; this.vertexEvaluatorModels = [];
+      return;
+    }
     this.liveOnly = process.env.PANTHORIUM_AI_MODE === "gemini-live-only";
     this.keys = { groq: process.env.GROQ_API_KEY || "", openai: process.env.OPENAI_API_KEY || "", gemini: process.env.GEMINI_API_KEY || "", anthropic: process.env.ANTHROPIC_API_KEY || "" };
     this.priority = (process.env.AI_PRIORITY || "vertex,groq,openai,gemini,anthropic").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -73,7 +80,7 @@ class ProviderManager {
     }
   }
   vertexPublisherConfigured() { return /^[A-Za-z0-9.-]{3,100}$/.test(String(this.vertex.project || '')); }
-  vertexConfigured() { if (this.liveOnly) return false; return Boolean(this.vertex.project && (this.vertex.tuningJobId ? this.vertex.tuningJobLocation : (this.vertex.location && this.vertex.endpointId))); }
+  vertexConfigured() { if (this.localOnly) return false; if (this.liveOnly) return false; return Boolean(this.vertex.project && (this.vertex.tuningJobId ? this.vertex.tuningJobLocation : (this.vertex.location && this.vertex.endpointId))); }
   async resolveTunedVertexEndpoint() {
     if (!this.vertex.tuningJobId || this.vertex.endpointId) return;
     if (!this.vertexEndpointPromise) {
@@ -101,7 +108,7 @@ class ProviderManager {
     }
     return this.vertexEndpointPromise;
   }
-  available() { if (this.liveOnly) return process.env.GEMINI_LIVE_ENABLED === "1" ? ["gemini-live"] : []; return this.priority.filter((p) => p === "vertex" ? this.vertexConfigured() : Boolean(this.keys[p])); }
+  available() { if (this.localOnly) return ["local"]; if (this.liveOnly) return process.env.GEMINI_LIVE_ENABLED === "1" ? ["gemini-live"] : []; return this.priority.filter((p) => p === "vertex" ? this.vertexConfigured() : Boolean(this.keys[p])); }
   evaluatorLocation() {
     const location = this.vertexEvaluatorLocation || this.vertex.location || this.vertex.tuningJobLocation;
     return /^(global|[a-z0-9]+(?:-[a-z0-9]+)*)$/.test(location || "") ? location : "";
@@ -110,7 +117,7 @@ class ProviderManager {
     const evaluatorReady = this.vertexConfigured() && Boolean(this.evaluatorLocation());
     return [...this.available(), ...(evaluatorReady ? this.vertexEvaluatorModels.map((_, index) => `vertex_eval_${index + 1}`) : [])];
   }
-  catalog() { if (this.liveOnly) return [{ provider:"gemini-live", model:this.models["gemini-live"], configured:this.available().length > 0, priority:0, streaming:"native" }]; return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: provider === "vertex" ? this.vertexConfigured() : Boolean(this.keys[provider]), priority, streaming: provider === "vertex" || provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
+  catalog() { if (this.localOnly) return [{provider:"local",model:this.local.model,configured:true,priority:0,streaming:"buffered"}]; if (this.liveOnly) return [{ provider:"gemini-live", model:this.models["gemini-live"], configured:this.available().length > 0, priority:0, streaming:"native" }]; return this.priority.map((provider, priority) => ({ provider, model: this.models[provider] || null, configured: provider === "vertex" ? this.vertexConfigured() : Boolean(this.keys[provider]), priority, streaming: provider === "vertex" || provider === "groq" || provider === "openai" ? "native" : "buffered" })); }
   resolveModel(provider, requestedModel) {
     const configured = this.models[provider];
     if (!configured) return null;
@@ -176,6 +183,10 @@ class ProviderManager {
     catch(error){if(error.status===429)this.cooling.set(provider,{until:Date.now()+Math.max(60000,error.retryAfterMs||60000)});throw error;}
   }
   async callAvailable(provider, systemPrompt, history, options = {}) {
+    if (this.localOnly) {
+      if (provider !== "local") throw new Error("provider_not_available");
+      return this.local.complete(systemPrompt, history, options);
+    }
     if (this.liveOnly) {
       if (provider !== "gemini-live" || !this.available().length) throw new Error("provider_not_available");
       return require("./geminiLiveCompletion").completeLive({ systemPrompt, history, tools:options.tools || [], entitlements:this.entitlements, userId:options.userId });
@@ -392,6 +403,10 @@ class ProviderManager {
     return { text: text.trim(), model, usage, streaming: "native", truncated };
   }
   async streamDetailed(provider, systemPrompt, history, options = {}, onDelta = () => {}) {
+    if (this.localOnly) {
+      if (provider !== "local") throw new Error("provider_not_available");
+      return this.local.complete(systemPrompt, history, options, onDelta);
+    }
     if (this.liveOnly) {
       if (provider !== "gemini-live" || !this.available().length) throw new Error("provider_not_available");
       return require("./geminiLiveCompletion").completeLive({ systemPrompt, history, onDelta, entitlements:this.entitlements, userId:options.userId });

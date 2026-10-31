@@ -1,0 +1,40 @@
+'use strict';
+const assert = require('node:assert/strict');
+const {LocalLlmProvider,localEndpoint} = require('../services/localLlmProvider');
+const {ProviderManager} = require('../services/providerManager');
+const {localProfileGuard} = require('../middleware/localProfile');
+(async () => {
+ const saved = {...process.env}; const nativeFetch=global.fetch;
+ try {
+  process.env.PANTHORIUM_AI_MODE='local-only';
+  process.env.GEMINI_LIVE_ENABLED='1'; process.env.GOOGLE_CLOUD_PROJECT='should-not-be-used';
+  process.env.OPENAI_API_KEY='test-sentinel'; process.env.GEMINI_API_KEY='test-sentinel';
+  delete process.env.LOCAL_LLM_URL; delete process.env.LOCAL_LLM_MODEL;
+  let calls=[];
+  global.fetch=async (url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({choices:[{message:{content:'local answer'}}]})};};
+  const providers = new ProviderManager();
+  assert.deepEqual(providers.available(),['local']); assert.equal(providers.vertexConfigured(),false);
+  assert.equal((await providers.callDetailed('local','brief',[{role:'user',content:'hello'}])).text,'local answer');
+  assert.equal(calls.length,1);assert.equal(calls[0].url,'http://127.0.0.1:8088/v1/chat/completions');
+  assert.equal(calls[0].options.redirect,'error');assert.equal(calls[0].options.headers.Authorization,undefined);
+  const body=JSON.parse(calls[0].options.body);assert.equal(body.model,'panthorium-local');assert.equal(body.tools,undefined);
+  for(const provider of ['gemini-live','gemini','openai','vertex']) await assert.rejects(providers.callDetailed(provider,'brief',[]),/provider_not_available/);
+  assert.equal(calls.length,1);
+  global.fetch=async()=>{throw new Error('local service offline');};
+  await assert.rejects(providers.callDetailed('local','brief',[]),/local service offline/);
+  for(const url of ['https://example.com/v1/chat/completions','http://localhost:8088/v1/chat/completions','http://127.0.0.1:8088/v1/chat/completions?redirect=1']) assert.throws(()=>localEndpoint(url),/local_llm_loopback_required/);
+  let release;global.fetch=()=>new Promise(resolve=>{release=resolve;});
+  const inFlight=providers.callDetailed('local','brief',[]);
+  await assert.rejects(providers.callDetailed('local','brief',[]),/local_llm_busy/);
+  release({ok:true,json:async()=>({choices:[{message:{content:'done'}}]})}); await inFlight;
+  process.env.PANTHORIUM_LOCAL_PROFILE='1';
+  function guard(method,path){let status=200,passed=false;localProfileGuard({method,path},{status:n=>({json:()=>{status=n;},end:()=>{status=n;}})},()=>{passed=true;});return {status,passed};}
+  assert.equal(guard('POST','/api/agent/run').status,503);
+  assert.equal(guard('GET','/api/files').status,503);
+  assert.equal(guard('POST','/api/local/chat').passed,true);
+  assert.equal(guard('POST','/api/auth/login').passed,true);
+  assert.equal(guard('GET','/api/health').passed,true);
+  delete process.env.PANTHORIUM_LOCAL_PROFILE;assert.equal(guard('POST','/api/agent/run').passed,true);
+  console.log('PASS local provider isolation, failure/no fallback, endpoint restrictions, concurrency and action guard');
+ } finally {global.fetch=nativeFetch;for(const k of Object.keys(process.env))delete process.env[k];Object.assign(process.env,saved);}
+})().catch(error=>{console.error(error);process.exitCode=1;});

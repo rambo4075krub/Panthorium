@@ -1,5 +1,5 @@
 /** Panthorium OS Backend */
-require("dotenv").config();
+if (process.env.PANTHORIUM_LOCAL_PROFILE !== "1") require("dotenv").config();
 
 const path = require("path");
 const fs = require("fs");
@@ -113,6 +113,8 @@ const { createOrganizationResourcesRouter } = require('./routes/organizationReso
 const { createOrganizationGovernanceRouter } = require('./routes/organizationGovernance');
 
 const app = express();
+app.use(require("./middleware/localProfile").localProfileGuard);
+if (process.env.PANTHORIUM_LOCAL_PROFILE === "1") app.get(["/local-ai", "/local-ai.html"], (req, res) => res.sendFile(path.join(__dirname, "local-ai.html")));
 if (config.trustProxy) app.set("trust proxy", 1);
 
 const authRepository = createAuthRepository(config);
@@ -557,8 +559,8 @@ async function start() {
     liveGateway.attach(server);
     console.log("  Gemini Live WebSocket enabled · " + (process.env.GEMINI_LIVE_LOCATION || "us-central1"));
   }
-  if (!config.isProduction || process.env.PANTHORIUM_SCHEDULER_INTERVAL_FALLBACK === '1') agentScheduler.start();
-  sentinelTraining.start();
+  if (process.env.PANTHORIUM_LOCAL_PROFILE !== "1" && (!config.isProduction || process.env.PANTHORIUM_SCHEDULER_INTERVAL_FALLBACK === '1')) agentScheduler.start();
+  if (process.env.PANTHORIUM_LOCAL_PROFILE !== "1") sentinelTraining.start();
   autonomousGovernance.start();
   sentinelOrchestrator.start();
   server.on('close', stopBackgroundWorkers);
