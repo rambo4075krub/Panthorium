@@ -62,6 +62,12 @@ and `D:\PanthoriumAI\voice\models` after review. Keep Gemini and application dat
 
 ## Local rollout
 
+Required release order: edit and test, publish the changes to GitHub, merge the
+reviewed change into `main`, then deploy Production only after main CI succeeds.
+Use the existing CI-published notebook release ref and verify the active commit
+and public health afterward. Do not use direct Production source overrides as
+the normal update path.
+
 `install-local.py` validates original/current hashes, backs up source and DPAPI
 runtime config, acquires the stage lock, installs, checks DB/HTTP/public health,
 and rolls back on failure. Receipts explicitly state `githubSynced:false`.
