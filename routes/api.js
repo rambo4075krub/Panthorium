@@ -40,23 +40,28 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       const message = req.body?.message;
       if (typeof message !== "string" || !message.trim() || message.length > 2000) return res.status(400).json({ok:false,error:"invalid_message"});
       try {
-        const entitlements = sentinel.providers.entitlements;
+        if (!require('../services/hybridAiPolicy').localEnabled() && hybridQwen) return res.status(503).json({ok:false,error:'local_disabled'});
         const userId = req.user.sub || req.user.id;
-        if (entitlements && !require('../billing-catalog').hasQuota(await entitlements.state(userId), 'aiCredits')) return res.status(402).json({ok:false,error:'quota_exceeded'});
-        const complete = hybridQwen ? hybridQwen.complete.bind(hybridQwen) : sentinel.providers.callDetailed.bind(sentinel.providers, "local");
-        const result = await complete( "คุณคือผู้ช่วย Panthorium ในเครื่อง ตอบภาษาไทยสั้น ชัดเจน และซื่อสัตย์ ไม่มีเครื่องมือสั่งงานระบบจริง", [{role:"user",content:message.trim()}]);
-        if (entitlements) {
-          const input = result.usage?.prompt_tokens, output = result.usage?.completion_tokens;
-          if (!Number.isSafeInteger(input) || input < 0 || !Number.isSafeInteger(output) || output < 0) throw new Error('local_usage_unavailable');
-          await entitlements.consume(userId,{textInputTokens:input,textOutputTokens:output});
+        if (sentinel.providers.hybrid) {
+          const controller = new AbortController();
+          const cancel = () => { if (!res.writableEnded) controller.abort(); };
+          res.once('close',cancel);
+          let result;
+          try { result = await sentinel.chat({message:message.trim(),sessionId:req.body.sessionId,userId,provider:'local',voiceMode:req.body.voice===true,user:req.user,functionCalling,requestId:stableActionRequestId(req)||req.requestId||randomUUID(),signal:controller.signal}); }
+          finally { res.off('close',cancel); }
+          if (res.destroyed) return;
+          return res.status(result.ok?200:503).json({...result,creditsCharged:0,billable:false});
         }
-        res.json({ok:true,...result,actionsEnabled:false});
+        const complete = hybridQwen ? hybridQwen.complete.bind(hybridQwen) : sentinel.providers.callDetailed.bind(sentinel.providers, "local");
+        const result = await complete("คุณคือผู้ช่วย Panthorium ตอบภาษาไทยสั้น ชัดเจน และซื่อสัตย์ ไม่มีเครื่องมือสั่งงานระบบจริง",[{role:'user',content:message.trim()}]);
+        res.json({ok:true,...result,creditsCharged:0,billable:false,actionsEnabled:false});
       } catch (error) {
         if (String(error.message).startsWith('quota_exceeded')) return res.status(402).json({ok:false,error:'quota_exceeded'});
         res.status(error.message === "local_llm_busy" ? 429 : 503).json({ok:false,error:"local_inference_unavailable"});
       }
     });
   }
+  if (sentinel.providers?.hybrid) router.use('/hybrid',require('./hybridAi').createHybridRouter({sentinel,auth,permission:requirePermission('chat'),limiter:speechLimiter,biometrics}));
   router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", deployment: process.env.PANTHORIUM_DEPLOY_SHA ? {sha:process.env.PANTHORIUM_DEPLOY_SHA, stage:process.env.PANTHORIUM_DEPLOY_STAGE} : undefined, localPilot: process.env.PANTHORIUM_LOCAL_PROFILE === "1" ? { actionsEnabled:false, trainingEnabled:false, cloudServicesEnabled:false } : undefined, release: process.env.K_REVISION || process.env.PANTHORIUM_RELEASE || require("../package.json").version, sentinel: sentinel.status(), aiMode: process.env.PANTHORIUM_AI_MODE || "legacy", geminiLiveEnabled: process.env.GEMINI_LIVE_ENABLED === "1", voiceIdentityConfigured: biometrics?.status?.().configured === true, voiceIdentityGateEnabled: biometrics?.gateEnabled === true, time: new Date().toISOString() }));
   router.get("/sentinel/status", auth, requirePermission("system:read"), (req, res) => res.json({ ok: true, ...sentinel.status() }));
   router.get("/ai/providers", auth, requirePermission("chat"), (req, res) => res.json({ ok: true, providers: sentinel.providerCatalog() }));

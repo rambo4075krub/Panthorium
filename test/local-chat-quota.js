@@ -14,11 +14,12 @@ async function main(){
  const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));
  try{
   const send=()=>fetch('http://127.0.0.1:'+server.address().port+'/api/local/chat',{method:'POST',headers:{authorization:'Bearer fixture','content-type':'application/json'},body:JSON.stringify({message:'hello'})});
-  let r=await send();assert.equal(r.status,200);assert.equal((await r.json()).text,'answer');assert.equal(remaining,65);
-  remaining=0;r=await send();assert.equal(r.status,402);assert.equal(calls,1,'exhausted quota stops before inference');
-  remaining=5;r=await send();assert.equal(r.status,402);assert.equal((await r.json()).text,undefined,'no uncharged answer on insufficient actual usage');assert.equal(remaining,5);
-  remaining=100;usage=null;r=await send();assert.equal(r.status,503);assert.equal(remaining,100,'missing usage fails closed');
-  console.log('Local AI HTTP quota: measured tokens, shared debit, exhausted preflight and missing-usage failure passed');
+  let r=await send();assert.equal(r.status,200);assert.equal((await r.json()).text,'answer');assert.equal(remaining,100,'Qwen must never debit credits');
+  remaining=0;r=await send();assert.equal(r.status,200);assert.equal(calls,2,'Qwen works after Gemini credits are exhausted');
+  assert.equal((await r.json()).creditsCharged,0);
+  remaining=5;r=await send();assert.equal(r.status,200);assert.equal(remaining,5);
+  remaining=100;usage=null;r=await send();assert.equal(r.status,200);assert.equal(remaining,100,'local token telemetry is not a billing dependency');
+  console.log('Local AI HTTP: zero credit debit, exhausted Gemini quota fallback, no usage billing dependency passed');
  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));for(const [key,value] of [['PANTHORIUM_LOCAL_PROFILE',saved.profile],['PANTHORIUM_LOCAL_QWEN',saved.hybrid]])value===undefined?delete process.env[key]:process.env[key]=value;}
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

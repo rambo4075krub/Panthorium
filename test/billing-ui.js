@@ -28,7 +28,7 @@ async function main() {
   const root = w.document.querySelector('[data-billing-root]');
   assert.equal(root.querySelectorAll('.pb-card').length, 4);
   assert.match(root.querySelector('[data-ai-service]').textContent, /ผู้ช่วย AI/);
-  assert.match(root.querySelector('.pb-card').textContent, /โควต้า AI ร่วม/);
+  assert.match(root.querySelector('.pb-card').textContent, /เครดิต Gemini Live รวม/);
   root.querySelector('[data-product-id="work-pro"]').click();
   assert.match(root.querySelector('.pb-total').textContent, /1,089 บาท/);
   assert.match(root.querySelector('[data-refund-policy]').textContent, /ชำระซ้ำ/);

@@ -3,7 +3,7 @@
   const ID = 'billing';
   const catalog = window.PanthoriumBillingCatalog;
   if (!catalog) return;
-  const tabs = [['membership', 'สมาชิก'], ['ai', 'โควต้า AI เพิ่ม'], ['storage', 'พื้นที่ / ดาวน์โหลด'], ['organizations', 'องค์กร']];
+  const tabs = [['membership', 'สมาชิก'], ['ai', 'เครดิต Gemini เพิ่ม'], ['storage', 'พื้นที่ / ดาวน์โหลด'], ['organizations', 'องค์กร']];
   const os = () => typeof OS !== 'undefined' ? OS : null;
   const price = value => value.toLocaleString('th-TH') + ' บาท';
   const nativeAndroid = () => window.Capacitor?.isNativePlatform?.() === true || /\bPanthoriumAndroid\b/i.test(navigator.userAgent);
@@ -22,11 +22,11 @@
   }
   function serviceInfo() {
     const info = node('section', null, 'pb-conditions'); info.dataset.aiService = '';
-    info.append(node('h3', 'บริการที่คุณได้รับ'), node('p', catalog.serviceDescription));
+    info.append(node('h3', 'บริการที่คุณได้รับ'), node('p', catalog.serviceDescription), node('p', 'ใช้ Gemini Live เป็นหลักสำหรับการพูด ระบบอาจเลือก Qwen สำหรับงานข้อความที่เหมาะสม โดย Qwen ไม่หักเครดิต เมื่อเครดิต Gemini หมดสามารถใช้ Qwen ต่อได้ฟรีหากทรัพยากรพร้อม งานอาจช้าลงหรือถูกพัก และคุณภาพอาจต่างกัน'));
     const details = document.createElement('details'); const title = node('summary', 'ความหมายข้อความเข้า/ออก วิธีใช้ และอัตราโควต้า');
     details.append(title, node('p', catalog.usageExplanation), node('p', 'วิธีใช้: สมัครและเข้าสู่บัญชี → เปิดผู้ช่วย AI → พิมพ์คำถามหรือเปิดไมโครโฟนและอนุญาตเมื่อใช้เสียง → รับคำตอบในระบบ เมื่อซื้อแพ็กเกจ สิทธิ์จะเพิ่มในบัญชีหลังยืนยันการชำระสำเร็จ'));
     const list = node('ul'); catalog.conversionDetails.forEach(text => list.append(node('li', text)));
-    details.append(list, node('p', 'ตัวอย่าง: ส่งข้อความ 1,000 โทเคนและรับคำตอบ 200 โทเคน ใช้ 2,000 เครดิต; ส่งเสียง 60 วินาทีและรับเสียงคำตอบ 60 วินาที ใช้ 36,000 เครดิต การใช้งานผสมคิดรวมจากยอดเดียวกัน'), node('p', 'ข้อความบริบทและข้อความถอดเสียงที่ส่งให้ AI ประมวลผลอาจนับเป็นโทเคนเพิ่มเติม เสียงนับตามเวลาข้อมูลเสียงที่รับส่งและปัดเศษสะสมเป็นวินาที ไม่ใช่เวลาที่เปิดหน้าต่างค้างไว้ เครดิตเป็นหน่วยบริการ ไม่ใช่เงินและโอนหรือแลกเงินสดไม่ได้'));
+    details.append(list, node('p', 'ตัวอย่าง Gemini Live: ส่งข้อความ 1,000 โทเคนและรับคำตอบ 200 โทเคน ใช้ 2,000 เครดิต; ส่งเสียง 60 วินาทีและรับเสียงคำตอบ 60 วินาที ใช้ 36,000 เครดิต การใช้งานผสมคิดรวมจากยอดเดียวกัน'), node('p', 'ข้อความบริบทและข้อความถอดเสียงที่ส่งให้ AI ประมวลผลอาจนับเป็นโทเคนเพิ่มเติม เสียงนับตามเวลาข้อมูลเสียงที่รับส่งและปัดเศษสะสมเป็นวินาที ไม่ใช่เวลาที่เปิดหน้าต่างค้างไว้ เครดิตเป็นหน่วยบริการ ไม่ใช่เงินและโอนหรือแลกเงินสดไม่ได้'));
     info.append(details); return info;
   }
   function open() {
@@ -51,21 +51,21 @@
       main.replaceChildren();
       if (category === 'organizations') { renderOrganizations(); return; }
       const intro = node('div', null, 'pb-intro');
-      intro.append(node('p', 'PANTHORIUM / PLANS', 'pb-eyebrow'), node('h2', category === 'membership' ? 'เลือกแพ็กเกจที่เหมาะกับคุณ' : tabs.find(tab => tab[0] === category)[1]), node('p', 'บัญชีเดียว ใช้โควต้าเสียงและข้อความร่วมกันทุกอุปกรณ์', 'pb-muted'));
+      intro.append(node('p', 'PANTHORIUM / PLANS', 'pb-eyebrow'), node('h2', category === 'membership' ? 'เลือกแพ็กเกจที่เหมาะกับคุณ' : tabs.find(tab => tab[0] === category)[1]), node('p', 'Gemini Live ใช้เครดิตร่วมทั้งเสียงและข้อความ · Qwen 4B ใช้ฟรีเมื่อระบบพร้อม', 'pb-muted'));
       main.appendChild(intro);
       main.appendChild(serviceInfo());
-      const balance = node('p', 'เข้าสู่ระบบเพื่อดูโควต้า AI คงเหลือ', 'pb-notice'); balance.dataset.aiBalance = ''; main.appendChild(balance);
+      const balance = node('p', 'เข้าสู่ระบบเพื่อดูเครดิต Gemini Live คงเหลือ', 'pb-notice'); balance.dataset.aiBalance = ''; main.appendChild(balance);
       const balanceUser = os()?.state?.user;
       const balanceId = balanceUser?.id || balanceUser?.sub;
       const token = window.PanthoriumAuth?.getAccessToken?.() || os()?.config?.accessToken;
       if (balanceId && token && !(balanceUser.roles || []).includes('guest')) {
-        balance.textContent = 'กำลังตรวจโควต้า AI คงเหลือ…';
+        balance.textContent = 'กำลังตรวจเครดิต Gemini Live คงเหลือ…';
         (async () => { try {
           const backend = String(window.PanthoriumAuth?.getBackendUrl?.() || os()?.config?.backendUrl || '').replace(/\/$/, '');
           const response = await fetch(backend+'/api/billing/entitlements', {headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(15000)});
           const value = await response.json(); if (!response.ok || !value.ok) throw new Error('unavailable');
           if (!balance.isConnected || (os()?.state?.user?.id || os()?.state?.user?.sub)!==balanceId) return;
-          balance.textContent = value.unlimited?.includes('aiCredits') ? 'โควต้า AI ร่วม: ไม่จำกัดในช่วงโปรโมชัน' : 'โควต้า AI ร่วมคงเหลือ '+Number(value.remaining?.aiCredits || 0).toLocaleString('th-TH')+' เครดิต · ใช้ได้ทั้งเสียงและข้อความ';
+          balance.textContent = value.unlimited?.includes('aiCredits') ? 'เครดิต Gemini Live รวม: ไม่จำกัดในช่วงโปรโมชัน' : 'เครดิต Gemini Live รวมคงเหลือ '+Number(value.remaining?.aiCredits || 0).toLocaleString('th-TH')+' เครดิต · ใช้ได้ทั้งเสียงและข้อความ';
         } catch (_) { if (balance.isConnected && (os()?.state?.user?.id || os()?.state?.user?.sub)===balanceId) balance.textContent = 'ยังโหลดโควต้าคงเหลือไม่ได้ กรุณาเปิดหน้านี้ใหม่'; } })();
       }
       if (nativeAndroid()) main.append(node('p', 'การซื้อภายในแอปยังไม่เปิดให้บริการ', 'pb-notice'));

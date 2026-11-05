@@ -57,8 +57,8 @@ class Pool {
   assert(!catalog.hasQuota(await rights.state('fresh'), 'textOutputTokens'));
   await assert.rejects(rights.consume('fresh', { voiceInputSeconds: 1 }), /quota_exceeded:aiCredits/);
   assert.equal((await rights.state('fresh')).remaining.aiCredits, 0);
-  assert(catalog.displayDetails(catalog.get('free'), start).some(x => x.includes('AI ร่วมไม่จำกัด')));
-  assert(!catalog.displayDetails(catalog.get('free'), end).some(x => x.includes('AI ร่วมไม่จำกัด')));
+  assert(catalog.displayDetails(catalog.get('free'), start).some(x => x.includes('Gemini Live รวมไม่จำกัด')));
+  assert(!catalog.displayDetails(catalog.get('free'), end).some(x => x.includes('Gemini Live รวมไม่จำกัด')));
   assert.equal(catalog.get('free').quotas.aiCredits, 100000, 'base shared quota returns after promotion');
   // Exercise the HTTP completion preflight and meter with JSON-safe unlimited quotas.
   const { EventEmitter } = require('node:events');

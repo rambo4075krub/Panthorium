@@ -11,6 +11,7 @@ function validateNoArgs(args) { return plainObject(args) && Object.keys(args).le
 class ToolRegistry {
   constructor({ sentinel, conversations, securityResponse, aiOperations, integrations, knowledge, training, mediaStudio } = {}) {
     this.tools = new Map();
+    this.register({id:'calculator.evaluate',description:'Evaluate bounded arithmetic accurately',permission:'chat',risk:'low',mutates:false,argsSchema:{expression:'arithmetic string, max 200 characters'},validateArgs:args=>onlyKeys(args,['expression'])&&typeof args.expression==='string'&&args.expression.length>0&&args.expression.length<=200?null:'invalid_tool_args',run:async({args})=>({expression:args.expression,result:require('../calculator-expression').evaluate(args.expression)})});
     for (const operation of ['open', 'close', 'refresh', 'minimize', 'maximize', 'fullscreen', 'restore']) {
       this.register({
         id: `window.${operation}`, description: `${operation} one Panthorium function window in the user's browser`,

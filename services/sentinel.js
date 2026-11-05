@@ -123,29 +123,32 @@ class Sentinel {
     const systemPrompt=this.prompts.build('default')+currentTimeContext()+(this.prompts.productContext?.()||'')+context+candidate+reflection+this.voiceLanguageGuard();
     return this.normalizeVoiceAnswer(await this.gateway.complete({systemPrompt,history:[{role:'user',content:message}],userId,sessionId}));
   }
-  async completeWithFunctionCalls({ systemPrompt, history, preferredProvider, preferredModel, userId, sessionId, user, functionCalling, requestId }) {
+  async completeWithFunctionCalls({ systemPrompt, history, preferredProvider, preferredModel, userId, sessionId, user, functionCalling, requestId, voiceMode = false, signal }) {
     const selectedProvider = preferredProvider || this.gateway.orderedProviders?.()[0];
-    const declarations = ['vertex','gemini-live'].includes(selectedProvider) ? functionCalling?.declarationsFor(user) || [] : [];
+    const declarations = ['vertex','gemini-live','local'].includes(selectedProvider) ? functionCalling?.declarationsFor(user) || [] : [];
     if (!declarations.length) return this.gateway.complete({ systemPrompt, history, preferredProvider, preferredModel, userId, sessionId });
     let currentHistory = history.slice();
     let toolResults = [];
     let totalUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     let functionCallCount = 0;
     let result = null;
+    let lockedProvider;
     for (let round = 0; round < 4; round += 1) {
-      result = await this.gateway.complete({ systemPrompt, history: currentHistory, preferredProvider: selectedProvider, preferredModel, userId, sessionId, tools: declarations });
+      result = await this.gateway.complete({ systemPrompt, history: currentHistory, preferredProvider: lockedProvider || preferredProvider, preferredModel, userId, sessionId, tools: declarations, voiceMode, lockedProvider, signal });
       if (result.usage) {
-        totalUsage.inputTokens += Number(result.usage.inputTokens) || 0;
-        totalUsage.outputTokens += Number(result.usage.outputTokens) || 0;
-        totalUsage.totalTokens += Number(result.usage.totalTokens) || 0;
+        totalUsage.inputTokens += Number(result.usage.inputTokens ?? result.usage.prompt_tokens) || 0;
+        totalUsage.outputTokens += Number(result.usage.outputTokens ?? result.usage.completion_tokens) || 0;
+        totalUsage.totalTokens += Number(result.usage.totalTokens ?? result.usage.total_tokens) || 0;
       }
       if (!result.ok || !result.functionCalls?.length) break;
+      lockedProvider = result.provider;
       if (round === 3) {
         result = { ...result, ok: false, error: 'function_call_round_limit', text: 'Sentinel: ใช้ขั้นตอนเชื่อมต่อฟังก์ชันครบขีดจำกัด กรุณาลองแยกคำสั่ง' };
         break;
       }
       const functionResponses = [];
       for (const call of result.functionCalls) {
+        signal?.throwIfAborted();
         functionCallCount += 1;
         if (functionCallCount > 5) {
           functionResponses.push({ functionResponse: { name: String(call.name || 'unknown_function'), ...(call.id ? { id: call.id } : {}), response: { error: 'function_call_limit_reached' } } });
@@ -176,7 +179,7 @@ class Sentinel {
     }
     return result || { ok: false, error: 'function_call_failed', text: '' };
   }
-  async chat({ sessionId, userId = "system", message, mode = "default", provider, model, voiceMode = false, user, functionCalling, requestId }) {
+  async chat({ sessionId, userId = "system", message, mode = "default", provider, model, voiceMode = false, user, functionCalling, requestId, signal }) {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message, historyLimit: voiceMode ? 12 : 40 });
     const [trainingContext, memoryContext] = await Promise.all([
@@ -184,7 +187,7 @@ class Sentinel {
       this.memoryContextFor(userId, message, prepared.sid)
     ]);
     const functionGuidance = this.functionGuidance(user, functionCalling);
-    const result = this.normalizeVoiceAnswer(await this.completeWithFunctionCalls({ systemPrompt: this.prompts.build(mode)+currentTimeContext()+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard() + functionGuidance, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, user, functionCalling, requestId }));
+    const result = this.normalizeVoiceAnswer(await this.completeWithFunctionCalls({ systemPrompt: this.prompts.build(mode)+currentTimeContext()+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard() + functionGuidance, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, user, functionCalling, requestId, voiceMode, signal }));
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });
     this.captureTraining({message,result,userId,sessionId:prepared.sid});
     return result.ok ? { ...result, sessionId: prepared.sid, sentinel: "Sentinel" } : result;
@@ -204,10 +207,10 @@ class Sentinel {
     const hasTools = functionCalling?.declarationsFor(user)?.some(tool => ['panthorium_studio_catalog', 'panthorium_web_search', 'panthorium_web_read', 'panthorium_weather_get', 'panthorium_notifications_read'].includes(tool.name));
     // Let the model understand natural requests and follow-ups; a keyword gate
     // would silently miss phrases such as “วาดรูป” or “make a poster”.
-    const useFunctions = hasTools && ['vertex', 'gemini-live'].includes(provider || this.gateway.orderedProviders?.()[0]);
+    const useFunctions = hasTools && ['vertex', 'gemini-live', 'local'].includes(provider || this.gateway.orderedProviders?.()[0]);
     let result;
     if (useFunctions) {
-      result = this.normalizeVoiceAnswer(await this.completeWithFunctionCalls({ systemPrompt, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, user, functionCalling, requestId }));
+      result = this.normalizeVoiceAnswer(await this.completeWithFunctionCalls({ systemPrompt, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, user, functionCalling, requestId, voiceMode }));
       if (result.ok) {
         result.streaming = 'buffered-function-calling';
         onProvider?.({ provider: result.provider, model: result.model });
