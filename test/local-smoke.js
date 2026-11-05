@@ -1,6 +1,6 @@
 'use strict';
 const assert=require('node:assert/strict');
-const base='http://127.0.0.1:8787';
+const base='http://127.0.0.1:18787';
 (async()=>{
  const health=await fetch(base+'/api/health');assert.equal(health.status,200);
  const h=await health.json();assert.equal(h.aiMode,'local-only');assert.equal(h.geminiLiveEnabled,false);

@@ -13,7 +13,7 @@ const keep = /^(Path|SystemRoot|windir|TEMP|TMP|USERPROFILE|HOMEDRIVE|HOMEPATH|A
 for (const key of Object.keys(process.env)) if (!keep.test(key)) delete process.env[key];
 Object.assign(process.env, {
  NODE_ENV:'development', PANTHORIUM_LOCAL_PROFILE:'1', PANTHORIUM_AI_MODE:'local-only',
- HOST:'127.0.0.1', PORT:'8787', ALLOWED_ORIGINS:'http://127.0.0.1:8787,http://localhost:8787',
+ HOST:'127.0.0.1', PORT:'18787', ALLOWED_ORIGINS:'http://127.0.0.1:18787,http://localhost:18787',
  DATABASE_URL:'', DATABASE_SSL_MODE:'disable', DATA_FILE:path.join(state,'panthorium.json'), AUDIT_FILE:path.join(state,'audit.log'),
  ADMIN_USERNAME:profile.username, ADMIN_PASSWORD:profile.password, JWT_SECRET:profile.jwtSecret,
  LOCAL_LLM_URL:'http://127.0.0.1:8088/v1/chat/completions', LOCAL_LLM_MODEL:'panthorium-local',

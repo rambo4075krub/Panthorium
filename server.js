@@ -113,7 +113,12 @@ const { createOrganizationResourcesRouter } = require('./routes/organizationReso
 const { createOrganizationGovernanceRouter } = require('./routes/organizationGovernance');
 
 const app = express();
+const notebookControl = require("./services/notebookControl").installNotebookControl(app);
 app.use(require("./middleware/localProfile").localProfileGuard);
+if (process.env.PANTHORIUM_LOCAL_QWEN === "1") {
+  app.get("/qwen", (req, res) => res.sendFile(path.join(__dirname, "qwen-local.html")));
+  app.get("/qwen-local.js", (req, res) => res.sendFile(path.join(__dirname, "qwen-local.js")));
+}
 if (process.env.PANTHORIUM_LOCAL_PROFILE === "1") app.get(["/local-ai", "/local-ai.html"], (req, res) => res.sendFile(path.join(__dirname, "local-ai.html")));
 if (config.trustProxy) app.set("trust proxy", 1);
 
@@ -133,7 +138,12 @@ const agentRuns = new AgentRunRepository({ databaseUrl: config.databaseUrl, data
 const agentPending = new AgentPendingRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const agentJobs = new AgentJobRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, requireDatabase: config.isProduction });
 const agentAutomationRepository = new AgentAutomationRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, requireDatabase: config.isProduction });
-const cloudNotesRepository = new CloudNotesRepository({ bucket: process.env.PANTHORIUM_FILES_BUCKET });
+const diskObjectClient = process.env.PANTHORIUM_OBJECT_ROOT
+  ? new (require('./services/diskObjectClient').DiskObjectClient)(process.env.PANTHORIUM_OBJECT_ROOT, process.env.PANTHORIUM_FILES_BUCKET)
+  : null;
+const objectOptions = { bucket: process.env.PANTHORIUM_FILES_BUCKET };
+if (diskObjectClient) objectOptions.clientFactory = () => diskObjectClient;
+const cloudNotesRepository = new CloudNotesRepository(objectOptions);
 const agentMemoryRepository = new AgentMemoryRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, requireDatabase: config.isProduction, notesRepository: cloudNotesRepository });
 const agentKnowledgeRepository = new AgentKnowledgeRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const multiAgentRuns = new MultiAgentRunRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
@@ -173,7 +183,7 @@ const organizationResources = new OrganizationResourceService({ organizations,
   complete: process.env.GEMINI_LIVE_ENABLED === '1' && liveEntitlements
     ? createCloudAppCompletion({ entitlements: liveEntitlements, usageLedger, gate: sentinel.gateway.concurrencyGate }) : null });
 const organizationGovernance = new OrganizationGovernanceService({ organizations });
-const cloudFiles = new CloudFilesService({ bucket: process.env.PANTHORIUM_FILES_BUCKET, entitlements:liveEntitlements, notifications });
+const cloudFiles = new CloudFilesService({ ...objectOptions, entitlements:liveEntitlements, notifications });
 const social = new (require('./services/socialService').SocialService)({ repository: new (require('./services/socialRepository').SocialRepository)({...cloudStoreOptions,allowMemory:!config.isProduction&&!config.databaseUrl}), files:cloudFiles, accounts:authRepository, supportAdminUsername:config.adminUsername, systemNotifications:notifications });
 notifications.socialVisibility = (userId, sourceId) => social.notifications.systemNotificationVisible(userId, sourceId);
 const mediaStudio = new MediaStudioService({ files: cloudFiles, providers: sentinel.providers, gateway: sentinel.gateway, audit, jobSecret: config.jwtSecret });
@@ -499,6 +509,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({ ok: false, error: "internal_error" });
 });
 
+let localPushTimer = null;
+
 async function start() {
   await actionLedger.init();
   await notifications.init();
@@ -559,16 +571,20 @@ async function start() {
     liveGateway.attach(server);
     console.log("  Gemini Live WebSocket enabled · " + (process.env.GEMINI_LIVE_LOCATION || "us-central1"));
   }
-  if (process.env.PANTHORIUM_LOCAL_PROFILE !== "1" && (!config.isProduction || process.env.PANTHORIUM_SCHEDULER_INTERVAL_FALLBACK === '1')) agentScheduler.start();
-  if (process.env.PANTHORIUM_LOCAL_PROFILE !== "1") sentinelTraining.start();
-  autonomousGovernance.start();
-  sentinelOrchestrator.start();
+  if (process.env.PANTHORIUM_DEPLOY_PROBE !== '1' && process.env.PANTHORIUM_LOCAL_PROFILE !== "1" && (!config.isProduction || process.env.PANTHORIUM_SCHEDULER_INTERVAL_FALLBACK === '1')) agentScheduler.start();
+  if (process.env.PANTHORIUM_DEPLOY_PROBE !== '1' && process.env.PANTHORIUM_LOCAL_PROFILE !== "1" && process.env.PANTHORIUM_PUSH_INTERVAL_FALLBACK === '1' && !localPushTimer) {
+    localPushTimer = setInterval(() => notificationPush.tick().catch(() => console.error('[PUSH] local retry failed')), 60000);
+    localPushTimer.unref();
+  }
+  if (process.env.PANTHORIUM_DEPLOY_PROBE !== "1" && process.env.PANTHORIUM_LOCAL_PROFILE !== "1") sentinelTraining.start();
+  if (process.env.PANTHORIUM_DEPLOY_PROBE !== "1") { autonomousGovernance.start(); sentinelOrchestrator.start(); }
   server.on('close', stopBackgroundWorkers);
   if (liveGateway) server.on('close', () => liveGateway.close());
   return server;
 }
 
 function stopBackgroundWorkers() {
+  if (localPushTimer) { clearInterval(localPushTimer); localPushTimer = null; }
   agentScheduler.stop();
   sentinelTraining.stop();
   sentinelActiveLearning.shutdown?.();
@@ -596,6 +612,7 @@ if (require.main === module) {
         }
       });
     };
+    notebookControl.setShutdown(shutdown);
     process.once('SIGTERM', shutdown);
     process.once('SIGINT', shutdown);
   }).catch((error) => { console.error("[BOOT]", error); process.exit(1); });
