@@ -57,7 +57,14 @@ def sql(query,db='postgres',env=None):
 def ensure_database():
  p=subprocess.run([str(BIN/'pg_isready.exe'),'-q','-h','127.0.0.1','-p','55432'],capture_output=True,
                   creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
- if p.returncode:command([BIN/'pg_ctl.exe','start','-w','-t','45','-D',DBROOT/'data','-l',DBROOT/'logs'/'postgresql.log'],timeout=55)
+ if p.returncode:
+  # A Windows postmaster can retain pg_ctl's pipe handles after pg_ctl exits.
+  # Use a file, not capture_output/PIPE: waiting for pipe EOF would hang startup.
+  with (DBROOT/'logs'/'startup-controller.log').open('ab') as output:
+   started=subprocess.run([str(BIN/'pg_ctl.exe'),'start','-w','-t','45','-D',str(DBROOT/'data'),'-l',str(DBROOT/'logs'/'postgresql.log')],
+     stdin=subprocess.DEVNULL,stdout=output,stderr=subprocess.STDOUT,timeout=55,
+     creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+  if started.returncode:raise RuntimeError('database_start_failed; inspect startup-controller.log')
 @contextlib.contextmanager
 def lock(name,wait=0):
  import msvcrt
@@ -241,6 +248,7 @@ def restore_before_exposure(stage,backup):
  if (Path(backup)/'state.json').exists():shutil.copy2(Path(backup)/'state.json',HOST/stage/'state.json')
  return failed
 def verify_readiness(stage,state,front=False):
+ if sql('SELECT 1',env=pg_env(stage))!='1':raise RuntimeError('database_not_ready')
  port=STAGES[stage]['front'] if front else state['port']
  h=health(port)
  if not matches(h,stage,state['sha']):raise RuntimeError('unexpected_served_release')

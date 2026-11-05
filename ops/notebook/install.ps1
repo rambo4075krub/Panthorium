@@ -8,7 +8,7 @@ New-Item -ItemType Directory -Force -Path $target | Out-Null
 $stamp=Get-Date -Format yyyyMMdd-HHmmss
 $backup=Join-Path $root "controller-backups\$stamp"
 New-Item -ItemType Directory -Force -Path $backup | Out-Null
-foreach($name in @('runtime.py','agent.py','edge.cjs','smoke.cjs','bootstrap.py')){
+foreach($name in @('runtime.py','agent.py','edge.cjs','smoke.cjs','bootstrap.py','start-database.py')){
     if(Test-Path "$target\$name"){Copy-Item "$target\$name" "$backup\$name"}
     Copy-Item "$ops\$name" "$target\$name"
 }
@@ -47,6 +47,20 @@ if((Test-Path $log) -and (Get-Item $log).Length -gt 5MB){
 exit $LASTEXITCODE
 '@
 [IO.File]::WriteAllText("$target\Invoke-AutoDeploy.ps1",$taskScript,[Text.UTF8Encoding]::new($false))
+# Start PostgreSQL without attaching it to a visible console.
+$startup=[Environment]::GetFolderPath('Startup')
+$databaseShortcut=Join-Path $startup 'Panthorium PostgreSQL.lnk'
+if(Test-Path $databaseShortcut){
+    Copy-Item $databaseShortcut (Join-Path $backup 'PostgreSQL-startup.lnk')
+    if(!(Test-Path 'C:\Python314\pythonw.exe')){throw 'Windowless Python launcher is missing'}
+    $shell=New-Object -ComObject WScript.Shell
+    $link=$shell.CreateShortcut($databaseShortcut)
+    $link.TargetPath='C:\Python314\pythonw.exe'
+    $link.Arguments='"D:\Panthorium\Host\deploy\start-database.py"'
+    $link.WorkingDirectory=$target
+    $link.WindowStyle=7
+    $link.Save()
+}
 if($EnableTask){
     foreach($stage in @('production','staging')){
         $state=Get-Content "$hostRoot\$stage\active.json" -Raw | ConvertFrom-Json
