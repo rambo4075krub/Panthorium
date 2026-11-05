@@ -56,6 +56,10 @@ jobs:
       - name: Notebook storage, proxy and deployment recovery
         run: |
           node test/local-provider.js
+          node test/hybrid-ai.js
+          node test/hybrid-http.js
+          node test/voice-style.js
+          python3 -m py_compile deploy/hybrid/hybrid_server.py deploy/hybrid/host/voice/voice_engine.py
           node test/notebook-runtime.js
           python3 -m unittest discover -s ops/notebook -p 'test_*.py'
       - name: Free public-source live smoke (advisory)
@@ -87,6 +91,8 @@ jobs:
       - name: Social media real browser audio and video
         run: |
           npx --no-install playwright install --with-deps --only-shell chromium
+          node test/hybrid-voice-browser.js
+          node test/speech-buffer-browser.js
           node test/guest-start-menu-browser.js
           node test/social-experience-browser.js
           node test/social-rtc-browser.js

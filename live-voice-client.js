@@ -345,6 +345,11 @@
       socket.onerror = () => { clearTimeout(timeout); reject(new Error("เชื่อม Gemini Live ไม่สำเร็จ")); };
       socket.onclose = event => {
         clearTimeout(timeout);
+        if (event.code === 4402 && window.PanthoriumHybridVoice) {
+          if (!serverReady) reject(Object.assign(new Error('quota_exceeded'),{code:'quota_exceeded'}));
+          else { cleanup(); window.PanthoriumHybridVoice.start(); }
+          return;
+        }
         if (!serverReady) reject(new Error(event.reason || "Gemini Live ปฏิเสธการเชื่อมต่อ"));
         else {
           const canResume = resumeEnabled && resumeSessionId && !approvalDialogs.size && reconnectAttempts < 2 && [1006, 1011, 1012, 1013].includes(event.code);
@@ -432,26 +437,36 @@
 
   // Desktop and chat controls share one microphone and one Live connection.
   async function toggle(owner = "chat") {
+    if (window.PanthoriumHybridVoice?.isActive()) { await window.PanthoriumHybridVoice.start(); return; }
     if(window.PanthoriumSocialRTC?.isActive?.()){setStatus("กำลังโทรหรือไลฟ์อยู่ กรุณาวางสายก่อนเปิดไมค์ Sentinel");return;}
     if (starting || reconnectTimer) { cleanup(); return; }
     if (socket && socket.readyState < WebSocket.CLOSING) { cleanup(); return; }
     starting = true;
     sessionOwner = owner;
-    try { await openLiveSession(sessionGeneration); }
-    catch (error) { if (error.code === "voice_session_cancelled") return; console.warn("Gemini Live voice session failed", error); cleanup(); setStatus(error.name === "NotAllowedError" || error.name === "SecurityError"
+    try {
+      const generation = sessionGeneration;
+      const policy = await window.PanthoriumHybridVoice?.policy();
+      if (generation !== sessionGeneration) return;
+      if (policy && !policy.geminiAllowed) {
+        if (policy.local.enabled) { await window.PanthoriumHybridVoice.start(); return; }
+        throw new Error('เครดิต Gemini ไม่พอ และ Qwen ปิดอยู่');
+      }
+      await openLiveSession(sessionGeneration);
+    }
+    catch (error) { if (error.code === 'quota_exceeded' && window.PanthoriumHybridVoice) { cleanup(); await window.PanthoriumHybridVoice.start(); return; } if (error.code === "voice_session_cancelled") return; console.warn("Gemini Live voice session failed", error); cleanup(); setStatus(error.name === "NotAllowedError" || error.name === "SecurityError"
       ? "กรุณาอนุญาตไมโครโฟนให้ Panthorium Browser แล้วลองใหม่"
       : error.message || "เชื่อมเสียงสดไม่สำเร็จ", "error"); }
     finally { starting = false; }
   }
   window.PanthoriumLiveVoice = {
-    toggle, stop:cleanup,
+    toggle, stop:() => { cleanup(); window.PanthoriumHybridVoice?.stop(); },
     sendText:text => { if (activeAccountKey !== null && activeAccountKey !== accountKey()) { cleanup(); return false; } if (!serverReady || socket?.readyState !== WebSocket.OPEN || typeof text !== 'string' || !text.trim() || text.length > 2000) return false; socket.send(JSON.stringify({clientContent:{turns:[{role:'user',parts:[{text}]}],turnComplete:true}})); return true; },
-    stopPlayback:() => { outputSuppressed = true; stopPlayback(); if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'stopPlayback' })); },
-    isActive:() => serverReady,
-    isBusy:() => !!(serverReady || starting || reconnectTimer || microphone || activeSources.size),
-    state:() => ({ active: serverReady, busy: !!(serverReady || starting || reconnectTimer || microphone || activeSources.size), mode: currentStatus.mode }),
+    stopPlayback:() => { if(window.PanthoriumHybridVoice?.isActive())window.PanthoriumHybridVoice.stop(); outputSuppressed = true; stopPlayback(); if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'stopPlayback' })); },
+    isActive:() => serverReady || !!window.PanthoriumHybridVoice?.isActive(),
+    isBusy:() => !!(serverReady || starting || reconnectTimer || microphone || activeSources.size || window.PanthoriumHybridVoice?.isActive()),
+    state:() => ({ active: serverReady, busy: !!(serverReady || starting || reconnectTimer || microphone || activeSources.size || window.PanthoriumHybridVoice?.isActive()), mode: currentStatus.mode }),
     syncChatButton,
-    stopChatSession:() => { if (sessionOwner === "chat") cleanup(); }
+    stopChatSession:() => { if (sessionOwner === "chat") { cleanup(); window.PanthoriumHybridVoice?.stop(); } }
   };
   document.getElementById("desktop-voice")?.addEventListener("click", () => toggle("desktop"));
   window.addEventListener('panthorium:cloud-app-context', event => {

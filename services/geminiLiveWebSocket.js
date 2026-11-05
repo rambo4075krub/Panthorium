@@ -207,7 +207,7 @@ function createGeminiLiveWebSocketGateway({
           sessionResumption: resumeAllowed ? { handle: resumeHandle } : null, contextCompression });
       } catch (error) {
         console.warn("[Gemini Live] upstream connection failed", String(error?.message || error).slice(0, 160));
-        client.close(1011, `live_upstream_unavailable:${safeCloseDetail(error?.message)}`.slice(0, 123));
+        client.close(/quota_exceeded/.test(String(error?.message)) ? 4402 : 1011, `live_upstream_unavailable:${safeCloseDetail(error?.message)}`.slice(0, 123));
         release();
         return;
       }

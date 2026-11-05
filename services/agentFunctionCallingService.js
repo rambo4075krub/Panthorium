@@ -7,6 +7,7 @@ const { NOTIFICATION_TOOL_DEFINITIONS } = require('./notificationTools');
 const { STUDIO_TOOL_DEFINITIONS } = require('./creativeStudioTools');
 
 const TOOL_DEFINITIONS = [
+  {name:'panthorium_calculate',toolId:'calculator.evaluate',description:'Calculate arithmetic accurately. Always use for addition/subtraction/percentages, including Thai money questions. Pass the exact numbers and operations in the question, e.g. 546.02-10. Do not do arithmetic from memory.',properties:{expression:{type:'STRING',description:'Arithmetic expression using numbers + - * / parentheses, maximum 200 characters.'}},required:['expression']},
   ...PUBLIC_WEB_TOOL_DEFINITIONS,
   ...NOTIFICATION_TOOL_DEFINITIONS,
   ...STUDIO_TOOL_DEFINITIONS,
