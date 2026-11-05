@@ -1,0 +1,25 @@
+pkgname=expat
+pkgver=2.10.0
+pkgrel=0
+pkgdesc="Expat built from the verified upstream security release"
+url="https://libexpat.github.io/"
+arch="x86_64"
+license="MIT"
+checkdepends="bash"
+subpackages="libexpat:libs"
+source="https://github.com/libexpat/libexpat/releases/download/R_2_10_0/expat-$pkgver.tar.xz"
+build() {
+    ./configure --prefix=/usr --disable-static --without-docbook
+    make -j2
+}
+check() {
+    make check
+}
+package() {
+    make DESTDIR="$pkgdir" install
+}
+libs() {
+    pkgdesc="Expat XML parser shared library"
+    amove usr/lib/libexpat.so*
+}
+sha512sums="bd61f361d823f67586dad246fa4d4abbe3d22f5a0f9a28401e7a2fc96753d5bae33fbe4068fae72f016998d0da9d8c92edc4abd2fe8a8e4aafc775a8ab547c44  expat-2.10.0.tar.xz"

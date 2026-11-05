@@ -1,3 +1,8 @@
+FROM node:24.22.1-alpine AS native-security-build
+RUN apk add --no-cache alpine-sdk meson python3-dev py3-packaging libffi-dev pcre2-dev zlib-dev gettext-dev bash
+COPY build/alpine-security/ /build/alpine-security/
+RUN sh /build/alpine-security/build.sh
+
 FROM node:24.22.1-alpine AS media-build
 RUN apk add --no-cache build-base pkgconf nasm patch x264-dev opus-dev libass-dev zlib-dev
 COPY build/media/ /build/media/
@@ -5,7 +10,11 @@ RUN node /build/media/build-ffmpeg.mjs
 
 FROM node:24.22.1-alpine AS runtime
 # Only the libraries used by the reviewed CPU/local-file build, plus captions.
-RUN apk add --no-cache x264-libs opus libass zlib font-dejavu font-noto-thai
+COPY --from=native-security-build /out/keys/ /etc/apk/keys/
+COPY --from=native-security-build /out/packages/ /tmp/panthorium-security-packages/
+RUN apk add --no-cache /tmp/panthorium-security-packages/*.apk x264-libs opus libass zlib font-dejavu font-noto-thai \
+    && rm -rf /tmp/panthorium-security-packages
+COPY build/alpine-security/sources.json /usr/local/share/panthorium/native-security-sources.json
 COPY --from=media-build /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 COPY --from=media-build /opt/ffmpeg/share/panthorium/ /usr/local/share/panthorium/
 WORKDIR /app

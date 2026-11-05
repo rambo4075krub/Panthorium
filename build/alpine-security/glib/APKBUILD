@@ -1,0 +1,18 @@
+pkgname=glib
+pkgver=2.90.1
+pkgrel=0
+pkgdesc="GLib built from the verified upstream security release"
+url="https://gitlab.gnome.org/GNOME/glib"
+arch="x86_64"
+license="LGPL-2.1-or-later"
+makedepends="meson python3-dev py3-packaging libffi-dev pcre2-dev zlib-dev gettext-dev"
+options="!check"
+source="https://download.gnome.org/sources/glib/2.90/glib-$pkgver.tar.xz"
+build() {
+    meson setup --prefix=/usr --libdir=lib --buildtype=release --default-library=shared --wrap-mode=nodownload -Dman-pages=disabled -Ddocumentation=false -Dlibmount=disabled -Dtests=false -Dintrospection=disabled -Dnls=disabled -Dsysprof=disabled . output
+    meson compile -C output -j 2
+}
+package() {
+    DESTDIR="$pkgdir" meson install --no-rebuild -C output
+}
+sha512sums="d2d76deaad64e307034b09635c64a60537b0d625d1695b314bc33e9e3c9b20284270d2105333474eb1fbe5afcaa814d4c52ded3a1c2a46b4b2652f7b66a211c3  glib-2.90.1.tar.xz"
