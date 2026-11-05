@@ -10,7 +10,7 @@ const people=[]; let created=null,token=null;
 async function login(person){const r=await fetch(base+'/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:person.user,password:person.pw})});const j=await r.json();if(!r.ok||!j.accessToken)throw Error('login '+r.status+' '+String(j.error||''));return j.accessToken;}
 function headers(t){return {authorization:'Bearer '+t};}
 async function main(){
- const health=await (await fetch(base+'/api/health')).json();assert.equal(health.release,'notebook-'+stage);assert.equal(health.deployment.sha,process.env.TEST_SHA);
+ const health=await (await fetch(base+'/api/health')).json();assert.equal(health.release,'notebook-'+stage+'-'+process.env.TEST_SHA.slice(0,12));assert.equal(health.deployment.sha,process.env.TEST_SHA);
  assert.match((await pool.query('select inet_server_addr()::text as host')).rows[0].host,/^127\.0\.0\.1/);
  const noauth=await fetch(base+'/api/files');assert.equal(noauth.status,401);
  for(let i=0;i<2;i++){let p={id:crypto.randomUUID(),user:'verify_'+crypto.randomBytes(8).toString('hex'),pw:crypto.randomBytes(24).toString('hex')};

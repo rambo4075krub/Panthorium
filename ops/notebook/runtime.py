@@ -93,7 +93,7 @@ def process_identity(pid):
 def same_process(meta):return process_identity(meta['pid'])==meta['identity']
 def health(port):
  with urllib.request.urlopen('http://127.0.0.1:'+str(port)+'/api/health',timeout=3) as r:return json.load(r)
-def matches(h,stage,sha):return h.get('ok') is True and h.get('release')=='notebook-'+stage and h.get('deployment',{}).get('sha')==sha
+def matches(h,stage,sha):return h.get('ok') is True and h.get('release')=='notebook-'+stage+'-'+sha[:12] and h.get('deployment',{}).get('sha')==sha and h.get('deployment',{}).get('stage')==stage
 def spawn(args,cwd,env,meta_path,logprefix):
  logprefix=Path(logprefix);logprefix.parent.mkdir(parents=True,exist_ok=True)
  with Path(str(logprefix)+'.out.log').open('ab') as out,Path(str(logprefix)+'.err.log').open('ab') as err:
@@ -124,7 +124,7 @@ def runtime_env(stage,state,probe=None):
   DATABASE_URL='postgresql://'+item['role']+':'+quote(pw,safe='')+'@127.0.0.1:55432/'+db,
   DATABASE_SSL_MODE='disable',PGOPTIONS='-c default_transaction_read_only=off',
   PANTHORIUM_OBJECT_ROOT=str(data/'uploads' if probe else UPLOADS/stage),
-  PANTHORIUM_RELEASE='notebook-'+stage,PANTHORIUM_DEPLOY_SHA=state['sha'],PANTHORIUM_DEPLOY_STAGE=stage,
+  PANTHORIUM_RELEASE='notebook-'+stage+'-'+state['sha'][:12],PANTHORIUM_DEPLOY_SHA=state['sha'],PANTHORIUM_DEPLOY_STAGE=stage,
   PANTHORIUM_AI_MODE='gemini-live-only',PANTHORIUM_LOCAL_QWEN='1',LOCAL_LLM_MODEL='panthorium-local',
   PANTHORIUM_DEPLOY_CONTROL_TOKEN=control,ALLOWED_ORIGINS=','.join(sorted(origins)),
   DATA_FILE=str(data/'state.json'),AUDIT_FILE=str(data/'audit.log'),
@@ -244,6 +244,8 @@ def verify_readiness(stage,state,front=False):
  port=STAGES[stage]['front'] if front else state['port']
  h=health(port)
  if not matches(h,stage,state['sha']):raise RuntimeError('unexpected_served_release')
+ with urllib.request.urlopen('http://127.0.0.1:'+str(port)+'/app-release.json',timeout=5) as r:
+  if json.load(r).get('release')!=h['release'] or 'no-store' not in r.headers.get('Cache-Control',''):raise RuntimeError('client_update_release_mismatch')
  for route,expected in [('/',200),('/qwen-local.js',200),('/api/files',401)]:
   req=urllib.request.Request('http://127.0.0.1:'+str(port)+route)
   try:

@@ -15,6 +15,11 @@ class DeploymentRecoveryTests(unittest.TestCase):
  def journal(self,phase):
   j={'old':self.old,'new':self.new,'phase':phase,'operation':str(self.root/'op'),'finalBackup':'backup'}
   agent.atomic(agent.journal_path(self.stage),j);return j
+ def test_release_identity_checks_environment_and_full_commit(self):
+  h={'ok':True,'release':'notebook-staging-'+('a'*12),'deployment':{'sha':'a'*40,'stage':'staging'}}
+  self.assertTrue(agent.matches(h,'staging','a'*40))
+  self.assertFalse(agent.matches(h,'production','a'*40))
+  self.assertFalse(agent.matches(h,'staging',('a'*12)+('b'*28)))
  def test_exact_head_gate(self):
   refs={'refs/heads/staging':'a'*40,'refs/heads/deploy/notebook-staging':'b'*40}
   self.assertIsNone(agent.eligible(refs,'staging'))
