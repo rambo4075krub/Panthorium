@@ -40,10 +40,19 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       const message = req.body?.message;
       if (typeof message !== "string" || !message.trim() || message.length > 2000) return res.status(400).json({ok:false,error:"invalid_message"});
       try {
+        const entitlements = sentinel.providers.entitlements;
+        const userId = req.user.sub || req.user.id;
+        if (entitlements && !require('../billing-catalog').hasQuota(await entitlements.state(userId), 'aiCredits')) return res.status(402).json({ok:false,error:'quota_exceeded'});
         const complete = hybridQwen ? hybridQwen.complete.bind(hybridQwen) : sentinel.providers.callDetailed.bind(sentinel.providers, "local");
         const result = await complete( "คุณคือผู้ช่วย Panthorium ในเครื่อง ตอบภาษาไทยสั้น ชัดเจน และซื่อสัตย์ ไม่มีเครื่องมือสั่งงานระบบจริง", [{role:"user",content:message.trim()}]);
+        if (entitlements) {
+          const input = result.usage?.prompt_tokens, output = result.usage?.completion_tokens;
+          if (!Number.isSafeInteger(input) || input < 0 || !Number.isSafeInteger(output) || output < 0) throw new Error('local_usage_unavailable');
+          await entitlements.consume(userId,{textInputTokens:input,textOutputTokens:output});
+        }
         res.json({ok:true,...result,actionsEnabled:false});
       } catch (error) {
+        if (String(error.message).startsWith('quota_exceeded')) return res.status(402).json({ok:false,error:'quota_exceeded'});
         res.status(error.message === "local_llm_busy" ? 429 : 503).json({ok:false,error:"local_inference_unavailable"});
       }
     });

@@ -1,0 +1,24 @@
+'use strict';
+const assert=require('node:assert/strict');
+const express=require('express');
+const {createApiRouter}=require('../routes/api');
+const {creditCost}=require('../billing-catalog');
+async function main(){
+ const saved={profile:process.env.PANTHORIUM_LOCAL_PROFILE,hybrid:process.env.PANTHORIUM_LOCAL_QWEN};
+ process.env.PANTHORIUM_LOCAL_PROFILE='1';delete process.env.PANTHORIUM_LOCAL_QWEN;
+ let remaining=100,calls=0,usage={prompt_tokens:10,completion_tokens:5};
+ const entitlements={state:async()=>({remaining:{aiCredits:remaining}}),consume:async(user,amounts)=>{assert.equal(user,'123e4567-e89b-42d3-a456-426614174000');const cost=creditCost(amounts);if(cost>remaining)throw new Error('quota_exceeded:aiCredits');remaining-=cost;}};
+ const sentinel={providers:{entitlements,callDetailed:async()=>{calls++;return {text:'answer',usage};}}};
+ const auth={verifyAccessToken:()=>({sub:'123e4567-e89b-42d3-a456-426614174000',roles:['user'],permissions:['chat']})};
+ const app=express();app.use(express.json());app.use('/api',createApiRouter(sentinel,auth,{record(){}}));
+ const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));
+ try{
+  const send=()=>fetch('http://127.0.0.1:'+server.address().port+'/api/local/chat',{method:'POST',headers:{authorization:'Bearer fixture','content-type':'application/json'},body:JSON.stringify({message:'hello'})});
+  let r=await send();assert.equal(r.status,200);assert.equal((await r.json()).text,'answer');assert.equal(remaining,65);
+  remaining=0;r=await send();assert.equal(r.status,402);assert.equal(calls,1,'exhausted quota stops before inference');
+  remaining=5;r=await send();assert.equal(r.status,402);assert.equal((await r.json()).text,undefined,'no uncharged answer on insufficient actual usage');assert.equal(remaining,5);
+  remaining=100;usage=null;r=await send();assert.equal(r.status,503);assert.equal(remaining,100,'missing usage fails closed');
+  console.log('Local AI HTTP quota: measured tokens, shared debit, exhausted preflight and missing-usage failure passed');
+ }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));for(const [key,value] of [['PANTHORIUM_LOCAL_PROFILE',saved.profile],['PANTHORIUM_LOCAL_QWEN',saved.hybrid]])value===undefined?delete process.env[key]:process.env[key]=value;}
+}
+main().catch(error=>{console.error(error);process.exitCode=1;});

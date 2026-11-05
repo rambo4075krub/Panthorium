@@ -3,7 +3,7 @@
   const ID = 'billing';
   const catalog = window.PanthoriumBillingCatalog;
   if (!catalog) return;
-  const tabs = [['membership', 'สมาชิก'], ['voice', 'เสียงเพิ่ม'], ['text', 'ข้อความเพิ่ม'], ['storage', 'พื้นที่ / ดาวน์โหลด'], ['organizations', 'องค์กร']];
+  const tabs = [['membership', 'สมาชิก'], ['ai', 'โควต้า AI เพิ่ม'], ['storage', 'พื้นที่ / ดาวน์โหลด'], ['organizations', 'องค์กร']];
   const os = () => typeof OS !== 'undefined' ? OS : null;
   const price = value => value.toLocaleString('th-TH') + ' บาท';
   const nativeAndroid = () => window.Capacitor?.isNativePlatform?.() === true || /\bPanthoriumAndroid\b/i.test(navigator.userAgent);
@@ -19,6 +19,15 @@
     result.type = 'button';
     result.addEventListener('click', action);
     return result;
+  }
+  function serviceInfo() {
+    const info = node('section', null, 'pb-conditions'); info.dataset.aiService = '';
+    info.append(node('h3', 'บริการที่คุณได้รับ'), node('p', catalog.serviceDescription));
+    const details = document.createElement('details'); const title = node('summary', 'ความหมายข้อความเข้า/ออก วิธีใช้ และอัตราโควต้า');
+    details.append(title, node('p', catalog.usageExplanation), node('p', 'วิธีใช้: สมัครและเข้าสู่บัญชี → เปิดผู้ช่วย AI → พิมพ์คำถามหรือเปิดไมโครโฟนและอนุญาตเมื่อใช้เสียง → รับคำตอบในระบบ เมื่อซื้อแพ็กเกจ สิทธิ์จะเพิ่มในบัญชีหลังยืนยันการชำระสำเร็จ'));
+    const list = node('ul'); catalog.conversionDetails.forEach(text => list.append(node('li', text)));
+    details.append(list, node('p', 'ตัวอย่าง: ส่งข้อความ 1,000 โทเคนและรับคำตอบ 200 โทเคน ใช้ 2,000 เครดิต; ส่งเสียง 60 วินาทีและรับเสียงคำตอบ 60 วินาที ใช้ 36,000 เครดิต การใช้งานผสมคิดรวมจากยอดเดียวกัน'), node('p', 'ข้อความบริบทและข้อความถอดเสียงที่ส่งให้ AI ประมวลผลอาจนับเป็นโทเคนเพิ่มเติม เสียงนับตามเวลาข้อมูลเสียงที่รับส่งและปัดเศษสะสมเป็นวินาที ไม่ใช่เวลาที่เปิดหน้าต่างค้างไว้ เครดิตเป็นหน่วยบริการ ไม่ใช่เงินและโอนหรือแลกเงินสดไม่ได้'));
+    info.append(details); return info;
   }
   function open() {
     if (!os() || typeof createWindow !== 'function') return false;
@@ -42,11 +51,26 @@
       main.replaceChildren();
       if (category === 'organizations') { renderOrganizations(); return; }
       const intro = node('div', null, 'pb-intro');
-      intro.append(node('p', 'PANTHORIUM / PLANS', 'pb-eyebrow'), node('h2', category === 'membership' ? 'เลือกแพ็กเกจที่เหมาะกับคุณ' : tabs.find(tab => tab[0] === category)[1]), node('p', 'บัญชีเดียว ใช้โควต้าร่วมกันทุกอุปกรณ์ · ไม่มี Reserve', 'pb-muted'));
+      intro.append(node('p', 'PANTHORIUM / PLANS', 'pb-eyebrow'), node('h2', category === 'membership' ? 'เลือกแพ็กเกจที่เหมาะกับคุณ' : tabs.find(tab => tab[0] === category)[1]), node('p', 'บัญชีเดียว ใช้โควต้าเสียงและข้อความร่วมกันทุกอุปกรณ์', 'pb-muted'));
       main.appendChild(intro);
+      main.appendChild(serviceInfo());
+      const balance = node('p', 'เข้าสู่ระบบเพื่อดูโควต้า AI คงเหลือ', 'pb-notice'); balance.dataset.aiBalance = ''; main.appendChild(balance);
+      const balanceUser = os()?.state?.user;
+      const balanceId = balanceUser?.id || balanceUser?.sub;
+      const token = window.PanthoriumAuth?.getAccessToken?.() || os()?.config?.accessToken;
+      if (balanceId && token && !(balanceUser.roles || []).includes('guest')) {
+        balance.textContent = 'กำลังตรวจโควต้า AI คงเหลือ…';
+        (async () => { try {
+          const backend = String(window.PanthoriumAuth?.getBackendUrl?.() || os()?.config?.backendUrl || '').replace(/\/$/, '');
+          const response = await fetch(backend+'/api/billing/entitlements', {headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(15000)});
+          const value = await response.json(); if (!response.ok || !value.ok) throw new Error('unavailable');
+          if (!balance.isConnected || (os()?.state?.user?.id || os()?.state?.user?.sub)!==balanceId) return;
+          balance.textContent = value.unlimited?.includes('aiCredits') ? 'โควต้า AI ร่วม: ไม่จำกัดในช่วงโปรโมชัน' : 'โควต้า AI ร่วมคงเหลือ '+Number(value.remaining?.aiCredits || 0).toLocaleString('th-TH')+' เครดิต · ใช้ได้ทั้งเสียงและข้อความ';
+        } catch (_) { if (balance.isConnected && (os()?.state?.user?.id || os()?.state?.user?.sub)===balanceId) balance.textContent = 'ยังโหลดโควต้าคงเหลือไม่ได้ กรุณาเปิดหน้านี้ใหม่'; } })();
+      }
       if (nativeAndroid()) main.append(node('p', 'การซื้อภายในแอปยังไม่เปิดให้บริการ', 'pb-notice'));
       const grid = node('div', null, 'pb-grid');
-      catalog.products.filter(item => item.category === category).forEach(product => {
+      catalog.products.filter(item => item.category === category).sort((a,b) => a.price-b.price).forEach(product => {
         const card = node('article', null, 'pb-card' + (product.id === 'work' ? ' pb-featured' : ''));
         card.append(node('p', product.kind === 'subscription' ? 'รายเดือน' : product.kind === 'free' ? 'เริ่มใช้งาน' : 'ซื้อครั้งเดียว', 'pb-eyebrow'), node('h3', product.name), node('p', price(product.price), 'pb-price'), node('p', product.kind==='subscription' ? 'รอบ 1 เดือน · ต่ออายุด้วยการชำระใหม่' : product.term, 'pb-muted'));
         const list = node('ul');
@@ -63,7 +87,7 @@
       });
       main.appendChild(grid);
       const conditions = node('section', null, 'pb-conditions');
-      conditions.append(node('h3', 'เงื่อนไขการใช้งาน'), node('p', 'สมาชิกไม่ทบโควต้า เมื่อหมดให้ซื้อเพิ่มหรือรอรอบใหม่ เสียงเข้า/ออกและข้อความเข้า/ออกแยกโควต้ากัน งานอัตโนมัติและการลองใหม่ใช้วงเงินเดียวกัน'), node('p', 'Voice/Text เสริมไม่ต่ออายุและไม่เติมอัตโนมัติ ใช้แพ็กที่หมดอายุก่อน บัญชี Free ต้องยืนยันบัญชีก่อนซื้อ และยังดาวน์โหลดไม่ได้'), node('p', 'พื้นที่และดาวน์โหลดเสริมสำหรับ Life ขึ้นไป การยกเลิกพื้นที่มีผลเมื่อสิ้นรอบ หากเกินโควต้าจะหยุดอัปโหลดและแจ้งให้ลดไฟล์ภายใน 30 วันก่อนดำเนินการตามนโยบายที่ยอมรับไว้'), node('p', 'ราคาสุทธิสำหรับผู้ขายบุคคลธรรมดาที่ยังไม่จด VAT · เกณฑ์วันที่ 11 ตุลาคม 2569', 'pb-muted'));
+      conditions.append(node('h3', 'เงื่อนไขการใช้งาน'), node('p', 'เสียงและข้อความใช้เครดิต AI จากยอดเดียวกัน เมื่อหมดให้ซื้อเพิ่มหรือรอรอบใหม่ งานอัตโนมัติและการลองใหม่ที่เกิดการประมวลผลใช้โควต้าร่วมด้วย โควต้าสมาชิกไม่ทบยอด'), node('p', 'โควต้า AI เสริมไม่ต่ออายุและไม่เติมอัตโนมัติ ใช้แพ็กที่หมดอายุก่อน บัญชี Free ต้องยืนยันบัญชีก่อนซื้อ และยังดาวน์โหลดไม่ได้ สิทธิ์เดิมที่ยังไม่หมดอายุแปลงยอดคงเหลือเป็นเครดิตโดยคงวันหมดอายุ'), node('p', 'พื้นที่และดาวน์โหลดเสริมสำหรับ Life ขึ้นไป การยกเลิกพื้นที่มีผลเมื่อสิ้นรอบ หากเกินโควต้าจะหยุดอัปโหลดและแจ้งให้ลดไฟล์ภายใน 30 วันก่อนดำเนินการตามนโยบายที่ยอมรับไว้'), node('p', catalog.refundSummary), node('p', 'ราคาสุทธิสำหรับผู้ขายบุคคลธรรมดาที่ยังไม่จด VAT', 'pb-muted'));
       main.appendChild(conditions);
       announce.textContent = 'เลือกแพ็กเกจเพื่อดูยอดและโหมดชำระก่อนยืนยัน';
     }
@@ -98,6 +122,7 @@
       const list = node('ul');
       catalog.displayDetails(product).forEach(detail => list.appendChild(node('li', detail)));
       summary.appendChild(list);
+      summary.appendChild(serviceInfo());
       const total = node('div', null, 'pb-total');
       total.append(node('strong', 'ยอดชำระ'), node('strong', price(product.price)));
       summary.appendChild(total);
@@ -108,8 +133,10 @@
       if (product.paidMembershipRequired) summary.append(node('p', 'ต้องมีสมาชิก Life ขึ้นไป ระบบจะตรวจสอบสิทธิ์ก่อนรับชำระ'));
       if (product.kind === 'subscription') summary.append(node('p', 'รอบใช้งาน 1 เดือนนับจากชำระ ต่ออายุด้วยการสแกนจ่ายใหม่ ไม่มีหักเงินอัตโนมัติ ไม่มีการคิดยอดเฉลี่ยกลางรอบ'));
       else summary.append(node('p', 'อายุ 30 วันนับจากชำระ · ไม่มีต่ออายุหรือเติมอัตโนมัติ'));
-      const policy = button('ดู Privacy/Policy', () => window.PanthoriumPrivacyPolicy?.open?.(), 'pb-back');
+      const policy = button('ดู Privacy/Policy และเงื่อนไขบริการ', () => window.PanthoriumPrivacyPolicy?.open?.('terms-of-use'), 'pb-back');
       summary.appendChild(policy);
+      const refund = node('section', null, 'pb-notice'); refund.dataset.refundPolicy = '';
+      refund.append(node('strong', 'การยกเลิกและคืนเงิน'), node('p', catalog.refundSummary)); summary.appendChild(refund);
       const pay = button('ชำระเงินผ่าน Omise — กำลังตรวจระบบ', startPayment, 'pb-primary');
       let busy = false;
       let mode='test';let pollTimer=null;let qrObjectUrl=null;
@@ -178,7 +205,7 @@
       }
       (async () => {try { const status = await api('/status');if(!sameAccount())return;
         if(status.checkoutEnabled && ['test','live'].includes(status.mode) && registered) {mode=status.mode;acknowledgement.hidden = false;
-          consentText.textContent=mode==='live' ? ' ฉันยอมรับยอด '+price(product.price)+' และโควต้าตามรายการ อายุ '+(product.kind==='subscription' ? '1 เดือน':'30 วัน')+' นับจากจ่าย ไม่ทบยอด ไม่มีการหักเงินต่ออายุอัตโนมัติ' : ' ฉันเข้าใจว่านี่คือรายการทดสอบ ไม่ตัดเงินจริง ไม่ต่ออายุอัตโนมัติ และไม่เพิ่มสิทธิ์ใช้งานจริง';
+          consentText.textContent=mode==='live' ? ' ฉันยอมรับยอด '+price(product.price)+' วิธีคิดโควต้าตามรายการและนโยบายยกเลิก/คืนเงินที่แสดง อายุ '+(product.kind==='subscription' ? '1 เดือน':'30 วัน')+' นับจากจ่าย ไม่ทบยอด ไม่มีการหักเงินต่ออายุอัตโนมัติ' : ' ฉันเข้าใจว่านี่คือรายการทดสอบ ไม่ตัดเงินจริง ไม่ต่ออายุอัตโนมัติ และไม่เพิ่มสิทธิ์ใช้งานจริง';
           pay.textContent=mode==='live' ? 'ชำระ '+price(product.price)+' ผ่าน PromptPay' : 'สร้างรายการ PromptPay — โหมด Test';pay.disabled = false;announce.textContent=mode==='live' ? 'พร้อมรับชำระเงินจริงผ่าน Omise' : 'เชื่อม Omise Test พร้อมแล้ว · ไม่ตัดเงินจริงและไม่เพิ่มสิทธิ์จริง';
         }
         else {pay.textContent = registered ? 'Omise ยังไม่พร้อม' : 'เข้าสู่ระบบก่อนทดสอบชำระเงิน';}
