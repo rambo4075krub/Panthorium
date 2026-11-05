@@ -57,7 +57,7 @@ def prepare(stage,sha,source=None):
  return {'stage':stage,'sha':sha,'path':str(final)}
 def runtime_fingerprint(root):
  root=Path(root);files=set()
- for name in ['Dockerfile','ops/notebook/runtime.py','ops/notebook/agent.py','ops/notebook/edge.cjs','ops/notebook/smoke.cjs']:
+ for name in ['Dockerfile','ops/notebook/runtime.py','ops/notebook/agent.py','ops/notebook/edge.cjs','ops/notebook/smoke.cjs','ops/notebook/start-database.py']:
   files.add(root/name)
  for prefix in ['speaker-service','build/media','build/libsndfile','build/zlib','build/security','build/alpine-security']:
   files.update(p for p in (root/prefix).rglob('*') if p.is_file() and '__pycache__' not in p.parts)

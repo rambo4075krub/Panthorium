@@ -18,6 +18,7 @@ def legacy_meta(stage):
  return {'pid':pid,'identity':identity}
 def bootstrap(stage,sha,source):
  with lock(stage,wait=2):
+  ensure_database()
   if active_path(stage).exists():
    current=read(active_path(stage))
    if current['sha']==sha and not current.get('maintenance'):
