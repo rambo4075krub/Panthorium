@@ -1,4 +1,5 @@
 const MODEL_ID = "gemini-3.8-live";
+const { VOICE_STYLE_INSTRUCTION } = require('./voiceStyle');
 const DEFAULT_LOCATION = "us-central1";
 const ALLOWED_LOCATIONS = new Set([DEFAULT_LOCATION]);
 const CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
@@ -49,7 +50,7 @@ function createSetupMessage({ model, systemInstruction = "", tools = [], transcr
     setup.context_window_compression = { trigger_tokens: trigger, sliding_window: { target_tokens: target } };
   }
   if (Array.isArray(tools) && tools.length) setup.tools = [{ function_declarations: tools }];
-  const instruction = String(systemInstruction || "").trim();
+  const instruction = [String(systemInstruction || "").trim(), VOICE_STYLE_INSTRUCTION].filter(Boolean).join('\n\n');
   if (instruction) setup.system_instruction = { parts: [{ text: instruction }] };
   return { setup };
 }

@@ -1,6 +1,7 @@
 'use strict';
 const express=require('express');
 const {localEnabled,routeProviders}=require('../services/hybridAiPolicy');
+const {removeThaiPoliteParticles}=require('../services/voiceStyle');
 function voiceBase() {
   const u=new URL(process.env.LOCAL_VOICE_URL||'http://127.0.0.1:8765');
   if(u.protocol!=='http:'||u.hostname!=='127.0.0.1'||!u.port||u.username||u.password||u.pathname!=='/'||u.search||u.hash)throw new Error('invalid_local_voice_endpoint');
@@ -22,8 +23,10 @@ function createHybridRouter({sentinel,auth,permission,limiter,biometrics}) {
   });
   r.use((req,res,next)=>localEnabled()&&sentinel.providers.hybrid?next():res.status(503).json({ok:false,error:'local_disabled'}));
   r.post('/speech',async(req,res)=>{
-    const text=req.body?.text;
-    if(typeof text!=='string'||!text.trim()||text.length>1200)return res.status(400).json({ok:false,error:'invalid_speech_request'});
+    const raw=req.body?.text;
+    if(typeof raw!=='string'||!raw.trim()||raw.length>1200)return res.status(400).json({ok:false,error:'invalid_speech_request'});
+    const text=removeThaiPoliteParticles(raw);
+    if(!text)return res.status(400).json({ok:false,error:'invalid_speech_request'});
     const controller=new AbortController();const cancel=()=>{if(!res.writableEnded)controller.abort();};res.on('close',cancel);
     try {
       const p=await fetch(voiceBase()+'/speech',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,voice:'th_m_1',speed:1}),redirect:'error',signal:AbortSignal.any([controller.signal,AbortSignal.timeout(60000)])});

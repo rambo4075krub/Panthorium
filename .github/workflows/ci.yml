@@ -58,6 +58,7 @@ jobs:
           node test/local-provider.js
           node test/hybrid-ai.js
           node test/hybrid-http.js
+          node test/voice-style.js
           python3 -m py_compile deploy/hybrid/hybrid_server.py deploy/hybrid/host/voice/voice_engine.py
           node test/notebook-runtime.js
           python3 -m unittest discover -s ops/notebook -p 'test_*.py'

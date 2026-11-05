@@ -41,6 +41,12 @@ outbound MCP connector and does not grant credentials/scopes to external clients
 
 ## Audio
 
+All Gemini Live sessions and local model prompts request speech without Thai
+polite endings (ครับ/ค่ะ/คะ/นะครับ/นะคะ/ครับผม). Local TTS also removes these
+particles before synthesis using Thai word boundaries, preserving quoted text
+and ordinary words. Gemini generates audio directly, so this style is controlled
+at generation time; its transcript is not presented as an audio-editing guarantee.
+
 Short replies are synthesized in full. Long replies use Thai word/sentence
 boundaries, preserve decimal tokens, prefetch two complete clips, and schedule
 Web Audio sources against one continuous clock. Later synthesis overlaps playback.

@@ -5,6 +5,7 @@ const { PromptManager } = require("./promptManager");
 const { ProviderManager } = require("./providerManager");
 const { AiGateway } = require("./aiGateway");
 const { safeOutput } = require('./agentFunctionCallingService');
+const { VOICE_STYLE_INSTRUCTION, removeThaiPoliteParticles } = require('./voiceStyle');
 
 
 function currentTimeContext(date = new Date()) {
@@ -14,10 +15,6 @@ function currentTimeContext(date = new Date()) {
   const isoDate = `${values.year}-${values.month}-${values.day}`;
   const localTime = new Intl.DateTimeFormat("th-TH", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date);
   return `\n\n[เวลาปัจจุบันที่เชื่อถือได้] เขตเวลา Asia/Bangkok; วันที่ไทยตามปฏิทินพุทธศักราช (พ.ศ.): ${buddhistDate} (${isoDate}, ค.ศ.) เวลา ${localTime} น. ใช้ข้อมูลนี้เป็นหลักเมื่อผู้ใช้ถามวัน เดือน ปี หรือเวลาปัจจุบัน ห้ามเดาจากความจำหรือข้อมูลฝึก หากตอบวันที่ไทยให้ใช้ปีพุทธศักราชซึ่งเท่ากับ ค.ศ. + 543; หากมีข้อสงสัยเรื่องเขตเวลา ให้ระบุเขตเวลาแทนการคาดเดา`;
-}
-
-function removeThaiPoliteParticles(text) {
-  return String(text || "").replace(/\s*(?:ครับ|ค่ะ|คะ)(?=\s|[,.!?;:…。、]|$)/g, "").replace(/[ \t]+\n/g, "\n").trim();
 }
 
 class Sentinel {
@@ -106,7 +103,7 @@ class Sentinel {
     }
   }
   voiceLanguageGuard() {
-    return "\n\nข้อกำหนดสุดท้าย: หากผู้ใช้ระบุภาษาในคำขอปัจจุบัน ให้ใช้ภาษานั้น; หากไม่ได้ระบุ ให้ทำตามภาษาที่ผู้ใช้เลือกไว้ในความชอบบัญชี หรือใช้ภาษาของผู้ใช้เมื่อเลือกอัตโนมัติ หากข้อความมีหลายภาษา ให้คงภาษาของแต่ละส่วนตามบริบท ระบบนี้รองรับการรับฟังและตอบกลับด้วยเสียง ห้ามกล่าวว่าเป็นระบบข้อความเท่านั้นหรือไม่มีเสียงพูด ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ";
+    return "\n\nข้อกำหนดสุดท้าย: หากผู้ใช้ระบุภาษาในคำขอปัจจุบัน ให้ใช้ภาษานั้น; หากไม่ได้ระบุ ให้ทำตามภาษาที่ผู้ใช้เลือกไว้ในความชอบบัญชี หรือใช้ภาษาของผู้ใช้เมื่อเลือกอัตโนมัติ หากข้อความมีหลายภาษา ให้คงภาษาของแต่ละส่วนตามบริบท ระบบนี้รองรับการรับฟังและตอบกลับด้วยเสียง ห้ามกล่าวว่าเป็นระบบข้อความเท่านั้นหรือไม่มีเสียงพูด " + "\n" + VOICE_STYLE_INSTRUCTION;
   }
   normalizeVoiceAnswer(result) {
     if (result?.ok && /ข้อความเท่านั้น|ไม่มีเสียงพูด|ไม่สามารถพูด|ไม่มีระบบเสียง/i.test(String(result.text || ""))) {

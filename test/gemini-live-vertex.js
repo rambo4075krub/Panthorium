@@ -36,7 +36,7 @@ async function main() {
     setup: {
       model: "projects/demo/locations/us-central1/publishers/google/models/gemini-3.8-live",
       generation_config: { response_modalities: ["audio"] },
-      system_instruction: { parts: [{ text: "ตอบภาษาไทย" }] }
+      system_instruction: { parts: [{ text: "ตอบภาษาไทย\n\n" + require("../services/voiceStyle").VOICE_STYLE_INSTRUCTION }] }
     }
   });
   const tools = [{ name: "panthorium_ai_providers", description: "List providers", parameters: { type: "OBJECT", properties: {} } }];
