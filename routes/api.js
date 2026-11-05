@@ -32,7 +32,23 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     if (process.env.PANTHORIUM_AI_MODE === "gemini-live-only") return res.status(410).json({ ok:false, error:"gemini_live_microphone_required", text:"ใช้ไมโครโฟน Gemini Live เพื่อสนทนาด้วยเสียง" });
     next();
   });
-  router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", release: process.env.K_REVISION || process.env.PANTHORIUM_RELEASE || require("../package.json").version, sentinel: sentinel.status(), aiMode: process.env.PANTHORIUM_AI_MODE || "legacy", geminiLiveEnabled: process.env.GEMINI_LIVE_ENABLED === "1", voiceIdentityConfigured: biometrics?.status?.().configured === true, voiceIdentityGateEnabled: biometrics?.gateEnabled === true, time: new Date().toISOString() }));
+  const hybridQwen = process.env.PANTHORIUM_LOCAL_QWEN === "1"
+    ? new (require("../services/localLlmProvider").LocalLlmProvider)() : null;
+  if (process.env.PANTHORIUM_LOCAL_PROFILE === "1" || hybridQwen) {
+    router.post("/local/chat", auth, requirePermission("chat"), aiLimiter, async (req, res) => {
+      if (hybridQwen && (req.user.roles?.includes("guest") || String(req.user.sub).startsWith("guest:"))) return res.status(403).json({ok:false,error:"account_required"});
+      const message = req.body?.message;
+      if (typeof message !== "string" || !message.trim() || message.length > 2000) return res.status(400).json({ok:false,error:"invalid_message"});
+      try {
+        const complete = hybridQwen ? hybridQwen.complete.bind(hybridQwen) : sentinel.providers.callDetailed.bind(sentinel.providers, "local");
+        const result = await complete( "คุณคือผู้ช่วย Panthorium ในเครื่อง ตอบภาษาไทยสั้น ชัดเจน และซื่อสัตย์ ไม่มีเครื่องมือสั่งงานระบบจริง", [{role:"user",content:message.trim()}]);
+        res.json({ok:true,...result,actionsEnabled:false});
+      } catch (error) {
+        res.status(error.message === "local_llm_busy" ? 429 : 503).json({ok:false,error:"local_inference_unavailable"});
+      }
+    });
+  }
+  router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", deployment: process.env.PANTHORIUM_DEPLOY_SHA ? {sha:process.env.PANTHORIUM_DEPLOY_SHA, stage:process.env.PANTHORIUM_DEPLOY_STAGE} : undefined, localPilot: process.env.PANTHORIUM_LOCAL_PROFILE === "1" ? { actionsEnabled:false, trainingEnabled:false, cloudServicesEnabled:false } : undefined, release: process.env.K_REVISION || process.env.PANTHORIUM_RELEASE || require("../package.json").version, sentinel: sentinel.status(), aiMode: process.env.PANTHORIUM_AI_MODE || "legacy", geminiLiveEnabled: process.env.GEMINI_LIVE_ENABLED === "1", voiceIdentityConfigured: biometrics?.status?.().configured === true, voiceIdentityGateEnabled: biometrics?.gateEnabled === true, time: new Date().toISOString() }));
   router.get("/sentinel/status", auth, requirePermission("system:read"), (req, res) => res.json({ ok: true, ...sentinel.status() }));
   router.get("/ai/providers", auth, requirePermission("chat"), (req, res) => res.json({ ok: true, providers: sentinel.providerCatalog() }));
   router.get("/ai/operations", auth, requirePermission("chat"), async (req, res, next) => { try { res.json({ ok: true, metrics: await aiOperations.overview(req.user.sub, req.query.hours) }); } catch (error) { next(error); } });
