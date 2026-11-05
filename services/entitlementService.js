@@ -1,7 +1,7 @@
 'use strict';
 const catalog = require('../billing-catalog');
 const dayKey=now=>new Date(now+7*3600000).toISOString().slice(0,10);
-const KEYS = ['voiceInputSeconds','voiceOutputSeconds','textInputTokens','textOutputTokens','downloadBytes'];
+const KEYS = [...catalog.aiKeys,'downloadBytes'];
 class EntitlementError extends Error { constructor(message,status=403){super(message);this.status=status;} }
 class EntitlementService {
   constructor({pool, now = () => Date.now()}) { this.pool=pool;this.ready=null;this.now=now; }
@@ -45,16 +45,21 @@ class EntitlementService {
     const promotion=!membership ? catalog.promotionAt(now) : null;
     const period=dayKey(now).slice(0,7);
     const free=membership ? {} : (await c.query('SELECT used FROM panthorium_free_usage WHERE user_id=$1 AND period=$2',[userId,period])).rows[0]?.used || {};
-    const remaining={...(!membership ? catalog.get('free').quotas : {})};
-    for(const k of KEYS)remaining[k]=Math.max(0,(remaining[k]||0)-(Number(free[k])||0));
-    if(!membership){const daily=free.day===dayKey(now) ? Math.max(0,60-(free.dailyVoiceSeconds||0)) : 60;remaining.voiceInputSeconds=Math.min(remaining.voiceInputSeconds,daily);remaining.voiceOutputSeconds=Math.min(remaining.voiceOutputSeconds,daily);}
-    for(const r of applicable)for(const [k,v] of Object.entries(r.snapshot.quotas || {}))remaining[k]=(remaining[k]||0)+Math.max(0,v-(Number(r.used[k])||0));
-    const unlimited=promotion ? [...promotion.unlimited] : [];
+    const remaining={aiCredits:!membership ? catalog.creditBalance(catalog.get('free').quotas,free) : 0,
+      storageBytes:!membership ? catalog.get('free').quotas.storageBytes : 0,downloadBytes:0};
+    for(const r of applicable){
+      remaining.aiCredits+=catalog.creditBalance(r.snapshot.quotas,r.used);
+      remaining.storageBytes+=r.snapshot.quotas?.storageBytes || 0;
+      remaining.downloadBytes+=Math.max(0,(r.snapshot.quotas?.downloadBytes || 0)-(Number(r.used.downloadBytes)||0));
+    }
+    const unlimited=promotion ? ['aiCredits'] : [];
     for(const k of unlimited)remaining[k]=null; // JSON-safe unlimited; consumers must use hasQuota.
-    return {promotion,unlimited,plan:membership?.product_id || 'free',startsAt:membership?.starts_at || null,expiresAt:membership?.ends_at || null,remaining,grants:applicable.map(r=>({productId:r.product_id,startsAt:r.starts_at,expiresAt:r.ends_at})),automaticRenewal:false};
+    return {promotion,unlimited,quotaPolicy:catalog.quotaPolicy,plan:membership?.product_id || 'free',startsAt:membership?.starts_at || null,expiresAt:membership?.ends_at || null,remaining,grants:applicable.map(r=>({productId:r.product_id,startsAt:r.starts_at,expiresAt:r.ends_at})),automaticRenewal:false};
   }
   async consume(userId,amounts){
     for(const [k,v] of Object.entries(amounts))if(!KEYS.includes(k)||!Number.isSafeInteger(v)||v<0)throw new EntitlementError('invalid_usage',400);
+    let credits;
+    try{credits=catalog.creditCost(amounts);}catch{throw new EntitlementError('invalid_usage',400);}
     return this.locked(userId,async c=>{
       const rows=await this.active(c,userId);const membership=rows.filter(r=>r.snapshot.category==='membership').sort((a,b)=>new Date(b.starts_at)-new Date(a.starts_at))[0];
       const applicable=rows.filter(r=>(r.snapshot.category!=='membership' || r.order_id===membership?.order_id) && (!r.snapshot.paidMembershipRequired || !!membership));
@@ -62,21 +67,20 @@ class EntitlementService {
       const promotion=!membership ? catalog.promotionAt(now) : null;
       const period=dayKey(now).slice(0,7);
       let free={};if(!membership){await c.query('INSERT INTO panthorium_free_usage(user_id,period) VALUES($1,$2) ON CONFLICT DO NOTHING',[userId,period]);free=(await c.query('SELECT used FROM panthorium_free_usage WHERE user_id=$1 AND period=$2 FOR UPDATE',[userId,period])).rows[0].used;}
-      let dailyAdded=0;
-      for(const [k,requested] of Object.entries(amounts)){
-        if(promotion?.unlimited.includes(k)) {
-          // Keep usage visible without spending base quota or purchased add-ons.
-          const key='promotion_'+k;
-          free[key]=Math.min(Number.MAX_SAFE_INTEGER,(Number(free[key])||0)+requested);
-          continue;
-        }
+      const charges={downloadBytes:amounts.downloadBytes || 0};
+      if(promotion){
+        // Keep promotional raw usage visible; do not spend purchased add-ons.
+        for(const k of catalog.aiKeys)if(amounts[k])free['promotion_'+k]=Math.min(Number.MAX_SAFE_INTEGER,(Number(free['promotion_'+k])||0)+amounts[k]);
+      }else charges.aiCredits=credits;
+      for(const [k,requested] of Object.entries(charges)){
         let left=requested;
-        // Earliest expiry first, including add-ons. Transaction rolls all dimensions back on exhaustion.
-        for(const r of applicable){const avail=Math.max(0,(r.snapshot.quotas?.[k]||0)-(Number(r.used[k])||0));const take=Math.min(left,avail);r.used[k]=(Number(r.used[k])||0)+take;left-=take;if(!left)break;}
-        if(left&&!membership){const take=Math.min(left,Math.max(0,(catalog.get('free').quotas[k]||0)-(Number(free[k])||0)));free[k]=(Number(free[k])||0)+take;left-=take;if(k.startsWith('voice'))dailyAdded+=take;}
+        if(!left)continue;
+        // Legacy snapshots are converted on read, retaining old usage and expiry.
+        // Newly consumed credits never erase or reset historical counters.
+        for(const r of applicable){const avail=k==='aiCredits' ? catalog.creditBalance(r.snapshot.quotas,r.used) : Math.max(0,(r.snapshot.quotas?.[k]||0)-(Number(r.used[k])||0));const take=Math.min(left,avail);if(take)r.used[k]=(Number(r.used[k])||0)+take;left-=take;if(!left)break;}
+        if(left&&!membership){const avail=k==='aiCredits' ? catalog.creditBalance(catalog.get('free').quotas,free) : Math.max(0,(catalog.get('free').quotas[k]||0)-(Number(free[k])||0));const take=Math.min(left,avail);if(take)free[k]=(Number(free[k])||0)+take;left-=take;}
         if(left)throw new EntitlementError('quota_exceeded:'+k,402);
       }
-      if(!membership && dailyAdded){const day=dayKey(now);const used=free.day===day ? (Number(free.dailyVoiceSeconds)||0) : 0;if(used+dailyAdded>60)throw new EntitlementError('quota_exceeded:dailyVoiceSeconds',402);free.day=day;free.dailyVoiceSeconds=used+dailyAdded;}
       for(const r of applicable)await c.query('UPDATE panthorium_entitlement_grants SET used=$2 WHERE order_id=$1',[r.order_id,JSON.stringify(r.used)]);
       if(!membership)await c.query('UPDATE panthorium_free_usage SET used=$3 WHERE user_id=$1 AND period=$2',[userId,period,JSON.stringify(free)]);
       return {ok:true};

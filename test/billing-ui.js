@@ -27,8 +27,13 @@ async function main() {
   assert.equal(w.PanthoriumBilling.open(), true);
   const root = w.document.querySelector('[data-billing-root]');
   assert.equal(root.querySelectorAll('.pb-card').length, 4);
+  assert.match(root.querySelector('[data-ai-service]').textContent, /ผู้ช่วย AI/);
+  assert.match(root.querySelector('.pb-card').textContent, /โควต้า AI ร่วม/);
   root.querySelector('[data-product-id="work-pro"]').click();
   assert.match(root.querySelector('.pb-total').textContent, /1,089 บาท/);
+  assert.match(root.querySelector('[data-refund-policy]').textContent, /ชำระซ้ำ/);
+  assert.match(root.querySelector('.pb-summary').textContent, /17,400,000/);
+  assert(!root.querySelector('.pb-summary').textContent.includes('แยกโควต้ากัน'));
   assert.equal(root.querySelector('.pb-primary').disabled, true, 'no payment before backend verification is integrated');
   assert.equal(root.querySelectorAll('input:not([type=checkbox])').length, 0, 'never collect card data for an unconfigured checkout');
   root.querySelector('.pb-back').click();
@@ -45,6 +50,7 @@ async function main() {
   let paymentCalls=0;
   w.PanthoriumAuth = {getAccessToken:()=> 'fixture-token'};
   w.fetch = async (url, options) => {
+    if (url.endsWith('/entitlements')) return {ok:true,json:async()=>({ok:true,remaining:{aiCredits:2465000},unlimited:[]})};
     if (url.endsWith('/status')) return {ok:true,json:async()=>({ok:true,checkoutEnabled:true,mode:'test'})};
     paymentCalls++;
     assert.equal(options.headers.Authorization,'Bearer fixture-token');
