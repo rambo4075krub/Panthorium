@@ -30,7 +30,9 @@ class AuthService {
         const user = await repository.findUserById(id);
         if (!user) throw Object.assign(new Error('account_not_found'), { status: 401 });
         if ((principal.accountVersion || 0) !== (user.credentialVersion || 0)) throw Object.assign(new Error('account_session_revoked'), { status: 401 });
-        return { ...principal, roles: user.roles || [], permissions: normalizeSentinelPermissions(user.permissions) };
+        // Access tokens intentionally omit email. Hydrate it from the current
+        // account so mailbox consent never trusts stale or client-supplied data.
+        return { ...principal, email: user.email || null, emailVerifiedAt: user.emailVerifiedAt || null, roles: user.roles || [], permissions: normalizeSentinelPermissions(user.permissions) };
       };
     }
   }

@@ -30,7 +30,7 @@ async function main() {
     await repository.init();
     const userId = randomUUID();
     const actorId = randomUUID();
-    const user = await repository.createUser({ id: userId, username: "security-fixture", passwordHash: await bcrypt.hash("Initial-test-password", 4), roles: [], permissions: ["chat"] });
+    const user = await repository.createUser({ id: userId, username: "security-fixture", email: "mailbox-fixture@example.invalid", emailVerifiedAt: new Date().toISOString(), passwordHash: await bcrypt.hash("Initial-test-password", 4), roles: [], permissions: ["chat"] });
 
     // Exercise the additive migration with a pre-existing legacy refresh row.
     await pool.query("ALTER TABLE panthorium_refresh_tokens DROP COLUMN account_version");
@@ -48,6 +48,10 @@ async function main() {
     const first = await auth.issueSession(user);
     const firstPrincipal = auth.verifyAccessToken(first.accessToken);
     assert.equal(firstPrincipal.accountVersion, 0);
+    assert.equal(firstPrincipal.email, undefined);
+    const hydrated = await accounts.validate(firstPrincipal);
+    assert.equal(hydrated.email, user.email, "PostgreSQL account validation restores email omitted from JWT");
+    assert.equal(hydrated.emailVerifiedAt, user.emailVerifiedAt);
     assert.equal((await pool.query("SELECT account_version FROM panthorium_refresh_tokens WHERE user_id=$1", [userId])).rows[0].account_version, 0);
 
     // If any transaction statement fails after the password update and token
