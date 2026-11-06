@@ -3,7 +3,7 @@ const path=require('path');
 const fs=require('fs');
 const crypto=require('crypto');
 const {spawn}=require('child_process');
-const {app,BrowserWindow,session,ipcMain,net,dialog,Notification,Tray,Menu,nativeImage}=require('electron');
+const {app,BrowserWindow,session,ipcMain,net,dialog,Notification,Tray,Menu,nativeImage,shell}=require('electron');
 const {createDesktopNotifications}=require('./notifications.cjs');
 const metadata=require('../package.json');
 const {createBrowserSecurity}=require('./browser-security.cjs');
@@ -46,6 +46,7 @@ function postTranscription(payload){
   });
 }
 function installVoiceBridge(){
+  require('./mailbox-oauth.cjs').installMailboxOAuth({ipcMain,shell,security:browserSecurity,appOrigin:API_ORIGIN});
   ipcMain.handle('panthorium:browser-account',(event,accountId)=>{
     if(!browserSecurity.isTrustedShellEvent(event))return {ok:false,error:'untrusted_origin'};
     const result=browserSecurity.setAccount(event.sender,accountId);

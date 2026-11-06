@@ -15,7 +15,7 @@ if (process.argv.includes('--verify-package')) {
   const archive = path.join(root, 'dist/win-unpacked/resources/app.asar');
   const metadata = JSON.parse(asar.extractFile(archive, 'package.json').toString());
   assert.equal(metadata.main, 'electron/main.cjs');
-  for (const file of ['main.cjs', 'preload.cjs', 'browser-security.cjs', 'update-signature.cjs', 'update-download.cjs', 'update-trust.json']) {
+  for (const file of ['main.cjs', 'preload.cjs', 'browser-security.cjs', 'mailbox-oauth.cjs', 'update-signature.cjs', 'update-download.cjs', 'update-trust.json']) {
     assert.deepEqual(asar.extractFile(archive, 'electron/' + file), fs.readFileSync(path.join(root, 'electron', file)),
       'The unpacked application must contain the reviewed ' + file);
   }
@@ -183,9 +183,13 @@ if (process.argv.includes('--verify-package')) {
     await isolated(shell.webContents, true);
     const bridge = await evaluate(shell.webContents, async () => ({
       version: window.panthoriumDesktop.bridgeVersion,
+      mailbox: typeof window.panthoriumDesktop.openMailboxOAuth,
+      unsafeMailboxUrl: await window.panthoriumDesktop.openMailboxOAuth('file:///C:/Windows/System32/calc.exe'),
       info: await window.panthoriumDesktop.getAppInfo()
     }));
-    assert.equal(bridge.version, '7');
+    assert.equal(bridge.version, '8');
+    assert.equal(bridge.mailbox, 'function');
+    assert.equal(bridge.unsafeMailboxUrl.error, 'invalid_mailbox_oauth_url');
     assert.equal(bridge.info.packaged, false);
     assert.equal(bridge.info.platform, process.platform);
     const mic = await evaluate(shell.webContents, microphone);
@@ -210,6 +214,8 @@ if (process.argv.includes('--verify-package')) {
     await deniedMicrophone(unregistered.webContents, 'Unregistered default-session window');
     const badAccount = await evaluate(unregistered.webContents, () => window.panthoriumDesktop.setBrowserAccount('attacker'));
     assert.equal(badAccount.error, 'untrusted_origin');
+    const badMailbox = await evaluate(unregistered.webContents, () => window.panthoriumDesktop.openMailboxOAuth('https://accounts.google.com/o/oauth2/v2/auth'));
+    assert.equal(badMailbox.error, 'untrusted_origin');
     unregistered.destroy();
 
     const otherSession = session.fromPartition('native-security-unregistered');
