@@ -5,7 +5,8 @@
   const status=(label,mode='idle')=>{
     window.dispatchEvent(new CustomEvent('panthorium:live-state',{detail:{mode,label}}));
     for(const id of ['chat-mic','desktop-voice']){const b=document.getElementById(id);if(b){b.title=label;b.setAttribute('aria-label',label);b.setAttribute('aria-pressed',String(active));b.classList.toggle('listening',active);b.textContent=active?'⏹':'🎤';}}
-    window.PanthoriumOrb?.setTranscript?.(label,0);
+    // Idle/auth cleanup updates the microphone, not the welcome or last answer.
+    if(mode!=='idle')window.PanthoriumOrb?.setTranscript?.(label,0);
   };
   async function api(path,body,signal){
     await window.PanthoriumAuth?.ensureSession?.();
