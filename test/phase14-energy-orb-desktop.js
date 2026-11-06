@@ -36,3 +36,40 @@ assert(shell.includes('webglcontextlost'), 'desktop must recover safely if WebGL
 assert(!shell.includes('const SPHERE_RADIUS'), 'legacy sphere implementation must stay removed');
 
 console.log('phase14 exact prototype orb desktop ok');
+
+// Exercise the real transcript controller across visits and account changes.
+{
+  const { JSDOM } = require('jsdom');
+  const dom = new JSDOM('<section id="orb-transcript"><div data-orb-line="previous"></div><div data-orb-line="current"></div><div data-orb-line="next"></div></section>', { runScripts: 'outside-only', pretendToBeVisual: true });
+  const w = dom.window;
+  w.$ = id => w.document.getElementById(id);
+  w.OS = { state: { user: { sub: 'first-account' } } };
+  w.eval(shell.slice(shell.indexOf('    const ORB_WELCOME_TEXT'), shell.indexOf('    function languageForText')));
+  const current = () => w.document.querySelector('[data-orb-line="current"]').textContent;
+  const welcome = 'หากยังไม่มีคำถาม ให้ถามว่าทำอะไรได้บ้าง';
+  w.initOrbTranscriptControls();
+  assert.equal(current(), welcome, 'first visit shows the requested hint');
+  w.dispatchEvent(new w.Event('panthorium:auth-changed'));
+  w.setOrbTranscript('คำตอบใหม่');
+  assert.equal(current(), 'คำตอบใหม่');
+  w.dispatchEvent(new w.Event('panthorium:auth-changed'));
+  assert.equal(current(), 'คำตอบใหม่', 'same-account token refresh preserves current answer');
+  w.OS.state.user = { sub: 'second-account' };
+  w.dispatchEvent(new w.Event('panthorium:auth-changed'));
+  assert.equal(current(), welcome, 'account change clears old answer');
+  w.setOrbTranscript(['ข้อความเก่า', 'ข้อมูลส่วนตัว']);
+  w.dispatchEvent(new w.Event('pageshow'));
+  assert.equal(current(), welcome, 'back-forward cache restore starts with hint');
+  assert.equal(w.document.querySelector('[data-orb-line="next"]').textContent, '');
+  w.setOrbTranscript('ข้อความเดิม');
+  Object.defineProperty(w.document, 'hidden', { configurable: true, value: true });
+  w.document.dispatchEvent(new w.Event('visibilitychange'));
+  assert.equal(current(), 'ข้อความเดิม');
+  Object.defineProperty(w.document, 'hidden', { configurable: true, value: false });
+  w.document.dispatchEvent(new w.Event('visibilitychange'));
+  assert.equal(current(), welcome, 'returning from background starts with hint');
+  w.setOrbTranscript('ผลลัพธ์หลังกลับมา');
+  assert.equal(current(), 'ผลลัพธ์หลังกลับมา');
+  w.close();
+  console.log('orb welcome lifecycle and result replacement passed');
+}

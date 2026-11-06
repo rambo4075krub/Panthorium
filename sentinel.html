@@ -904,7 +904,7 @@
         <div id="orb-system-notice" class="orb-system-notice" role="status" aria-live="off" aria-atomic="true" aria-label="สถานะระบบ"></div>
         <section id="orb-transcript" tabindex="0" role="region" aria-label="ข้อความประกอบเสียงตอบของ AI">
             <div class="orb-transcript-line previous" data-orb-line="previous" aria-label="ประโยคก่อนหน้า"></div>
-            <div class="orb-transcript-line current" data-orb-line="current" aria-live="polite" aria-label="ประโยคปัจจุบัน"></div>
+            <div class="orb-transcript-line current" data-orb-line="current" aria-live="polite" aria-label="ประโยคปัจจุบัน">หากยังไม่มีคำถาม ให้ถามว่าทำอะไรได้บ้าง</div>
             <div class="orb-transcript-line next" data-orb-line="next" aria-label="ข้อความที่เหลือซึ่งยังไม่อ่าน"></div>
         </section>
 
@@ -1202,7 +1202,8 @@
     let aiSpeechPulse = 0;
     let aiSpeechEnvelope = 0;
     let userSpeechActive = false;
-    let orbTranscriptLines = [];
+    const ORB_WELCOME_TEXT = "หากยังไม่มีคำถาม ให้ถามว่าทำอะไรได้บ้าง";
+    let orbTranscriptLines = [ORB_WELCOME_TEXT];
     let orbTranscriptOffsets = [];
     let orbTranscriptIndex = 0;
     let orbTranscriptTouchY = null;
@@ -1242,6 +1243,24 @@
         orbTranscriptIndex = Math.min(Math.max(0, Number(index) || 0), Math.max(0, next.length - 1));
         renderOrbTranscript();
     }
+
+    // A new visit must not display an answer from the previous visit/account.
+    function resetOrbWelcome() {
+        orbTranscriptTouchY = null;
+        setOrbTranscript(ORB_WELCOME_TEXT);
+    }
+    let orbTranscriptAccount = "";
+    window.addEventListener("pageshow", resetOrbWelcome);
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) resetOrbWelcome();
+    });
+    window.addEventListener("panthorium:auth-changed", () => {
+        const account = String(OS.state.user?.sub || OS.state.user?.id || "");
+        if (account !== orbTranscriptAccount) {
+            orbTranscriptAccount = account;
+            resetOrbWelcome();
+        }
+    });
 
     function showOrbTranscriptSentence(index) {
         orbTranscriptIndex = Math.min(Math.max(0, Number(index) || 0), Math.max(0, orbTranscriptLines.length - 1));
