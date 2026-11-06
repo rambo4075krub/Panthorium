@@ -296,6 +296,7 @@ if (config.mcpEnabled) app.use(require('./routes/mcp').createMcpRouter({ oauth: 
 app.use('/internal/push', createInternalJobsRouter({ scheduler: {tick:()=>notificationPush.tick()},audience:process.env.PUSH_SCHEDULER_AUDIENCE,serviceAccounts:process.env.PUSH_SCHEDULER_SERVICE_ACCOUNTS }));
 app.use('/internal/jobs', createInternalJobsRouter({ scheduler: { tick: async () => {
   await voiceSessions.purgeExpired();
+  if (process.env.USER_MAILBOX_ENABLED === '1') { await userMailbox.store.cleanup(); await actionLedger.purgeMailboxExpired(); }
   const socialRetention = await social.purgeExpiredMessages();
   const scheduled = await agentScheduler.tick();
   const studio = await creativeStudio.tick();
@@ -529,6 +530,7 @@ app.use((err, req, res, next) => {
 });
 
 let localPushTimer = null;
+let mailboxMaintenanceTimer = null;
 
 async function start() {
   await actionLedger.init();
@@ -595,6 +597,10 @@ async function start() {
     localPushTimer = setInterval(() => notificationPush.tick().catch(() => console.error('[PUSH] local retry failed')), 60000);
     localPushTimer.unref();
   }
+  if (process.env.PANTHORIUM_DEPLOY_PROBE !== '1' && process.env.USER_MAILBOX_ENABLED === '1' && !mailboxMaintenanceTimer) {
+    const maintainMailbox = () => Promise.all([userMailbox.store.cleanup(), actionLedger.purgeMailboxExpired()]).catch(() => console.error('[MAILBOX] retention cleanup failed'));
+    await maintainMailbox(); mailboxMaintenanceTimer = setInterval(maintainMailbox, 3600000); mailboxMaintenanceTimer.unref();
+  }
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== "1" && process.env.PANTHORIUM_LOCAL_PROFILE !== "1") sentinelTraining.start();
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== "1") { autonomousGovernance.start(); sentinelOrchestrator.start(); }
   server.on('close', stopBackgroundWorkers);
@@ -604,6 +610,7 @@ async function start() {
 
 function stopBackgroundWorkers() {
   if (localPushTimer) { clearInterval(localPushTimer); localPushTimer = null; }
+  if (mailboxMaintenanceTimer) { clearInterval(mailboxMaintenanceTimer); mailboxMaintenanceTimer = null; }
   agentScheduler.stop();
   sentinelTraining.stop();
   sentinelActiveLearning.shutdown?.();

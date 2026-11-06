@@ -206,7 +206,7 @@ class Sentinel {
     ]);
     const voiceHint = voiceMode ? "\n\nโหมดตอบด้วยเสียง: เริ่มตอบประเด็นสำคัญทันที ใช้ภาษาไทยธรรมชาติ กระชับเป็นวลีที่พูดได้ลื่น ไม่เกริ่นซ้ำ ไม่ใช้ตารางหรือ Markdown สำหรับคำถามทั่วไปให้จบใน 1–3 ประโยค หากเป็นงานซับซ้อนให้รักษารายละเอียดที่จำเป็น แต่แบ่งเป็นประโยคสั้นชัดเจน" : '';
     const systemPrompt = this.prompts.build(mode)+currentTimeContext()+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard() + voiceHint + this.functionGuidance(user, functionCalling);
-    const hasTools = functionCalling?.declarationsFor(user)?.some(tool => ['panthorium_studio_catalog', 'panthorium_web_search', 'panthorium_web_read', 'panthorium_weather_get', 'panthorium_notifications_read'].includes(tool.name));
+    const hasTools = functionCalling?.declarationsFor(user)?.some(tool => ['panthorium_studio_catalog', 'panthorium_web_search', 'panthorium_web_read', 'panthorium_weather_get', 'panthorium_notifications_read', 'panthorium_mailbox_read', 'panthorium_mailbox_analyze', 'panthorium_mailbox_write'].includes(tool.name));
     // Let the model understand natural requests and follow-ups; a keyword gate
     // would silently miss phrases such as “วาดรูป” or “make a poster”.
     const useFunctions = hasTools && ['vertex', 'gemini-live', 'local'].includes(provider || this.gateway.orderedProviders?.()[0]);

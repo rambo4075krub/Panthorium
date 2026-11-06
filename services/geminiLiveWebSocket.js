@@ -154,7 +154,7 @@ function createGeminiLiveWebSocketGateway({
       userId = String(user.sub || user.id || "");
       if (!userId || sessions.has(userId)) return rejectAuth(4429, "live_session_already_active");
       sessions.set(userId, client);
-      if(authService.validateAccountPrincipal){accountTimer=setInterval(async()=>{if(accountCheckRunning)return;accountCheckRunning=true;try{const fresh=await authService.validateAccountPrincipal(authService.verifyAccessToken(accessToken));if(!(fresh.permissions||[]).includes("chat")||JSON.stringify([...(fresh.roles||[])].sort())!==JSON.stringify([...(user.roles||[])].sort())||JSON.stringify([...(fresh.permissions||[])].sort())!==JSON.stringify([...(user.permissions||[])].sort()))throw new Error("permission_denied");}catch{if(client.readyState<2)client.close(4403,"account_access_denied");release();}finally{accountCheckRunning=false;}},30000);accountTimer.unref?.();}
+      if(authService.validateAccountPrincipal){accountTimer=setInterval(async()=>{if(accountCheckRunning)return;accountCheckRunning=true;try{const fresh=await authService.validateAccountPrincipal(authService.verifyAccessToken(accessToken));if(!(fresh.permissions||[]).includes("chat")||JSON.stringify([...(fresh.roles||[])].sort())!==JSON.stringify([...(user.roles||[])].sort())||JSON.stringify([...(fresh.permissions||[])].sort())!==JSON.stringify([...(user.permissions||[])].sort()))throw new Error("permission_denied");user=fresh;}catch{if(client.readyState<2)client.close(4403,"account_access_denied");release();}finally{accountCheckRunning=false;}},30000);accountTimer.unref?.();}
       accessToken = token;
       // App context has its own scoped cloud session. Until checkpoints include a
       // verified context fingerprint, never restore or save provider state for it.
@@ -236,7 +236,7 @@ function createGeminiLiveWebSocketGateway({
         const fresh = authService.verifyAccessToken(accessToken);
         const freshId = String(fresh?.sub || fresh?.id || "");
         if (!freshId || freshId !== userId || !((authService.validateAccountPrincipal?user:fresh).permissions || []).includes("chat")) throw new Error("live_auth_expired");
-        return authService.validateAccountPrincipal ? {...fresh,roles:user.roles,permissions:user.permissions} : fresh;
+        return authService.validateAccountPrincipal ? {...fresh,email:user.email,emailVerifiedAt:user.emailVerifiedAt,roles:user.roles,permissions:user.permissions} : fresh;
       };
       const currentUserForEffect = async () => {
         // Revalidate at the effect boundary; the 30-second connection monitor is
@@ -390,7 +390,7 @@ function createGeminiLiveWebSocketGateway({
             continue;
           }
           let freshUser;
-          try { freshUser = currentUser(); }
+          try { freshUser = /^panthorium_mailbox_/.test(call.name) ? await currentUserForEffect() : currentUser(); }
           catch {
             responses.push({ name: String(call?.name || "unknown_function"), ...(id ? { id } : {}), response: { error: "authentication_required" } });
             if (client.readyState < 2) client.close(4401, "invalid_or_expired_token");

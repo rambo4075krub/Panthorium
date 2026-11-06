@@ -1,9 +1,12 @@
 const { getDatabasePool } = require('./databasePool');
+const { MailboxStore } = require('./mailbox/store');
 
 class ConversationRepository {
-  constructor({ databaseUrl, databaseSslMode } = {}) {
+  constructor({ databaseUrl, databaseSslMode, pool, contentEncryptionKey = process.env.USER_MAILBOX_ENCRYPTION_KEY, encryptContent = process.env.USER_MAILBOX_AI_POLICY_VERIFIED === '1' } = {}) {
     this.memory = new Map();
-    this.pool = databaseUrl ? getDatabasePool({ connectionString: databaseUrl, ssl: databaseSslMode === "disable" ? false : { rejectUnauthorized: false } }) : null;
+    this.pool = pool || (databaseUrl ? getDatabasePool({ connectionString: databaseUrl, ssl: databaseSslMode === "disable" ? false : { rejectUnauthorized: false } }) : null);
+    this.cipher = new MailboxStore({ key: contentEncryptionKey });
+    this.encryptContent = encryptContent;
   }
   async init() {
     if (!this.pool) return;
@@ -19,11 +22,13 @@ class ConversationRepository {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`);
     await this.pool.query("CREATE INDEX IF NOT EXISTS idx_panthorium_conversation_session ON panthorium_conversation_messages(user_id, session_id, id)");
+    await this.pool.query("ALTER TABLE panthorium_conversation_messages ADD COLUMN IF NOT EXISTS content_encrypted BOOLEAN NOT NULL DEFAULT false");
   }
   key(userId, sessionId) { return `${userId}:${sessionId}`; }
   async append({ userId, sessionId, role, content, provider = null, model = null, usage = null }) {
     if (this.pool) {
-      await this.pool.query("INSERT INTO panthorium_conversation_messages(user_id,session_id,role,content,provider,model,usage) VALUES($1,$2,$3,$4,$5,$6,$7)", [userId, sessionId, role, content, provider, model, usage ? JSON.stringify(usage) : null]);
+      const stored = this.encryptContent ? this.cipher.seal(content, JSON.stringify(['mailbox-conversation-v1', userId, sessionId, role])) : content;
+      await this.pool.query("INSERT INTO panthorium_conversation_messages(user_id,session_id,role,content,provider,model,usage,content_encrypted) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", [userId, sessionId, role, stored, provider, model, usage ? JSON.stringify(usage) : null, this.encryptContent]);
       return;
     }
     const key = this.key(userId, sessionId); const list = this.memory.get(key) || [];
@@ -32,8 +37,8 @@ class ConversationRepository {
   }
   async history(userId, sessionId, limit = 40) {
     if (this.pool) {
-      const result = await this.pool.query("SELECT role,content,provider,model,usage,created_at AS \"createdAt\" FROM (SELECT * FROM panthorium_conversation_messages WHERE user_id=$1 AND session_id=$2 ORDER BY id DESC LIMIT $3) q ORDER BY id ASC", [userId, sessionId, Math.min(Math.max(limit, 1), 100)]);
-      return result.rows;
+      const result = await this.pool.query("SELECT role,content,content_encrypted,provider,model,usage,created_at AS \"createdAt\" FROM (SELECT * FROM panthorium_conversation_messages WHERE user_id=$1 AND session_id=$2 ORDER BY id DESC LIMIT $3) q ORDER BY id ASC", [userId, sessionId, Math.min(Math.max(limit, 1), 100)]);
+      return result.rows.map(({ content_encrypted, ...row }) => ({ ...row, content: content_encrypted ? this.cipher.open(row.content, JSON.stringify(['mailbox-conversation-v1', userId, sessionId, row.role])) : row.content }));
     }
     return (this.memory.get(this.key(userId, sessionId)) || []).slice(-limit);
   }

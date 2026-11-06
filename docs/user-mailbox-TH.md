@@ -1,10 +1,10 @@
 # กล่องอีเมลผู้ใช้ Panthorium — ขอบเขตและแผนเปิดบริการ
 
-ปรับปรุง 6 พฤศจิกายน 2026 (Asia/Bangkok)
+ปรับปรุง 7 พฤศจิกายน 2026 (Asia/Bangkok)
 
 ## สถานะของชุดโค้ดนี้
 
-เป็น implementation ใน feature branch มีการทดสอบด้วยผู้ให้บริการจำลอง ไม่ใช่หลักฐานว่า Gmail/Outlook จริงเชื่อมต่อหรือส่งอีเมลแล้ว ฟังก์ชันปิดโดยค่าเริ่มต้น จนกว่าจะตั้งค่า OAuth, encryption และฐานข้อมูล ผู้ให้บริการ AI ต้องผ่านการตรวจนโยบายก่อนเปิดเครื่องมือเสียงที่ส่งเนื้อหาอีเมลเข้าโมเดล ไม่มีการใช้บัญชีอีเมลลูกค้าจริงในการทดสอบนี้
+Gmail แบบปกติติดตั้งและตรวจอ่านกล่องอีเมลเจ้าของที่อนุญาตแล้วได้จริง ชุดนี้เพิ่มการเชื่อม AI/เสียงแยกจากกล่องปกติ; การทดสอบอัตโนมัติใช้ผู้ให้บริการจำลองและ PostgreSQL สำหรับตรวจสิทธิ์ การยืนยัน และการเข้ารหัส ยังต้องทดสอบ OAuth AI ด้วยความยินยอมของเจ้าของผ่านหน้าแอป ไม่ถือว่าทดสอบส่ง/ลบอีเมลจริงหรือ Outlook แล้ว Google ยังอยู่ใน Testing และ Microsoft ยังติดการไม่มี directory ที่ลงทะเบียนแอปได้ ฟังก์ชันปิดโดยค่าเริ่มต้นจนกว่าจะตั้งค่า OAuth, encryption, ฐานข้อมูลและนโยบายข้อมูลครบ
 
 ## ประสบการณ์หลังเข้าสู่ระบบ (ข้อกำหนดเพิ่มเติม)
 
@@ -52,7 +52,7 @@
 - เบราว์เซอร์ทั่วไป: จองหน้าต่างจากการกดปุ่มก่อนเรียก API เพื่อรองรับ popup blocker; ถ้าเปิดไม่ได้ แสดงลิงก์ให้ผู้ใช้กดเอง และปิดหน้าต่างว่างเมื่อคำขอล้มเหลวหรือเปลี่ยนบัญชี
 - Panthorium Browser บนเดสก์ท็อป: ใช้ native bridge รุ่น 8 เปิดเบราว์เซอร์ของระบบ เฉพาะ OAuth endpoint ของ Google/Microsoft และ callback ของ Panthorium ตรวจ main frame, state, PKCE, scope และพารามิเตอร์ซ้ำก่อนเปิด ไม่มีการผ่อนข้อจำกัด popup/webview เดิม รุ่นเก่าจะแจ้งให้อัปเดต
 - Android: ส่ง navigation ออกนอก allowNavigation ของ Capacitor เพื่อให้เปิดผ่านเบราว์เซอร์ของเครื่อง ตามพฤติกรรมที่ตรวจจากซอร์ส Capacitor Android 8.5.2 ไม่ฝังหน้าอนุญาต Google ใน WebView
-- หลังอนุญาตเสร็จ กลับมาที่ Panthorium แล้วกด “ตรวจการเชื่อมต่อ”; login ครั้งต่อไปตรวจสถานะจากเซิร์ฟเวอร์เหมือนเดิม การทดสอบคำสั่งเสียงและ OAuth บนเครื่องจริงยังต้องใช้บัญชีที่ยินยอมทดสอบ
+- หลังอนุญาตเสร็จ กลับมาที่ Panthorium ระบบตรวจการเชื่อมต่ออัตโนมัติ หรือกด “ตรวจการเชื่อมต่อ”; login ครั้งต่อไปตรวจสถานะจากเซิร์ฟเวอร์เหมือนเดิม การทดสอบคำสั่งเสียงและ OAuth บนเครื่องจริงยังต้องใช้บัญชีที่ยินยอมทดสอบ
 
 ## ความปลอดภัยและผลลัพธ์
 
@@ -64,7 +64,7 @@
 - “ผู้ให้บริการรับคำขอส่ง” ไม่เท่ากับ “ผู้รับได้รับแล้ว”
 - ข้อมูลอีเมล/ไฟล์เป็น untrusted data ไม่ให้อำนาจเปลี่ยนสิทธิ์ เรียกเครื่องมืออื่น หรือเปิดเผยอีเมลอื่น
 - สรุปโดยตรงไม่ผ่าน conversation memory หรือ training; เมื่อเปิดโมดูลนี้ ปิด captureTraining ของบทสนทนาอัตโนมัติเพื่อกันอีเมลไหลเข้า training ทางบทสนทนาต่อเนื่อง
-- ข้อความจากเสียง/แชทและการอนุมัติยังอาจอยู่ในประวัติบทสนทนา/action ledger เดิม ต้องกำหนด retention/deletion ให้สอดคล้องก่อน Production
+- บันทึกคำสั่งอีเมลใน action ledger เข้ารหัสด้วยกุญแจอีเมล และล้างรายการอายุเกิน 30 วันรายชั่วโมง บทสนทนาใหม่เข้ารหัสเมื่อเปิด AI อีเมล ผู้ใช้ลบผ่านฟังก์ชันลบบทสนทนาได้; metadata และประวัติก่อนเปิดระบบนี้ไม่ได้แปลงย้อนหลัง
 - ถอนเชื่อมต่อจะลบ token/proposal/draft ของโมดูลนี้ ไม่ลบอีเมลต้นฉบับ ผู้ใช้เพิกถอนสิทธิ์เพิ่มเติมได้ในบัญชี Google/Microsoft
 
 ## ข้อจำกัดที่ต้องแสดงตามจริง
@@ -91,6 +91,8 @@ USER_MAILBOX_PUBLIC_ORIGIN=https://YOUR_BACKEND_ORIGIN
 USER_MAILBOX_ENCRYPTION_KEY=<base64 ของ random bytes 32 ไบต์>
 USER_MAILBOX_GOOGLE_CLIENT_ID=<OAuth web application client id>
 USER_MAILBOX_GOOGLE_CLIENT_SECRET=<secret>
+USER_MAILBOX_GOOGLE_AGENT_CLIENT_ID=<separate AI-agent OAuth web client id>
+USER_MAILBOX_GOOGLE_AGENT_CLIENT_SECRET=<agent client secret>
 USER_MAILBOX_MICROSOFT_CLIENT_ID=<Entra application client id>
 USER_MAILBOX_MICROSOFT_CLIENT_SECRET=<secret>
 ```
@@ -124,3 +126,16 @@ AI policy gate เปิดได้เมื่อยืนยันบริ�
 - https://developers.google.com/workspace/gmail/api/reference/rest
 - https://learn.microsoft.com/en-us/graph/permissions-reference
 - https://learn.microsoft.com/en-us/graph/api/message-reply?view=graph-rest-1.0
+
+## การแยกสิทธิ์กล่องอีเมลกับ AI/เสียง
+
+- Google ใช้ Web client สองตัว: ตัวปกติสำหรับปุ่มอีเมล และตัวที่เลือก AI-powered agent สำหรับ AI/เสียง ทั้งคู่ใช้ callback เดียวกันข้างต้น โดย state ที่เข้ารหัสผูก purpose ไว้ฝั่งเซิร์ฟเวอร์
+- ตั้งคู่ USER_MAILBOX_GOOGLE_AGENT_CLIENT_ID/SECRET ให้ต่างจากตัวปกติ ระบบปฏิเสธการใช้ Client ID เดียวกัน
+- ปุ่มเชื่อม AI/เสียงแสดงคำอธิบายข้อมูลและผู้ประมวลผลก่อนส่งไปขอสิทธิ์ OAuth อีกครั้ง อีเมลต้องตรงบัญชีสมัครเหมือนเดิม
+- Token และการ refresh แยกตาม purpose; AI tools ไม่รับ connection ปกติ และ API อ่าน/เขียนด้วยปุ่มไม่รับ connection สำหรับ agent
+- ถอนเฉพาะ AI/เสียงได้โดยไม่ถอนกล่องอีเมลปกติ บันทึกคำสั่งที่เกิดขึ้นแล้วและประวัติสนทนาคงอยู่ตามระยะเก็บ/การลบประวัติที่อธิบายในนโยบาย
+- กลับมาจากหน้าอนุญาตแล้วหน้ากล่องอีเมลตรวจสถานะให้อัตโนมัติ และยังมีปุ่มตรวจการเชื่อมต่อให้กดเอง
+- Microsoft ใช้ client ที่รองรับ organizational + personal accounts; แยกการอนุญาต/โทเคน purpose=agent ภายในระบบ แม้ใช้ application เดียวกันได้
+- Public rollout ยังต้องผ่านการตรวจแอป/สิทธิ์ของผู้ให้บริการตามจริง โหมด Testing ไม่ใช่การเปิดให้ลูกค้าทุกราย
+
+ข้อกำหนดแยก client สำหรับงานปกติและ AI: https://support.google.com/cloud/answer/15549257
