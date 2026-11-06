@@ -3,7 +3,11 @@ No credentials, remote tools or user content are persisted by this process.
 """
 from pathlib import Path
 import asyncio, contextlib, gc, io, json, os, subprocess, sys, time
-import httpx, psutil
+import httpx, psutil, threading, re
+from work_queue import WorkQueue, QueueError, resource_reason
+queue=WorkQueue()
+metrics_lock=threading.Lock()
+pressure_latched=False
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import Response
 BASE=Path(__file__).resolve().parent
@@ -41,8 +45,11 @@ def stop_model():
         try:p.wait(8)
         except psutil.TimeoutExpired:p.kill()
 
-def snapshot():
-    global cached_gpu,last_gpu
+def snapshot(kind="chat"):
+    with metrics_lock:return _snapshot(kind)
+
+def _snapshot(kind="chat"):
+    global cached_gpu,last_gpu,pressure_latched
     mem=psutil.virtual_memory()
     p=model_process()
     local=psutil.Process().memory_info().rss
@@ -56,8 +63,13 @@ def snapshot():
             cached_gpu=max(used/total for total,used in pairs)
         except Exception:cached_gpu=None
         last_gpu=time.monotonic()
-    reason='disabled' if DISABLED.exists() else 'ram_pressure' if mem.available<RESERVE or local>mem.total*LIMIT else 'gpu_metrics_unavailable' if cached_gpu is None else 'vram_pressure' if cached_gpu>LIMIT else None
-    return {'ready':reason is None,'reason':reason,'busy':busy,'ramAvailableBytes':mem.available,'localRamBytes':local,'localRamLimitBytes':int(mem.total*LIMIT),'vramUsedFraction':cached_gpu,'vramLimit':LIMIT,'modelLoaded':p is not None}
+    ram_used=1-mem.available/mem.total
+    cpu=psutil.cpu_percent()
+    hard='ram_pressure' if ram_used>=.65 or mem.available<RESERVE else 'vram_pressure' if cached_gpu is not None and cached_gpu>=.60 else None
+    if hard:pressure_latched=True
+    elif ram_used<.60 and cached_gpu is not None and cached_gpu<.55:pressure_latched=False
+    reason='disabled' if DISABLED.exists() else resource_reason(ram_used=ram_used,total=mem.total,available=mem.available,local_ram=local,vram=cached_gpu,cpu=cpu,model_loaded=p is not None,voice_loaded=engine is not None,kind=kind,latched=pressure_latched)
+    return {'ready':reason is None,'reason':reason,'pressure':hard,'busy':busy,'ramAvailableBytes':mem.available,'ramUsedFraction':ram_used,'ramLimit':.65,'cpuPercent':cpu,'localRamBytes':local,'localRamLimitBytes':int(mem.total*LIMIT),'vramUsedFraction':cached_gpu,'vramLimit':LIMIT,'modelLoaded':p is not None,'queue':queue.status()}
 
 def drop_voice():
     global engine
@@ -94,25 +106,40 @@ async def ensure_model():
         await asyncio.to_thread(stop_model)
         raise HTTPException(503,s['reason'])
 
+def owner(request):
+    value=request.headers.get('x-panthorium-account','legacy')
+    if value!='legacy' and not re.fullmatch(r'[0-9a-f]{64}',value):raise HTTPException(400,'invalid_account_key')
+    return value
+
 @contextlib.asynccontextmanager
-async def admission():
+async def admission(request,kind='chat'):
     global busy,last_use,latest,phase
-    # Reject overflow immediately: no hidden unbounded llama.cpp queue.
-    if busy:raise HTTPException(429,'local_busy_retry_later')
-    busy=True
-    phase="admission"
+    async def ready():
+        global latest
+        latest=await asyncio.to_thread(snapshot,kind)
+        if DISABLED.exists():raise QueueError('local_disabled',503)
+        return latest['ready']
     try:
-        latest=await asyncio.to_thread(snapshot)
-        if not latest['ready']:raise HTTPException(503,latest['reason'])
-        yield
-    finally:busy=False;phase="idle";last_use=time.monotonic()
+        async with queue.lease(owner(request),ready,request.is_disconnected):
+            busy=True;phase='admission'
+            try:yield
+            finally:busy=False;phase='idle';last_use=time.monotonic()
+    except QueueError as e:raise HTTPException(e.status,e.code,headers={'Retry-After':'10'})
+
+async def voice_work(call):
+    # A cancelled HTTP task must not release the slot while native synthesis still runs.
+    task=asyncio.create_task(asyncio.to_thread(call))
+    try:return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await task
+        raise
 
 async def monitor():
     global latest
     while True:
         try:
             latest=await asyncio.to_thread(snapshot)
-            if DISABLED.exists() or latest['reason'] in ('ram_pressure','vram_pressure'):
+            if DISABLED.exists() or latest.get('pressure') in ('ram_pressure','vram_pressure'):
                 # Free our own process only. Never stop a database, app or other GPU task.
                 await asyncio.to_thread(stop_model)
                 if not busy:await asyncio.to_thread(drop_voice)
@@ -133,9 +160,9 @@ async def start():
 async def end():
     app.state.monitor.cancel()
 @app.get('/status')
-async def status():return {**latest,'busy':busy,'phase':phase,'ready':latest.get('ready',False) and not DISABLED.exists()}
+async def status(request:Request):return {**latest,'busy':busy,'phase':phase,'ready':latest.get('ready',False) and not DISABLED.exists(),'queue':queue.status(owner(request))}
 @app.get('/health')
-async def health():return {'ok':True,'service':'panthorium-free-ai-broker'}
+async def health():return {'ok':True,'service':'panthorium-free-ai-broker','version':'queue-v1'}
 
 @app.post('/v1/chat/completions')
 async def chat(request:Request):
@@ -146,7 +173,7 @@ async def chat(request:Request):
     data=json.loads(raw)
     if data.get('model')!='panthorium-local' or data.get('stream') is not False:raise HTTPException(400,'invalid_request')
     data['max_tokens']=min(3072,max(1,int(data.get('max_tokens',768))))
-    async with admission():
+    async with admission(request):
         await asyncio.to_thread(drop_voice)
         await ensure_model()
         phase="inference"
@@ -159,7 +186,9 @@ async def chat(request:Request):
             watcher=asyncio.create_task(disconnected())
             try:
                 done,_=await asyncio.wait({task,watcher},timeout=130,return_when=asyncio.FIRST_COMPLETED)
-                if task not in done:raise HTTPException(499 if watcher in done else 503,'cancelled_or_timeout')
+                if task not in done:
+                    await asyncio.to_thread(stop_model)
+                    raise HTTPException(499 if watcher in done else 503,'cancelled_or_timeout')
                 r=await task
                 return Response(r.content,status_code=r.status_code,media_type='application/json')
             except httpx.HTTPError:raise HTTPException(503,'local_inference_unavailable')
@@ -171,18 +200,18 @@ async def chat(request:Request):
 async def speech(request:Request):
     data=await request.json();text=data.get('text','')
     if not isinstance(text,str) or not text.strip() or len(text)>1200:raise HTTPException(400,'invalid_text')
-    async with admission():
-        audio,meta=await asyncio.to_thread(lambda:voice_engine().speech(text,'th_m_1',1.0))
+    async with admission(request,'voice'):
+        audio,meta=await voice_work(lambda:voice_engine().speech(text,'th_m_1',1.0))
         return Response(audio,media_type='audio/wav',headers={'Cache-Control':'no-store','X-Audio-Duration':str(meta['audio_seconds'])})
 
 @app.post('/transcribe')
-async def transcribe(file:UploadFile=File(...)):
+async def transcribe(request:Request,file:UploadFile=File(...)):
     audio=await file.read(1024*1024+1);await file.close()
     if not audio or len(audio)>1024*1024:raise HTTPException(413,'invalid_audio_size')
-    async with admission():
-        result=await asyncio.to_thread(lambda:voice_engine().transcribe(io.BytesIO(audio)))
+    async with admission(request,'voice'):
+        result=await voice_work(lambda:voice_engine().transcribe(io.BytesIO(audio)))
         return {'text':result['text'][:2000]}
 
 if __name__=='__main__':
     import uvicorn
-    uvicorn.run(app,host='127.0.0.1',port=8765,access_log=False,log_level='warning',limit_concurrency=8)
+    uvicorn.run(app,host='127.0.0.1',port=8765,access_log=False,log_level='warning',limit_concurrency=32)

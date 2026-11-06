@@ -261,12 +261,18 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
     const sid = sessionId || req.headers["x-session-id"] || randomUUID();
     res.status(200).set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders?.();
-    const event = (name, payload) => { if (!res.writableEnded) res.write(`event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`); };
+    const event = (name, payload) => { if (!res.writableEnded && !res.destroyed) res.write(`event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`); };
     event("start", { sessionId: sid, sentinel: "Sentinel" });
+    const controller=new AbortController();const cancel=()=>{if(!res.writableEnded)controller.abort();};res.once('close',cancel);
+    let pollBusy=false;const queueTimer=setInterval(async()=>{
+      if(pollBusy||res.destroyed||!sentinel.providers.hybrid)return;pollBusy=true;
+      try{const {voiceBase}=require('./hybridAi');const {accountKey}=require('../services/localWorkIdentity');const r=await fetch(voiceBase()+'/status',{headers:{'X-Panthorium-Account':accountKey(req.user.sub)},signal:AbortSignal.timeout(1500)});const s=await r.json();if(s.queue?.yourPosition||s.queue?.yourRunning)event('queue',{position:s.queue.yourPosition,running:s.queue.yourRunning,reason:s.reason,maxWaitSeconds:s.queue.maxWaitSeconds});}catch{}finally{pollBusy=false;}
+    },2000);
     try {
       const result = await sentinel.streamChat({
         sessionId: sid,
         userId: req.user.sub,
+        signal:controller.signal,
         message,
         mode: "default",
         provider: provider?.toLowerCase(),
@@ -286,10 +292,11 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
       audit.record("sentinel.chat_stream", { userId: req.user.sub, sessionId: sid, ok: false });
       audit.record("sentinel.stream_failed", { userId: req.user.sub, sessionId: sid, error: streamError.message });
     } finally {
+      clearInterval(queueTimer);res.off('close',cancel);
       if (!res.writableEnded) res.end();
     }
   });
-  router.post("/chat", auth, requirePermission("chat"), aiLimiter, async (req, res) => { try { const error = validChatBody(req.body || {}); if (error) return res.status(400).json({ ok: false, error }); const { message, sessionId, provider, model, voice } = req.body || {}; const sid = sessionId || req.headers["x-session-id"] || randomUUID(); const result = await sentinel.chat({ sessionId: sid, userId: req.user.sub, message, mode: "default", provider: provider?.toLowerCase(), model, voiceMode: voice === true, user: req.user, functionCalling, requestId: stableActionRequestId(req) || req.requestId || randomUUID() }); audit.record("sentinel.chat", { userId: req.user.sub, sessionId: sid, provider: result.provider || null, model: result.model || null, usage: result.usage || null, latencyMs: result.latencyMs || null, functionCallCount: result.functionCallCount || 0, ok: result.ok }); res.json({ ...result, sessionId: sid }); } catch (err) { res.status(500).json({ ok: false, error: "internal_error" }); } });
+  router.post("/chat", auth, requirePermission("chat"), aiLimiter, async (req, res) => { const controller=new AbortController();const cancel=()=>{if(!res.writableEnded)controller.abort();};res.once('close',cancel);try { const error = validChatBody(req.body || {}); if (error) return res.status(400).json({ ok: false, error }); const { message, sessionId, provider, model, voice } = req.body || {}; const sid = sessionId || req.headers["x-session-id"] || randomUUID(); const result = await sentinel.chat({ signal:controller.signal,sessionId: sid, userId: req.user.sub, message, mode: "default", provider: provider?.toLowerCase(), model, voiceMode: voice === true, user: req.user, functionCalling, requestId: stableActionRequestId(req) || req.requestId || randomUUID() }); audit.record("sentinel.chat", { userId: req.user.sub, sessionId: sid, provider: result.provider || null, model: result.model || null, usage: result.usage || null, latencyMs: result.latencyMs || null, functionCallCount: result.functionCallCount || 0, ok: result.ok }); res.json({ ...result, sessionId: sid }); } catch (err) { if(!res.destroyed)res.status(500).json({ ok: false, error: "internal_error" }); } finally {res.off('close',cancel);} });
   router.post("/sentinel/command", auth, aiLimiter, async (req, res, next) => {
     try {
       const { command, provider } = req.body || {};

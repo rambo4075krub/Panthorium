@@ -28,7 +28,7 @@
     if (window.PanthoriumAuth?.hasPermission && !window.PanthoriumAuth.hasPermission('chat')) return { ok: false, text: 'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat', provider: 'RBAC', via: 'rbac' };
     let token = await ensureToken(); if (!token) throw new Error('authentication_required');
     const base = (system?.config?.backendUrl || '').replace(/\/$/, '');
-    const timeoutSignal = AbortSignal.timeout(45000);
+    const timeoutSignal = AbortSignal.timeout(210000);
     const requestId = window.crypto?.randomUUID?.() || `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const requestSignal = signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeoutSignal]) : signal || timeoutSignal;
     if (document.body.dataset.aiMode === "gemini-live-only") voiceMode = false;
@@ -46,6 +46,7 @@
         for (const line of frame.split('\n')) { if (line.startsWith('event:')) event = line.slice(6).trim(); if (line.startsWith('data:')) { try { data = JSON.parse(line.slice(5).trim()); } catch (_) {} } }
         if (!data) continue;
         if (event === 'start') emit('status', { text: 'Sentinel กำลังประมวลผล...' });
+        if (event === 'queue') emit('status',{text:data.running?'Qwen ฟรี · กำลังประมวลผล':`Qwen ฟรี · คิวที่ ${data.position} · รอได้ไม่เกิน ${data.maxWaitSeconds} วินาที${data.reason?' · กำลังรอทรัพยากร':''}`});
         if (event === 'provider') { meta = { ...meta, ...data }; emit('provider', data); }
         if (event === 'delta') {
           const delta = data.delta || ''; if (!delta) continue; sawDelta = true;

@@ -1,4 +1,5 @@
 'use strict';
+const {accountKey}=require('./localWorkIdentity');
 const {randomUUID} = require('crypto');
 const {localTools} = require('./hybridAiPolicy');
 function localEndpoint(value = 'http://127.0.0.1:8088/v1/chat/completions') {
@@ -33,9 +34,9 @@ class LocalLlmProvider {
     this.reasoning = env.LOCAL_LLM_REASONING === '1';
     this.busy = false;
   }
-  async complete(systemPrompt, history, {model, tools = [], hybrid = false, voiceMode = false, signal} = {}, onDelta) {
+  async complete(systemPrompt, history, {model, tools = [], hybrid = false, voiceMode = false, signal, userId} = {}, onDelta) {
     if (model && model !== this.model) throw new Error('model_not_allowed');
-    if (this.busy) throw new Error('local_llm_busy');
+    if (this.busy && !hybrid) throw new Error('local_llm_busy');
     if (!Array.isArray(history)) throw new Error('local_context_too_large');
     if (!hybrid && (history.length>8 || history.some(m=>!['user','assistant'].includes(m.role)||typeof m.content!=='string') || history.reduce((n,m)=>n+m.content.length,0)>4000 || String(systemPrompt).length>2000)) throw new Error('local_context_too_large');
     let selected = hybrid ? localTools(tools,history) : tools;
@@ -58,9 +59,9 @@ class LocalLlmProvider {
     if (needsCalculation) selected=selected.filter(t=>t.function.name==='panthorium_calculate');
     const toolChoice=needsCalculation?'required':'auto';
     const thinking = this.reasoning && !voiceMode;
-    this.busy = true;
+    if(!hybrid)this.busy = true;
     try {
-      const response = await fetch(this.url, {method:'POST',redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(150000)]):AbortSignal.timeout(150000),headers:{'Content-Type':'application/json'},body:JSON.stringify({model:this.model,messages:[{role:'system',content:prompt},...messages],temperature:0.3,max_tokens:thinking?3072:hybrid?768:160,stream:false,chat_template_kwargs:{enable_thinking:thinking},...(selected.length?{tools:selected,tool_choice:toolChoice,parallel_tool_calls:false}:{})})});
+      const response = await fetch(this.url, {method:'POST',redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(hybrid?195000:150000)]):AbortSignal.timeout(hybrid?195000:150000),headers:{'Content-Type':'application/json',...(hybrid?{'X-Panthorium-Account':accountKey(userId)}:{})},body:JSON.stringify({model:this.model,messages:[{role:'system',content:prompt},...messages],temperature:0.3,max_tokens:thinking?3072:hybrid?768:160,stream:false,chat_template_kwargs:{enable_thinking:thinking},...(selected.length?{tools:selected,tool_choice:toolChoice,parallel_tool_calls:false}:{})})});
       if (!response.ok) {
         if(response.status===429) throw new Error('local_llm_busy');
         if(response.status===503) throw new Error('local_resource_unavailable');
@@ -80,7 +81,7 @@ class LocalLlmProvider {
       if (!text&&!functionCalls.length) throw new Error('local_llm_empty');
       if(onDelta&&text)onDelta(text);
       return {text,model:this.model,provider:'local',usage:result.usage||null,billable:false,creditsCharged:0,streaming:'buffered',...(functionCalls.length?{functionCalls,modelParts:functionCalls.map(functionCall=>({functionCall}))}:{})};
-    } finally { this.busy=false; }
+    } finally { if(!hybrid)this.busy=false; }
   }
 }
 module.exports={LocalLlmProvider,localEndpoint,schema,messagesFor};
