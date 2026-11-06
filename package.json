@@ -26,6 +26,7 @@
     "test:notifications": "node test/notification-update-announcements.js && node test/notification-fcm-popup.js && node test/desktop-notifications.js && node test/notification-popup-client.js && node test/notification-push-client.js && node test/notification-push-worker.js && node test/notification-push.js && node test/notifications.js && node test/notification-tools.js && node test/notification-approval-ui.js && node test/notification-producers.js && node test/notifications-ui.js"
   },
   "dependencies": {
+    "@langchain/langgraph": "1.7.1",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",

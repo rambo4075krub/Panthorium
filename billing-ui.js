@@ -22,7 +22,7 @@
   }
   function serviceInfo() {
     const info = node('section', null, 'pb-conditions'); info.dataset.aiService = '';
-    info.append(node('h3', 'บริการที่คุณได้รับ'), node('p', catalog.serviceDescription), node('p', 'ใช้ Gemini Live เป็นหลักสำหรับการพูด ระบบอาจเลือก Qwen สำหรับงานข้อความที่เหมาะสม โดย Qwen ไม่หักเครดิต เมื่อเครดิต Gemini หมดสามารถใช้ Qwen ต่อได้ฟรีหากทรัพยากรพร้อม งานอาจช้าลงหรือถูกพัก และคุณภาพอาจต่างกัน'));
+    info.append(node('h3', 'บริการที่คุณได้รับ'), node('p', catalog.serviceDescription), node('p', 'ใช้ Gemini Live เป็นหลักสำหรับการพูด ระบบอาจเลือก Qwen สำหรับงานข้อความที่เหมาะสม โดย Qwen ไม่หักเครดิต เมื่อเครดิต Gemini หมดสามารถใช้ Qwen ต่อได้ฟรีหากทรัพยากรพร้อม มีคิวรอจำกัด เมื่อคิวเต็มหรือหน่วยความจำไม่พอ ระบบอาจพักงานหรือให้ลองใหม่โดยไม่หักเครดิต และคุณภาพอาจต่างกัน'));
     const details = document.createElement('details'); const title = node('summary', 'ความหมายข้อความเข้า/ออก วิธีใช้ และอัตราโควต้า');
     details.append(title, node('p', catalog.usageExplanation), node('p', 'วิธีใช้: สมัครและเข้าสู่บัญชี → เปิดผู้ช่วย AI → พิมพ์คำถามหรือเปิดไมโครโฟนและอนุญาตเมื่อใช้เสียง → รับคำตอบในระบบ เมื่อซื้อแพ็กเกจ สิทธิ์จะเพิ่มในบัญชีหลังยืนยันการชำระสำเร็จ'));
     const list = node('ul'); catalog.conversionDetails.forEach(text => list.append(node('li', text)));

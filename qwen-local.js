@@ -3,6 +3,7 @@ const login = document.querySelector('#login');
 const chat = document.querySelector('#chat');
 const output = document.querySelector('output');
 let token = '';
+let pending;const cancelButton=document.querySelector('#cancel');cancelButton.onclick=()=>pending?.abort();
 login.onsubmit = async event => {
   event.preventDefault(); login.querySelector('button').disabled = true;
   try {
@@ -14,13 +15,14 @@ login.onsubmit = async event => {
   finally { login.querySelector('button').disabled = false; }
 };
 chat.onsubmit = async event => {
-  event.preventDefault(); chat.querySelector('button').disabled = true; output.textContent = 'Qwen กำลังตอบ…';
+  event.preventDefault(); chat.querySelector('button').disabled = true; output.textContent = 'Qwen ฟรี · กำลังตรวจคิวและทรัพยากร…';
+  pending=new AbortController();cancelButton.hidden=false;let polling=false,finished=false;const timer=setInterval(async()=>{if(polling)return;polling=true;try{const r=await fetch('/api/hybrid/status',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(1500)});const s=await r.json(),q=s.local?.queue;if(finished)return;if(q?.yourPosition)output.textContent=`Qwen ฟรี · คิวที่ ${q.yourPosition} · รอได้ไม่เกิน ${q.maxWaitSeconds} วินาที${s.local.reason?' · รอทรัพยากร':''}`;else if(q?.yourRunning)output.textContent='Qwen ฟรี · กำลังตอบ…';}catch{}finally{polling=false;}},2000);
   try {
-    const response = await fetch('/api/local/chat',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({message:chat.elements.message.value})});
+    const response = await fetch('/api/local/chat',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},signal:AbortSignal.any([pending.signal,AbortSignal.timeout(210000)]),body:JSON.stringify({message:chat.elements.message.value})});
     const result = await response.json();
     if (response.status === 401) { token=''; chat.hidden=true; login.hidden=false; throw Error('กรุณาเข้าสู่ระบบอีกครั้ง'); }
-    if (!response.ok) throw Error(response.status===429?'Qwen กำลังตอบคำขออื่น กรุณาลองอีกครั้ง':'ยังรับคำตอบจาก Qwen ไม่ได้');
+    if (!response.ok) throw Error(response.status===429?'Qwen กำลังตอบคำขออื่น กรุณาลองอีกครั้ง':'Qwen พักรับงานเนื่องจากคิวหรือทรัพยากรไม่พร้อม กรุณาลองใหม่ภายหลัง ไม่หักเครดิต');
     output.textContent = result.text;
-  } catch(error) { output.textContent=error.message; }
-  finally { chat.querySelector('button').disabled=false; }
+  } catch(error) { output.textContent=error.name==='AbortError'?'ยกเลิกคำขอแล้ว':error.message; }
+  finally {finished=true;clearInterval(timer);pending=null;cancelButton.hidden=true;chat.querySelector('button').disabled=false;}
 };
