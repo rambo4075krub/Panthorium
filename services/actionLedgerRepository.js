@@ -1,6 +1,7 @@
 'use strict';
 const { createHash, randomUUID } = require('crypto');
 const { getDatabasePool } = require('./databasePool');
+const { MailboxStore } = require('./mailbox/store');
 
 const STATES = ['proposed', 'awaiting_confirmation', 'running', 'succeeded', 'failed', 'cancel_requested', 'unknown'];
 const SELECT = `action_id AS "actionId", user_id AS "userId", request_id AS "requestId", tool_id AS "toolId", args, args_hash AS "argsHash", approval_hash AS "approvalHash", approval_expires_at AS "approvalExpiresAt", requires_confirmation AS "requiresConfirmation", description, risk, state, result, started_at AS "startedAt", created_at AS "createdAt", updated_at AS "updatedAt"`;
@@ -26,7 +27,7 @@ function payloadHash(toolId, args) {
 }
 
 class ActionLedgerRepository {
-  constructor({ databaseUrl = '', databaseSslMode = 'disable', pool, required = false, allowMemory = false, approvalTtlMs = 5 * 60 * 1000, staleAfterMs = 15 * 60 * 1000, now = () => Date.now() } = {}) {
+  constructor({ databaseUrl = '', databaseSslMode = 'disable', pool, required = false, allowMemory = false, approvalTtlMs = 5 * 60 * 1000, staleAfterMs = 15 * 60 * 1000, now = () => Date.now(), mailboxEncryptionKey = process.env.USER_MAILBOX_ENCRYPTION_KEY } = {}) {
     this.pool = pool || (databaseUrl ? getDatabasePool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: true } }) : null);
     this.required = required;
     this.allowMemory = allowMemory === true && required !== true;
@@ -36,6 +37,22 @@ class ActionLedgerRepository {
     this.now = now;
     this.memory = new Map();
     this.keys = new Map();
+    this.mailboxCipher = new MailboxStore({ key: mailboxEncryptionKey });
+  }
+  encodeMailbox(item, field, value) {
+    if (!this.pool || !item.toolId.startsWith('mailbox.') || value == null) return value;
+    return { mailboxEncryptedV1: this.mailboxCipher.seal(value, JSON.stringify(['action-ledger-mailbox-v1', item.userId, item.actionId, item.toolId, field])) };
+  }
+  decodeMailbox(row) {
+    if (!row || !row.toolId?.startsWith('mailbox.')) return row;
+    const item = { ...row };
+    for (const field of ['args', 'result']) if (item[field]?.mailboxEncryptedV1) {
+      item[field] = this.mailboxCipher.open(item[field].mailboxEncryptedV1, JSON.stringify(['action-ledger-mailbox-v1', item.userId, item.actionId, item.toolId, field]));
+    }
+    return item;
+  }
+  async purgeMailboxExpired() {
+    if (this.pool && this.ready) await this.pool.query("DELETE FROM panthorium_action_ledger WHERE tool_id LIKE 'mailbox.%' AND created_at < $1", [new Date(this.now() - 30 * 86400000).toISOString()]);
   }
   async init() {
     this.ready = false;
@@ -68,9 +85,9 @@ class ActionLedgerRepository {
     if (this.pool) {
       await this.pool.query(`INSERT INTO panthorium_action_ledger(action_id,user_id,request_id,tool_id,args,args_hash,approval_hash,approval_expires_at,requires_confirmation,description,risk,state,created_at,updated_at)
         VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,$13) ON CONFLICT(user_id,request_id) DO NOTHING`,
-      [actionId,userId,requestId,toolId,JSON.stringify(item.args),argsHash,approvalHash,approvalExpiresAt,item.requiresConfirmation,item.description,risk,item.state,now]);
+      [actionId,userId,requestId,toolId,JSON.stringify(this.encodeMailbox(item, 'args', item.args)),argsHash,approvalHash,approvalExpiresAt,item.requiresConfirmation,item.description,risk,item.state,now]);
       const result = await this.pool.query(`SELECT ${SELECT} FROM panthorium_action_ledger WHERE user_id=$1 AND request_id=$2`, [userId,requestId]);
-      stored = result.rows[0];
+      stored = this.decodeMailbox(result.rows[0]);
     } else {
       const key = JSON.stringify([userId, requestId]);
       const existingId = this.keys.get(key);
@@ -88,7 +105,7 @@ class ActionLedgerRepository {
       // A lost worker is never re-claimed. Only reconciliation or its eventual completion can resolve this receipt.
       await this.pool.query(`UPDATE panthorium_action_ledger SET state='unknown',updated_at=$3 WHERE user_id=$1 AND action_id=$2 AND state IN ('running','cancel_requested') AND started_at < $4 AND result IS NULL`, [userId,actionId,now,stale]);
       const result = await this.pool.query(`SELECT ${SELECT} FROM panthorium_action_ledger WHERE user_id=$1 AND action_id=$2`, [userId,actionId]);
-      return result.rows[0] || null;
+      return this.decodeMailbox(result.rows[0]) || null;
     }
     const item = this.memory.get(actionId);
     if (!item || item.userId !== userId) return null;
@@ -143,7 +160,7 @@ class ActionLedgerRepository {
       try {
         await client.query('BEGIN');
         const locked = await client.query(`SELECT ${SELECT} FROM panthorium_action_ledger WHERE user_id=$1 AND action_id=$2 FOR UPDATE`, [userId, actionId]);
-        const current = locked.rows[0];
+        const current = this.decodeMailbox(locked.rows[0]);
         if (!current) throw new Error('action_not_found');
         if (!['proposed','awaiting_confirmation'].includes(current.state)) {
           await client.query('COMMIT');
@@ -155,7 +172,7 @@ class ActionLedgerRepository {
           AND (requires_confirmation=FALSE OR (approval_hash=$3 AND approval_expires_at > clock_timestamp())) RETURNING ${SELECT}`, [userId,actionId,approvalHash || null]);
         if (!result.rows[0]) throw new Error('action_confirmation_expired');
         await client.query('COMMIT');
-        return { claimed: true, action: result.rows[0] };
+        return { claimed: true, action: this.decodeMailbox(result.rows[0]) };
       } catch (error) {
         try { await client.query('ROLLBACK'); } catch { /* no effect has been dispatched */ }
         throw error;
@@ -172,9 +189,11 @@ class ActionLedgerRepository {
     const frozenResult = clone(result);
     const now = new Date(this.now()).toISOString();
     if (this.pool) {
+      const current = await this.get(userId, actionId);
+      if (!current) return null;
       const updated = await this.pool.query(`UPDATE panthorium_action_ledger SET state=$3,result=$4::jsonb,updated_at=$5
-        WHERE user_id=$1 AND action_id=$2 AND state IN ('running','cancel_requested','unknown') AND started_at IS NOT NULL AND result IS NULL RETURNING ${SELECT}`, [userId,actionId,state,JSON.stringify(frozenResult),now]);
-      return updated.rows[0] || await this.get(userId, actionId);
+        WHERE user_id=$1 AND action_id=$2 AND state IN ('running','cancel_requested','unknown') AND started_at IS NOT NULL AND result IS NULL RETURNING ${SELECT}`, [userId,actionId,state,JSON.stringify(this.encodeMailbox(current, 'result', frozenResult)),now]);
+      return this.decodeMailbox(updated.rows[0]) || await this.get(userId, actionId);
     }
     const item = this.memory.get(actionId);
     if (!item || item.userId !== userId) return null;
