@@ -62,6 +62,8 @@ async function main() {
   client.emit("message", JSON.stringify({ type: "auth", token: "valid" }), false);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(gateway.activeSessions(), 1);
+  assert.match(liveOptions.systemInstruction, /Mailbox tools are unavailable/);
+  assert.match(liveOptions.systemInstruction, /Never claim the inbox is empty/);
   assert.deepEqual(liveOptions.tools, [{ name: 'panthorium_ai_providers' }, { name: 'panthorium_window_open' }, { name: 'panthorium_calendar_write' }]);
   upstream.emit("message", JSON.stringify({ setupComplete: {} }), false);
   await new Promise(resolve => setImmediate(resolve));
