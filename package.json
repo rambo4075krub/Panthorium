@@ -44,7 +44,7 @@
     "jsonwebtoken": "^9.0.2",
     "jszip": "^3.10.1",
     "node-edge-tts": "^1.2.10",
-    "pdfjs-dist": "^5.6.205",
+    "pdfjs-dist": "6.5.438",
     "pg": "^8.13.1",
     "robots-parser": "3.0.1",
     "three": "^0.128.0",
