@@ -150,7 +150,7 @@
   function reviewNotification(result, owner) {
     const confirmation = result?.confirmation, user = getOS()?.state?.user;
     if (!owner || owner !== accountId() || owner.startsWith('guest:') || user?.roles?.includes('guest') || !user?.permissions?.includes('chat') ||
-        result?.toolId !== 'notifications.write' || confirmation?.toolId !== result.toolId || result.requiresConfirmation !== true ||
+        !['notifications.write','mailbox.write'].includes(result?.toolId) || confirmation?.toolId !== result.toolId || result.requiresConfirmation !== true ||
         !/^[a-f0-9-]{36}$/i.test(confirmation.actionId || '') || !/^[a-f0-9]{64}$/.test(confirmation.approvalHash || '') ||
         !Number.isFinite(Date.parse(confirmation.approvalExpiresAt)) || !confirmation.args || typeof confirmation.args !== 'object') return false;
     if (notificationApprovals.has(confirmation.actionId)) return false;
@@ -159,8 +159,9 @@
     const card = make('section'); card.dataset.notificationApproval = confirmation.actionId;
     card.style.cssText = 'padding:16px;border:1px solid var(--accent,#4ddac4);border-radius:12px;margin:10px 0;background:var(--bg-panel,#111c2a);color:var(--text,#f4f8fc);max-width:620px;overflow-wrap:anywhere';
     const actions = { send: 'ส่งการแจ้งเตือนถึงฉันตอนนี้', settings: 'เปลี่ยนตั้งค่าการแจ้งเตือน', mark_read: 'ทำเครื่องหมายอ่านแล้ว', delete: 'ลบการแจ้งเตือน' };
-    const label = make('h3', actions[confirmation.args.action] || 'ตรวจสอบการแจ้งเตือน'); label.style.margin = '0 0 8px';
-    card.append(label, make('p', confirmation.args.action === 'send' ? 'การส่งตอนนี้จะบันทึกในศูนย์แจ้งเตือน และแสดงตามสวิตช์กับช่วงเวลาเงียบที่ตั้งไว้' : 'ตรวจสอบรายละเอียดด้านล่าง การเปลี่ยนแปลงจะเกิดขึ้นหลังคุณยืนยัน'));
+    const emailAction = result.toolId === 'mailbox.write';
+    const label = make('h3', emailAction ? 'ตรวจสอบคำสั่งอีเมล' : actions[confirmation.args.action] || 'ตรวจสอบการแจ้งเตือน'); label.style.margin = '0 0 8px';
+    card.append(label, make('p', !emailAction && confirmation.args.action === 'send' ? 'การส่งตอนนี้จะบันทึกในศูนย์แจ้งเตือน และแสดงตามสวิตช์กับช่วงเวลาเงียบที่ตั้งไว้' : 'ตรวจสอบรายละเอียดด้านล่าง การเปลี่ยนแปลงจะเกิดขึ้นหลังคุณยืนยัน'));
     const details = make('div');
     details.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;line-height:1.6';
     const categoryLabels = { system: 'ระบบ', security: 'ความปลอดภัยและบัญชี', operations: 'การดำเนินการ', reminders: 'การเตือนและกำหนดเวลา', calendar: 'ปฏิทิน', files: 'ไฟล์และเอกสาร', social: 'Social Media', billing: 'แพ็กเกจและชำระเงิน', ai: 'Sentinel AI' };
@@ -170,6 +171,7 @@
     const add = (name, value) => details.append(make('p', name + ': ' + value));
     const onOff = value => value === true ? 'เปิด' : 'ปิด';
     const args = confirmation.args;
+    if(emailAction) add('รายละเอียดอีเมลที่ขอยืนยัน', JSON.stringify(args,null,2));
     if (args.action === 'send') { add('หัวข้อ', args.title); if (args.body) add('ข้อความ', args.body); add('หมวด', categoryLabels[args.category || 'system'] || args.category); }
     if (args.action === 'settings') {
       for (const [key, value] of Object.entries(args.patch || {})) {
@@ -215,7 +217,7 @@
       const outcome = stored ? stored.result : data;
       if (cancelled && data.cancellationEffective) { status.textContent = 'ยกเลิกคำขอแล้ว'; record.finished = true; }
       else if (outcome?.ok === true) {
-        status.textContent = ({ send: 'บันทึกการแจ้งเตือนแล้ว', settings: 'บันทึกตั้งค่าการแจ้งเตือนแล้ว', mark_read: 'ทำเครื่องหมายอ่านแล้ว', delete: 'ลบการแจ้งเตือนแล้ว' })[confirmation.args.action] || 'ดำเนินการแล้ว';
+        status.textContent = emailAction ? 'ดำเนินการคำสั่งอีเมลแล้ว ตรวจสถานะในกล่องอีเมล (การรับคำขอส่งยังไม่ยืนยันการส่งถึงผู้รับ)' : ({ send: 'บันทึกการแจ้งเตือนแล้ว', settings: 'บันทึกตั้งค่าการแจ้งเตือนแล้ว', mark_read: 'ทำเครื่องหมายอ่านแล้ว', delete: 'ลบการแจ้งเตือนแล้ว' })[confirmation.args.action] || 'ดำเนินการแล้ว';
         record.finished = true; window.PanthoriumNotifications?.refresh?.();
         window.dispatchEvent(new CustomEvent('panthorium:notifications-changed'));
       } else if (data.error === 'action_confirmation_expired') { status.textContent = 'คำขอนี้หมดอายุแล้ว กรุณาสั่งใหม่'; record.finished = true; }
@@ -239,7 +241,7 @@
   }
   window.addEventListener('panthorium:ai-done', event => {
     for (const result of event.detail?.toolResults || []) {
-      if (result.toolId !== 'notifications.write') continue;
+      if (!['notifications.write','mailbox.write'].includes(result.toolId)) continue;
       if (result.requiresConfirmation) reviewNotification(result, event.detail?.accountId);
       else if (result.ok && (!event.detail?.accountId || event.detail.accountId === accountId())) window.PanthoriumNotifications?.refresh?.();
     }

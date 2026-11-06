@@ -1,3 +1,4 @@
+const { MAILBOX_GUIDANCE } = require('./mailbox/tools');
 const { PUBLIC_WEB_GUIDANCE } = require('./publicWebTools');
 const { NOTIFICATION_GUIDANCE } = require('./notificationTools');
 const {hasQuota}=require('../billing-catalog');
@@ -202,7 +203,7 @@ function createGeminiLiveWebSocketGateway({
           ? '\nFor new images, videos, printable documents, spreadsheets, presentations, and connected creative workflows, prefer panthorium_studio_catalog followed by panthorium_studio_create. This keeps all outputs in the shared Creative Studio job history. Reuse exact current-account source file IDs and only compatible handoffs. Never describe a queued or running job as complete; read panthorium_studio_status for its actual state. Do not change Auto/Never settings or invent links. The exact workflow requires the on-screen approval before work starts.' : '';
         const publicWebInstruction = tools.some(tool => tool.name === 'panthorium_web_search') ? PUBLIC_WEB_GUIDANCE : '';
         const notificationInstruction = tools.some(tool => tool.name === 'panthorium_notifications_read') ? NOTIFICATION_GUIDANCE : '';
-        const sessionInstruction = systemInstruction + studioInstruction + publicWebInstruction + notificationInstruction + (typeof contextInstruction === 'string' ? '\n' + contextInstruction.slice(0, 16000) : '');
+        const sessionInstruction = systemInstruction + (tools.some(tool => tool.name === 'panthorium_mailbox_read') ? MAILBOX_GUIDANCE : '') + studioInstruction + publicWebInstruction + notificationInstruction + (typeof contextInstruction === 'string' ? '\n' + contextInstruction.slice(0, 16000) : '');
         upstream = await connectLive({ projectId, location, systemInstruction: sessionInstruction, tools, transcription: process.env.PANTHORIUM_AI_MODE === "gemini-live-only" || voiceApprovalEnabled,
           sessionResumption: resumeAllowed ? { handle: resumeHandle } : null, contextCompression });
       } catch (error) {
