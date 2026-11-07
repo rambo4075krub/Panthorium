@@ -64,9 +64,9 @@ def resource_reason(*,ram_used,total,available,local_ram,vram,cpu,model_loaded,v
     if vram is None:return 'gpu_metrics_unavailable'
     if vram>=(.55 if latched else .60):return 'vram_pressure'
     if local_ram>total*.60:return 'ram_pressure'
-    if cpu>=65:return 'cpu_pressure'
     # Include load transients, not just the final model working set.
     if memory_budget(ram_used=ram_used,total=total,model_loaded=model_loaded,
                      voice_loaded=voice_loaded,kind=kind,cold_budget=cold_budget)['ramShortfallBytes']:
         return 'ram_headroom'
+    if cpu>=65:return 'cpu_pressure'
     return None

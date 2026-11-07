@@ -92,6 +92,7 @@ class ResourceTests(unittest.TestCase):
     def test_preflight_and_pressure(self):
         self.assertIsNone(self.reason())
         self.assertEqual(self.reason(ram_used=.60),'ram_headroom')
+        self.assertEqual(self.reason(ram_used=.60,cpu=99),'ram_headroom','CPU load must not hide an impossible cold-load budget')
         self.assertEqual(self.reason(ram_used=.65),'ram_pressure')
         self.assertEqual(self.reason(ram_used=.61,latched=True,model_loaded=True),'ram_pressure')
         self.assertEqual(self.reason(vram=None),'gpu_metrics_unavailable')
