@@ -111,7 +111,7 @@
     const uid=owner();
     if(desktop()){
       if(!verified)return false;
-      const result=await window.panthoriumDesktop.showNotification({id:item.id,silent});
+      const result=await window.panthoriumDesktop.showNotification({id:item.id,silent,title:String(item.title || 'Panthorium').slice(0,160),body:String(item.body || item.title || 'มีการแจ้งเตือนใหม่').slice(0,500)});
       if(!result.ok)throw Error('แสดงป๊อบอัพไม่สำเร็จ: '+result.error);
       return true;
     }
@@ -122,7 +122,7 @@
       const reg=await navigator.serviceWorker.register('/sw.js');
       await navigator.serviceWorker.ready;
       if(uid!==owner())return false;
-      if(!(await reg.getNotifications({tag:item.id})).length)await reg.showNotification('Panthorium',{body:'มีการแจ้งเตือนใหม่ เปิด Panthorium เพื่อดูรายละเอียด',tag:item.id,silent,data:{url:'/?notifications=1'},icon:'/panthorium-logo.png'});
+      if(!(await reg.getNotifications({tag:item.id})).length)await reg.showNotification(String(item.title || 'Panthorium').slice(0,160),{body:String(item.body || item.title || 'มีการแจ้งเตือนใหม่').slice(0,500),tag:item.id,silent,data:{url:'/?notifications=1'},icon:'/panthorium-logo.png'});
       return true;
     }
     return false;

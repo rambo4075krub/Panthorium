@@ -26,7 +26,7 @@ class ToolRegistry {
       });
     }
     this.register({ id: 'system.status', description: 'Read Sentinel runtime status', permission: 'system:read', risk: 'low', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async () => sentinel.status() });
-    this.register({ id: 'ai.providers', description: 'List configured AI providers and models', permission: 'chat', risk: 'low', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async () => sentinel.providerCatalog() });
+    this.register({ id: 'ai.providers', description: 'List configured AI providers and models', permission: 'chat', risk: 'low', mutates: false, argsSchema: {}, validateArgs: validateNoArgs, run: async ({user}) => sentinel.providerCatalog().filter(p => p.provider !== 'local' || require('./localAiAccess').localAiAllowed(user)).map(p => p.provider === 'gemini-live' ? {...p,provider:'Sentinel AI',model:'Sentinel AI'} : p) });
     this.register({
       id: 'ai.operations', description: 'Read current-user AI usage and provider health metrics', permission: 'chat', risk: 'low', mutates: false,
       argsSchema: { hours: 'integer 1..168 (optional)' },

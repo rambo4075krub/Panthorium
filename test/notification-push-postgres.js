@@ -26,7 +26,7 @@ const {NotificationPushService}=require('../services/notificationPushService');
     const restarted=new NotificationPushService({notifications:service,pool,sendWeb:async(sub,payload)=>sent.push({sub,payload:JSON.parse(payload)})});await restarted.init();assert.equal(restarted.vapid.publicKey,push.vapid.publicKey,'VAPID survives restart');
     await assert.rejects(push.subscribe(other,{subscription}),{code:'push_device_already_bound'});
     const notice=()=>service.publish({userId:'a',category:'social',type:'social.activity.message',title:'PRIVATE TITLE',body:'PRIVATE BODY',sourceId:randomBytes(10).toString('hex')});
-    await notice();await Promise.all([push.tick(),push.tick()]);assert.equal(sent.length,1,'new notice delivered once; old history not replayed');assert(!JSON.stringify(sent[0].payload).includes('PRIVATE'));
+    await notice();await Promise.all([push.tick(),push.tick()]);assert.equal(sent.length,1,'new notice delivered once; old history not replayed');assert.equal(sent[0].payload.title,'PRIVATE TITLE');assert.equal(sent[0].payload.body,'PRIVATE BODY');
     await restarted.tick();assert.equal(sent.length,1,'restart does not redeliver accepted jobs');
     await service.updateSettings({user,patch:{events:{social_message:false}}});await notice();await push.tick();assert.equal(sent.length,1);
     await service.updateSettings({user,patch:{events:{social_message:true},quietHours:{enabled:true,start:'00:00',end:'00:00'}}});await notice();await push.tick();assert.equal(sent.length,1);

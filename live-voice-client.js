@@ -180,16 +180,14 @@
     heading.id = dialog.getAttribute("aria-labelledby");
     heading.textContent = "อนุมัติการดำเนินการ";
     heading.style.cssText = "margin:0 0 8px;font-size:1.2rem";
+    const presentation = window.PanthoriumActionPresentation?.describe(frame) || { question: "ยืนยันการดำเนินการหรือไม่", details: [] };
     const description = document.createElement("p");
-    description.textContent = String(frame.description || "Panthorium ต้องการเรียกใช้เครื่องมือ").slice(0, 240);
-    const metadata = document.createElement("p");
-    metadata.textContent = `เครื่องมือ: ${String(frame.toolId || frame.name || "unknown").slice(0, 100)} · ความเสี่ยง: ${String(frame.risk || "medium").slice(0, 24)}${frame.mutates ? " · มีการเปลี่ยนแปลงข้อมูล" : ""}`;
-    const detailLabel = document.createElement("h3");
-    detailLabel.textContent = "รายละเอียดที่จะส่งให้เครื่องมือ";
-    detailLabel.style.cssText = "margin:16px 0 6px;font-size:1rem";
-    const details = document.createElement("pre");
-    details.textContent = JSON.stringify(frame.args ?? {}, null, 2).slice(0, 256000);
-    details.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;max-height:34vh;overflow:auto;padding:12px;border-radius:8px;background:#080d16;color:#e2e8f0;font-size:.85rem";
+    description.textContent = presentation.question;
+    const details = document.createElement("div");
+    details.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;max-height:34vh;overflow:auto";
+    for (const value of presentation.details) {
+      const line = document.createElement("p"); line.textContent = value; details.append(line);
+    }
     const note = document.createElement("p");
     note.textContent = frame.voiceChallenge?.phrase
       ? `ตรวจรายละเอียดก่อนยืนยัน หลังฟังรายการแล้วพูดว่า “${frame.voiceChallenge.phrase}” หรือกดอนุมัติ หากไม่ตรงให้ยกเลิก`
@@ -219,9 +217,9 @@
       approve.disabled = true;
       approve.style.opacity = ".55";
       emailConsent.addEventListener("change", () => { approve.disabled = !emailConsent.checked; approve.style.opacity = approve.disabled ? ".55" : "1"; });
-      dialog.append(heading, description, metadata, detailLabel, details, note, consentLabel, actions);
+      dialog.append(heading, description, details, note, consentLabel, actions);
     } else {
-      dialog.append(heading, description, metadata, detailLabel, details, note, actions);
+      dialog.append(heading, description, details, note, actions);
     }
     actions.append(cancel, approve);
     document.body.append(dialog);
@@ -232,14 +230,14 @@
       sendToolApproval(frame, approved);
       if (dialog.open) dialog.close();
       dialog.remove();
-      if (serverReady) setStatus("กำลังฟัง Gemini Live · แตะไมค์เพื่อจบ", "listening");
+      if (serverReady) setStatus("กำลังฟัง Sentinel AI · แตะไมค์เพื่อจบ", "listening");
     };
     approvalDialogs.set(approvalRequestId, { dialog, finish });
     cancel.addEventListener("click", () => finish(false));
     approve.addEventListener("click", () => finish(!reminderNeedsEmailConsent || emailConsent?.checked === true));
     dialog.addEventListener("cancel", event => { event.preventDefault(); finish(false); });
     dialog.addEventListener("click", event => { if (event.target === dialog) finish(false); });
-    setStatus("Gemini Live รอการยืนยันก่อนดำเนินการ", "processing");
+    setStatus("Sentinel AI รอการยืนยันก่อนดำเนินการ", "processing");
     try {
       if (typeof dialog.showModal === 'function') { dialog.showModal(); cancel.focus(); }
       else { dialog.setAttribute('open', ''); }
@@ -263,7 +261,7 @@
       serverReady = true;
       resumeSessionId = typeof frame.sessionId === 'string' ? frame.sessionId : null;
       resumeEnabled = frame.resumable === true;
-      setStatus("กำลังฟัง Gemini Live · แตะไมค์เพื่อจบ", "listening");
+      setStatus("กำลังฟัง Sentinel AI · แตะไมค์เพื่อจบ", "listening");
       return;
     }
     if (frame.type === "uiAction") {
@@ -284,7 +282,7 @@
     }
     if (frame.type === "toolResult") {
       if (frame.toolId === 'calendar.write' && frame.ok && !frame.error) window.dispatchEvent(new CustomEvent('panthorium:calendar-changed'));
-      if (frame.error) console.info("Gemini Live function result", frame.toolId || "unknown", frame.error);
+      if (frame.error) console.info("Sentinel AI function result", frame.toolId || "unknown", frame.error);
       if (frame.toolId?.startsWith('studio.') || frame.toolId?.startsWith('social.') || frame.toolId?.startsWith('notifications.') || frame.toolId?.startsWith('mailbox.')) {
         window.dispatchEvent(new CustomEvent('panthorium:ai-done', { detail: { source: 'gemini-live', toolResults: [frame] } }));
       }
@@ -300,12 +298,12 @@
     const parts = content.modelTurn?.parts || content.model_turn?.parts || [];
     for (const part of parts) {
       const audio = part.inlineData?.data || part.inline_data?.data;
-      if (audio) { setStatus("Gemini Live กำลังตอบ", "listening"); playPcm24k(audio); }
+      if (audio) { setStatus("Sentinel AI กำลังตอบ", "listening"); playPcm24k(audio); }
     }
     if (content.turnComplete || content.turn_complete) {
       inputTranscript = ""; outputTranscript = ""; chatUserRow = null; chatAssistantRow = null;
       outputSuppressed = false;
-      setStatus("Gemini Live พร้อมฟัง", "listening");
+      setStatus("Sentinel AI พร้อมฟัง", "listening");
     }
   }
 
@@ -333,16 +331,16 @@
     microphone = stream;
     socket = new WebSocket(backendWebSocketUrl());
     socket.binaryType = "arraybuffer";
-    setStatus("กำลังเชื่อม Gemini Live", "processing");
+    setStatus("กำลังเชื่อม Sentinel AI", "processing");
 
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("เชื่อม Gemini Live ไม่สำเร็จ")), 45000);
+      const timeout = setTimeout(() => reject(new Error("เชื่อม Sentinel AI ไม่สำเร็จ")), 45000);
       cancelConnection = () => { clearTimeout(timeout); reject(cancelled()); };
       const context = window.PanthoriumCloudApps?.voiceContext?.() || null;
       activeContextKey = JSON.stringify(context);
       socket.onopen = () => { if (generation !== sessionGeneration || !socket) return; socket.send(JSON.stringify({ type: "auth", token, protocolVersion: 1,
         ...(resumeSessionId && resumeEnabled ? { sessionId: resumeSessionId } : {}), context })); };
-      socket.onerror = () => { clearTimeout(timeout); reject(new Error("เชื่อม Gemini Live ไม่สำเร็จ")); };
+      socket.onerror = () => { clearTimeout(timeout); reject(new Error("เชื่อม Sentinel AI ไม่สำเร็จ")); };
       socket.onclose = event => {
         clearTimeout(timeout);
         if (event.code === 4402 && window.PanthoriumHybridVoice) {
@@ -350,7 +348,7 @@
           else { cleanup(); window.PanthoriumHybridVoice.start(); }
           return;
         }
-        if (!serverReady) reject(new Error(event.reason || "Gemini Live ปฏิเสธการเชื่อมต่อ"));
+        if (!serverReady) reject(new Error(event.reason || "Sentinel AI ปฏิเสธการเชื่อมต่อ"));
         else {
           const canResume = resumeEnabled && resumeSessionId && !approvalDialogs.size && reconnectAttempts < 2 && [1006, 1011, 1012, 1013].includes(event.code);
           if (canResume) {
@@ -366,7 +364,7 @@
               catch (error) { cleanup(); setStatus('กลับเข้าบทสนทนาไม่ได้ กรุณาเริ่มใหม่และตรวจสถานะงานเดิม', 'error'); }
               finally { starting = false; }
             }, reconnectAttempts * 500);
-          } else { cleanup(false); setStatus(event.reason || "Gemini Live จบการเชื่อมต่อ · แตะไมค์เพื่อเริ่มใหม่"); }
+          } else { cleanup(false); setStatus(event.reason || "Sentinel AI จบการเชื่อมต่อ · แตะไมค์เพื่อเริ่มใหม่"); }
         }
       };
       socket.onmessage = event => {
@@ -383,9 +381,9 @@
         handleModelFrame(frame);
         if (frame.error) {
           clearTimeout(timeout);
-          reject(new Error("Gemini Live ใช้งานไม่ได้ในขณะนี้"));
+          reject(new Error("Sentinel AI ใช้งานไม่ได้ในขณะนี้"));
           cleanup();
-          setStatus("Gemini Live ใช้งานไม่ได้ในขณะนี้ · แตะไมค์เพื่อลองใหม่", "error");
+          setStatus("Sentinel AI ใช้งานไม่ได้ในขณะนี้ · แตะไมค์เพื่อลองใหม่", "error");
         }
       };
     });
@@ -449,11 +447,11 @@
       if (generation !== sessionGeneration) return;
       if (policy && !policy.geminiAllowed) {
         if (policy.local.enabled) { await window.PanthoriumHybridVoice.start(); return; }
-        throw new Error('เครดิต Gemini ไม่พอ และ Qwen ปิดอยู่');
+        throw new Error('เครดิต Sentinel AI ไม่เพียงพอ กรุณาตรวจแพ็กเกจหรือเพิ่มเครดิต');
       }
       await openLiveSession(sessionGeneration);
     }
-    catch (error) { if (error.code === 'quota_exceeded' && window.PanthoriumHybridVoice) { cleanup(); await window.PanthoriumHybridVoice.start(); return; } if (error.code === "voice_session_cancelled") return; console.warn("Gemini Live voice session failed", error); cleanup(); setStatus(error.name === "NotAllowedError" || error.name === "SecurityError"
+    catch (error) { if (error.code === 'quota_exceeded' && window.PanthoriumHybridVoice) { const fallback = await window.PanthoriumHybridVoice.policy(); cleanup(); if (fallback?.local?.enabled) { await window.PanthoriumHybridVoice.start(); return; } error.message = 'เครดิต Sentinel AI ไม่เพียงพอ กรุณาตรวจแพ็กเกจหรือเพิ่มเครดิต'; } if (error.code === "voice_session_cancelled") return; console.warn("Sentinel AI voice session failed", error); cleanup(); setStatus(error.name === "NotAllowedError" || error.name === "SecurityError"
       ? "กรุณาอนุญาตไมโครโฟนให้ Panthorium Browser แล้วลองใหม่"
       : error.message || "เชื่อมเสียงสดไม่สำเร็จ", "error"); }
     finally { starting = false; }

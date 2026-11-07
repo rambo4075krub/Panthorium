@@ -130,12 +130,13 @@
     } catch (error) { showStatus(errorMessage(error), 'error'); setBusy(false); }
   }
   function renderAction() {
-    $('action-description').textContent = action.description || 'ตรวจสอบรายละเอียดของคำสั่งก่อนยืนยัน';
+    const presentation = window.PanthoriumActionPresentation?.describe(action) || { question: 'ยืนยันการดำเนินการหรือไม่', details: [] };
+    $('action-description').textContent = presentation.question;
     $('action-tool').textContent = action.toolId;
     $('action-state').textContent = stateLabels[action.state] || action.state || 'ไม่ทราบสถานะ';
     $('action-risk').textContent = ({low:'ต่ำ',medium:'ปานกลาง',high:'สูง',critical:'สูงมาก'})[action.risk] || action.risk || 'ไม่ระบุ';
     $('action-expiry').textContent = expiry(action.approvalExpiresAt);
-    $('action-args').textContent = JSON.stringify(action.args || {}, null, 2);
+    $('action-args').textContent = presentation.details.join('\n');
     $('paid-notice').hidden = !paidTools.has(action.toolId);
     const pending = action.state === 'awaiting_confirmation' || action.state === 'proposed';
     const expired = !Number.isFinite(Date.parse(action.approvalExpiresAt)) || Date.parse(action.approvalExpiresAt) <= Date.now();

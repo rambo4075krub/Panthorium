@@ -9,9 +9,9 @@ const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('nod
   vm.runInNewContext(fs.readFileSync('sw.js','utf8'),{self,indexedDB,URL,Promise,Response});
   async function push(data){let result;handlers.push({data:{json:()=>data},waitUntil:p=>result=p});await result;}
   const notice={v:1,id:'notice_'+'1'.repeat(64),binding,title:'PRIVATE',body:'secret',url:'https://evil.test'};
-  await push(notice);assert.equal(shown.length,1);assert.equal(shown[0].o.data.url,'/?notifications=1');assert(!JSON.stringify(shown).includes('PRIVATE'));assert(!JSON.stringify(shown).includes('secret'));
+  await push(notice);assert.equal(shown.length,1);assert.equal(shown[0].o.data.url,'/?notifications=1');assert.equal(shown[0].t,notice.title);assert.equal(shown[0].o.body,notice.body);
   await push({...notice,binding:'b'.repeat(32)});assert.equal(shown.length,1,'old-account binding cannot display');
   let clicked;handlers.notificationclick({notification:{close(){}},waitUntil:p=>clicked=p});await clicked;assert.deepEqual(opened,['/?notifications=1']);
   let revoked;handlers.message({source:{url:'https://panthorium.test/'},data:{type:'panthorium:push-binding',binding:null},waitUntil:p=>revoked=p});await revoked;await push(notice);assert.equal(shown.length,1);
-  console.log('Push worker: receives without a page, generic privacy, account binding, revocation and same-origin click passed');
+  console.log('Push worker: receives without a page, detailed content, account binding, revocation and same-origin click passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

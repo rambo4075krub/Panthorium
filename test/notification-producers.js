@@ -24,7 +24,7 @@ async function filesSuite() {
   } }) });
   const file = await files.upload(owner, 'PRIVATE-CONFIDENTIAL-FILENAME.txt', 'text/plain', Buffer.from('secret content'));
   assert.equal(events.length, 1); assert.equal(events[0].userId, owner); assert.equal(events[0].sourceId, file.id);
-  assert(!JSON.stringify(events).includes('PRIVATE-CONFIDENTIAL')); assert(!JSON.stringify(events).includes('secret content'));
+  assert(JSON.stringify(events).includes('PRIVATE-CONFIDENTIAL')); assert(!JSON.stringify(events).includes('secret content'));
   await assert.rejects(files.remove(other, file.id), /file_not_found/); assert.equal(events.length, 1);
   storageFails = true; await assert.rejects(files.upload(owner, 'failure.txt', 'text/plain', Buffer.from('test')), /files_storage_unavailable/);
   assert.equal(events.length, 1, 'failed storage never announces completion'); storageFails = false;
@@ -107,7 +107,7 @@ async function socialSuite() {
   assert(await social.notifications.systemNotificationVisible(b.sub,callNotice.sourceId));
   await repo.put({...call,status:'accepted'});
   assert.equal(await social.notifications.systemNotificationVisible(b.sub,callNotice.sourceId),false,'resolved call no longer exposes stale activity');
-  assert(!JSON.stringify(events).includes('PRIVATE-CONTENT')); assert(!JSON.stringify(events).includes('PRIVATE-NAME'));
+  assert.equal(notice.body,'PRIVATE-CONTENT'); assert.match(notice.title,/PRIVATE-NAME-0/); assert.equal(notice.userId,b.sub);
   assert(await social.notifications.systemNotificationVisible(b.sub, notice.sourceId));
   await write(a, 'delete', { recordId: message.id });
   assert.equal(await social.notifications.systemNotificationVisible(b.sub, notice.sourceId), false, 'deleted source is hidden');

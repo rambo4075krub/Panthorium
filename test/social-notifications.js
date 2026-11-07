@@ -33,7 +33,7 @@ async function suite(repo) {
   assert(await find(a, "thread-accepted")); assert(!await find(b, "thread-request"));
   const message = (await write(a, "message", { recordId: thread.id, text: "private content stays in chat" })).record;
   const messageNotice = await find(b, "message");
-  assert(!JSON.stringify(messageNotice).includes(message.text));
+  assert.equal(messageNotice.preview, message.text);
   await service.notifications.read(b.sub, [messageNotice.id]);
   assert.equal((await repo.get(message.id)).readAt, undefined, "acknowledging alert does not send read receipt");
   const second = (await write(a, "message", { recordId: thread.id, text: "two" })).record;

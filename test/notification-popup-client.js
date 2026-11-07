@@ -8,11 +8,11 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{JSDOM}=require
   Object.defineProperty(w.navigator,'serviceWorker',{value:{register:async()=>reg,ready:Promise.resolve(reg),addEventListener(){}}});
   w.eval(fs.readFileSync('notification-push-client.js','utf8'));
   const item={id:'notice_'+'1'.repeat(64),title:'PRIVATE',body:'PRIVATE'};
-  assert(await w.PanthoriumPush.show(item,true));assert.equal(shown.length,1);assert(shown[0].silent);assert(!JSON.stringify(shown).includes('PRIVATE'));
+  assert(await w.PanthoriumPush.show(item,true));assert.equal(shown.length,1);assert(shown[0].silent);assert.equal(shown[0].title,item.title);assert.equal(shown[0].body,item.body);
   await w.PanthoriumPush.show(item);assert.equal(shown.length,1,'foreground and remote push share the notification tag');assert.equal(prompts,0);
   w.Notification.permission='denied';assert.equal(await w.PanthoriumPush.show(item),false);assert.equal(shown.length,1);
   let enabled=false,account='';w.panthoriumDesktop={isElectron:true,setBrowserAccount:async uid=>{account=uid;return {ok:true};},setNotificationBackground:async value=>{enabled=value;return {ok:true};},showNotification:async()=>({ok:true})};
   await w.PanthoriumPush.enable();assert(enabled);assert.equal(account,'a');assert(w.PanthoriumPush.active(),'desktop does not require unsupported Chromium Web Push');
   await w.PanthoriumPush.show(item);await w.PanthoriumPush.disconnect();assert(!enabled);assert(!w.PanthoriumPush.active());
-  w.close();console.log('Popup client: mobile service-worker display, generic content, deduplication, denied permission and desktop native opt-in passed');
+  w.close();console.log('Popup client: mobile service-worker display, detailed content, deduplication, denied permission and desktop native opt-in passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -18,8 +18,10 @@ function localInput(question, sources) {
 
 function createMailboxCompletion(gateway) {
   return async ({ user, provider, question, sources }) => {
+    const localAllowed = require('../localAiAccess').localAiAllowed(user);
+    if (provider === 'local' && !localAllowed) return {ok:false,error:'local_access_denied'};
     let result;
-    for (const selected of provider ? [provider] : ['gemini-live', 'local']) {
+    for (const selected of provider ? [provider] : (localAllowed ? ['gemini-live', 'local'] : ['gemini-live'])) {
       const data = selected === 'local' ? localInput(question, sources) : { question, sources };
       if (!data) { result = { ok: false, error: 'mailbox_local_context_too_large' }; continue; }
       result = await gateway.complete({

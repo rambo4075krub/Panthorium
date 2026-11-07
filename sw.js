@@ -66,8 +66,8 @@ self.addEventListener('push',event=>{
   event.waitUntil((async()=>{
     let data;try{data=event.data.json();}catch{return;}
     if(data?.v!==1||!/^notice_[a-f0-9]{64}$/.test(data.id||'')||data.binding!==await pushBinding())return;
-    await self.registration.showNotification('Panthorium',{
-      body:'มีการแจ้งเตือนใหม่ เปิด Panthorium เพื่อดูรายละเอียด',
+    await self.registration.showNotification(typeof data.title==='string' ? data.title.slice(0,160) : 'Panthorium',{
+      body:typeof data.body==='string' ? data.body.slice(0,500) : 'มีการแจ้งเตือนใหม่',
       tag:data.id,silent:data.silent===true,data:{url:'/?notifications=1'},icon:'/panthorium-logo.png'
     });
   })());
