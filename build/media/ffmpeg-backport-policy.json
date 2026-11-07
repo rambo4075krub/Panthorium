@@ -15,9 +15,11 @@
       "architecture": "amd64",
       "sourceLockSha256": "097c1337f23a4333cb7cd716c0f4227fb1760185f3256c842ed413aa5aea292c",
       "binaries": {
-        "ffmpeg": "50f919add9fc9c8f275460f05305d6c2881cc22435c6dfb39442921291499b58",
-        "ffprobe": "d5e68106960b60d0c4b69eea3a3a490379f76cb02267314f4e3b8416480d41eb"
-      }
+        "ffmpeg": "2c5ff332843c9d5136d8a0e6e9d83524fe72e89d3032b961ef1f0e7a8c8c605d",
+        "ffprobe": "6ea885ae36119ff1bc114b7cce0935384ad0d2db8bde09dd3a2b098d943b5cd6"
+      },
+      "reviewedAt": "2026-11-07",
+      "evidenceRun": "https://github.com/rambo4075krub/Panthorium/actions/runs/42361475688"
     },
     "speaker": {
       "os": "linux",
