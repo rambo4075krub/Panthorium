@@ -13,7 +13,9 @@ function authUrl(provider) {
   });
 }
 (async () => {
-  for (const provider of ['google', 'microsoft']) assert(validMailboxOAuthUrl(authUrl(provider), origin));
+  assert(validMailboxOAuthUrl(authUrl('google'), origin));
+  const ms = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?' + new URLSearchParams({client_id:'old-client',redirect_uri:origin+'/api/mailbox/oauth/microsoft/callback',scope:'openid email offline_access User.Read Mail.ReadWrite Mail.Send',response_type:'code',state:'a'.repeat(43),code_challenge:'b'.repeat(43),code_challenge_method:'S256',prompt:'consent',access_type:'offline'});
+  assert.equal(validMailboxOAuthUrl(ms,origin),false,'retired Microsoft flow cannot launch from native bridge');
   const good = authUrl('google');
   for (const bad of [
     'file:///C:/Windows/System32/calc.exe', 'javascript:alert(1)', 'https://evil.example/',

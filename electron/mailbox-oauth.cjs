@@ -1,8 +1,7 @@
 'use strict';
 
 const providers = {
-  google: { origin: 'https://accounts.google.com', path: '/o/oauth2/v2/auth', scope: 'openid email https://www.googleapis.com/auth/gmail.modify' },
-  microsoft: { origin: 'https://login.microsoftonline.com', path: '/common/oauth2/v2.0/authorize', scope: 'openid email offline_access User.Read Mail.ReadWrite Mail.Send' }
+  google: { origin: 'https://accounts.google.com', path: '/o/oauth2/v2/auth', scope: 'openid email https://www.googleapis.com/auth/gmail.modify' }
 };
 const keys = new Set(['client_id', 'redirect_uri', 'response_type', 'scope', 'state', 'code_challenge', 'code_challenge_method', 'prompt', 'login_hint', 'access_type']);
 
