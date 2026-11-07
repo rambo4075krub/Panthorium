@@ -1,11 +1,23 @@
 import asyncio
 import unittest
-from work_queue import WorkQueue, QueueError, resource_reason
+from work_queue import WorkQueue, QueueError, resource_reason, admission_ready, memory_budget
 
 async def yes(): return True
 async def no(): return False
 
 class QueueTests(unittest.IsolatedAsyncioTestCase):
+    async def test_memory_denial_returns_immediately_and_releases_account(self):
+        q=WorkQueue(wait_seconds=45)
+        async def blocked():return admission_ready({'ready':False,'reason':'ram_headroom'})
+        async def request():
+            async with q.lease('a',blocked,no):self.fail('blocked model started')
+        with self.assertRaises(QueueError) as caught:
+            await asyncio.wait_for(request(),timeout=.5)
+        self.assertEqual(caught.exception.code,'local_resource_ram_headroom')
+        self.assertEqual(caught.exception.status,503)
+        self.assertEqual(q.status()['waiting'],0)
+        async with q.lease('a',yes,no):self.assertTrue(q.status('a')['yourRunning'])
+
     async def test_fifo_isolation_bounds_and_cleanup(self):
         q=WorkQueue(interval=.001)
         release=asyncio.Event(); entered=asyncio.Event(); order=[]
@@ -56,12 +68,31 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order,['a','b'])
 
 class ResourceTests(unittest.TestCase):
+    def test_budget_reports_shortfall_with_unchanged_limit(self):
+        gib=1024**3
+        b=memory_budget(ram_used=.625,total=16*gib,model_loaded=False,voice_loaded=False)
+        self.assertAlmostEqual(b['ramHeadroomBytes']/gib,.4,places=8)
+        self.assertEqual(b['ramRequiredAdditionalBytes'],6.5*gib)
+        self.assertAlmostEqual(b['ramShortfallBytes']/gib,6.1,places=8)
+        b=memory_budget(ram_used=.7,total=16*gib,model_loaded=False,voice_loaded=False)
+        self.assertEqual(b['ramHeadroomBytes'],0)
+        self.assertAlmostEqual(b['ramShortfallBytes']/gib,7.3,places=8)
+        b=memory_budget(ram_used=10/32,total=32*gib,model_loaded=False,voice_loaded=False)
+        self.assertEqual(b['ramShortfallBytes'],0)
+
+    def test_memory_and_monitoring_fail_closed_but_cpu_can_wait(self):
+        for reason in ['ram_pressure','vram_pressure','gpu_metrics_unavailable','resource_monitor_unavailable','model_not_installed']:
+            with self.assertRaises(QueueError):admission_ready({'ready':False,'reason':reason})
+        self.assertFalse(admission_ready({'ready':False,'reason':'cpu_pressure'}))
+        self.assertTrue(admission_ready({'ready':True,'reason':None}))
+
     def reason(self,**kw):
         values=dict(ram_used=.20,total=16*1024**3,available=11.2*1024**3,local_ram=.3*1024**3,vram=.1,cpu=20,model_loaded=False,voice_loaded=False)
         values.update(kw); return resource_reason(**values)
     def test_preflight_and_pressure(self):
         self.assertIsNone(self.reason())
         self.assertEqual(self.reason(ram_used=.60),'ram_headroom')
+        self.assertEqual(self.reason(ram_used=.60,cpu=99),'ram_headroom','CPU load must not hide an impossible cold-load budget')
         self.assertEqual(self.reason(ram_used=.65),'ram_pressure')
         self.assertEqual(self.reason(ram_used=.61,latched=True,model_loaded=True),'ram_pressure')
         self.assertEqual(self.reason(vram=None),'gpu_metrics_unavailable')

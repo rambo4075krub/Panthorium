@@ -41,9 +41,11 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
                     if r.status_code==200:self.assertEqual(r.content,str(i).encode())
                 self.assertEqual(maximum,1);self.assertFalse(broker.queue.status()['running'])
                 self.assertEqual(broker.queue.status()['waiting'],0)
-            with patch.object(broker,'queue',WorkQueue(wait_seconds=.025,interval=.001)),patch.object(broker,'snapshot',return_value={'ready':False,'reason':'ram_headroom'}),patch.object(broker,'ensure_model') as ensure:
-                response=await client.post('/v1/chat/completions',json={'model':'panthorium-local','stream':False},headers=headers('blocked'))
-                self.assertEqual(response.status_code,503);self.assertEqual(response.json()['detail'],'local_queue_timeout');ensure.assert_not_called()
+            with patch.object(broker,'queue',WorkQueue(wait_seconds=45)),patch.object(broker,'snapshot',return_value={'ready':False,'reason':'ram_headroom'}),patch.object(broker,'ensure_model') as ensure:
+                response=await asyncio.wait_for(client.post('/v1/chat/completions',json={'model':'panthorium-local','stream':False},headers=headers('blocked')),timeout=1)
+                self.assertEqual(response.status_code,503);self.assertEqual(response.json()['detail'],'local_resource_ram_headroom');ensure.assert_not_called()
+                self.assertEqual(response.headers['retry-after'],'10')
+                self.assertEqual(broker.queue.status()['waiting'],0)
                 self.assertTrue((await client.get('/health')).json()['ok'])
             print(f'ASGI synthetic 20-account burst: admitted={len(good)}, rejected={20-len(good)}, peak_workers={maximum}; resource pause did not start model')
 

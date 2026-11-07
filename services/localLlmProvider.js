@@ -65,7 +65,11 @@ class LocalLlmProvider {
       const response = await fetch(this.url, {method:'POST',redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(hybrid?195000:150000)]):AbortSignal.timeout(hybrid?195000:150000),headers:{'Content-Type':'application/json',...(hybrid?{'X-Panthorium-Account':accountKey(userId)}:{})},body:JSON.stringify({model:this.model,messages:[{role:'system',content:prompt},...messages],temperature:thinking?0.6:0.7,top_p:thinking?0.95:0.8,top_k:20,min_p:0,presence_penalty:1.5,max_tokens:thinking?3072:hybrid?768:160,stream:false,chat_template_kwargs:{enable_thinking:thinking},...(selected.length?{tools:selected,tool_choice:toolChoice,parallel_tool_calls:false}:{})})});
       if (!response.ok) {
         if(response.status===429) throw new Error('local_llm_busy');
-        if(response.status===503) throw new Error('local_resource_unavailable');
+        if(response.status===503) {
+          let code;
+          try{code=require('./localAiResources').resourceCode((await response.json()).detail);}catch{}
+          throw new Error(code||'local_resource_unavailable');
+        }
         throw new Error('local_llm_http_'+response.status);
       }
       const result = await response.json();

@@ -2,7 +2,9 @@
 const login = document.querySelector('#login');
 const chat = document.querySelector('#chat');
 const output = document.querySelector('output');
+const availability = document.querySelector('#availability');
 let token = '';
+function showAvailability(local){availability.hidden=!local?.enabled;availability.textContent=local?.message||'';}
 let pending;const cancelButton=document.querySelector('#cancel');cancelButton.onclick=()=>pending?.abort();
 login.onsubmit = async event => {
   event.preventDefault(); login.querySelector('button').disabled = true;
@@ -14,7 +16,7 @@ login.onsubmit = async event => {
     const accessResponse=await fetch('/api/hybrid/status',{headers:{Authorization:'Bearer '+token}});
     const access=await accessResponse.json();
     if(!accessResponse.ok||!access.local?.enabled){token='';throw Error('บริการนี้เปิดเฉพาะแอดมินและบัญชีเจ้าของระบบที่ได้รับสิทธิ์');}
-    login.reset(); login.hidden = true; chat.hidden = false; output.textContent = ''; chat.elements.message.focus();
+    login.reset(); login.hidden = true; chat.hidden = false; output.textContent = '';showAvailability(access.local); chat.elements.message.focus();
   } catch (error) { output.textContent = error.message; }
   finally { login.querySelector('button').disabled = false; }
 };
@@ -24,10 +26,10 @@ chat.onsubmit = async event => {
   try {
     const response = await fetch('/api/local/chat',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},signal:AbortSignal.any([pending.signal,AbortSignal.timeout(210000)]),body:JSON.stringify({message:chat.elements.message.value})});
     const result = await response.json();
-    if (response.status === 401) { token=''; chat.hidden=true; login.hidden=false; throw Error('กรุณาเข้าสู่ระบบอีกครั้ง'); }
-    if(response.status===403){chat.hidden=true;login.hidden=false;throw Error('บัญชีนี้ไม่มีสิทธิ์ใช้บริการ AI ภายใน');}
-    if (!response.ok) throw Error(response.status===429?'Qwen กำลังตอบคำขออื่น กรุณาลองอีกครั้ง':'Qwen พักรับงานเนื่องจากคิวหรือทรัพยากรไม่พร้อม กรุณาลองใหม่ภายหลัง ไม่หักเครดิต');
+    if (response.status === 401) { token=''; chat.hidden=true; login.hidden=false;showAvailability(null); throw Error('กรุณาเข้าสู่ระบบอีกครั้ง'); }
+    if(response.status===403){token='';chat.hidden=true;login.hidden=false;showAvailability(null);throw Error('บัญชีนี้ไม่มีสิทธิ์ใช้บริการ AI ภายใน');}
+    if (!response.ok) throw Error(String(result.error||'').startsWith('local_resource_')&&typeof result.text==='string'?result.text:response.status===429?'Qwen กำลังตอบคำขออื่น กรุณาลองอีกครั้ง':'Qwen พักรับงานเนื่องจากคิวหรือทรัพยากรไม่พร้อม กรุณาลองใหม่ภายหลัง ไม่หักเครดิต');
     output.textContent = result.text;
   } catch(error) { output.textContent=error.name==='AbortError'?'ยกเลิกคำขอแล้ว':error.message; }
-  finally {finished=true;clearInterval(timer);pending=null;cancelButton.hidden=true;chat.querySelector('button').disabled=false;}
+  finally {finished=true;clearInterval(timer);pending=null;cancelButton.hidden=true;chat.querySelector('button').disabled=false;if(token)try{const r=await fetch('/api/hybrid/status',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(2000)});if(r.ok)showAvailability((await r.json()).local);}catch{}}
 };

@@ -121,3 +121,13 @@ cold-load budget fits below 65%; being barely below 65% is insufficient. Do not
 relax guards, close user applications or label mocked protocol tests as live model
 results. Record actual answer, tool and speech checks separately when resources
 permit them. Both direct startup and broker requests enforce admission.
+
+Resource denials now return immediately with an allowlisted reason instead of
+waiting 45 seconds in an idle queue. Busy admitted work still uses the bounded
+FIFO queue; CPU pressure may recover during that wait. RAM/VRAM limits, the
+6.5 GiB conservative cold-load estimate and account permissions are unchanged.
+The private local status page shows current RAM, the limit and the estimated
+additional headroom needed. These are admission estimates, not measured 8B peaks.
+Only authorized local users receive those host metrics. A resource refusal is
+non-billable and never grants permission to switch an explicit local request to
+the paid provider.
