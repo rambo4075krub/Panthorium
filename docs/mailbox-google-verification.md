@@ -12,7 +12,7 @@ Prepared 2026-11-07. This is a preparation record, not evidence of Google approv
 - Scopes: OpenID `openid`, email, and `https://www.googleapis.com/auth/gmail.modify`.
 - Separate standard and AI Web clients exist; callback is `/api/mailbox/oauth/google/callback`.
 - Verification Center says verification is not required because the app is Testing. This is not a successful brand or restricted-scope review.
-- Terms URL and logo fields are empty. Existing service terms are publicly rendered at https://panthorium.net/privacy#terms-of-use ; this URL has not yet been saved to Branding.
+- The logo field is empty. The existing public terms page and its anchor were verified without login; https://panthorium.net/privacy#terms-of-use was saved to Branding and confirmed with the “Branding changes saved!” signal. Testing status was preserved.
 - Audience has a Publish app control. It was not clicked. No submission form, demo-video field, or final attestations were inspected.
 
 ## Prepared scope justification
@@ -28,7 +28,7 @@ This draft must be checked against the actual review form and current deployed b
 ## Evidence still needed
 
 1. Confirm ownership of `panthorium.net` in Google Search Console using an appropriate project owner/editor. An authorized-domain entry alone is insufficient evidence.
-2. Check the public homepage, privacy and terms on an unauthenticated browser. Privacy includes a Google API Services User Data Policy / Limited Use statement. Save the terms URL to Branding when the page has been verified.
+2. Check the public homepage, privacy and terms on an unauthenticated browser. Privacy includes a Google API Services User Data Policy / Limited Use statement. The terms URL has been saved to Branding; repeat the public-page check after material changes.
 3. Record a real walkthrough using explicitly permitted test data: application identity and client IDs; standard OAuth consent; separate AI disclosure and OAuth consent; search/read; summary/attachment processing; exact-action preview and cancellation; independent AI disconnect; reconnect and data deletion controls. Show the browser address bar and scope use. Never show credentials, tokens, unrelated real email or personal attachments. A synthetic unit-test recording is not a substitute for the real OAuth walkthrough.
 4. Create an accessible demo-video link. **No demo video or URL has been created yet.**
 5. Review the actual production/verification forms, copy the accurate scope justification, and supply the requested contact and evidence fields. Publishing and submitting are separate from approval; do not present either as completed verification.
