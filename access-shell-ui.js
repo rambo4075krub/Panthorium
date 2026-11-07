@@ -27,7 +27,8 @@
       body[data-panthorium-role="user"] #btn-settings-quick,body[data-panthorium-role="guest"] #btn-settings-quick{display:none!important;}
       body[data-panthorium-role="guest"][data-panthorium-browser="desktop"] #sm-apps{display:block!important;}
       #start-menu .sm-footer{display:flex;gap:8px;}
-      #start-menu .sm-footer button{flex:1;min-height:38px;}
+      #start-menu .sm-footer button{flex:1;min-width:0;min-height:44px;}
+      #start-menu .sm-footer .browser-action{width:auto;margin:0;padding:10px;}
     `;
     el.textContent += restrictedLaunchers.map(id => 'body[data-panthorium-role="guest"] #' + id).concat('body[data-panthorium-role="guest"] [data-production-intelligence="1"]').join(',') + '{display:none!important;}';
     document.head.appendChild(el);
@@ -66,10 +67,11 @@
     const button = document.getElementById('panthorium-browser-update');
     if (!button) return;
     button.disabled = installing || !!checking;
-    if (!button.querySelector('[data-update-label]')) button.innerHTML = '<span data-update-label>อัพเดท</span><small data-update-message role="status" aria-live="polite"></small>';
+    if (!button.querySelector('[data-update-label]')) button.innerHTML = '<span data-update-label>📥 อัพเดท</span><small data-update-message role="status" aria-live="polite"></small>';
     const web = window.PanthoriumUpdates?.state?.();
-    const message = installing ? 'กำลังเตรียมอัพเดท' : checking ? 'กำลังตรวจสอบเวอร์ชั่น' : web?.available ? 'มีเวอร์ชั่นเว็บใหม่พร้อมอัพเดท' : !updateStatus?.ok ? 'ตรวจสอบไม่สำเร็จ กดเพื่อลองอัพเดท' : updateStatus.storeCheck ? 'ตรวจสอบและอัพเดทผ่าน Google Play' : updateStatus.available ? 'มีเวอร์ชั่นใหม่พร้อมอัพเดท' : 'เป็นเวอร์ชั่นล่าสุดแล้ว';
+    const message = installing ? 'กำลังเตรียมอัพเดท' : checking ? 'กำลังตรวจสอบเวอร์ชั่น' : web?.available ? 'มีเวอร์ชั่นเว็บใหม่พร้อมอัพเดท' : !updateStatus?.ok ? 'ตรวจสอบไม่สำเร็จ กดเพื่อลองอัพเดท' : updateStatus.storeCheck ? '' : updateStatus.available ? 'มีเวอร์ชั่นใหม่พร้อมอัพเดท' : 'เป็นเวอร์ชั่นล่าสุดแล้ว';
     button.querySelector('[data-update-message]').textContent = message;
+    button.querySelector('[data-update-message]').hidden = !message;
     button.dataset.state = installing ? 'installing' : !updateStatus?.ok ? 'unknown' : updateStatus.available ? 'available' : 'current';
     button.title = 'อัพเดท — ' + message;
   }
@@ -215,7 +217,8 @@
       // Every installed edition uses the same update controls.
       document.getElementById('panthorium-browser-download')?.remove();
       let update = document.getElementById('panthorium-browser-update');
-      if (!update) { update = document.createElement('button'); update.id = 'panthorium-browser-update'; update.type = 'button'; update.className = 'browser-action'; update.onclick = updateBrowser; menu.appendChild(update); }
+      if (!update) { update = document.createElement('button'); update.id = 'panthorium-browser-update'; update.type = 'button'; update.className = 'browser-action'; update.onclick = updateBrowser; (footer || menu).appendChild(update); }
+      if (footer && update.parentElement !== footer) footer.appendChild(update);
       renderUpdateStatus();
       refreshUpdateStatus();
     } else {

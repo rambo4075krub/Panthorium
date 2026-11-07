@@ -40,13 +40,13 @@ function renderAgentConsent(content,active){
  else if(!agentConnectionId){
   section.append(el('p','เชื่อมต่อเพิ่มเติมเพื่อให้ Sentinel อ่าน สรุป วิเคราะห์ไฟล์แนบ และจัดการอีเมลตามคำสั่งเสียงของคุณ'));
   section.append(button('เชื่อมต่อ AI และเสียง',()=>{
-   section.replaceChildren(el('h3','อนุญาตการใช้อีเมลกับ AI และเสียง'),el('p','ข้อมูลอีเมลและไฟล์แนบที่คุณสั่งใช้งานจะประมวลผลด้วย Gemini ผ่าน Google Cloud หรือ Qwen ของ Panthorium ตามโหมดที่เลือก ไม่ใช้ฝึกโมเดลทั่วไป การส่ง ตอบกลับ ลบ หรือย้าย ต้องทบทวนและยืนยันแต่ละคำสั่ง คุณถอนการเชื่อมต่อ AI ได้ภายหลัง'));
+   section.replaceChildren(el('h3','อนุญาตการใช้อีเมลกับ AI และเสียง'),el('p','Sentinel AI ประมวลผลอีเมลและไฟล์แนบที่คุณสั่งใช้งานผ่าน Google Cloud หรือระบบภายในเฉพาะบัญชีที่ได้รับสิทธิ์ ไม่ใช้ฝึกโมเดลทั่วไป การส่ง ตอบกลับ ลบ หรือย้าย ต้องทบทวนและยืนยันแต่ละคำสั่ง คุณถอนการเชื่อมต่อ AI ได้ภายหลัง'));
    section.append(button('ดำเนินการต่อไปยังผู้ให้บริการ',()=>connectMailbox(active.provider,content,'agent')),button('ยกเลิก',render));
   }));
  }else{
   section.append(el('p','เชื่อมต่อ AI และเสียงแล้ว ลองพูด “สรุปอีเมลล่าสุดของฉัน” หรือ “ค้นหาอีเมลจาก…”'));
   const label=el('label','ผู้ประมวลผลสรุปอีเมล'),select=el('select');select.dataset.aiProvider='';
-  for(const [value,text]of [['','อัตโนมัติ (Gemini แล้ว Qwen)'],['local','Qwen ในระบบ'],['gemini-live','Gemini — ใช้เครดิตของบัญชี']]){const o=el('option',text);o.value=value;select.append(o);}label.append(select);section.append(label);
+  for(const [value,text]of [['','Sentinel AI · อัตโนมัติ'],['gemini-live','Sentinel AI · ใช้เครดิตของบัญชี'],...(status.localAiAllowed ? [['local','Qwen 4B · สิทธิ์บริการภายใน']] : [])]){const o=el('option',text);o.value=value;select.append(o);}label.append(select);section.append(label);
   section.append(button('ถอนเฉพาะการเชื่อมต่อ AI และเสียง',()=>{section.replaceChildren(el('p','หยุดการเข้าถึงอีเมลผ่าน AI และเสียง? กล่องอีเมลปกติยังใช้ได้'));section.append(button('ยืนยันถอนการเชื่อมต่อ AI',async()=>{await api('connection?purpose=agent','DELETE');stop();await render();}),button('ยกเลิก',render));}));
  }
  content.append(section);

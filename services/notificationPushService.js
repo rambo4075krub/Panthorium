@@ -115,7 +115,7 @@ class NotificationPushService {
       if(!n||n.readAt||this.now()-new Date(n.createdAt).getTime()>86400000||!catalog.enabled(settings,n)||!settings.channels.browser||quiet(settings,this.now()))return finish('suppressed');
       if(this.authorizeOwner && !await this.authorizeOwner(d.user_id,d.subscription.accountVersion||0))return finish('suppressed');
       if((n.type==='social.activity'||n.type.startsWith('social.activity.')) && await this.notifications.socialVisibility?.(d.user_id,n.sourceId)!==true)return finish('suppressed');
-      const payload={v:1,binding:d.binding,id:n.id,title:'Panthorium',body:'มีการแจ้งเตือนใหม่ เปิด Panthorium เพื่อดูรายละเอียด',url:'/?notifications=1',silent:!settings.channels.sound};
+      const payload={v:1,binding:d.binding,id:n.id,title:settings.privacyPreview === false ? 'Panthorium' : String(n.title || 'Panthorium').slice(0,160),body:settings.privacyPreview === false ? 'มีการแจ้งเตือนใหม่ เปิด Panthorium เพื่อดูรายละเอียด' : String(n.body || n.title || 'มีการแจ้งเตือนใหม่').slice(0,500),url:'/?notifications=1',silent:!settings.channels.sound};
       if(d.subscription.kind==='fcm') {
         if(!this.fcmProject)throw Error('native_push_unavailable');
         const channelId=settings.channels.sound?'panthorium_alerts':d.subscription.popupChannels===2?'panthorium_popups_silent_v2':'panthorium_silent';

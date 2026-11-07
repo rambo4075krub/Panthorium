@@ -68,6 +68,7 @@
     @media(max-width:480px) { .shell { padding:24px 17px 38px; } .brand { margin-bottom:32px; } .card { padding:20px 17px; } .actions .button { flex:1; } dl { grid-template-columns:82px minmax(0,1fr); gap:9px 12px; } .endpoint { align-items:stretch; } .endpoint .button { padding:8px 12px; } }
     @media(prefers-reduced-motion:no-preference) { button { transition:background .15s ease; } }
   </style>
+  <script src="/action-presentation.js" defer></script>
   <script src="/mcp-connect.js" defer></script>
 </head>
 <body>
@@ -101,10 +102,10 @@
     <section id="action-panel" class="card" hidden aria-labelledby="action-title">
       <h2 id="action-title">ตรวจสอบคำสั่งจาก ChatGPT</h2>
       <p id="action-description"></p>
-      <dl><dt>เครื่องมือ</dt><dd id="action-tool"></dd><dt>สถานะ</dt><dd id="action-state"></dd><dt>ระดับความเสี่ยง</dt><dd id="action-risk"></dd><dt>ยืนยันภายใน</dt><dd id="action-expiry"></dd></dl>
+      <dl><dt hidden>เครื่องมือ</dt><dd id="action-tool" hidden></dd><dt>สถานะ</dt><dd id="action-state"></dd><dt hidden>ระดับความเสี่ยง</dt><dd id="action-risk" hidden></dd><dt>ยืนยันภายใน</dt><dd id="action-expiry"></dd></dl>
       <div id="paid-notice" class="notice" hidden><strong>คำสั่งนี้ใช้บริการ AI ที่มีค่าใช้จ่าย</strong><p>จะใช้โควตาหรือคิดค่าบริการตามบัญชี Panthorium และผู้ให้บริการที่ตั้งไว้ ระบบยังไม่ได้แจ้งยอดเงินที่แน่นอนสำหรับคำสั่งนี้ หากไม่ต้องการใช้บริการแบบเสียเงิน ให้ยกเลิกคำสั่งนี้</p></div>
-      <h3>รายละเอียดที่จะส่งให้เครื่องมือ</h3>
-      <pre id="action-args" tabindex="0"></pre>
+      <h3>รายละเอียดการดำเนินการ</h3>
+      <div id="action-args" style="white-space:pre-wrap;overflow-wrap:anywhere" tabindex="0"></div>
       <div id="action-buttons" class="actions"><button id="confirm-action" class="button primary" type="button">ยืนยันคำสั่งนี้</button><button id="cancel-action" class="button" type="button">ยกเลิกคำสั่ง</button></div>
       <p id="action-followup" class="small muted" hidden></p>
     </section>

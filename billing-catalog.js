@@ -27,7 +27,7 @@
     return Math.max(0, total - spent);
   }
   const serviceDescription = 'Panthorium คือบริการผู้ช่วย AI ผ่านเว็บไซต์และแอป สำหรับถามตอบ สรุปข้อมูล ช่วยร่างข้อความ และสั่งงานเครื่องมือที่เปิดใช้งาน โดยพิมพ์ข้อความหรือพูดผ่านไมโครโฟน แล้วรับคำตอบเป็นข้อความหรือเสียง';
-  const usageExplanation = 'คิดเครดิตเฉพาะ Gemini Live API เท่านั้น การประมวลผลด้วย Qwen 4B และเสียงถอด/สร้างในเซิร์ฟเวอร์ไม่หักเครดิต Qwen อาจช้าลง พักรับงาน หรือมีความสามารถลดลงตามทรัพยากรเครื่อง ไม่รับประกันว่าจะพร้อมใช้ตลอดเวลา ข้อความที่ส่งให้ AI หมายถึงคำถาม คำสั่ง และบริบทที่ระบบส่งไปประมวลผล ส่วนคำตอบจาก AI คือข้อความที่ระบบสร้างกลับมา โทเคนเป็นหน่วยย่อยของข้อความ ไม่ใช่จำนวนข้อความหรือจำนวนคำตายตัว โควต้านี้ไม่ใช่แพ็กเกจ SMS ค่าโทรศัพท์ หรือการส่งข้อความโฆษณา';
+  const usageExplanation = 'Sentinel AI ใช้เครดิตร่วมสำหรับเสียงและข้อความตามแพ็กเกจของบัญชี เมื่อเครดิตไม่พอ ต้องรอรอบสิทธิ์ใหม่หรือเพิ่มเครดิตก่อนใช้งานต่อ ข้อความที่ส่งให้ AI รวมคำถาม คำสั่ง และบริบทที่จำเป็น โทเคนเป็นหน่วยย่อยของข้อความ ไม่ใช่จำนวนข้อความหรือจำนวนคำตายตัว โควต้านี้ไม่ใช่แพ็กเกจ SMS ค่าโทรศัพท์ หรือการส่งข้อความโฆษณา';
   const conversionDetails = Object.freeze(['ข้อความที่ส่งให้ AI 1 โทเคน = 1 เครดิต', 'คำตอบข้อความจาก AI 1 โทเคน = 5 เครดิต', 'เสียงที่ส่งให้ AI 1 วินาที = 100 เครดิต', 'เสียงคำตอบจาก AI 1 วินาที = 500 เครดิต']);
   const refundSummary = 'ไม่มีหักเงินต่ออายุอัตโนมัติ หากชำระซ้ำ ไม่ได้รับสิทธิ์ หรือบริการมีปัญหา ติดต่อ account@panthorium.net พร้อมเลขคำสั่งซื้อเพื่อขอยกเลิกหรือคืนเงิน ผู้ให้บริการตรวจสอบรายการและสิทธิ์ตามกฎหมายก่อนแจ้งผล ไม่จำกัดสิทธิ์ผู้บริโภคตามกฎหมาย';
   const products = [];
@@ -42,13 +42,12 @@
   ];
   const n = value => value.toLocaleString('th-TH');
   plans.forEach(([id, name, price, voice, input, output, storage, download]) => add(id, name, 'membership', price, [
-    `เครดิต Gemini Live รวม ${n(creditCost({voiceInputSeconds:voice*60,voiceOutputSeconds:voice*60,textInputTokens:input,textOutputTokens:output}))} เครดิต/เดือน`,
-    'Gemini Live ใช้เสียงและข้อความจากยอดเดียวกัน',
-    'Qwen 4B ใช้ฟรี ไม่หักเครดิต รวมถึงหลังเครดิต Gemini หมด',
+    `เครดิต Sentinel AI รวม ${n(creditCost({voiceInputSeconds:voice*60,voiceOutputSeconds:voice*60,textInputTokens:input,textOutputTokens:output}))} เครดิต/เดือน`,
+    'Sentinel AI ใช้เสียงและข้อความจากยอดเดียวกัน',
     `พื้นที่ ${storage}`, `ดาวน์โหลด ${download}`
   ], price ? 'รอบ 1 เดือน · ชำระใหม่เมื่อต้องการต่ออายุ · โควต้าไม่ทบยอด' : 'แพ็กเกจฟรี · โควต้ารายเดือน', { kind: price ? 'subscription' : 'free', quotaPolicy, quotas: {aiCredits:creditCost({voiceInputSeconds:voice*60,voiceOutputSeconds:voice*60,textInputTokens:input,textOutputTokens:output}),storageBytes: id==='free' ? 50*1024**2 : Number(storage.split(' ')[0])*1024**3,downloadBytes: id==='free' ? 0 : Number(download.split(' ')[0])*1024**3} }));
   function aiAddon(id, price, credits) {
-    add(id, 'AI ' + n(credits), 'ai', price, [`เครดิต Gemini Live รวม ${n(credits)} เครดิต`, 'ใช้ได้ทั้งเสียงและข้อความจากยอดเดียวกัน'], 'ซื้อครั้งเดียว · อายุ 30 วันนับจากชำระ', {kind:'one-time',verifiedAccountRequired:true,quotaPolicy,quotas:{aiCredits:credits}});
+    add(id, 'AI ' + n(credits), 'ai', price, [`เครดิต Sentinel AI รวม ${n(credits)} เครดิต`, 'ใช้ได้ทั้งเสียงและข้อความจากยอดเดียวกัน'], 'ซื้อครั้งเดียว · อายุ 30 วันนับจากชำระ', {kind:'one-time',verifiedAccountRequired:true,quotaPolicy,quotas:{aiCredits:credits}});
   }
   // Stable IDs keep pending orders, payment receipts and historical grants valid.
   [['S', 59, 20], ['M', 169, 70], ['L', 399, 175], ['XL', 849, 375]].forEach(([size, price, minutes]) => aiAddon('voice-'+size.toLowerCase(),price,creditCost({voiceInputSeconds:minutes*60,voiceOutputSeconds:minutes*60})));
@@ -73,7 +72,7 @@
     return state.unlimited?.includes(key) || Number(state.remaining?.[key]) > 0;
   };
   const displayDetails = (product, now = Date.now()) => product.id === 'free' && promotionAt(now)
-    ? product.details.map(detail => detail.startsWith('เครดิต Gemini Live รวม') ? 'เครดิต Gemini Live รวมไม่จำกัด ทั้งเสียงและข้อความในช่วงโปรโมชัน' : detail).concat('โปรโมชัน 18 ต.ค.–30 พ.ย. 2026 (เวลาไทย) · กลับโควต้าปกติ 1 ธ.ค. 2026')
+    ? product.details.map(detail => detail.startsWith('เครดิต Sentinel AI รวม') ? 'เครดิต Sentinel AI รวมไม่จำกัด ทั้งเสียงและข้อความในช่วงโปรโมชัน' : detail).concat('โปรโมชัน 18 ต.ค.–30 พ.ย. 2026 (เวลาไทย) · กลับโควต้าปกติ 1 ธ.ค. 2026')
     : product.details;
   return Object.freeze({ version: '2026-11-05', aiRates, aiKeys, quotaPolicy, creditCost, creditBalance, serviceDescription, usageExplanation, conversionDetails, refundSummary, promotionAt, hasQuota, displayDetails, taxStatus: 'individual-not-vat-registered', products: Object.freeze(products), get: id => products.find(item => item.id === id) || null });
 });

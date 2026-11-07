@@ -210,6 +210,7 @@ async function until(check, message) {
     assert.equal(await page.locator("[data-notification-toast]").count(), 0, "all-day quiet hours suppress alerts");
     await toggle("quietHours.enabled", false);
 
+    await toggle("privacyPreview", false);
     await publish("private-preview", "system", "ข้อความส่วนตัวไม่ควรอยู่ในป๊อปอัป");
     await page.locator("[data-notification-toast]").waitFor();
     assert.doesNotMatch(await page.locator("[data-notification-toast]").textContent(), /private-preview|ข้อความส่วนตัว/);
@@ -287,7 +288,7 @@ async function until(check, message) {
     assert.equal(await row(detailed.id).count(), 0, "late old-account response cannot restore private content");
     assert.doesNotMatch(await center.textContent(), /รายละเอียดบัญชีแรก|แสดงรายละเอียดที่ยินยอมแล้ว|master-muted/);
     await checked("categories.operations", true);
-    await checked("privacyPreview", false);
+    await checked("privacyPreview", true);
     assert.equal(await page.locator("[data-notification-toast]").count(), 0, "account switch does not replay another account's speech or previews");
 
     await page.evaluate(() => {

@@ -185,6 +185,7 @@ class ProviderManager {
     catch(error){if(error.status===429)this.cooling.set(provider,{until:Date.now()+Math.max(60000,error.retryAfterMs||60000)});throw error;}
   }
   async callAvailable(provider, systemPrompt, history, options = {}) {
+    if (provider === 'local' && !await require('./localAiAccess').canUseLocal(this,options.userId)) throw Object.assign(new Error('local_access_denied'),{status:403});
     if (this.hybrid && provider === 'local') {
       if (!require('./hybridAiPolicy').localEnabled()) throw new Error('local_disabled');
       return this.local.complete(systemPrompt, history, {...options, hybrid:true});
@@ -409,6 +410,7 @@ class ProviderManager {
     return { text: text.trim(), model, usage, streaming: "native", truncated };
   }
   async streamDetailed(provider, systemPrompt, history, options = {}, onDelta = () => {}) {
+    if (provider === 'local' && !await require('./localAiAccess').canUseLocal(this,options.userId)) throw Object.assign(new Error('local_access_denied'),{status:403});
     if (this.hybrid && provider === 'local') {
       if (!require('./hybridAiPolicy').localEnabled()) throw new Error('local_disabled');
       return this.local.complete(systemPrompt, history, {...options, hybrid:true}, onDelta);

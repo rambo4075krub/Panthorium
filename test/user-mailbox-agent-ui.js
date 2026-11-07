@@ -22,7 +22,7 @@ const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(resol
   try {
     w.eval(fs.readFileSync('user-mailbox-ui.js', 'utf8')); await w.PanthoriumUserMailbox.open();
     await click('เชื่อมต่อ AI และเสียง');
-    assert(w.document.body.textContent.includes('Gemini ผ่าน Google Cloud หรือ Qwen'));
+    assert(w.document.body.textContent.includes('Sentinel AI ประมวลผลอีเมล'));
     assert.equal(requests.filter(x => x.path.endsWith('/connect')).length, 0, 'disclosure precedes OAuth');
     await click('ดำเนินการต่อไปยังผู้ให้บริการ');
     assert.deepEqual(requests.find(x => x.path.endsWith('/connect')).body, { provider: 'google', purpose: 'agent' });

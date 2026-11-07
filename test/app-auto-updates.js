@@ -58,8 +58,9 @@ async function clientScenario(run, { hidden = false } = {}) {
     else Object.defineProperty(w.navigator, 'userAgent', { value: 'Android PanthoriumAndroid' });
     w.eval(fs.readFileSync('access-shell-ui.js', 'utf8')); w.PanthoriumAccessShell.sync(); await w.PanthoriumAccessShell.refreshUpdateStatus(true);
     const button = w.document.getElementById('panthorium-browser-update');
-    assert.equal(button.querySelector('[data-update-label]').textContent, 'อัพเดท');
-    assert.match(button.querySelector('[data-update-message]').textContent, /Google Play/);
+    assert.equal(button.querySelector('[data-update-label]').textContent, '📥 อัพเดท');
+    assert.equal(button.querySelector('[data-update-message]').textContent, '');
+    assert.equal(button.parentElement, w.document.getElementById('btn-restart').parentElement);
     assert.equal(w.document.getElementById('panthorium-browser-download'), null);
     await button.onclick(); assert.equal(storeNavigations, 1); w.close();
   }

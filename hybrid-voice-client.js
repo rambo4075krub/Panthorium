@@ -16,7 +16,7 @@
     if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error==='voice_not_authorized'?'เสียงไม่ผ่านการยืนยันตัวตน':e.error==='voice_enrollment_required'?'กรุณาลงทะเบียนเสียงในตั้งค่าก่อน':'Qwen กำลังไม่พร้อมหรือทรัพยากรไม่พอ กรุณาลองใหม่ภายหลัง');}return r;
   }
   async function policy(){try{return await(await api('/api/hybrid/status',null,AbortSignal.timeout(6000))).json();}catch{return null;}}
-  function stop(){clearInterval(queueTimer);queueTimer=null;generation++;active=false;controller?.abort();controller=null;clearTimeout(timer);timer=null;if(recorder&&recorder.state!=='inactive'){recorder.onstop=null;recorder.stop();}recorder=null;stream?.getTracks().forEach(t=>t.stop());stream=null;speech?.stop();speech=null;if(context){context.close().catch(()=>{});context=null;}window.dispatchEvent(new CustomEvent('panthorium:ai-speaking',{detail:{speaking:false}}));status('กดไมค์เพื่อเริ่มเสียง · Qwen ใช้ฟรี');}
+  function stop(){clearInterval(queueTimer);queueTimer=null;generation++;active=false;controller?.abort();controller=null;clearTimeout(timer);timer=null;if(recorder&&recorder.state!=='inactive'){recorder.onstop=null;recorder.stop();}recorder=null;stream?.getTracks().forEach(t=>t.stop());stream=null;speech?.stop();speech=null;if(context){context.close().catch(()=>{});context=null;}window.dispatchEvent(new CustomEvent('panthorium:ai-speaking',{detail:{speaking:false}}));status('กดไมค์เพื่อเริ่มเสียง Sentinel AI');}
   function row(kind,text){const list=document.getElementById('chat-messages');if(!list)return;const r=document.createElement('div');r.className='msg '+kind;r.textContent=text;list.appendChild(r);list.scrollTop=list.scrollHeight;}
   async function answer(blob,id){
     const check=()=>{if(id!==generation||identity!==account())throw new DOMException('Cancelled','AbortError');};
@@ -39,9 +39,12 @@
   async function start(){
     if(active){if(recorder?.state==='recording')recorder.stop();else stop();return;}
     // Restricted Cloud App sessions never fall back into unrestricted tools.
-    if(window.PanthoriumCloudApps?.voiceContext?.()){status('โหมดงานนี้ต้องใช้ Gemini Live กรุณาเติมเครดิตหรือออกจากบริบทงานก่อน','error');return;}
+    if(window.PanthoriumCloudApps?.voiceContext?.()){status('โหมดงานนี้ต้องใช้ Sentinel AI กรุณาเติมเครดิตหรือออกจากบริบทงานก่อน','error');return;}
     stop();active=true;const id=generation;identity=account();controller=new AbortController();
     try{
+      const access=await policy();
+      if(id!==generation||identity!==account())return;
+      if(!access?.local?.enabled)throw new Error('บัญชีนี้ไม่สามารถใช้บริการ AI ภายในได้ กรุณาใช้ Sentinel AI ตามแพ็กเกจ');
       if(!window.MediaRecorder)throw new Error('เบราว์เซอร์ไม่รองรับเสียง Qwen กรุณาพิมพ์ข้อความแทน');
       context=new(window.AudioContext||window.webkitAudioContext)();await context.resume();
       const opened=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}});

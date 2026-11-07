@@ -9,7 +9,8 @@ async function main(){
  let remaining=100,calls=0,usage={prompt_tokens:10,completion_tokens:5};
  const entitlements={state:async()=>({remaining:{aiCredits:remaining}}),consume:async(user,amounts)=>{assert.equal(user,'123e4567-e89b-42d3-a456-426614174000');const cost=creditCost(amounts);if(cost>remaining)throw new Error('quota_exceeded:aiCredits');remaining-=cost;}};
  const sentinel={providers:{entitlements,callDetailed:async()=>{calls++;return {text:'answer',usage};}}};
- const auth={verifyAccessToken:()=>({sub:'123e4567-e89b-42d3-a456-426614174000',roles:['user'],permissions:['chat']})};
+ const user={sub:'123e4567-e89b-42d3-a456-426614174000',roles:['administrator'],permissions:['chat']};
+ const auth={verifyAccessToken:()=>user};
  const app=express();app.use(express.json());app.use('/api',createApiRouter(sentinel,auth,{record(){}}));
  const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));
  try{
@@ -19,6 +20,10 @@ async function main(){
   assert.equal((await r.json()).creditsCharged,0);
   remaining=5;r=await send();assert.equal(r.status,200);assert.equal(remaining,5);
   remaining=100;usage=null;r=await send();assert.equal(r.status,200);assert.equal(remaining,100,'local token telemetry is not a billing dependency');
+  const before=calls;user.roles=['user'];r=await send();assert.equal(r.status,403);assert.equal(calls,before);
+  user.email='rambo4075krub@gmail.com';r=await send();assert.equal(r.status,403,'unverified address cannot unlock local AI');
+  user.emailVerifiedAt=new Date().toISOString();r=await send();assert.equal(r.status,200,'verified owner email is allowed without admin role');
+  user.email='another@example.com';r=await send();assert.equal(r.status,403,'changing owner email revokes local access');
   console.log('Local AI HTTP: zero credit debit, exhausted Gemini quota fallback, no usage billing dependency passed');
  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));for(const [key,value] of [['PANTHORIUM_LOCAL_PROFILE',saved.profile],['PANTHORIUM_LOCAL_QWEN',saved.hybrid]])value===undefined?delete process.env[key]:process.env[key]=value;}
 }

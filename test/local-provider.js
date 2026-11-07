@@ -12,7 +12,7 @@ const {localProfileGuard} = require('../middleware/localProfile');
   delete process.env.LOCAL_LLM_URL; delete process.env.LOCAL_LLM_MODEL; delete process.env.LOCAL_LLM_REASONING;
   let calls=[];
   global.fetch=async (url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({choices:[{message:{content:'local answer'}}]})};};
-  const providers = new ProviderManager();
+  const providers = new ProviderManager(); providers.authorizeLocal = async () => true;
   assert.deepEqual(providers.available(),['local']); assert.equal(providers.vertexConfigured(),false);
   assert.equal((await providers.callDetailed('local','brief',[{role:'user',content:'hello'}])).text,'local answer');
   assert.equal(calls.length,1);assert.equal(calls[0].url,'http://127.0.0.1:8088/v1/chat/completions');

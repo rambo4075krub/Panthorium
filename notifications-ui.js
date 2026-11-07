@@ -116,7 +116,7 @@
     return { ok: true, text };
   }
   function preview(item, settings) {
-    if (settings.privacyPreview !== true) return 'มีการแจ้งเตือนใหม่ใน Panthorium เปิดศูนย์แจ้งเตือนเพื่อดูรายละเอียด';
+    if (settings.privacyPreview === false) return 'มีการแจ้งเตือนใหม่ใน Panthorium เปิดศูนย์แจ้งเตือนเพื่อดูรายละเอียด';
     return [item.title, item.body].filter(Boolean).join(' — ').slice(0, 500);
   }
   function beep() {
@@ -133,7 +133,7 @@
     const eligible = items.filter(item => !item.readAt && eventCatalog()?.enabled(settings, item) === true);
     if (!eligible.length) return;
     const latest = eligible[0];
-    const text = eligible.length > 1 ? `มี ${eligible.length} การแจ้งเตือนใหม่ใน Panthorium` : preview(latest, settings);
+    const text = preview(latest, settings) + (eligible.length > 1 ? ` (และอีก ${eligible.length - 1} รายการ)` : '');
     if (settings.channels?.inApp && document.visibilityState !== 'hidden') {
       document.querySelector('[data-notification-toast]')?.remove();
       const toast = node('div', null, { 'data-notification-toast': '', role: 'status', 'aria-live': 'polite' });
@@ -147,7 +147,7 @@
         n.onclick = () => { n.close(); if (current(s)) { window.focus(); open(); } };
         setTimeout(() => { n.close(); s.browserNotices.delete(n); }, 15000);
       } catch (_) { message('อุปกรณ์นี้แสดงป๊อปอัปไม่ได้ • ตรวจสิทธิ์แจ้งเตือนในการตั้งค่าอุปกรณ์'); } };
-      if(window.PanthoriumPush?.show) window.PanthoriumPush.show(latest,!settings.channels.sound).then(shown=>{if(!shown)fallback();}).catch(e=>{if(current(s))message(e.message);fallback();});
+      if(window.PanthoriumPush?.show) window.PanthoriumPush.show(settings.privacyPreview === false ? {id:latest.id,title:'Panthorium',body:preview(latest,settings)} : latest,!settings.channels.sound).then(shown=>{if(!shown)fallback();}).catch(e=>{if(current(s))message(e.message);fallback();});
       else fallback();
     }
     if (!busy()) {

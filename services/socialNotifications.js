@@ -94,9 +94,10 @@ class SocialNotifications {
     if (!this.service.systemNotifications) return;
     for (const notice of notices) {
       try {
-        if (!await this.systemNotificationVisible(notice.ownerId, notice.id)) continue;
+        const preview = await this.view(this.service.repo, notice.ownerId, notice);
+        if (!preview) continue;
         await this.service.systemNotifications.publish({ userId: notice.ownerId, category: 'social', type: 'social.activity.' + notice.type,
-          title: 'ความเคลื่อนไหวใหม่ใน Social Media', body: 'เปิด Social Media เพื่อดูความเคลื่อนไหวที่คุณมีสิทธิ์เข้าถึง',
+          title: (preview.name + ' ' + preview.text).slice(0,160), body: (preview.preview || preview.reason || preview.text).slice(0,2000),
           sourceId: notice.id, sensitive: true });
       } catch { /* Social mutation is already committed; delivery cannot invalidate it. */ }
     }
@@ -183,7 +184,8 @@ class SocialNotifications {
     // Post counters contain new posts only. Conversation/group notices retain their own destinations.
     if (["like", "comment", "share", "reported", "moderation-hidden", "moderation-restored"].includes(type)) module = "notifications";
     else if (["feed", "short", "watch", "live", "tv", "market", "profile"].includes(module) && type !== "new-post") module = "notifications";
-    return { id: n.id, type, name, text: labels[type], createdAt: n.createdAt, readAt,
+    return { id: n.id, type, name, text: labels[type],
+      preview: String(r.text || r.title || (r.files?.length ? 'ส่งไฟล์แนบ ' + r.files.length + ' ไฟล์' : '')).slice(0,500), createdAt: n.createdAt, readAt,
       target: moderation && r.hidden ? null : { module: destination, ...(["friends", "profile"].includes(destination) ? {} : { recordId: target.id }), ...(r.kind === "order" ? { orders: true } : {}) },
       ...(moderation ? { reason: r.moderation?.reason || "" } : {}), module };
   }

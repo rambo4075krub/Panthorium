@@ -3,6 +3,7 @@ const rateLimit = require("express-rate-limit");
 const { randomUUID } = require("crypto");
 const { statusFor: actionStatus } = require("./actions");
 const { requireAuth, requirePermission } = require("../middleware/auth");
+const { localAiAllowed } = require('../services/localAiAccess');
 const { denyGuest } = require("../middleware/guestAccess");
 const { synthesizeSentinelMaleVoice } = require("../services/sentinelSpeechAudio");
 function validText(value, max) { return typeof value === "string" && value.trim().length > 0 && value.length <= max; }
@@ -29,14 +30,18 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
   const identityNavigationLimiter = rateLimit({ windowMs: 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false });
   const agentLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
   router.use(["/speech", "/speech/transcribe", "/speech/identity-navigation"], (req, res, next) => {
-    if (process.env.PANTHORIUM_AI_MODE === "gemini-live-only") return res.status(410).json({ ok:false, error:"gemini_live_microphone_required", text:"ใช้ไมโครโฟน Gemini Live เพื่อสนทนาด้วยเสียง" });
+    if (process.env.PANTHORIUM_AI_MODE === "gemini-live-only") return res.status(410).json({ ok:false, error:"gemini_live_microphone_required", text:"ใช้ไมโครโฟน Sentinel AI เพื่อสนทนาด้วยเสียง" });
+    next();
+  });
+  router.use(['/chat','/agent'], auth, (req,res,next) => {
+    if (String(req.body?.provider || '').toLowerCase() === 'local' && !localAiAllowed(req.user)) return res.status(403).json({ok:false,error:'local_access_denied'});
     next();
   });
   const hybridQwen = process.env.PANTHORIUM_LOCAL_QWEN === "1"
     ? new (require("../services/localLlmProvider").LocalLlmProvider)() : null;
   if (process.env.PANTHORIUM_LOCAL_PROFILE === "1" || hybridQwen) {
     router.post("/local/chat", auth, requirePermission("chat"), aiLimiter, async (req, res) => {
-      if (hybridQwen && (req.user.roles?.includes("guest") || String(req.user.sub).startsWith("guest:"))) return res.status(403).json({ok:false,error:"account_required"});
+      if (!localAiAllowed(req.user)) return res.status(403).json({ok:false,error:'local_access_denied'});
       const message = req.body?.message;
       if (typeof message !== "string" || !message.trim() || message.length > 2000) return res.status(400).json({ok:false,error:"invalid_message"});
       try {
@@ -53,7 +58,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
           return res.status(result.ok?200:503).json({...result,creditsCharged:0,billable:false});
         }
         const complete = hybridQwen ? hybridQwen.complete.bind(hybridQwen) : sentinel.providers.callDetailed.bind(sentinel.providers, "local");
-        const result = await complete("คุณคือผู้ช่วย Panthorium ตอบภาษาไทยสั้น ชัดเจน และซื่อสัตย์ ไม่มีเครื่องมือสั่งงานระบบจริง",[{role:'user',content:message.trim()}]);
+        const result = await complete("คุณคือผู้ช่วย Panthorium ตอบภาษาไทยสั้น ชัดเจน และซื่อสัตย์ ไม่มีเครื่องมือสั่งงานระบบจริง",[{role:'user',content:message.trim()}], {userId});
         res.json({ok:true,...result,creditsCharged:0,billable:false,actionsEnabled:false});
       } catch (error) {
         if (String(error.message).startsWith('quota_exceeded')) return res.status(402).json({ok:false,error:'quota_exceeded'});
@@ -64,7 +69,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
   if (sentinel.providers?.hybrid) router.use('/hybrid',require('./hybridAi').createHybridRouter({sentinel,auth,permission:requirePermission('chat'),limiter:speechLimiter,biometrics}));
   router.get("/health", (req, res) => res.json({ ok: true, service: "Panthorium Backend", deployment: process.env.PANTHORIUM_DEPLOY_SHA ? {sha:process.env.PANTHORIUM_DEPLOY_SHA, stage:process.env.PANTHORIUM_DEPLOY_STAGE} : undefined, localPilot: process.env.PANTHORIUM_LOCAL_PROFILE === "1" ? { actionsEnabled:false, trainingEnabled:false, cloudServicesEnabled:false } : undefined, release: process.env.K_REVISION || process.env.PANTHORIUM_RELEASE || require("../package.json").version, sentinel: sentinel.status(), aiMode: process.env.PANTHORIUM_AI_MODE || "legacy", geminiLiveEnabled: process.env.GEMINI_LIVE_ENABLED === "1", voiceIdentityConfigured: biometrics?.status?.().configured === true, voiceIdentityGateEnabled: biometrics?.gateEnabled === true, time: new Date().toISOString() }));
   router.get("/sentinel/status", auth, requirePermission("system:read"), (req, res) => res.json({ ok: true, ...sentinel.status() }));
-  router.get("/ai/providers", auth, requirePermission("chat"), (req, res) => res.json({ ok: true, providers: sentinel.providerCatalog() }));
+  router.get("/ai/providers", auth, requirePermission("chat"), (req, res) => res.json({ ok: true, providers: sentinel.providerCatalog().filter(p => p.provider !== "local" || localAiAllowed(req.user)) }));
   router.get("/ai/operations", auth, requirePermission("chat"), async (req, res, next) => { try { res.json({ ok: true, metrics: await aiOperations.overview(req.user.sub, req.query.hours) }); } catch (error) { next(error); } });
   router.post("/speech", auth, requirePermission("chat"), speechLimiter, async (req, res) => {
     const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
@@ -265,7 +270,7 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
     event("start", { sessionId: sid, sentinel: "Sentinel" });
     const controller=new AbortController();const cancel=()=>{if(!res.writableEnded)controller.abort();};res.once('close',cancel);
     let pollBusy=false;const queueTimer=setInterval(async()=>{
-      if(pollBusy||res.destroyed||!sentinel.providers.hybrid)return;pollBusy=true;
+      if(pollBusy||res.destroyed||!sentinel.providers.hybrid||!localAiAllowed(req.user))return;pollBusy=true;
       try{const {voiceBase}=require('./hybridAi');const {accountKey}=require('../services/localWorkIdentity');const r=await fetch(voiceBase()+'/status',{headers:{'X-Panthorium-Account':accountKey(req.user.sub)},signal:AbortSignal.timeout(1500)});const s=await r.json();if(s.queue?.yourPosition||s.queue?.yourRunning)event('queue',{position:s.queue.yourPosition,running:s.queue.yourRunning,reason:s.reason,maxWaitSeconds:s.queue.maxWaitSeconds});}catch{}finally{pollBusy=false;}
     },2000);
     try {

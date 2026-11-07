@@ -25,13 +25,14 @@ function setup(url, handler) {
     const result = await handler(url, options, body, calls);
     return { ok:(result.status || 200) < 400, status:result.status || 200, json:async () => result.data };
   };
+  w.eval(fs.readFileSync(path.join(__dirname, '..', 'action-presentation.js'), 'utf8'));
   w.eval(script);
   return { dom, w, d:w.document, calls };
 }
 function noSecretsInDom(d) { assert(!d.documentElement.outerHTML.includes(session.accessToken)); assert(!d.documentElement.outerHTML.includes(approvalHash)); assert.equal(d.querySelectorAll('[onerror], [onclick]').length, 0); }
 
 async function main() {
-  assert.equal((html.match(/<script/g) || []).length, 1);
+  assert.equal((html.match(/<script/g) || []).length, 2);
   assert(html.includes('src="/mcp-connect.js"'));
   let consentCalls = 0;
   const consent = setup('/oauth/authorize?redirect_uri=https://evil.test', async (url, options, body) => {
