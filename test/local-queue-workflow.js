@@ -7,14 +7,16 @@ const {accountKey}=require('../services/localWorkIdentity');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 (async()=>{
   const releases=[];
-  const providers={hybrid:true,available:()=>['gemini-live','local'],entitlements:{state:async()=>({remaining:{aiCredits:10000}})},
+  const providers={authorizeLocal:async()=>true,hybrid:true,available:()=>['gemini-live','local'],entitlements:{state:async()=>({remaining:{aiCredits:10000}})},
     callDetailed:async(provider,_s,_h,options)=>{
       if(provider==='local')await new Promise(resolve=>releases.push(resolve));
       return{text:options.userId};
     },streamDetailed:async(_p,_s,_h,options,onDelta)=>{assert(options.signal);onDelta('answer');return{text:'answer'};}};
   const gateway=new AiGateway({providers,concurrencyGate:new ConcurrencyGate({limit:1,maxQueue:0})});
   const jobs=Array.from({length:5},(_,i)=>gateway.complete({preferredProvider:'local',userId:'u'+i,history:[]}));
-  while(releases.length<5)await tick();
+  const admissionDeadline=Date.now()+5000;
+  while(releases.length<5&&Date.now()<admissionDeadline)await tick();
+  assert.equal(releases.length,5,'authorized local requests must reach the local provider before the deadline');
   assert.equal((await gateway.complete({preferredProvider:'local',userId:'overflow'})).error,'system_busy');
   assert.equal(gateway.localGate.stats().queued,0);
   assert.equal((await gateway.complete({preferredProvider:'gemini-live',userId:'paid'})).text,'paid','local saturation cannot consume the cloud admission gate');
