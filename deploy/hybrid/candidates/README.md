@@ -1,4 +1,4 @@
-# Qwen3-8B candidate — not activated
+# Qwen3-8B download and isolated benchmark
 
 This candidate is Qwen3-8B Q4_K_M from the model publisher, pinned to a revision,
 size and SHA-256. Its weights are 5.03 decimal GB (4.68 GiB). This is a larger
@@ -21,18 +21,18 @@ the isolated run at the existing 65% RAM/60% VRAM targets. These are monitored
 limits, not OS-enforced hard caps. The 6.5 GiB cold-load allowance is conservative
 planning, not a measured requirement. GPU offload is deliberately limited.
 
-Before any production switch:
+For a quality benchmark:
 
-1. Deploy and test the administrator/owner-only policy from PR #313 (or its
-   successor). Never infer authorization from a client-supplied email.
-2. Obtain enough free memory while keeping the existing resource limits.
-3. Run and review the ten answers, latency, truncation and peak resources;
+1. Keep the administrator/verified-owner-only policy and the resource limits.
+2. Run and review the ten answers, latency, truncation and peak resources;
    separately validate actual API/MCP calls, user isolation and buffered voice.
-4. Update the broker's model process identity and its model-specific forecast,
-   startup arguments, provider sampling, and rollback together. Keep the public
-   model alias stable. The current broker identifies the 4B path explicitly.
-5. Follow GitHub → main → verified production deployment. This candidate tooling
-   does not perform that activation and is not a production-ready upgrade.
+3. Record zero cases when resource admission blocks the run; do not claim a pass.
+
+Production replacement is a separate explicit operation described in
+`../README.md`. The candidate preparation command never activates a model.
+The production profile uses the same pinned weights; after activation the file
+lives in `models/`, not `models/candidates/`. This benchmark's download cache is
+separate; do not download a second copy merely to benchmark an installed model.
 
 No API per-call charge is introduced by downloading these Apache-2.0 weights.
 Local hardware/electricity and separate external services remain independent.

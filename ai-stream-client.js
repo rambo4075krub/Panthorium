@@ -46,7 +46,7 @@
         for (const line of frame.split('\n')) { if (line.startsWith('event:')) event = line.slice(6).trim(); if (line.startsWith('data:')) { try { data = JSON.parse(line.slice(5).trim()); } catch (_) {} } }
         if (!data) continue;
         if (event === 'start') emit('status', { text: 'Sentinel กำลังประมวลผล...' });
-        if (event === 'queue') emit('status',{text:data.running?'Qwen ฟรี · กำลังประมวลผล':`Qwen ฟรี · คิวที่ ${data.position} · รอได้ไม่เกิน ${data.maxWaitSeconds} วินาที${data.reason?' · กำลังรอทรัพยากร':''}`});
+        if (event === 'queue') emit('status',{text:data.running?'Sentinel AI · กำลังประมวลผล':`Sentinel AI · คิวที่ ${data.position} · รอได้ไม่เกิน ${data.maxWaitSeconds} วินาที${data.reason?' · กำลังรอทรัพยากร':''}`});
         if (event === 'provider') { meta = { ...meta, ...data }; emit('provider', data); }
         if (event === 'delta') {
           const delta = data.delta || ''; if (!delta) continue; sawDelta = true;
@@ -87,7 +87,7 @@
       emit('stream-end', {});
       streamSpeechOk = await window.PanthoriumVoiceStream?.finish?.() === true;
     }
-    return { ok: true, text: state.text, provider: meta.provider ? `Sentinel · ${meta.provider}` : 'Sentinel', via: 'sentinel-stream', model: meta.model || null, usage: meta.usage || null, toolResults: meta.toolResults || [], latencyMs: meta.latencyMs || null, streaming: meta.streaming || 'unknown', streamSpoken: voiceMode, streamSpeechOk };
+    return { ok: true, text: state.text, provider: 'Sentinel AI', via: 'sentinel-stream', model: meta.model || null, usage: meta.usage || null, toolResults: meta.toolResults || [], latencyMs: meta.latencyMs || null, streaming: meta.streaming || 'unknown', streamSpoken: voiceMode, streamSpeechOk };
   }
   function installVisualStreaming() {
     if (window.__panthoriumStreamVisualInstalled) return; window.__panthoriumStreamVisualInstalled = true;
@@ -171,8 +171,12 @@
     const add = (name, value) => details.append(make('p', name + ': ' + value));
     const onOff = value => value === true ? 'เปิด' : 'ปิด';
     const args = confirmation.args;
-    if(emailAction) add('รายละเอียดอีเมลที่ขอยืนยัน', JSON.stringify(args,null,2));
-    if (args.action === 'send') { add('หัวข้อ', args.title); if (args.body) add('ข้อความ', args.body); add('หมวด', categoryLabels[args.category || 'system'] || args.category); }
+    if (emailAction) {
+      const presentation = window.PanthoriumActionPresentation?.describe(confirmation);
+      label.textContent = presentation?.question || 'ยืนยันการดำเนินการกับอีเมลหรือไม่';
+      for (const line of presentation?.details || []) details.append(make('p', line));
+    }
+    if (!emailAction && args.action === 'send') { add('หัวข้อ', args.title); if (args.body) add('ข้อความ', args.body); add('หมวด', categoryLabels[args.category || 'system'] || args.category); }
     if (args.action === 'settings') {
       for (const [key, value] of Object.entries(args.patch || {})) {
         if (Object.hasOwn(flagLabels, key)) add(flagLabels[key], onOff(value));
@@ -186,9 +190,9 @@
       }
       if (args.patch?.channels?.browser === true || args.patch?.channels?.voice === true || args.patch?.channels?.sound === true) details.append(make('small', 'อุปกรณ์อาจต้องอนุญาตการแจ้งเตือนหรือปลดล็อกเสียงในตั้งค่าการแจ้งเตือนก่อน'));
     }
-    if (args.action === 'mark_read' || args.action === 'delete') {
+    if (!emailAction && (args.action === 'mark_read' || args.action === 'delete')) {
       add('ขอบเขต', args.all === true ? 'รายการทั้งหมดในบัญชีนี้' : (args.ids?.length || 0) + ' รายการที่เลือก');
-      if (args.ids?.length) { const exact = make('details'); exact.append(make('summary', 'รหัสรายการที่เลือก'), make('p', args.ids.join('\n'))); details.append(exact); }
+
     }
     const status = make('p', expiresAt <= Date.now() ? 'คำขอนี้หมดอายุแล้ว กรุณาสั่งใหม่' : 'รอคุณยืนยัน'); status.setAttribute('role', 'status');
     const controls = make('div'); controls.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px';

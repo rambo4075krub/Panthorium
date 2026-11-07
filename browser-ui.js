@@ -91,7 +91,7 @@
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.ok || typeof result.text !== 'string') throw new Error(result.error || 'summary_failed');
       root.querySelector('[data-summary]').textContent = result.text;
-      status(root, 'สรุปเสร็จแล้ว · Sentinel · ' + (result.provider || ''));
+      status(root, 'สรุปเสร็จแล้ว · Sentinel AI');
       root.querySelector('[data-open-sentinel]').hidden = false;
     } catch (error) {
       status(root, error.message === 'authentication_required' ? 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่' : 'ส่งให้ Sentinel ไม่สำเร็จ · ' + String(error.message || 'network_error'), true);

@@ -7,7 +7,7 @@ const {attachModelMcp}=require('../services/modelMcpBridge');
 const {chunks,BufferedSpeech}=require('../speech-buffer');
 (async()=>{
  const saved=global.fetch;
- const p={hybrid:true,entitlements:{state:async()=>({remaining:{aiCredits:0}})}};
+ const p={authorizeLocal:async()=>true,hybrid:true,entitlements:{state:async()=>({remaining:{aiCredits:0}})}};
  assert.deepEqual(await routeProviders(p,['gemini-live','local'],{},'u'),['local']);
  p.entitlements.state=async()=>({remaining:{aiCredits:10000}});
  assert.deepEqual(await routeProviders(p,['gemini-live','local'],{preferredProvider:'local'},'u'),['local']);

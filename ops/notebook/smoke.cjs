@@ -28,7 +28,7 @@ async function main(){
  const del=await fetch(base+'/api/files/'+created,{method:'DELETE',headers:headers(token)});assert.equal(del.status,200);
  assert.equal((await fetch(base+'/api/files/'+created,{headers:headers(token)})).status,404);created=null;
  console.log(stage+' HTTP login/upload/disk-bytes/list/preview/download/delete/cross-owner/anonymous passed');
- if(stage==='production' && process.env.TEST_INFERENCE==='1'){const ai=await fetch(base+'/api/local/chat',{method:'POST',headers:{...headers(token),'content-type':'application/json'},body:JSON.stringify({message:'What is 2 + 3? Reply with just the number.'}),signal:AbortSignal.timeout(100000)});const result=await ai.json();if(!ai.ok||!String(result.text).includes('5'))throw Error('local AI test '+ai.status+' '+String(result.error||''));console.log('Authenticated Qwen 4B answer verified');}
+ if(stage==='production' && process.env.TEST_INFERENCE==='1'){const ai=await fetch(base+'/api/local/chat',{method:'POST',headers:{...headers(token),'content-type':'application/json'},body:JSON.stringify({message:'What is 2 + 3? Reply with just the number.'}),signal:AbortSignal.timeout(100000)});const result=await ai.json();if(!ai.ok||!String(result.text).includes('5'))throw Error('local AI test '+ai.status+' '+String(result.error||''));console.log('Authenticated Qwen 8B answer verified');}
 }
 main().catch(e=>{console.error('Verification failed: '+e.message.slice(0,200));process.exitCode=1}).finally(async()=>{
  if(created&&token)await fetch(base+'/api/files/'+created,{method:'DELETE',headers:headers(token)}).catch(()=>{});

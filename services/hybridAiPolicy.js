@@ -2,13 +2,14 @@
 const {hasQuota} = require('../billing-catalog');
 function localEnabled(env = process.env) { return env.PANTHORIUM_LOCAL_QWEN === '1' && env.PANTHORIUM_QWEN_DISABLED !== '1' && !(env.LOCAL_QWEN_DISABLE_FILE && require('fs').existsSync(env.LOCAL_QWEN_DISABLE_FILE)); }
 async function routeProviders(providers, candidates, {preferredProvider, history = [], voiceMode = false} = {}, userId) {
+  if (candidates.includes('local') && !await require('./localAiAccess').canUseLocal(providers,userId)) candidates = candidates.filter(p => p !== 'local');
+  if (preferredProvider === 'local') return candidates.filter(p => p === 'local');
   if (!providers.hybrid) return candidates;
-  if (preferredProvider === 'local') return candidates.filter(p => p === 'local'); // Never silently bill a free request.
   let liveAllowed = false;
   try {
     const state = userId && providers.entitlements ? await providers.entitlements.state(userId) : null;
     liveAllowed = !!state && ['textInputTokens','textOutputTokens','voiceInputSeconds','voiceOutputSeconds'].every(k => hasQuota(state,k));
-  } catch { /* Billing unavailable: free path only. */ }
+  } catch { /* Billing unavailable: only an authorized local path may remain. */ }
   let ordered = candidates.filter(p => p !== 'gemini-live' || liveAllowed);
   const last = [...history].reverse().find(m => m.role === 'user' && typeof m.content === 'string')?.content || '';
   // Capability policy, not a claim that a small model always wins benchmarks.

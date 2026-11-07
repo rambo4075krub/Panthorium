@@ -161,6 +161,10 @@ async function auditSuite() {
   let action=await ledger.propose({userId:user.sub,requestId:'durable',toolId:'calendar.write',args:{title:'Private appointment'},requiresConfirmation:true});
   list=await notifications.list({user});
   assert(list.items.some(n=>n.type==='action.awaiting_confirmation'&&n.category==='operations'));
+  const legacyNotice = list.items.find(n=>n.type==='action.awaiting_confirmation');
+  notifications.repository.items.get(legacyNotice.id).body = 'ข้อความจากเวอร์ชั่นเดิม';
+  notifications.reconciledActions.clear();
+  assert.equal((await notifications.list({user})).items.find(n=>n.id===legacyNotice.id).body, 'ข้อความจากเวอร์ชั่นเดิม', 'upgrade preserves old receipt copy without breaking the inbox');
   assert(list.items.some(n=>n.type==='action.awaiting_confirmation'&&n.title.startsWith('ปฏิทิน: ')),'known tool domain distinguishes operation without exposing its arguments');
   await ledger.claim(user.sub,action.actionId,action.approvalHash);
   await notifications.list({user});

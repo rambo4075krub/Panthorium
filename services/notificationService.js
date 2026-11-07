@@ -2,6 +2,7 @@
 const { createHash, randomUUID } = require('crypto');
 const { failure } = require('./notificationRepository');
 const eventCatalog = require('../notification-event-catalog');
+const { describe } = require('../action-presentation');
 
 const CATEGORY_LABELS = Object.freeze({ system: 'ระบบ', security: 'ความปลอดภัยและบัญชี', operations: 'การดำเนินการ', reminders: 'การเตือนและกำหนดเวลา', calendar: 'ปฏิทิน', files: 'ไฟล์และเอกสาร', social: 'Social Media', billing: 'แพ็กเกจและชำระเงิน', ai: 'Sentinel AI' });
 const DEFAULT_SETTINGS = Object.freeze({ enabled: true,
@@ -9,7 +10,7 @@ const DEFAULT_SETTINGS = Object.freeze({ enabled: true,
   categories: Object.freeze(Object.fromEntries(Object.keys(CATEGORY_LABELS).map(key => [key,true]))),
   events: eventCatalog.defaults,
   quietHours: Object.freeze({ enabled: false, start: '22:00', end: '07:00', timeZone: 'Asia/Bangkok' }),
-  privacyPreview: false, askBeforeNotify: true });
+  privacyPreview: true, askBeforeNotify: true });
 const RETENTION_DAYS = 90;
 const NOTICE_ID = /^notice_[a-f0-9]{64}$/;
 const plain = value => !!value && typeof value === 'object' && !Array.isArray(value) && [Object.prototype,null].includes(Object.getPrototypeOf(value));
@@ -40,7 +41,7 @@ function operationTitle(state, toolId) {
   const title = ({awaiting_confirmation:'มีการดำเนินการรอการยืนยัน',running:'เริ่มดำเนินการแล้ว',succeeded:'ดำเนินการสำเร็จ',failed:'ดำเนินการไม่สำเร็จ',cancel_requested:'รับคำขอยกเลิกการดำเนินการแล้ว',unknown:'ยังยืนยันผลการดำเนินการไม่ได้'})[state];
   if (!title) return undefined;
   const prefix = String(toolId || '').split('.')[0];
-  const domain = ({ calendar:'ปฏิทิน',reminders:'การตั้งเตือน',files:'ไฟล์',studio:'สร้างสรรค์และเอกสาร',media:'สื่อ',social:'Social Media',billing:'แพ็กเกจและชำระเงิน',notes:'บันทึก',goals:'เป้าหมาย',memory:'ความจำ Sentinel' })[prefix];
+  const domain = ({ calendar:'ปฏิทิน',reminders:'การตั้งเตือน',files:'ไฟล์',studio:'สร้างสรรค์และเอกสาร',media:'สื่อ',social:'Social Media',billing:'แพ็กเกจและชำระเงิน',notes:'บันทึก',goals:'เป้าหมาย',mailbox:'อีเมล',memory:'ความจำ Sentinel' })[prefix];
   return domain ? domain + ': ' + title : title;
 }
 function operationBody(state, startedAt) {
@@ -148,9 +149,25 @@ class NotificationService {
       if (action.userId !== userId || String(action.toolId).startsWith('notifications.') || !operationTitle(action.state)) continue;
       const key = JSON.stringify([userId,action.actionId,action.state]);
       if (this.reconciledActions.has(key)) continue;
-      await this.publish({userId,category:'operations',type:'action.'+action.state,sourceId:action.actionId,
-        title:operationTitle(action.state,action.toolId),body:operationBody(action.state,action.startedAt),severity:['failed','unknown'].includes(action.state)?'warning':action.state==='succeeded'?'success':'info',
+      const noticeId = 'notice_' + createHash('sha256').update(JSON.stringify([userId,'operations','action.'+action.state,action.actionId])).digest('hex');
+      if (await this.repository.get(userId,noticeId,true)) {
+        this.reconciledActions.set(key,true);
+        if (this.reconciledActions.size>10000) this.reconciledActions.delete(this.reconciledActions.keys().next().value);
+        continue;
+      }
+      // Resolve the action only for a new receipt, and render its operation name.
+      // Do not copy mail bodies, tool results, credentials or raw arguments.
+      const detail = action.args ? action : await this.actionLedger.get?.(userId,action.actionId) || action;
+      const operation = describe(detail).operation;
+      try {
+        await this.publish({userId,category:'operations',type:'action.'+action.state,sourceId:action.actionId,
+        title:operationTitle(action.state,action.toolId),body:[operation, operationBody(action.state,action.startedAt)].filter(Boolean).join(' — ').slice(0,2000),severity:['failed','unknown'].includes(action.state)?'warning':action.state==='succeeded'?'success':'info',
         createdAt:action.updatedAt || action.createdAt,sensitive:true});
+      } catch (error) {
+        // Older releases may have stored different copy for this same receipt.
+        // Keep the immutable notice and its read/deleted state on upgrade.
+        if (error.code !== 'notification_request_conflict') throw error;
+      }
       this.reconciledActions.set(key,true);
       if (this.reconciledActions.size>10000) this.reconciledActions.delete(this.reconciledActions.keys().next().value);
     }

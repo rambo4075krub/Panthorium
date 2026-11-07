@@ -70,12 +70,12 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
       {
         assert.equal(w.document.getElementById('panthorium-browser-download'), null, 'no installer hyperlink inside any installed browser');
         const update = w.document.getElementById('panthorium-browser-update');
-        assert.equal(update.querySelector('[data-update-label]').textContent, 'อัพเดท');
+        assert.equal(update.querySelector('[data-update-label]').textContent, '📥 อัพเดท');
         assert.equal(update.querySelector('[data-update-message]').textContent, 'เป็นเวอร์ชั่นล่าสุดแล้ว');
         assert.equal(manual, 0, 'checking status must not invoke an installer');
         available = true;
         await w.PanthoriumAccessShell.refreshUpdateStatus(true);
-        assert.equal(update.querySelector('[data-update-label]').textContent, 'อัพเดท');
+        assert.equal(update.querySelector('[data-update-label]').textContent, '📥 อัพเดท');
         assert.equal(update.querySelector('[data-update-message]').textContent, 'มีเวอร์ชั่นใหม่พร้อมอัพเดท');
         await update.onclick();
         assert.equal(manual, 1);
@@ -108,6 +108,8 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
     }
     const restart = w.document.getElementById('btn-restart');
     assert(restart, 'every role has a restart button');
+    const updateControl = w.document.getElementById('panthorium-browser-update');
+    if (updateControl) assert.equal(updateControl.parentElement, restart.parentElement, 'restart and update share one row');
     assert.notEqual(w.getComputedStyle(restart).display, 'none', 'restart is visible for every role');
     assert.equal(w.document.querySelectorAll('#btn-restart').length, 1);
     let stoppedVoice = 0;

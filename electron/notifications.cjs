@@ -40,10 +40,11 @@ function createDesktopNotifications({ app, BrowserWindow, ipcMain, Notification,
   });
   handle('panthorium:notification-show', (state, input) => {
     if (!input || !/^notice_[a-f0-9]{64}$/.test(input.id || '') || typeof input.silent !== 'boolean'
-      || Object.keys(input).some(k => !['id', 'silent'].includes(k))) throw Error('invalid_notification');
+      || Object.keys(input).some(k => !['id', 'silent', 'title', 'body'].includes(k))) throw Error('invalid_notification');
+    if (['title','body'].some(k => input[k] !== undefined && (typeof input[k] !== 'string' || input[k].length > (k === 'title' ? 160 : 500)))) throw Error('invalid_notification');
     if (!state.enabled) throw Error('device_notifications_disabled');
     if (state.seen.has(input.id)) return { ok: true, duplicate: true };
-    const n = new Notification({ title: 'Panthorium', body: 'มีการแจ้งเตือนใหม่ เปิด Panthorium เพื่อดูรายละเอียด',
+    const n = new Notification({ title: input.title || 'Panthorium', body: input.body || 'มีการแจ้งเตือนใหม่',
       silent: input.silent, icon: iconPath });
     state.seen.add(input.id);
     if (state.seen.size > 500) state.seen.delete(state.seen.values().next().value);

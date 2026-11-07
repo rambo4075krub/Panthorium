@@ -4,7 +4,9 @@
 
 ## สถานะของชุดโค้ดนี้
 
-Gmail แบบปกติติดตั้งและตรวจอ่านกล่องอีเมลเจ้าของที่อนุญาตแล้วได้จริง ชุดนี้เพิ่มการเชื่อม AI/เสียงแยกจากกล่องปกติ; การทดสอบอัตโนมัติใช้ผู้ให้บริการจำลองและ PostgreSQL สำหรับตรวจสิทธิ์ การยืนยัน และการเข้ารหัส ยังต้องทดสอบ OAuth AI ด้วยความยินยอมของเจ้าของผ่านหน้าแอป ไม่ถือว่าทดสอบส่ง/ลบอีเมลจริงหรือ Outlook แล้ว Google ยังอยู่ใน Testing และ Microsoft ยังติดการไม่มี directory ที่ลงทะเบียนแอปได้ ฟังก์ชันปิดโดยค่าเริ่มต้นจนกว่าจะตั้งค่า OAuth, encryption, ฐานข้อมูลและนโยบายข้อมูลครบ
+รองรับเฉพาะ Gmail รวมถึง Google Workspace ที่เปิดใช้งาน Gmail และต้องเป็นอีเมลสมัคร Panthorium ที่ยืนยันแล้ว ผู้ที่ไม่มีกล่อง Gmail ไม่สามารถใช้ฟังก์ชันนี้ได้ การเชื่อม Google account อย่างเดียวไม่เพียงพอ: OAuth ต้องอ่าน Gmail profile ได้จริงก่อนบันทึกการเชื่อมต่อ ยกเลิกการรองรับ Microsoft ตามคำสั่งเจ้าของระบบ; เส้นทาง API และ native OAuth ปฏิเสธแม้มีค่าตั้งหรือโทเคน Microsoft เดิม
+
+Gmail ปกติและ AI/เสียงเชื่อมเจ้าของระบบสำเร็จแล้ว วันที่ 7 พฤศจิกายน 2026 ทดสอบอ่านและสรุปอีเมลจริง 1 ฉบับผ่าน production Gemini gateway ด้วยความยินยอมของเจ้าของ ได้สรุปภาษาไทยพร้อมอ้างอิงตรงฉบับ โดยไม่เปลี่ยนสถานะหรือส่ง/ลบข้อความ การทดสอบอัตโนมัติใช้ข้อมูลจำลองและ PostgreSQL ตรวจสิทธิ์ การยืนยันและการเข้ารหัส ไม่อ้างว่าทดสอบส่ง/ลบจริงหรือไมโครโฟนทุกอุปกรณ์แล้ว Google ยังอยู่ใน Testing; การเปิดลูกค้าทั่วไปต้องดำเนินการตรวจแอปและสิทธิ์ให้ครบ
 
 ## ประสบการณ์หลังเข้าสู่ระบบ (ข้อกำหนดเพิ่มเติม)
 
@@ -22,15 +24,15 @@ Gmail แบบปกติติดตั้งและตรวจอ่า�
 
 | ฟังก์ชัน | พฤติกรรม |
 |---|---|
-| เข้า/เปิด | เมนูอีเมลแยกจากศูนย์อีเมลผู้ดูแล; Gmail/Workspace และ Outlook/Microsoft 365 |
+| เข้า/เปิด | เมนูอีเมลแยกจากศูนย์อีเมลผู้ดูแล; Gmail และ Workspace ที่เปิดใช้งาน Gmail |
 | อ่าน/ค้นหา | รายการแบ่งหน้า เนื้อหาข้อความ โฟลเดอร์ ป้ายกำกับ ชื่อไฟล์แนบ; ไม่รัน HTML/script จากอีเมล |
 | สรุป | ทีละฉบับผ่าน UI หรือไม่เกิน 10 ฉบับผ่านเครื่องมือเสียง/แชท; อ้างอิงต้นทาง แจ้งข้อมูลถูกตัด |
 | ฟัง | อ่านเนื้อหา/สรุป หยุด พัก อ่านต่อ; Gemini Live ใช้เครื่องมือชุดเดียวกับแชท |
 | ส่ง | ระบุ To/Cc/Bcc หัวข้อ เนื้อหาและไฟล์แนบที่นำมาจากอีเมลเดิม; ทบทวนก่อนยืนยัน |
-| ตอบกลับ | ตรวจ Reply-To/From และหัวข้อเดิม; Gmail มี Message-ID/References/threadId; Outlook ใช้ reply endpoint |
+| ตอบกลับ | ตรวจ Reply-To/From และหัวข้อเดิม; Gmail มี Message-ID/References/threadId |
 | ร่าง | เก็บฉบับร่างที่เข้ารหัสใน Panthorium 30 วัน เปิดแก้และนำไปส่งได้ ไม่อ้างว่าเป็น provider draft |
 | ลบ | ย้ายลงถังขยะ และมีการกู้คืน; ไม่ลบถาวร |
-| ย้าย | ตรวจปลายทางจริง; Gmail เพิ่มป้ายปลายทาง/เอาป้ายต้นทางออก; Outlook ย้ายโฟลเดอร์ |
+| ย้าย | ตรวจปลายทางจริง; Gmail เพิ่มป้ายปลายทาง/เอาป้ายต้นทางออก |
 | อ่านแล้ว/ยังไม่อ่าน | เป็นคำสั่งเปลี่ยนสถานะที่ต้องยืนยัน |
 | วิเคราะห์ไฟล์ | TXT/CSV/MD/JSON, PDF ที่มีข้อความ, DOCX, XLSX, PPTX; ระบุแหล่งและขอบเขตการสกัด |
 
@@ -50,7 +52,7 @@ Gmail แบบปกติติดตั้งและตรวจอ่า�
 ## การเปิดหน้าอนุญาตในแต่ละอุปกรณ์
 
 - เบราว์เซอร์ทั่วไป: จองหน้าต่างจากการกดปุ่มก่อนเรียก API เพื่อรองรับ popup blocker; ถ้าเปิดไม่ได้ แสดงลิงก์ให้ผู้ใช้กดเอง และปิดหน้าต่างว่างเมื่อคำขอล้มเหลวหรือเปลี่ยนบัญชี
-- Panthorium Browser บนเดสก์ท็อป: ใช้ native bridge รุ่น 8 เปิดเบราว์เซอร์ของระบบ เฉพาะ OAuth endpoint ของ Google/Microsoft และ callback ของ Panthorium ตรวจ main frame, state, PKCE, scope และพารามิเตอร์ซ้ำก่อนเปิด ไม่มีการผ่อนข้อจำกัด popup/webview เดิม รุ่นเก่าจะแจ้งให้อัปเดต
+- Panthorium Browser บนเดสก์ท็อป: ใช้ native bridge รุ่น 8 เปิดเบราว์เซอร์ของระบบ เฉพาะ OAuth endpoint ของ Google และ callback ของ Panthorium ตรวจ main frame, state, PKCE, scope และพารามิเตอร์ซ้ำก่อนเปิด ไม่มีการผ่อนข้อจำกัด popup/webview เดิม รุ่นเก่าจะแจ้งให้อัปเดต
 - Android: ส่ง navigation ออกนอก allowNavigation ของ Capacitor เพื่อให้เปิดผ่านเบราว์เซอร์ของเครื่อง ตามพฤติกรรมที่ตรวจจากซอร์ส Capacitor Android 8.5.2 ไม่ฝังหน้าอนุญาต Google ใน WebView
 - หลังอนุญาตเสร็จ กลับมาที่ Panthorium ระบบตรวจการเชื่อมต่ออัตโนมัติ หรือกด “ตรวจการเชื่อมต่อ”; login ครั้งต่อไปตรวจสถานะจากเซิร์ฟเวอร์เหมือนเดิม การทดสอบคำสั่งเสียงและ OAuth บนเครื่องจริงยังต้องใช้บัญชีที่ยินยอมทดสอบ
 
@@ -59,13 +61,16 @@ Gmail แบบปกติติดตั้งและตรวจอ่า�
 - PKCE และ state แบบใช้ครั้งเดียว อายุ 10 นาที; อีเมลจาก provider ต้องตรงอีเมลสมัครที่ยืนยันแล้ว
 - AES-256-GCM ผูกข้อมูลกับ user/kind/id; โทเคนและฉบับร่างอยู่ในฐานข้อมูลฝั่งเซิร์ฟเวอร์
 - ทุก API ใช้ user จาก session ที่ยืนยันแล้ว ห้ามเลือก userId ผ่าน request
+- หน้าทบทวนแสดงบัญชี ผู้รับ Cc/Bcc หัวข้อ เนื้อหา ชื่อไฟล์ ป้ายต้นทาง/ปลายทางเป็นข้อความอ่านง่ายและอ่านออกเสียงได้; ยกเลิกไม่ดำเนินการ และปุ่มยืนยันกันการกดซ้ำ
+- ค้นหา/เปิดอีเมลทิ้งผลตอบกลับเก่าที่มาถึงช้า; การเปลี่ยนบัญชีหรือปิดหน้าต่างไม่แสดงเนื้อหาจากคำขอเดิม
+- รายการ Gmail โหลดรายละเอียดพร้อมกันไม่เกิน 4 คำขอ; การเลือกถังขยะ/สแปมตั้ง includeSpamTrash ชัดเจน
 - การกดยืนยันในหน้าอีเมลใช้ proposal ที่เข้ารหัสและถูกตรึงไว้; เสียง/แชทใช้ action ledger เดิม
 - atomic claim ป้องกันสองคำขอยืนยันส่งพร้อมกัน; เครือข่ายขาดระหว่างส่งบันทึกผลไม่แน่นอนและไม่ส่งซ้ำอัตโนมัติ
 - “ผู้ให้บริการรับคำขอส่ง” ไม่เท่ากับ “ผู้รับได้รับแล้ว”
 - ข้อมูลอีเมล/ไฟล์เป็น untrusted data ไม่ให้อำนาจเปลี่ยนสิทธิ์ เรียกเครื่องมืออื่น หรือเปิดเผยอีเมลอื่น
 - สรุปโดยตรงไม่ผ่าน conversation memory หรือ training; เมื่อเปิดโมดูลนี้ ปิด captureTraining ของบทสนทนาอัตโนมัติเพื่อกันอีเมลไหลเข้า training ทางบทสนทนาต่อเนื่อง
 - บันทึกคำสั่งอีเมลใน action ledger เข้ารหัสด้วยกุญแจอีเมล และล้างรายการอายุเกิน 30 วันรายชั่วโมง บทสนทนาใหม่เข้ารหัสเมื่อเปิด AI อีเมล ผู้ใช้ลบผ่านฟังก์ชันลบบทสนทนาได้; metadata และประวัติก่อนเปิดระบบนี้ไม่ได้แปลงย้อนหลัง
-- ถอนเชื่อมต่อจะลบ token/proposal/draft ของโมดูลนี้ ไม่ลบอีเมลต้นฉบับ ผู้ใช้เพิกถอนสิทธิ์เพิ่มเติมได้ในบัญชี Google/Microsoft
+- ถอนเชื่อมต่อจะลบ token/proposal/draft ของโมดูลนี้ ไม่ลบอีเมลต้นฉบับ ผู้ใช้เพิกถอนสิทธิ์เพิ่มเติมได้ในบัญชี Google
 
 ## ข้อจำกัดที่ต้องแสดงตามจริง
 
@@ -75,10 +80,9 @@ Gmail แบบปกติติดตั้งและตรวจอ่า�
 - XLSX แสดงตำแหน่งเซลล์และ cached value ของสูตร ไม่คำนวณสูตรใหม่/ไม่ตีความรูปแบบวันที่หรือกราฟ
 - ไม่รองรับ legacy DOC/XLS/PPT, ไฟล์รหัสผ่าน หรือ archive ทั่วไป
 - ไฟล์เข้าไม่เกิน 6 MiB; ข้อความสกัดไม่เกิน 80,000 ตัวอักษร; PDF ไม่เกิน 100 หน้า; worker timeout 15 วินาทีและจำกัด heap
-- แนบไฟล์เดิมได้ไม่เกิน 5 ไฟล์ รวม Gmail 6 MiB / Outlook 2 MiB; การอัปโหลดไฟล์ใหม่จากอุปกรณ์หรือ Cloud Files ยังไม่ได้เพิ่มในชุดนี้
-- กู้คืน Outlook ไป Inbox; Gmail ใช้ untrash ตามผู้ให้บริการ ไม่รับรองกลับโฟลเดอร์เดิมทุกกรณี
-- รายการโฟลเดอร์ Outlook แสดงระดับบนไม่เกิน 100 รายการ; ยังไม่ครอบคลุม nested folders จำนวนมาก
-- push แจ้งอีเมลใหม่ขณะปิดแอปยังต้องเพิ่ม Gmail watch/PubSub และ Microsoft subscription/webhook พร้อม renewal/reconciliation; การแจ้งให้เชื่อมหลังล็อกอินทำแล้วและแยกจาก background mail push
+- แนบไฟล์เดิมได้ไม่เกิน 5 ไฟล์ รวมไม่เกิน 6 MiB; การอัปโหลดไฟล์ใหม่จากอุปกรณ์หรือ Cloud Files ยังไม่ได้เพิ่มในชุดนี้
+- Gmail ใช้ untrash ตามผู้ให้บริการ ไม่รับรองกลับโฟลเดอร์เดิมทุกกรณี
+- push แจ้งอีเมลใหม่ขณะปิดแอปยังต้องเพิ่ม Gmail watch/PubSub พร้อม renewal/reconciliation; การแจ้งให้เชื่อมหลังล็อกอินทำแล้วและแยกจาก background mail push
 
 ## การตั้งค่าก่อนทดสอบจริง
 
@@ -93,25 +97,21 @@ USER_MAILBOX_GOOGLE_CLIENT_ID=<OAuth web application client id>
 USER_MAILBOX_GOOGLE_CLIENT_SECRET=<secret>
 USER_MAILBOX_GOOGLE_AGENT_CLIENT_ID=<separate AI-agent OAuth web client id>
 USER_MAILBOX_GOOGLE_AGENT_CLIENT_SECRET=<agent client secret>
-USER_MAILBOX_MICROSOFT_CLIENT_ID=<Entra application client id>
-USER_MAILBOX_MICROSOFT_CLIENT_SECRET=<secret>
 ```
 
 Google callback: `https://YOUR_BACKEND_ORIGIN/api/mailbox/oauth/google/callback`
-Microsoft callback: `https://YOUR_BACKEND_ORIGIN/api/mailbox/oauth/microsoft/callback`
 
 Google: เปิด Gmail API และ consent screen, scope `openid email gmail.modify`, test users, verified domain/privacy/contact; ตรวจ Restricted Scope Verification/CASA ก่อนเปิดลูกค้าทั่วไป
-Microsoft: delegated `openid email offline_access User.Read Mail.ReadWrite Mail.Send`; เลือก supported account types ให้ตรงกับบัญชีลูกค้า และตรวจข้อกำหนดองค์กรที่บังคับ admin consent
 
 AI policy gate เปิดได้เมื่อยืนยันบริการทั้งหมดที่ได้รับอีเมล รวมเสียง/บันทึก/การเรียนรู้ สอดคล้องข้อกำหนดผู้ให้บริการ และมีข้อความอธิบายต่อผู้ใช้ Gemini ใช้เครดิตเดิม Qwen ไม่หักเครดิตตามคิว/ทรัพยากรเดิม
 
 ## Acceptance ก่อนเปิดจริง
 
-1. Google และ Microsoft ทดสอบ OAuth ด้วยบัญชีจริงของผู้ทดสอบ, email mismatch, deny, revoked grant, refresh และ reconnect
+1. Google ทดสอบ OAuth ด้วยบัญชีจริงของผู้ทดสอบ, email mismatch, deny, revoked grant, refresh และ reconnect
 2. ผู้ใช้เก่าไม่เชื่อมต้องเห็นหน้าต่าง; เชื่อมแล้วเปิดใหม่/อีกอุปกรณ์ต้องไม่เห็น; ออกจากระบบต้องไม่เหลือข้อความ/เสียง
 3. สองบัญชีส่ง request ข้าม connection/message/proposal แล้วต้องถูกปฏิเสธ
 4. ส่ง/ตอบกลับถึงกล่องทดสอบที่ระบุชัด ตรวจ headers, Cc/Bcc, thread, attachment, duplicate confirm และ network timeout
-5. อ่าน/ค้นหา/ย้าย/ถังขยะ/กู้คืนเทียบสถานะ Gmail/Outlook จริง
+5. อ่าน/ค้นหา/ย้าย/ถังขยะ/กู้คืนเทียบสถานะ Gmail จริง
 6. PDF/Office ภาษาไทยและไฟล์เสีย/ใหญ่/สแกน ทดสอบ extraction และความถูกต้องของสรุปกับต้นฉบับ
 7. ทดสอบคำสั่งเสียง/ยืนยัน/ยกเลิกบน desktop, S24 Ultra, A12 และ Panthorium Browser; เมื่อเครดิตหมดตรวจ Qwen และ TTS
 8. ก่อนเปิด Production: configuration, consent/policy verification, retention/privacy deletion, real PostgreSQL concurrency และภาระงานหลายผู้ใช้
@@ -124,8 +124,6 @@ AI policy gate เปิดได้เมื่อยืนยันบริ�
 - https://developers.google.com/workspace/gmail/api/auth/scopes
 - https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification
 - https://developers.google.com/workspace/gmail/api/reference/rest
-- https://learn.microsoft.com/en-us/graph/permissions-reference
-- https://learn.microsoft.com/en-us/graph/api/message-reply?view=graph-rest-1.0
 
 ## การแยกสิทธิ์กล่องอีเมลกับ AI/เสียง
 
@@ -135,12 +133,13 @@ AI policy gate เปิดได้เมื่อยืนยันบริ�
 - Token และการ refresh แยกตาม purpose; AI tools ไม่รับ connection ปกติ และ API อ่าน/เขียนด้วยปุ่มไม่รับ connection สำหรับ agent
 - ถอนเฉพาะ AI/เสียงได้โดยไม่ถอนกล่องอีเมลปกติ บันทึกคำสั่งที่เกิดขึ้นแล้วและประวัติสนทนาคงอยู่ตามระยะเก็บ/การลบประวัติที่อธิบายในนโยบาย
 - กลับมาจากหน้าอนุญาตแล้วหน้ากล่องอีเมลตรวจสถานะให้อัตโนมัติ และยังมีปุ่มตรวจการเชื่อมต่อให้กดเอง
-- Microsoft ใช้ client ที่รองรับ organizational + personal accounts; แยกการอนุญาต/โทเคน purpose=agent ภายในระบบ แม้ใช้ application เดียวกันได้
 - Public rollout ยังต้องผ่านการตรวจแอป/สิทธิ์ของผู้ให้บริการตามจริง โหมด Testing ไม่ใช่การเปิดให้ลูกค้าทุกราย
 
 ข้อกำหนดแยก client สำหรับงานปกติและ AI: https://support.google.com/cloud/answer/15549257
 
 ## ขอบเขต Qwen และการเปิดลูกค้าทั่วไป
+
+Qwen เปิดให้เฉพาะแอดมินและบัญชีเจ้าของระบบที่ได้รับสิทธิ์ ผู้ใช้ทั่วไปไม่เห็นตัวเลือกนี้และถูกปฏิเสธที่ API ด้วย ชื่อบริการที่แสดงต่อผู้ใช้คือ Sentinel AI
 
 Qwen รับข้อมูลสรุปเป็น JSON พร้อมคำถามและรหัสต้นฉบับครบ หากเนื้อหาเกินขอบเขตบริบท จะสรุปจากส่วนต้นของแต่ละฉบับและแสดงคำเตือนว่าข้อมูลถูกตัด ไม่ใช่สรุปอีเมลครบทุกส่วน การเลือก Qwen โดยตรงไม่เปลี่ยนไปใช้ Gemini ที่หักเครดิตเอง หาก RAM/VRAM ไม่พร้อม บริการฟรีจะพักตามตัวควบคุมทรัพยากรเดิม
 

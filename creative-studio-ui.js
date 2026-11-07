@@ -418,11 +418,15 @@
     const args = confirmation.args || {}, steps = result.toolId === 'studio.edit' ? [{pluginId:args.pluginId,input:{name:args.name,revision:args.revision,operations:args.operations},sourceFileIds:[args.fileId]}] : Array.isArray(args.steps) ? args.steps : [args];
     open(steps[0]?.pluginId || 'image'); const v = view; if (!v || !current(v) || v.approvals.has(confirmation.actionId)) return false;
     const card = el('section', null, { class: 'cs-job', 'data-studio-approval': confirmation.actionId }), controls = el('div', null, { class: 'cs-actions' });
-    card.append(el('h2', 'ตรวจคำสั่งจาก Sentinel AI'), el('p', 'ยืนยันแผนนี้ก่อนเริ่มเรียกปลั๊กอิน งานสร้างสื่ออาจใช้โควตาหรือมีค่าใช้จ่าย'));
+    card.append(el('h2', result.toolId === 'studio.edit' ? 'ยืนยันการแก้ไขผลงานหรือไม่' : 'ยืนยันการสร้างผลงานหรือไม่'), el('p', 'งานสร้างเอกสารและสื่ออาจใช้โควตาหรือมีค่าใช้จ่ายตามบริการที่เลือก'));
     for (const [index, step] of steps.entries()) {
-      card.append(el('h3', (index + 1) + '. ' + (plugin(step.pluginId)?.title || String(step.pluginId || 'ไม่พบเครื่องมือ'))));
-      // Show every approved argument, rather than a model-written summary that could omit side effects.
-      const plan = el('pre', JSON.stringify({ input: step.input || {}, sourceFileIds: step.sourceFileIds || [], usePrevious: step.usePrevious === true }, null, 2)); plan.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,monospace;max-height:240px;overflow:auto'; card.append(plan);
+      card.append(el('h3', (index + 1) + '. ' + (plugin(step.pluginId)?.title || 'เอกสารและสื่อ')));
+      const presentation = window.PanthoriumActionPresentation?.describe({toolId:result.toolId,args:step.input || {}});
+      for (const text of presentation?.details || []) { const line = el('p', text); line.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere'; card.append(line); }
+      const sources = step.sourceFileIds || [];
+      if (sources.length) card.append(el('p', 'ไฟล์ต้นทาง: ' + sources.map((id, i) => v.files.find(file => file.id === id)?.name || 'ไฟล์ที่เลือก ' + (i + 1)).join(', ')));
+      if (step.usePrevious === true) card.append(el('p', 'ใช้ผลงานจากขั้นตอนก่อนหน้า'));
+      if (step.input?.operations?.length) card.append(el('p', 'แก้ไขเนื้อหา ' + step.input.operations.length + ' รายการ และบันทึกเป็นฉบับใหม่'));
     }
     const expires = new Date(confirmation.approvalExpiresAt), expired = Number.isFinite(expires.getTime()) && expires.getTime() <= Date.now();
     if (Number.isFinite(expires.getTime())) card.append(el('small', 'ยืนยันได้ถึง ' + expires.toLocaleString('th-TH')));

@@ -2,9 +2,12 @@ if (Test-Path 'D:\PanthoriumAI\qwen.disabled') { Write-Output 'Qwen disabled'; e
 $ErrorActionPreference = 'Stop'
 $llmRoot = 'D:\PanthoriumAI'
 $llmExe = Join-Path $llmRoot 'runtime\llama-server.exe'
-$llmModel = Join-Path $llmRoot 'models\Qwen3.5-4B-Q4_K_M.gguf'
+$profile = Get-Content -Raw (Join-Path $llmRoot 'hybrid\model-profile.json') | ConvertFrom-Json
+$llmModel = Join-Path (Join-Path $llmRoot 'models') $profile.filename
 $llmPidFile = Join-Path $llmRoot 'llm.pid'
 $llmHealth = 'http://127.0.0.1:8088/health'
+$brokerHealth = Invoke-RestMethod 'http://127.0.0.1:8765/health' -TimeoutSec 3
+if ($brokerHealth.version -ne 'qwen8b-v1' -or $brokerHealth.model -ne $profile.name) { throw 'The matching resource-monitoring broker must be running first.' }
 function Test-LlmIdentity($ProcessInfo) {
     if (-not $ProcessInfo) { return $false }
     $actualPath = $ProcessInfo.ExecutablePath
@@ -45,14 +48,18 @@ if (-not $existing) {
 if ($existing) {
     Wait-LlmHealth ([int]$existing.ProcessId)
     $existing.ProcessId | Set-Content -Encoding Ascii $llmPidFile
-    [pscustomobject]@{ status = 'reused'; pid = $existing.ProcessId; model = 'Qwen3.5-4B-Q4_K_M'; endpoint = $llmHealth } | ConvertTo-Json -Compress
+    [pscustomobject]@{ status = 'reused'; pid = $existing.ProcessId; model = $profile.name; endpoint = $llmHealth } | ConvertTo-Json -Compress
     exit 0
 }
 if (-not (Test-Path $llmExe) -or -not (Test-Path $llmModel)) { throw 'Required llama.cpp runtime or selected model is missing.' }
 $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse('127.0.0.1'), 8088)
 $probe.Server.ExclusiveAddressUse = $true
 try { $probe.Start() } catch { throw 'Local port8088 is occupied or unavailable; no new LLM process started.' } finally { $probe.Stop() }
-$llmArgs = @('-m', $llmModel, '--host', '127.0.0.1', '--port', '8088', '-c', '8192', '-np', '1', '-ngl', '20', '-t', '4', '-b', '256', '-ub', '128', '-fa', 'on', '--reasoning', 'on', '--reasoning-budget', '2048', '--reasoning-format', 'deepseek', '--cache-ram', '256', '--mmproj', 'D:\PanthoriumAI\models\Qwen3.5-4B-mmproj-F16.gguf', '--no-mmproj-offload', '--image-max-tokens', '512', '--video-fps', '1', '--video-ffmpeg-dir', 'D:\PanthoriumAI\runtime\media', '--alias', 'panthorium-local')
+$preflightJson = & (Join-Path $llmRoot 'voice\.venv\Scripts\python.exe') (Join-Path $llmRoot 'hybrid\model_profile.py')
+if ($LASTEXITCODE -ne 0) { Write-Output $preflightJson; exit 2 }
+$preflight = $preflightJson | ConvertFrom-Json
+if (-not $preflight.ready) { throw 'Local model resource admission failed' }
+$llmArgs = @($preflight.args)
 $env:TEMP = 'D:\Panthorium\Host\media-temp'
 $env:TMP = $env:TEMP
 $logStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -60,10 +67,11 @@ $stdoutPath = Join-Path $llmRoot "logs\llm-$logStamp.stdout.log"
 $stderrPath = Join-Path $llmRoot "logs\llm-$logStamp.stderr.log"
 $started = Start-Process -FilePath $llmExe -ArgumentList $llmArgs -WorkingDirectory (Split-Path $llmExe) -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
 $started.Id | Set-Content -Encoding Ascii $llmPidFile
+$started.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
 try { Wait-LlmHealth $started.Id }
 catch {
     $failed = Get-CimInstance Win32_Process -Filter "ProcessId = $($started.Id)"
     if (Test-LlmIdentity $failed) { Stop-Process -Id $started.Id -ErrorAction SilentlyContinue }
     throw
 }
-[pscustomobject]@{ status = 'started'; pid = $started.Id; model = 'Qwen3.5-4B-Q4_K_M'; endpoint = $llmHealth; stdout = $stdoutPath; stderr = $stderrPath } | ConvertTo-Json -Compress
+[pscustomobject]@{ status = 'started'; pid = $started.Id; model = $profile.name; endpoint = $llmHealth; stdout = $stdoutPath; stderr = $stderrPath } | ConvertTo-Json -Compress
