@@ -15,7 +15,7 @@ const { validMailboxOAuthUrl } = require('../electron/mailbox-oauth.cjs');
   let providerCalls = 0, summaries = 0;
   const exchanges = [];
   const service = new UserMailboxService({ pool, env,
-    complete: async input => { summaries++; assert.equal(input.sources[0].text, 'Private fixture text'); return { ok: true, text: 'สรุปทดสอบ', provider: 'local' }; },
+    complete: async input => { summaries++; assert.equal(input.sources[0].text, 'Private fixture text'); return { ok: true, text: 'สรุปทดสอบ', provider: 'local', sourceTruncated: true }; },
     fetchImpl: async (url, options) => {
       if (url.endsWith('/token')) {
         const form = new URLSearchParams(options.body), agent = form.get('client_id') === 'agent-client';
@@ -51,7 +51,9 @@ const { validMailboxOAuthUrl } = require('../electron/mailbox-oauth.cjs');
     await assert.rejects(() => service.analyze(user, { connectionId: standardId, messageIds: ['m1'] }), /agent_connection_required/);
     assert.equal(providerCalls, before, 'wrong-purpose and cross-account reads never reach the provider');
     assert.equal(summaries, 0);
-    assert.equal((await service.analyze(user, { connectionId: agentId, messageIds: ['m1'], provider: 'local' })).text, 'สรุปทดสอบ');
+    const analysis = await service.analyze(user, { connectionId: agentId, messageIds: ['m1'], provider: 'local' });
+    assert.equal(analysis.text, 'สรุปทดสอบ');
+    assert.equal(analysis.truncated, true, 'provider excerpt flag reaches the UI and voice tool');
     const saved = await service.store.get(user, 'connection', agentId);
     await service.store.put(user, 'connection', { ...saved, expiresAt: 0 }, { id: agentId });
     await service.agentRead(user, { action: 'get', connectionId: agentId, messageId: 'm1' });

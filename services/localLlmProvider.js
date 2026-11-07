@@ -12,7 +12,7 @@ function schema(value) {
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,key==='type'&&typeof item==='string'?item.toLowerCase():key==='description'?String(item).slice(0,180):schema(item)]));
 }
-function messagesFor(history) {
+function messagesFor(history, {preserveInput = false} = {}) {
   const messages = [];
   for (const item of history) {
     if (Array.isArray(item.parts)) {
@@ -23,7 +23,7 @@ function messagesFor(history) {
         const raw=JSON.stringify(r.response);
         messages.push({role:'tool',tool_call_id:r.id,content:raw.length<=2000?raw:JSON.stringify({truncated:true,preview:raw.slice(0,1800)})});
       }
-    } else if (['user','assistant'].includes(item.role) && typeof item.content==='string') messages.push({role:item.role,content:item.content.slice(-2400)});
+    } else if (['user','assistant'].includes(item.role) && typeof item.content==='string') messages.push({role:item.role,content:preserveInput ? item.content : item.content.slice(-2400)});
   }
   return messages;
 }
@@ -34,7 +34,7 @@ class LocalLlmProvider {
     this.reasoning = env.LOCAL_LLM_REASONING === '1';
     this.busy = false;
   }
-  async complete(systemPrompt, history, {model, tools = [], hybrid = false, voiceMode = false, signal, userId} = {}, onDelta) {
+  async complete(systemPrompt, history, {model, tools = [], hybrid = false, voiceMode = false, signal, userId, preserveInput = false} = {}, onDelta) {
     if (model && model !== this.model) throw new Error('model_not_allowed');
     if (this.busy && !hybrid) throw new Error('local_llm_busy');
     if (!Array.isArray(history)) throw new Error('local_context_too_large');
@@ -42,7 +42,8 @@ class LocalLlmProvider {
     let selected = hybrid ? localTools(tools,history) : tools;
     selected = selected.map(t=>({type:'function',function:{name:t.name,description:t.description?.slice(0,240),parameters:schema(t.parameters)}}));
     while (JSON.stringify(selected).length>7500) selected.pop();
-    const messages = hybrid ? messagesFor(history) : history;
+    const messages = hybrid ? messagesFor(history, {preserveInput}) : history;
+    if (preserveInput && JSON.stringify(messages).length > 6500) throw new Error('local_context_too_large');
     // Drop complete old turns only; never orphan a tool result from its call.
     while (messages.length>1 && JSON.stringify(messages).length>6500) {
       const next = messages.findIndex((m,i)=>i>0 && m.role==='user');
