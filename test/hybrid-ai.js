@@ -31,6 +31,19 @@ const {chunks,BufferedSpeech}=require('../speech-buffer');
  global.fetch=async(url,options)=>{payload=JSON.parse(options.body);return {ok:true,json:async()=>({choices:[{message:{content:'unverified number'}}]})};};
  await assert.rejects(local.complete('s',[{role:'user',content:'ราคา 546.02 บาท ลด 10 บาท'}],{hybrid:true,tools:arithmeticTools}),/local_required_calculation_missing/);
  assert.equal(payload.tool_choice,'required');assert.equal(payload.tools.length,1);
+ // Preserve an allowlisted resource failure through the real local provider and
+ // gateway, including streaming, without billing or silently switching to cloud.
+ global.fetch=async()=>new Response(JSON.stringify({detail:'local_resource_ram_headroom'}),{status:503,headers:{'content-type':'application/json'}});
+ const callLocal=(_provider,system,history,options)=>local.complete(system,history,{...options,hybrid:true});
+ p.callDetailed=callLocal;p.streamDetailed=callLocal;
+ for(const method of ['complete','stream']){
+   const failure=await gateway[method]({preferredProvider:'local',systemPrompt:'s',history:[{role:'user',content:'hello'}],userId:'u'});
+   assert.equal(failure.error,'local_resource_ram_headroom');assert.match(failure.text,/RAM/);
+   assert.equal(failure.creditsCharged,0);assert.equal(failure.billable,false);
+ }
+ assert.equal(gateway.localGate.stats().active,0);
+ global.fetch=async()=>new Response(JSON.stringify({detail:'secret-unrecognized-diagnostic'}),{status:503});
+ await assert.rejects(local.complete('s',[{role:'user',content:'hello'}],{hybrid:true}),/^Error: local_resource_unavailable$/);
  global.fetch=saved;
  let called=[];
  const service={listTools:(user,{scopes})=>user.sub==='owner'&&scopes.includes('panthorium:read')?[{name:'read',inputSchema:{type:'object',properties:{}}}]:[],callTool:async(user,name,args,id,options)=>{called.push({user,name,args,options});return{content:[{type:'text',text:'ok'}],structuredContent:{ok:true},isError:false};}};

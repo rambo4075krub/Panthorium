@@ -22,6 +22,16 @@ async function api(path,token,body){
    assert.equal(policy.data.local.model,'Qwen3-8B-Q4_K_M');assert.equal(policy.data.local.vision,false);
    assert.deepEqual(policy.data.local.capabilities,['text','thinking','tool-calling']);assert.equal(policy.data.primary,'local');
    results.push({test:'authorized 8B wiring',ready:policy.data.local.ready,reason:policy.data.local.reason,model:policy.data.local.model});
+   if(process.env.TEST_RESOURCE_DENIAL==='1'){
+    assert.equal(policy.data.local.ready,false,'Resource denial probe requires a paused model');
+    assert.ok(policy.data.local.resources.ramTotalBytes>0);
+    const start=Date.now(),denied=await api('/api/local/chat',token,{message:'Reply only with the number 5.'});
+    const elapsedMs=Date.now()-start;
+    assert.equal(denied.status,503);assert.match(denied.data.error,/^local_resource_(ram_headroom|ram_pressure|vram_pressure|gpu_metrics_unavailable|resource_monitor_unavailable|model_not_installed)$/);
+    assert.equal(denied.data.creditsCharged,0);assert.equal(denied.data.billable,false);
+    assert.ok(elapsedMs<10000,'Resource refusal unexpectedly waited in the queue');
+    results.push({test:'immediate resource refusal without billing',elapsedMs,error:denied.data.error,creditsCharged:denied.data.creditsCharged});
+   }
   }else{
    assert.equal(policy.data.primary,null);assert.equal(policy.data.local.model,undefined);
    for(const [path,body]of [['/api/local/chat',{message:'test'}],['/api/hybrid/speech',{text:'test'}],['/api/hybrid/transcribe',{audio:'data:audio/webm;base64,AQID'}]])assert.equal((await api(path,token,body)).status,403,path);

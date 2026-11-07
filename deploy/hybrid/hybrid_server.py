@@ -4,7 +4,7 @@ No credentials, remote tools or user content are persisted by this process.
 from pathlib import Path
 import asyncio, contextlib, gc, io, json, os, subprocess, sys, time
 import httpx, psutil, threading, re
-from work_queue import WorkQueue, QueueError, resource_reason
+from work_queue import WorkQueue, QueueError, resource_reason, admission_ready, memory_budget
 from model_profile import PROFILE, model_path, owns_model
 queue=WorkQueue()
 metrics_lock=threading.Lock()
@@ -69,7 +69,8 @@ def _snapshot(kind="chat"):
     elif ram_used<.60 and cached_gpu is not None and cached_gpu<.55:pressure_latched=False
     reason='disabled' if DISABLED.exists() else resource_reason(ram_used=ram_used,total=mem.total,available=mem.available,local_ram=local,vram=cached_gpu,cpu=cpu,model_loaded=p is not None,voice_loaded=engine is not None,kind=kind,latched=pressure_latched,cold_budget=PROFILE['coldRamBudgetGiB'])
     if kind=='chat' and (not model_path(ROOT).is_file() or model_path(ROOT).stat().st_size!=PROFILE['bytes']):reason='model_not_installed'
-    return {'ready':reason is None,'reason':reason,'pressure':hard,'busy':busy,'ramAvailableBytes':mem.available,'ramUsedFraction':ram_used,'ramLimit':.65,'cpuPercent':cpu,'localRamBytes':local,'localRamLimitBytes':int(mem.total*LIMIT),'vramUsedFraction':cached_gpu,'vramLimit':LIMIT,'modelLoaded':p is not None,'queue':queue.status()}
+    budget=memory_budget(ram_used=ram_used,total=mem.total,model_loaded=p is not None,voice_loaded=engine is not None,kind=kind,cold_budget=PROFILE['coldRamBudgetGiB'])
+    return {'ready':reason is None,'reason':reason,'pressure':hard,'busy':busy,'ramAvailableBytes':mem.available,'ramUsedFraction':ram_used,'ramLimit':.65,'cpuPercent':cpu,'localRamBytes':local,'localRamLimitBytes':int(mem.total*LIMIT),'vramUsedFraction':cached_gpu,'vramLimit':LIMIT,'modelLoaded':p is not None,'queue':queue.status(),**budget}
 
 def drop_voice():
     global engine
@@ -120,7 +121,7 @@ async def admission(request,kind='chat'):
         global latest
         latest=await asyncio.to_thread(snapshot,kind)
         if DISABLED.exists():raise QueueError('local_disabled',503)
-        return latest['ready']
+        return admission_ready(latest)
     try:
         async with queue.lease(owner(request),ready,request.is_disconnected):
             busy=True;phase='admission'
