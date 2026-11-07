@@ -7,7 +7,7 @@ Prepared 2026-11-07. This is a preparation record, not evidence of Google approv
 - Project: `project-0f6aa7d0-6055-420f-842` / `699017940678` (do not substitute the other project named panthorium-backend).
 - App: Panthorium; External; **Testing**; one test user, `rambo4075krub@gmail.com`.
 - Homepage: https://panthorium.net ; privacy: https://panthorium.net/privacy .
-- Authorized domain: `panthorium.net`. **Search Console ownership was not verified by this inspection.**
+- Authorized domain: `panthorium.net`. Search Console shows a domain property and delegated-owner access for the signed-in account. Independent verified-owner eligibility for the OAuth review has not been established.
 - Support and developer contact: `rambo4075krub@gmail.com`.
 - Scopes: OpenID `openid`, email, and `https://www.googleapis.com/auth/gmail.modify`.
 - Separate standard and AI Web clients exist; callback is `/api/mailbox/oauth/google/callback`.
@@ -39,9 +39,9 @@ This draft must be checked against the actual review form and current deployed b
 - Owner's standard and AI connections were both observed active on 2026-11-07; authenticated service calls successfully listed/read a real Gmail message.
 - A local summary attempt returned `local_resource_unavailable`; the broker reported `ram_pressure` at approximately 67.7% RAM usage against its 65% threshold. Keep the existing resource safeguards; do not raise RAM/VRAM limits to force a test.
 - A synthetic Thai email completed through the production Gemini gateway and normal quota checks. The returned summary preserved the fixture month/day and preparation task. This did not use private email content.
-- Real-email AI summary end-to-end remains unverified. Continue with synthetic fixtures until explicit authorization for the test data and receiving AI provider is established.
-- Automated regression tests cover separate grants, account isolation, token encryption, single-use OAuth state, exact-action confirmation and replay handling. These are not proof of real email delivery, physical-device microphone/audio behavior, Microsoft OAuth, or Google approval.
-- Microsoft remains blocked by the absence of a usable Entra directory for app registration.
+- After explicit owner authorization, one real Gmail message was read and summarized through the normal production Gemini gateway on 2026-11-07. The result was Thai (266 characters), referenced the selected source correctly and was not truncated; latency was approximately 30 seconds. Mail state was unchanged; no message or private content is included in this record.
+- Automated regression tests cover separate grants, account isolation, token encryption, single-use OAuth state, exact-action confirmation and replay handling. These are not proof of real email delivery, physical-device microphone/audio behavior, or Google approval.
+- Microsoft support was canceled by the owner. This feature is restricted to Gmail mailboxes (including Workspace Gmail) matching the verified registration email; Microsoft API/native flows are rejected.
 
 ## Official references
 

@@ -45,7 +45,7 @@ const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(resol
     assert.match(detail.textContent,/ยืนยันการลบอีเมลหรือไม่/);assert.match(detail.textContent,/Fixture mail/);assert.match(detail.textContent,/owner@example.com/);
     assert.doesNotMatch(detail.textContent,/private-message|messageId|private-proposal/);assert.equal(detail.querySelector('pre'),null);
     assert.equal(requests.filter(x=>x.path.endsWith('/confirm')).length,0);
-    await click('ยืนยันดำเนินการ');
+    await click('ยืนยันย้ายลงถังขยะ');
     assert.deepEqual(requests.find(x=>x.path.endsWith('/confirm')).body,{proposalId:'private-proposal'},'readable preview preserves the server-bound approval');
   } finally { dom.window.close(); }
   console.log('Mailbox UI: separate AI disclosure, consent, return refresh, agent-only analysis and independent disconnect passed');

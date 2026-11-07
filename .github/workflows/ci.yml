@@ -104,6 +104,7 @@ jobs:
           node test/contact-browser.js
           node test/social-notifications-browser.js
           node test/notifications-browser.js
+          node test/user-mailbox-browser.js
           node test/social-redesign-browser.js
           node test/social-watch-browser.js
           node test/social-tv-browser.js
