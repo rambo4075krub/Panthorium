@@ -5,6 +5,7 @@ from pathlib import Path
 import asyncio, contextlib, gc, io, json, os, subprocess, sys, time
 import httpx, psutil, threading, re
 from work_queue import WorkQueue, QueueError, resource_reason
+from model_profile import PROFILE, model_path, owns_model
 queue=WorkQueue()
 metrics_lock=threading.Lock()
 pressure_latched=False
@@ -32,9 +33,7 @@ def model_process():
     try:
         p=psutil.Process(int((ROOT/'llm.pid').read_text().strip()))
         args=p.cmdline()
-        if Path(p.exe()).resolve()!= (ROOT/'runtime'/'llama-server.exe').resolve():return None
-        if str(ROOT/'models'/'Qwen3.5-4B-Q4_K_M.gguf') not in args:return None
-        if args[args.index('--port')+1]!='8088' or args[args.index('--host')+1]!='127.0.0.1':return None
+        if not owns_model(p.exe(),args,ROOT):return None
         return p
     except (OSError,ValueError,psutil.Error):return None
 
@@ -68,7 +67,8 @@ def _snapshot(kind="chat"):
     hard='ram_pressure' if ram_used>=.65 or mem.available<RESERVE else 'vram_pressure' if cached_gpu is not None and cached_gpu>=.60 else None
     if hard:pressure_latched=True
     elif ram_used<.60 and cached_gpu is not None and cached_gpu<.55:pressure_latched=False
-    reason='disabled' if DISABLED.exists() else resource_reason(ram_used=ram_used,total=mem.total,available=mem.available,local_ram=local,vram=cached_gpu,cpu=cpu,model_loaded=p is not None,voice_loaded=engine is not None,kind=kind,latched=pressure_latched)
+    reason='disabled' if DISABLED.exists() else resource_reason(ram_used=ram_used,total=mem.total,available=mem.available,local_ram=local,vram=cached_gpu,cpu=cpu,model_loaded=p is not None,voice_loaded=engine is not None,kind=kind,latched=pressure_latched,cold_budget=PROFILE['coldRamBudgetGiB'])
+    if kind=='chat' and (not model_path(ROOT).is_file() or model_path(ROOT).stat().st_size!=PROFILE['bytes']):reason='model_not_installed'
     return {'ready':reason is None,'reason':reason,'pressure':hard,'busy':busy,'ramAvailableBytes':mem.available,'ramUsedFraction':ram_used,'ramLimit':.65,'cpuPercent':cpu,'localRamBytes':local,'localRamLimitBytes':int(mem.total*LIMIT),'vramUsedFraction':cached_gpu,'vramLimit':LIMIT,'modelLoaded':p is not None,'queue':queue.status()}
 
 def drop_voice():
@@ -87,7 +87,9 @@ async def ensure_model():
     phase='model_health'
     async with httpx.AsyncClient(timeout=2) as client:
         try:
-            if (await client.get('http://127.0.0.1:8088/health')).status_code==200:return
+            if (await client.get('http://127.0.0.1:8088/health')).status_code==200:
+                if model_process():return
+                raise HTTPException(503,'local_model_identity_mismatch')
         except httpx.HTTPError:pass
     phase='model_start'
     def launch():
@@ -160,9 +162,9 @@ async def start():
 async def end():
     app.state.monitor.cancel()
 @app.get('/status')
-async def status(request:Request):return {**latest,'busy':busy,'phase':phase,'ready':latest.get('ready',False) and not DISABLED.exists(),'queue':queue.status(owner(request))}
+async def status(request:Request):return {**latest,'model':PROFILE['name'],'capabilities':PROFILE['capabilities'],'vision':False,'voice':'external-asr-tts','busy':busy,'phase':phase,'ready':latest.get('ready',False) and not DISABLED.exists(),'queue':queue.status(owner(request))}
 @app.get('/health')
-async def health():return {'ok':True,'service':'panthorium-free-ai-broker','version':'queue-v1'}
+async def health():return {'ok':True,'service':'panthorium-free-ai-broker','version':'qwen8b-v1','model':PROFILE['name'],'capabilities':PROFILE['capabilities'],'vision':False,'voice':'external-asr-tts'}
 
 @app.post('/v1/chat/completions')
 async def chat(request:Request):

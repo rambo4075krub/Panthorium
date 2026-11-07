@@ -57,7 +57,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
 
 class ResourceTests(unittest.TestCase):
     def reason(self,**kw):
-        values=dict(ram_used=.30,total=16*1024**3,available=11.2*1024**3,local_ram=.3*1024**3,vram=.1,cpu=20,model_loaded=False,voice_loaded=False)
+        values=dict(ram_used=.20,total=16*1024**3,available=11.2*1024**3,local_ram=.3*1024**3,vram=.1,cpu=20,model_loaded=False,voice_loaded=False)
         values.update(kw); return resource_reason(**values)
     def test_preflight_and_pressure(self):
         self.assertIsNone(self.reason())

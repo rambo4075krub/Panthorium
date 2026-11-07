@@ -83,3 +83,27 @@ matching before changing it.
 - [Grype configuration reference](https://oss.anchore.com/docs/reference/grype/configuration/)
 - [Grype 0.118.0 OpenVEX implementation](https://github.com/anchore/grype/blob/v0.118.0/grype/vex/openvex/implementation.go)
 - [Pinned scan-action inputs](https://github.com/anchore/scan-action/blob/27805bf3b4e84b4a5c980df22ed233c00390a439/action.yml)
+
+## Backend rebuild review — 2026-11-07
+
+Evidence: [CI run 42361475688](https://github.com/rambo4075krub/Panthorium/actions/runs/42361475688),
+artifact `container-security-backend-runtime` (ID 13570094017), image
+`sha256:f19fed57622b06f1d61d5673e00108c3a43bd8cdf1dbea210048e480b732b4c5`.
+The build now requires Alpine zlib/zlib-dev 1.4-r0 to fix CVE-2026-4738;
+the old cached build used 1.3.2-r1. This changed the backend executable bytes.
+
+Review checked the extracted ELF bytes and their SHA-256, x86-64 architecture,
+complete embedded configuration against the committed lock, and dynamic libz
+linkage. Upstream source and patch were independently fetched, their pinned
+hashes verified, the patch applied with zero fuzz, and the resulting rtsp.c hash
+matched the existing reviewed policy. Re-running inventory verification against
+the actual binaries reproduced the CI proof and retained all 316 packages.
+The inventory contains zlib and zlib-dev 1.4-r0. The actual-image offline smoke
+passed eight audio/video formats, captions, three image formats and local-only
+protocol checks. The unfiltered scan has only the previously reviewed FFmpeg
+CVE-2026-107696 remaining at High/Critical severity; the two zlib findings are gone.
+
+Only the backend executable pins and its evidence reference change. Source,
+configuration, patch pins, speaker profiles, scanner version, matching policy
+and failure threshold stay unchanged. The next CI run must generate and verify
+the image-bound statement again and independently pass the filtered gate.

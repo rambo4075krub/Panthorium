@@ -1,7 +1,7 @@
-# Gemini Live + Qwen 4B on the notebook
+# Sentinel AI + Qwen 8B on the notebook
 
 Gemini Live is the primary voice provider and the only AI provider that debits
-Panthorium credits. Qwen has no quota preflight or credit debit. Explicit local
+Panthorium credits. Qwen is restricted to server-authorized administrators and the verified owner account. It has no quota preflight or credit debit. Explicit local
 requests never fall back to a paid provider. Automatic short text rewrites use
 Qwen first; complex/default tasks and voice use Gemini first. An exhausted or
 unavailable credit ledger removes Gemini from the candidate list. Once a tool
@@ -21,12 +21,12 @@ outbound MCP connector and does not grant credentials/scopes to external clients
   `LOCAL_QWEN_DISABLE_FILE=D:\PanthoriumAI\qwen.disabled`.
 - Application requests go through the broker to port 8088. One operation at a time across
   production and staging; excess requests receive a retryable busy response.
-- Qwen uses 20 GPU layers, 8192 context tokens, four CPU threads, below-normal
+- Qwen3-8B Q4_K_M uses 10 GPU layers, 8192 context tokens, four CPU threads, below-normal
   priority. ASR/TTS use two CPU threads. Text reasoning remains enabled;
   voice answers skip long internal reasoning to reduce latency. Arithmetic
   uses the registered bounded calculator instead of relying on mental math.
 - Monitor interval two seconds, local AI working set ceiling 60% of physical
-  RAM, global VRAM high-water threshold 60%, at least 1.5 GiB RAM reserved.
+  RAM, global RAM high-water threshold 65%, global VRAM high-water threshold 60%, at least 1.5 GiB RAM reserved. Cold model admission additionally reserves an estimated 6.5 GiB.
   Under pressure it rejects work and unloads only its identity-checked model.
   Other applications/Windows can exceed these thresholds independently; this
   is admission/watchdog protection, not an OS-enforced global 60% allocation cap.
@@ -63,8 +63,7 @@ models. Gemini still requires available credit; no model files or account data
 are deleted. Run `Enable-Qwen.ps1` to restore on-demand Qwen service.
 
 If permanently removing weights, disable first, stop the identity-checked broker,
-remove its startup invocation, and archive/delete only `D:\PanthoriumAI\models`
-and `D:\PanthoriumAI\voice\models` after review. Keep Gemini and application data.
+remove only the selected model file and its own launcher. Keep other models, voice assets, Gemini and application data.
 
 ## Local rollout
 
@@ -95,3 +94,30 @@ sources. Their installed locations are `D:\PanthoriumAI\Start-LLM.ps1` and
 `D:\PanthoriumAI\voice\voice_engine.py`; app deployments do not copy them
 automatically. Model weights, Python/runtime dependencies, encrypted settings,
 receipts, logs and user data remain on the notebook and are not published.
+
+## Qwen 8B replacement
+
+`model-profile.json` pins the 8B weights and launch settings. The model supports
+text, code, translation, reasoning and tool calling. It is text-only: ASR/TTS are
+separate services, and image/video understanding is not enabled by this upgrade.
+The existing permission-filtered API/MCP registry, confirmation gates, zero local
+credit charge and buffered speech remain unchanged. Thinking is enabled for text;
+voice skips long thinking to limit latency. Context is 8192 tokens with one slot,
+2048 thinking tokens and a 3072-token completion ceiling to protect the notebook.
+
+After the main release is active, run the voice venv Python against that release's
+`deploy/hybrid/update_host_broker.py --expected-sha <active-sha> --remove-4b`.
+The installer verifies the pinned 8B checksum, pauses admission, backs up scripts,
+stops only identity-checked broker/model processes, installs the profile and both
+launchers, and checks broker identity before removing exactly the old 4B weights
+and its vision projector. The 2B/Llama models and user data are untouched.
+A failed code installation restores scripts; once 4B weights are explicitly
+removed, returning to 4B requires downloading and verifying them again.
+
+Successful installation is not an inference benchmark. At high baseline RAM the
+configured 8B service remains resource-paused, while Sentinel's cloud route keeps
+its existing policy. It starts on demand only when global use plus the conservative
+cold-load budget fits below 65%; being barely below 65% is insufficient. Do not
+relax guards, close user applications or label mocked protocol tests as live model
+results. Record actual answer, tool and speech checks separately when resources
+permit them. Both direct startup and broker requests enforce admission.

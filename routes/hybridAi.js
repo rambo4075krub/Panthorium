@@ -20,7 +20,7 @@ function createHybridRouter({sentinel,auth,permission,limiter,biometrics}) {
     const available=sentinel.providers.available();
     const ordered=await routeProviders(sentinel.providers,available,{voiceMode:true},req.user.sub);
     let local={enabled:localAiAllowed(req.user)&&localEnabled()&&!!sentinel.providers.hybrid,ready:false};
-    if(local.enabled)try{const p=await fetch(voiceBase()+'/status',{headers:{'X-Panthorium-Account':accountKey(req.user.sub)},signal:AbortSignal.timeout(4000),redirect:'error'});const s=await p.json();local={...local,ready:s.ready===true,busy:s.busy===true,reason:s.reason||null,queue:s.queue||null};}catch{}
+    if(local.enabled)try{const p=await fetch(voiceBase()+'/status',{headers:{'X-Panthorium-Account':accountKey(req.user.sub)},signal:AbortSignal.timeout(4000),redirect:'error'});const s=await p.json();local={...local,ready:s.ready===true,busy:s.busy===true,reason:s.reason||null,queue:s.queue||null,model:typeof s.model==='string'?s.model:null,capabilities:Array.isArray(s.capabilities)?s.capabilities:[],vision:s.vision===true,voice:s.voice||null};}catch{}
     res.json({ok:true,primary:ordered[0]||null,geminiAllowed:ordered.includes('gemini-live'),local,creditsOnly:'gemini-live'});
   });
   r.use((req,res,next)=>localAiAllowed(req.user)?next():res.status(403).json({ok:false,error:'local_access_denied'}));

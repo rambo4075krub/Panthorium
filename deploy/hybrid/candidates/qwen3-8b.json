@@ -1,0 +1,18 @@
+{
+  "name": "Qwen3-8B-Q4_K_M",
+  "repository": "Qwen/Qwen3-8B-GGUF",
+  "revision": "7c41481f57cb95916b40956ab2f0b139b296d974",
+  "filename": "Qwen3-8B-Q4_K_M.gguf",
+  "bytes": 5027783488,
+  "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+  "license": "Apache-2.0",
+  "capabilities": ["text", "thinking", "tool-calling"],
+  "vision": false,
+  "coldRamBudgetGiB": 6.5,
+  "ramLimit": 0.65,
+  "vramLimit": 0.60,
+  "context": 8192,
+  "gpuLayers": 10,
+  "threads": 4,
+  "productionApproved": false
+}

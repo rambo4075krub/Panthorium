@@ -37,14 +37,14 @@ class WorkQueue:
             if job in self.pending:self.pending.remove(job)
             if self.active is job:self.active=None
 
-def resource_reason(*,ram_used,total,available,local_ram,vram,cpu,model_loaded,voice_loaded,kind='chat',latched=False):
-    """Conservative forecast from measured cold-load peak; no global OS hard cap claim."""
+def resource_reason(*,ram_used,total,available,local_ram,vram,cpu,model_loaded,voice_loaded,kind='chat',latched=False,cold_budget=6.5):
+    """Conservative cold-load estimate; no global OS hard cap or measured 8B peak claim."""
     if available<1536*1024**2 or ram_used>=(.60 if latched else .65):return 'ram_pressure'
     if vram is None:return 'gpu_metrics_unavailable'
     if vram>=(.55 if latched else .60):return 'vram_pressure'
     if local_ram>total*.60:return 'ram_pressure'
     if cpu>=65:return 'cpu_pressure'
     # Include load transients, not just the final model working set.
-    budget=(4.5 if not model_loaded else .5) if kind=='chat' else (.25 if voice_loaded else 2.0)
+    budget=(cold_budget if not model_loaded else .5) if kind=='chat' else (.25 if voice_loaded else 2.0)
     if ram_used*total+budget*1024**3>total*.65:return 'ram_headroom'
     return None

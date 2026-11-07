@@ -12,6 +12,15 @@ except ImportError:
 
 @unittest.skipUnless(AVAILABLE,'Broker dependencies are installed on the notebook')
 class BrokerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_healthy_port_must_belong_to_selected_model(self):
+        class Client:
+            async def __aenter__(self):return self
+            async def __aexit__(self,*args):pass
+            async def get(self,url):return httpx.Response(200)
+        with patch.object(broker.httpx,'AsyncClient',return_value=Client()),patch.object(broker,'model_process',return_value=None):
+            with self.assertRaises(broker.HTTPException) as result:await broker.ensure_model()
+            self.assertEqual(result.exception.detail,'local_model_identity_mismatch')
+
     async def test_twenty_accounts_and_resource_pause(self):
         from work_queue import WorkQueue
         active=0;maximum=0;started=0
