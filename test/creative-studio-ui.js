@@ -41,6 +41,7 @@ async function main() {
   };
   w.eval(fs.readFileSync(require.resolve('../start-menu-ui.js'), 'utf8'));
   w.eval(fs.readFileSync(require.resolve('../file-preview-ui.js'), 'utf8'));
+  w.eval(fs.readFileSync(require.resolve('../action-presentation.js'), 'utf8'));
   w.eval(fs.readFileSync(require.resolve('../creative-studio-ui.js'), 'utf8'));
   w.document.dispatchEvent(new w.Event('DOMContentLoaded')); await tick();
   const group = w.document.querySelector('[data-start-group="creative"]');
@@ -112,7 +113,10 @@ async function main() {
   w.dispatchEvent(new w.CustomEvent('panthorium:ai-done', { detail: { toolResults: [approval] } })); await tick();
   assert(root.querySelector('[data-studio-approval]'));
   assert.equal(root.querySelector('[data-studio-approval] img'), null);
-  assert.match(root.querySelector('[data-studio-approval]').textContent, /source-a/);
+  assert.match(root.querySelector('[data-studio-approval]').textContent, /approved image/);
+  assert.match(root.querySelector('[data-studio-approval]').textContent, /ไฟล์ต้นทาง:/);
+  assert.doesNotMatch(root.querySelector('[data-studio-approval]').textContent, /source-a|sourceFileIds|usePrevious/);
+  assert.equal(root.querySelector('[data-studio-approval] pre'), null);
   root.querySelector('[data-studio-approve]').click(); root.querySelector('[data-studio-approve]').click(); await tick();
   const confirmations = calls.filter(c => c.url.endsWith('/api/actions/approval-a/confirm'));
   assert.equal(confirmations.length, 1);

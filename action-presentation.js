@@ -11,10 +11,10 @@
     if (['block','follow'].includes(action) && args.enabled === false) operation = action === 'block' ? 'เลิกบล็อก' : 'เลิกติดตาม';
     if (['group-review','friend-review','accept-thread'].includes(action)) operation = (args.accept === true ? 'ยอมรับ' : 'ปฏิเสธ') + ({'group-review':'คำขอเข้ากลุ่ม','friend-review':'คำขอเป็นเพื่อน','accept-thread':'คำขอสนทนา'})[action];
     const details = [];
-    const fields = { expectedSubject:'หัวข้ออีเมล', subject:'หัวข้อ', title:'รายการ', name:'ชื่อ', to:'ถึง', cc:'สำเนาถึง', bcc:'สำเนาลับถึง', text:'ข้อความ', body:'ข้อความ', content:'เนื้อหา', prompt:'สิ่งที่ต้องการสร้าง', instruction:'การแก้ไขที่ต้องการ', start:'เริ่ม', end:'สิ้นสุด', startAt:'เริ่ม', endAt:'สิ้นสุด', dueAt:'กำหนดเวลา', remindAt:'เวลาเตือน', scheduledAt:'เวลา', timeZone:'เขตเวลา', location:'สถานที่', filename:'ชื่อไฟล์', fileName:'ชื่อไฟล์', destinationName:'ปลายทาง', folderName:'โฟลเดอร์ปลายทาง', amount:'จำนวนเงิน', currency:'สกุลเงิน' };
+    const fields = { account:'บัญชี', expectedSubject:'หัวข้ออีเมล', subject:'หัวข้อ', title:'รายการ', name:'ชื่อ', to:'ถึง', cc:'สำเนาถึง', bcc:'สำเนาลับถึง', text:'ข้อความ', body:'ข้อความ', content:'เนื้อหา', prompt:'สิ่งที่ต้องการสร้าง', instruction:'การแก้ไขที่ต้องการ', start:'เริ่ม', end:'สิ้นสุด', startAt:'เริ่ม', endAt:'สิ้นสุด', dueAt:'กำหนดเวลา', remindAt:'เวลาเตือน', scheduledAt:'เวลา', timeZone:'เขตเวลา', location:'สถานที่', filename:'ชื่อไฟล์', fileName:'ชื่อไฟล์', destinationName:'ปลายทาง', folderName:'โฟลเดอร์ปลายทาง', folder:'โฟลเดอร์ปลายทาง', amount:'จำนวนเงิน', currency:'สกุลเงิน' };
     for (const [key,label] of Object.entries(fields)) {
       const raw = args[key];
-      const value = Array.isArray(raw) ? raw.filter(x => typeof x === 'string').map(x => clean(x,320)).join(', ') : typeof raw === 'number' ? String(raw) : clean(raw);
+      const value = Array.isArray(raw) ? raw.filter(x => typeof x === 'string').map(x => clean(x,320)).join(', ') : typeof raw === 'number' ? String(raw) : clean(raw, ['text','body','content'].includes(key) ? 50000 : 2000);
       if (value) details.push(label + ': ' + value);
     }
     if (args.patch) {
