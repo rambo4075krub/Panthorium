@@ -164,9 +164,10 @@ class LocalInsightsService {
     await this.operator(userId);
     const control=await this.repository.control();
     const incidents=await this.repository.incidents();
+    const active=new Map((await this.security.listBlocks()).map(b=>[b.source,b]));
     return {enabled:control.enabled,workerStatus:control.worker_status,lastScanAt:this.lastScan?new Date(this.lastScan).toISOString():null,
       report:control.report_at && Date.now()-new Date(control.report_at)<7*86400000?control.report:null,reportAt:control.report_at,
-      recipients:await this.recipients(),incidents:incidents.map(i=>({...i,title:RULES[i.code]?.title,advice:RULES[i.code]?.advice})),trainingEnabled:false};
+      recipients:await this.recipients(),incidents:incidents.map(i=>({...i,title:RULES[i.code]?.title,advice:RULES[i.code]?.advice,blockActive:active.has('ai:'+i.id),blockExpiresAt:active.get('ai:'+i.id)?.expiresAt||null})),trainingEnabled:false};
   }
   async eligible(incident, userId) {
     const ip=publicIp(incident.ip); if(!ip || !RULES[incident.code] || Date.now()-new Date(incident.last_seen)>15*60000) return false;
@@ -197,6 +198,7 @@ class LocalInsightsService {
     if(!evidence || !await this.eligible(evidence,user.sub)) throw failure('incident_manual_review_required',409);
     const signals=await this.signals();
     if(!signals.some(s=>RULES[s.code]?.family===evidence.family && s.ip===evidence.ip)) throw failure('incident_evidence_expired',409);
+    await this.operator(user.sub);
     const result=await this.repository.transaction(async c=>{
       const control=(await c.query('SELECT * FROM panthorium_insights_control WHERE id=1 FOR UPDATE')).rows[0];
       const i=(await c.query('SELECT * FROM panthorium_insights_incidents WHERE id=$1 FOR UPDATE',[args.incidentId])).rows[0];
@@ -217,15 +219,16 @@ class LocalInsightsService {
   }
   async undo(userId,id) {
     await this.operator(userId);
-    return this.repository.transaction(async c=>{
+    const result=await this.repository.transaction(async c=>{
       const incident=(await c.query('SELECT * FROM panthorium_insights_incidents WHERE id=$1 FOR UPDATE',[id])).rows[0];
       if(!incident || incident.state!=='blocked') throw failure('incident_not_blocked',409);
       // Source ownership prevents removing a newer/manual/automatic protection.
       const removed=await c.query('DELETE FROM panthorium_security_ip_blocks WHERE ip=$1 AND source=$2 RETURNING ip',[incident.ip,'ai:'+id]);
       await c.query("UPDATE panthorium_insights_incidents SET state='reverted' WHERE id=$1",[id]);
-      this.audit.record('insights.response_reverted',{actorUserId:userId,incidentId:id,removed:removed.rowCount>0});
       return {ok:true,removed:removed.rowCount>0};
     });
+    this.audit.record('insights.response_reverted',{actorUserId:userId,incidentId:id,removed:result.removed});
+    return result;
   }
 }
 module.exports={LocalInsightsService,featureFor,publicIp,summaryInput,FEATURES,RULES,UUID};

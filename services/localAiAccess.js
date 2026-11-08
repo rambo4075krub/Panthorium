@@ -24,4 +24,4 @@ async function canUseLocal(providers, userId) {
   try { return typeof providers?.authorizeLocal === 'function' && await providers.authorizeLocal(userId) === true; }
   catch { return false; }
 }
-module.exports = { localAiAllowed, createLocalAiAuthorizer, canUseLocal };
+module.exports = { OWNER_EMAIL, localAiAllowed, createLocalAiAuthorizer, canUseLocal };

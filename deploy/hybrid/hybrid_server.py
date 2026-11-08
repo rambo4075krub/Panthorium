@@ -261,7 +261,9 @@ async def chat(request:Request):
             except asyncio.CancelledError:
                 if background:await asyncio.to_thread(stop_model)
                 raise
-            except httpx.HTTPError:raise HTTPException(503,'local_inference_unavailable')
+            except httpx.HTTPError:
+                if background:await asyncio.to_thread(stop_model)
+                raise HTTPException(503,'local_inference_unavailable')
             finally:
                 task.cancel();watcher.cancel()
                 if preemption is not None:preemption.cancel()

@@ -61,9 +61,9 @@
           element('strong',incident.title||'เหตุการณ์ความปลอดภัย',card);
           element('p',`ระดับ${incident.severity===3?'สูง':'ควรตรวจสอบ'} • ${incident.count} ครั้ง • IP ${incident.ip} • ล่าสุด ${new Date(incident.last_seen).toLocaleString('th-TH')}`,card);
           element('p',incident.advice||'',card);
-          const states={blocked:'บล็อกชั่วคราวแล้ว (หมดอายุอัตโนมัติ 10 นาที)',already_protected:'มีกฎอื่นป้องกันต้นทางนี้อยู่แล้ว',reverted:'ยกเลิกการบล็อกของแผนนี้แล้ว',observed:'รอตรวจสอบและอนุมัติ'};
+          const states={blocked:incident.blockActive?'บล็อกชั่วคราวถึง '+new Date(incident.blockExpiresAt).toLocaleTimeString('th-TH'):'การบล็อกของแผนนี้สิ้นสุดแล้ว',already_protected:'มีกฎอื่นป้องกันต้นทางนี้อยู่แล้ว',reverted:'ยกเลิกการบล็อกของแผนนี้แล้ว',observed:'รอตรวจสอบและอนุมัติ'};
           element('p',states[incident.state]||'รอตรวจสอบ',card);
-          if(incident.state==='blocked')button(card,'ยกเลิกการบล็อกของแผนนี้',async valid=>{await call('/api/local-insights/incidents/'+incident.id+'/undo','POST',{});if(valid())await load();});
+          if(incident.state==='blocked'&&incident.blockActive)button(card,'ยกเลิกการบล็อกของแผนนี้',async valid=>{await call('/api/local-insights/incidents/'+incident.id+'/undo','POST',{});if(valid())await load();});
           if(incident.state==='observed'&&data.enabled)button(card,'ดูแผนเพื่ออนุมัติ',async valid=>{
             const result=await call('/api/local-insights/incidents/'+incident.id+'/plan','POST',{});if(!valid())return;
             card.querySelector('[data-plan]')?.remove();const box=element('section','',card);box.dataset.plan='';
