@@ -48,6 +48,7 @@ const { extractOfficeText } = require('../services/officeArtifactService');
     const downloadPromise = page.waitForEvent('download'); await nativeRow.getByRole('button', { name: 'ดาวน์โหลด', exact: true }).click();
     const download = await downloadPromise, bytes = await fs.readFile(await download.path()); assert.match(extractOfficeText(bytes), /1200/);
     await nativeRow.getByRole('button', { name: 'เปิดแก้ไข', exact: true }).click(); await page.locator('[data-studio-editor]').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.querySelector('[data-studio-editor]')?.textContent.includes('1200'));
     assert.match(await page.locator('[data-studio-editor]').textContent(), /1200/); await page.evaluate(() => window.PanthoriumStudioEditor.close());
     await page.getByRole('button', { name: 'เพิ่มรายการงาน', exact: true }).click();
     await page.getByLabel('ชื่องาน', { exact: true }).fill('ส่งข้อเสนอให้ลูกค้า');
@@ -61,7 +62,7 @@ const { extractOfficeText } = require('../services/officeArtifactService');
     const tasks = (await f.service.list({ user: f.user })).projects[0].tasks; assert.equal(tasks.length, 1);
     assert.equal((await f.memory.repository.get(f.user.sub, tasks[0].id)).title, 'ส่งข้อเสนอให้ลูกค้า');
     const screenshotDir = process.env.WORK_ASSISTANT_SCREENSHOT_DIR;
-    if (screenshotDir) { await fs.mkdir(screenshotDir, { recursive: true }); await page.screenshot({ path: path.join(screenshotDir, 'work-assistant-desktop.png'), fullPage: true }); }
+    if (screenshotDir) { await fs.mkdir(screenshotDir, { recursive: true }); await page.locator('[data-work]').evaluate(root => { root.scrollTop = 0; }); await page.screenshot({ path: path.join(screenshotDir, 'work-assistant-desktop.png'), fullPage: true }); }
     await page.setViewportSize({ width: 390, height: 844 });
     assert(await page.locator('[data-work-title]').isVisible());
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Phone layout must not overflow horizontally');
