@@ -238,7 +238,7 @@
     let backgroundWarning='';
     if (key === 'browser' && value && window.PanthoriumPush) {
       try { await enableDevice(); } catch(e) {
-        if(webDevice()&&window.Notification?.permission==='granted')backgroundWarning=e.message;
+        if(window.PanthoriumPush.optedIn?.()||(webDevice()&&window.Notification?.permission==='granted'))backgroundWarning=e.message;
         else{message(e.message);return;}
       }
     } else if (key === 'browser' && value) {
@@ -261,13 +261,15 @@
       const saved=await saveSettings({ channels: { [key]: value } });
       if(saved&&key==='browser'){
         if(!value)await window.PanthoriumPush?.disconnect().catch(e=>message(e.message));
-        else if(!backgroundWarning)document.querySelector('[data-notification-opt-in]')?.remove();
-        if(backgroundWarning)message('เปิดป๊อปอัปขณะเปิดเว็บแล้ว • การรับเบื้องหลังยังไม่พร้อม: '+backgroundWarning);
+        else if(!backgroundWarning||window.PanthoriumPush?.accepted?.())document.querySelector('[data-notification-opt-in]')?.remove();
+        if(backgroundWarning)message((webDevice()?'เปิดป๊อปอัปขณะเปิดเว็บแล้ว':'บันทึกการเปิดรับแจ้งเตือนแล้ว')+' • การรับเบื้องหลังยังไม่พร้อม: '+backgroundWarning);
       }
     }
   }
-  function offerDevice(s) {
-    if(!current(s)||!s.settings?.enabled||!window.PanthoriumPush||window.PanthoriumPush.active()||document.querySelector('[data-notification-opt-in]'))return;
+  async function offerDevice(s) {
+    if(!current(s)||!s.settings?.enabled||!window.PanthoriumPush)return;
+    await window.PanthoriumPush.restore?.(s.settings);
+    if(!current(s)||!s.settings?.enabled||!window.PanthoriumPush||window.PanthoriumPush.active()||window.PanthoriumPush.accepted?.()||document.querySelector('[data-notification-opt-in]'))return;
     try{if(sessionStorage.getItem('panthorium-notification-offer')===s.uid)return;}catch{}
     const prompt=node('div',null,{'data-notification-opt-in':'',role:'region','aria-label':'เปิดป๊อบอัพแจ้งเตือน'});
     prompt.style.cssText='position:fixed;right:16px;bottom:48px;z-index:2147481999;max-width:min(340px,calc(100vw - 32px));box-sizing:border-box;padding:14px;border:1px solid #3aa89e;border-radius:13px;background:#102536;color:#eaf9ff;font:13px/1.5 system-ui';
@@ -277,7 +279,7 @@
       if(!current(s)){prompt.remove();return;}
       await channel('browser',true);
       if(!current(s))return;
-      if(s.settings.channels.browser&&window.PanthoriumPush.active())prompt.remove();
+      if(window.PanthoriumPush.accepted?.()||(s.settings.channels.browser&&window.PanthoriumPush.active())){prompt.remove();if(!window.PanthoriumPush.active())open();}
       else {const hint=prompt.querySelector('.pn-muted');hint.textContent=webDevice()&&s.settings.channels.browser&&window.Notification?.permission==='granted'?'เปิดป๊อปอัปขณะเปิดเว็บแล้ว • การรับเบื้องหลังยังไม่พร้อม':'ยังเปิดไม่สำเร็จ • เปิดตั้งค่าการแจ้งเตือนเพื่อตรวจสาเหตุหรืออัปเดตตัวแอพ';open();}
     }),button('ภายหลัง',()=>{try{sessionStorage.setItem('panthorium-notification-offer',s.uid);}catch{}prompt.remove();}));
     prompt.append(controls);document.body.append(prompt);
@@ -508,7 +510,7 @@
   window.PanthoriumNotifications = { announceUpdate, mount, open, refresh, readAloud, stopSpeaking, getState: () => current(session) ? { loaded: session.loaded, unreadCount: session.unreadCount, settings: session.settings ? JSON.parse(JSON.stringify(session.settings)) : null } : null };
   window.addEventListener('panthorium:auth-changed', () => { sync(true); refresh(); pendingUpdate(); });
   window.addEventListener('panthorium:boot-complete', refresh);
-  window.addEventListener('panthorium:push-changed', () => { if(window.PanthoriumPush?.active())document.querySelector('[data-notification-opt-in]')?.remove();for(const view of roots.values())view.signature='';render(); });
+  window.addEventListener('panthorium:push-changed', () => { if(window.PanthoriumPush?.active()||window.PanthoriumPush?.accepted?.())document.querySelector('[data-notification-opt-in]')?.remove();for(const view of roots.values())view.signature='';render(); });
   window.addEventListener('online', refresh);
   window.addEventListener('offline', () => { stopSpeaking(); message('ออฟไลน์ • รายการจะอัปเดตเมื่อเชื่อมต่ออีกครั้ง'); });
   window.addEventListener('panthorium:notifications-changed', async () => {
