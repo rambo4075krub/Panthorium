@@ -49,6 +49,7 @@
         const data=await call('/api/local-insights/operator');if(!current(owner,version))return;
         element('hr','',content);element('h3','งานหลังบ้าน Sentinel AI',content);
         element('p',`${labels[data.workerStatus]||'กำลังตรวจสถานะ'} • ผู้รับแจ้งเตือน ${data.recipients.length} บัญชี • การฝึกโมเดลปิดอยู่`,content);
+        element('small',data.lastScanAt?'ตรวจเหตุการณ์สำเร็จล่าสุด '+new Date(data.lastScanAt).toLocaleString('th-TH'):'ยังไม่มีผลยืนยันการตรวจเหตุการณ์ในรอบนี้ กรุณาโหลดสถานะล่าสุด',content);
         element('p','กฎตรวจจับแจ้งเหตุโดยไม่รอ AI ส่วน 9B วิเคราะห์เมื่อโมเดลเปิดอยู่และว่าง งานผู้ใช้มีลำดับก่อน การแจ้งเตือนบนอุปกรณ์ต้องเปิดสิทธิ์รับแจ้งเตือน',content);
         button(content,data.enabled?'หยุด 9B และระงับแผน':'เปิดงานหลังบ้าน',async valid=>{await call('/api/local-insights/control','PUT',{enabled:!data.enabled});if(valid())await load();});
         if(!data.enabled)element('p','การตรวจและแจ้งความเสี่ยงจากกฎยังทำงาน การหยุด 9B ไม่ยกเลิกการบล็อกที่อนุมัติไปแล้ว',content);

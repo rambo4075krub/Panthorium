@@ -57,7 +57,7 @@ class LocalInsightsRepository {
     this.assertReady();
     const prefs = (await this.pool.query('SELECT enabled FROM panthorium_insights_preferences WHERE user_id=$1', [userId])).rows[0];
     const counters = (await this.pool.query(`SELECT feature,SUM(total)::int AS total,SUM(errors)::int AS errors,SUM(denied)::int AS denied,SUM(slow)::int AS slow
-      FROM panthorium_insights_counters WHERE user_id=$1 AND day >= CURRENT_DATE - 30 GROUP BY feature ORDER BY SUM(total) DESC`, [userId])).rows;
+      FROM panthorium_insights_counters WHERE user_id=$1 AND day >= (NOW() AT TIME ZONE 'UTC')::date - 29 GROUP BY feature ORDER BY SUM(total) DESC`, [userId])).rows;
     return { enabled: prefs?.enabled === true, retentionDays: 30, counters };
   }
   async setConsent(userId, enabled) {
@@ -90,7 +90,7 @@ class LocalInsightsRepository {
     return (await this.pool.query(`SELECT feature,COUNT(DISTINCT user_id)::int AS accounts,SUM(total)::int AS total,
       SUM(errors)::int AS errors,SUM(denied)::int AS denied,SUM(slow)::int AS slow
       FROM panthorium_insights_counters JOIN panthorium_insights_preferences USING(user_id)
-      WHERE enabled=TRUE AND day >= CURRENT_DATE - 7 GROUP BY feature HAVING COUNT(DISTINCT user_id)>=5 ORDER BY SUM(total) DESC LIMIT 20`)).rows;
+      WHERE enabled=TRUE AND day >= (NOW() AT TIME ZONE 'UTC')::date - 6 GROUP BY feature HAVING COUNT(DISTINCT user_id)>=5 ORDER BY SUM(total) DESC LIMIT 20`)).rows;
   }
   async recordIncident(alert, family) {
     this.assertReady();
@@ -126,7 +126,7 @@ class LocalInsightsRepository {
       WHERE id=1 AND enabled=TRUE AND generation=$1 RETURNING id`, [control.generation,report ? JSON.stringify(report) : null,status])).rowCount>0;
   }
   async cleanup() {
-    await this.pool.query("DELETE FROM panthorium_insights_counters WHERE day<CURRENT_DATE-30; DELETE FROM panthorium_insights_incidents WHERE first_seen<NOW()-INTERVAL '30 days'; UPDATE panthorium_insights_control SET report=NULL,report_at=NULL WHERE report_at<NOW()-INTERVAL '7 days'");
+    await this.pool.query("DELETE FROM panthorium_insights_counters WHERE day<(NOW() AT TIME ZONE 'UTC')::date-29; DELETE FROM panthorium_insights_incidents WHERE first_seen<NOW()-INTERVAL '30 days'; UPDATE panthorium_insights_control SET report=NULL,report_at=NULL WHERE report_at<NOW()-INTERVAL '7 days'");
   }
 }
 module.exports = { LocalInsightsRepository, hash, iso };

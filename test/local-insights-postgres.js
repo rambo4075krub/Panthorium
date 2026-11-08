@@ -30,6 +30,9 @@ const {ActionLedgerRepository}=require('../services/actionLedgerRepository');
     assert.equal((await repo.preferences(ordinary)).counters.length,0);
     // No payload queued before renewed consent may be written afterwards.
     const buffered={...item(ordinary),since:Date.now()-1000};await repo.setConsent(ordinary,true);await repo.addCounters([buffered]);assert.equal((await repo.preferences(ordinary)).counters.length,0);
+    await pool.query("INSERT INTO panthorium_insights_counters VALUES($1,(NOW() AT TIME ZONE 'UTC')::date-30,'files',1,0,0,0)",[ordinary]);
+    assert.equal((await repo.preferences(ordinary)).counters.length,0);await repo.cleanup();
+    assert.equal((await pool.query("SELECT * FROM panthorium_insights_counters WHERE feature='files'")).rowCount,0,'expired daily counters are erased');
     const eligible=new Set([admin,owner]),records=[];
     const audit={pool,record:(event,fields)=>records.push({event,...fields})};
     const notices=new Map();
