@@ -5,6 +5,7 @@ const { readWorkFile } = require('./workDocumentReader');
 const { validEmail, validateTime } = require('./reminderService');
 const { validateContent } = require('./officeArtifactService');
 const { ConcurrencyGate } = require('./concurrencyGate');
+const { WORKFLOW_GROUPS } = require('./workflowCatalog');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MODES = ['summary', 'question', 'draft', 'rewrite', 'translate', 'tasks'];
 const TEMPLATES = Object.freeze([
@@ -70,8 +71,8 @@ function documentContent(pluginId, project) {
 }
 
 class WorkAssistantService {
-  constructor({ repository, files, gateway, studio, memory, reminders, authService, reader = readWorkFile, audit } = {}) {
-    Object.assign(this, { repository, files, gateway, studio, memory, reminders, authService, reader, audit });
+  constructor({ repository, files, gateway, studio, memory, reminders, authService, cloudApps, reader = readWorkFile, audit } = {}) {
+    Object.assign(this, { repository, files, gateway, studio, memory, reminders, authService, cloudApps, reader, audit });
     this.running = new Set();
     this.parserGate = new ConcurrencyGate({ limit: 2, maxQueue: 4, name: 'work-file-parsing' });
   }
@@ -80,8 +81,26 @@ class WorkAssistantService {
     return this.authService?.validateAccountPrincipal ? this.authService.validateAccountPrincipal(user) : user;
   }
   async getRaw(user, id) { uuid(id); const project = await this.repository.get(user.sub, id); if (!project) throw error('work_project_not_found', 404); return project; }
-  async list({ user }) { user = await this.principal(user); return { projects: (await this.repository.list(user.sub)).map(publicProject), templates: TEMPLATES, emailDeliveryAvailable: this.reminders?.deliveryAvailable === true }; }
+  async list({ user }) { user = await this.principal(user); return { projects: (await this.repository.list(user.sub)).map(publicProject), templates: TEMPLATES, workflows: WORKFLOW_GROUPS, emailDeliveryAvailable: this.reminders?.deliveryAvailable === true }; }
   async get({ user, projectId }) { user = await this.principal(user); return { project: publicProject(await this.getRaw(user, projectId)) }; }
+  async importRun({ user, runId }) {
+    user = await this.principal(user); uuid(runId);
+    if (!this.cloudApps) throw error('work_import_unavailable', 503);
+    const run = await this.cloudApps.get({ user, runId }), pack = this.cloudApps.pack(user, run.packId);
+    if (!['draft_ready', 'completed'].includes(run.status) || !run.result?.draft) throw error('work_import_not_ready', 409);
+    const existing = await this.repository.get(user.sub, runId);
+    if (existing) {
+      if (existing.data.origin?.runId !== runId) throw error('work_import_conflict', 409);
+      return { project: publicProject(existing), replayed: true };
+    }
+    const feature = pack.features.find(item => item.id === run.featureId);
+    const patch = validatePatch({ title: (feature?.name || pack.title).slice(0, 160), template: 'report', draft: run.result.draft,
+      text: ['โจทย์เดิม: ' + run.input, ...(run.sources || []).map(source => '[' + source.id + '] ' + source.title + '\n' + source.content)].join('\n\n') });
+    const result = await this.repository.mutate({ ownerId: user.sub, id: runId, version: 0, create: true, operationId: runId, input: { importRun: runId } }, next => {
+      Object.assign(next.data, patch, { origin: { runId, packId: run.packId, featureId: run.featureId, title: pack.title, createdAt: run.createdAt } });
+    });
+    return { project: publicProject(result.project), replayed: result.replayed };
+  }
   async save({ user, projectId, expectedVersion, patch, operationId }) {
     user = await this.principal(user); uuid(projectId); version(expectedVersion); uuid(operationId);
     const checked = validatePatch(patch);
