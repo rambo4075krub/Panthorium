@@ -1,7 +1,7 @@
 """Install the broker only from the active production release; keep a rollback copy.
 Run with the voice venv Python after GitHub main CI and notebook deployment succeed.
-Installs the pinned 8B profile and launchers. Never changes credentials, database
-or scheduled tasks. Removing the old 4B weights requires --remove-4b explicitly.
+Installs the pinned 9B profile and launchers. Never changes credentials, database
+or scheduled tasks. Old Qwen weights are removed only with explicit options.
 """
 import argparse, datetime, hashlib, json, os, shutil, subprocess, time
 from pathlib import Path
@@ -14,6 +14,8 @@ ACTIVE=Path(r'D:\Panthorium\Host\production\active.json')
 FILES=('hybrid_server.py','work_queue.py','model_profile.py','model-profile.json')
 HOST_FILES=('Start-LLM.ps1','Stop-LLM.ps1')
 LEGACY_WEIGHTS=('Qwen3.5-4B-Q4_K_M.gguf','Qwen3.5-4B-mmproj-F16.gguf')
+PREVIOUS_MODEL='Qwen3-8B-Q4_K_M.gguf'
+OWNED_WEIGHTS=(PROFILE['filename'],PREVIOUS_MODEL,LEGACY_WEIGHTS[0])
 
 def stop_owned_models():
     found=[]
@@ -21,13 +23,13 @@ def stop_owned_models():
     if recorded.exists():
         try:
             p=psutil.Process(int(recorded.read_text().strip()))
-            if not any(owns_model(p.exe(),p.cmdline(),ROOT,name) for name in (PROFILE['filename'],LEGACY_WEIGHTS[0])):
+            if not any(owns_model(p.exe(),p.cmdline(),ROOT,name) for name in OWNED_WEIGHTS):
                 raise RuntimeError('Recorded model PID is not owned; refusing replacement')
         except psutil.NoSuchProcess:pass
     for p in psutil.process_iter(['exe','cmdline']):
         try:
             if any(owns_model(p.info['exe'],p.info['cmdline'] or [],ROOT,name)
-                   for name in (PROFILE['filename'],LEGACY_WEIGHTS[0])):found.append(p)
+                   for name in OWNED_WEIGHTS):found.append(p)
         except (psutil.NoSuchProcess,psutil.AccessDenied):continue
     for p in found:
         try:p.terminate()
@@ -38,14 +40,28 @@ def stop_owned_models():
 
 def remove_legacy_weights(root, health):
     # Exact names only. Never recurse or remove another model, user data or voice assets.
-    if health.get('version')!='qwen8b-v1' or health.get('model')!=PROFILE['name']:
-        raise RuntimeError('8B installation must be healthy before removing 4B')
+    if health.get('version')!=PROFILE['brokerVersion'] or health.get('model')!=PROFILE['name']:
+        raise RuntimeError('Selected model installation must be healthy before removing 4B')
     removed=[]
     paths=[root/'models'/name for name in LEGACY_WEIGHTS]
     if any(path.is_symlink() for path in paths):raise RuntimeError('Refusing a linked legacy weight')
     for path in paths:
         if path.exists():
             path.unlink();removed.append(path.name)
+    return removed
+
+def remove_previous_weights(root, health):
+    if (health.get('version')!=PROFILE['brokerVersion'] or health.get('model')!=PROFILE['name'] or
+        health.get('ramGuardAlive') is not True or health.get('inferenceVerified') is not True):
+        raise RuntimeError('9B inference and its live resource guard must be verified before removing Qwen 8B')
+    # Remove exactly this previous Qwen, including any prepared duplicate and
+    # its source receipt. Llama 8B, other models and rollback scripts are retained.
+    paths=[root/'models'/sub/name for sub in ('','candidates')
+           for name in (PREVIOUS_MODEL,PREVIOUS_MODEL+'.source.json')]
+    if any(path.is_symlink() for path in paths):raise RuntimeError('Refusing a linked previous model')
+    removed=[]
+    for path in paths:
+        if path.is_file():path.unlink();removed.append(str(path.relative_to(root)))
     return removed
 
 def get(path):
@@ -74,6 +90,7 @@ def start_broker():
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--expected-sha',required=True)
     parser.add_argument('--remove-4b',action='store_true')
+    parser.add_argument('--remove-8b',action='store_true')
     args=parser.parse_args();active=json.loads(ACTIVE.read_text(encoding='utf-8-sig'))
     source=Path(__file__).resolve().parent
     if active['sha']!=args.expected_sha or source!=Path(active['path']).resolve()/'deploy'/'hybrid':
@@ -113,7 +130,7 @@ def main():
         for name in HOST_FILES:shutil.copy2(source/'host'/name,ROOT/name)
         start_broker()
         health=get('health')
-        if health.get('version')!='qwen8b-v1' or health.get('model')!=PROFILE['name']:raise RuntimeError('New broker model/version mismatch')
+        if health.get('version')!=PROFILE['brokerVersion'] or health.get('model')!=PROFILE['name'] or not health.get('ramGuardAlive'):raise RuntimeError('New broker model/version/guard mismatch')
         receipt={'sha':args.expected_sha,'backup':str(backup),'model':PROFILE['name'],
                  'modelSha256':PROFILE['sha256'],'inferenceTested':False,
                  'files':{name:hashlib.sha256((BASE/name).read_bytes()).hexdigest() for name in FILES},
@@ -134,11 +151,21 @@ def main():
     finally:
         if not already_disabled:disabled.unlink(missing_ok=True)
     # Commit the installation before irreversible removal. A removal failure leaves
-    # the verified 8B service installed and can be retried without rolling back to 4B.
+    # the selected service installed and can be retried without deleting a fallback.
+    if args.remove_8b:
+        response=httpx.post('http://127.0.0.1:8765/v1/chat/completions',timeout=140,json={
+            'model':'panthorium-local','stream':False,'max_tokens':64,
+            'chat_template_kwargs':{'enable_thinking':False},
+            'messages':[{'role':'user','content':'Reply with the single word READY.'}]})
+        response.raise_for_status()
+        if 'READY' not in response.json()['choices'][0]['message'].get('content',''):
+            raise RuntimeError('9B inference verification failed; Qwen 8B retained')
+        receipt['inferenceTested']=True
+        receipt['removed8B']=remove_previous_weights(ROOT,get('health'))
     if args.remove_4b:
         receipt['removed4B']=remove_legacy_weights(ROOT,get('health'))
         receipt['removed4BLaunchers']=[]
-        for old,new in [('start_llm_4b.cmd','start_llm_8b.cmd'),('Use-Qwen35-4B.cmd','Use-Qwen3-8B.cmd')]:
+        for old,new in [('start_llm_4b.cmd','start_llm_9b.cmd'),('Use-Qwen35-4B.cmd','Use-Qwen35-9B.cmd')]:
             legacy=ROOT/old
             if legacy.exists():
                 content=legacy.read_text(encoding='utf-8-sig')

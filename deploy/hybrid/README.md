@@ -1,4 +1,4 @@
-# Sentinel AI + Qwen 8B on the notebook
+# Sentinel AI + Qwen3.5-9B on the notebook
 
 Gemini Live is the primary voice provider and the only AI provider that debits
 Panthorium credits. Qwen is restricted to server-authorized administrators and the verified owner account. It has no quota preflight or credit debit. Explicit local
@@ -21,19 +21,22 @@ outbound MCP connector and does not grant credentials/scopes to external clients
   `LOCAL_QWEN_DISABLE_FILE=D:\PanthoriumAI\qwen.disabled`.
 - Application requests go through the broker to port 8088. One operation at a time across
   production and staging; excess requests receive a retryable busy response.
-- Qwen3-8B Q4_K_M uses 10 GPU layers, 8192 context tokens, four CPU threads, below-normal
-  priority. ASR/TTS use two CPU threads. Text reasoning remains enabled;
-  voice answers skip long internal reasoning to reduce latency. Arithmetic
-  uses the registered bounded calculator instead of relying on mental math.
-- Monitor interval two seconds, local AI working set ceiling 60% of physical
-  RAM, global RAM high-water threshold 65%, global VRAM high-water threshold 60%, at least 1.5 GiB RAM reserved. Cold model admission additionally reserves an estimated 6.5 GiB.
-  Under pressure it rejects work and unloads only its identity-checked model.
-  Other applications/Windows can exceed these thresholds independently; this
-  is admission/watchdog protection, not an OS-enforced global 60% allocation cap.
+- Qwen3.5-9B Q3_K_S uses 20 GPU layers, 8192 context tokens, four CPU threads,
+  below-normal priority and `--load-mode none`. F16 caches and fixed batches match
+  the notebook trial. Reasoning is bounded to 512 tokens; voice skips thinking.
+  Arithmetic uses the registered bounded calculator. This compressed model can
+  still make mistakes or fail to choose tools; successful loading is not a quality guarantee.
+- The separate RAM watchdog samples every 50 ms, independently of GPU queries.
+  Global thresholds are 82% RAM and 80% VRAM, with at least 2.5 GiB available RAM;
+  recovery thresholds are 77% and 75%. GPU temperatures stop work at 82 C and
+  recover below 77 C. Cold admission forecasts 2.3 GiB additional RAM and 3.1 GiB
+  VRAM. These are sampled stop thresholds with forecasts, not OS hard caps.
+  Startup rejects a missing watchdog, and unknown GPU metrics fail closed.
+  Only the identity-checked model is stopped; databases and other apps are untouched.
 - Idle voice memory is unloaded after three minutes. Model idle unloading is
   enabled only after production has migrated to the broker; until then its
   legacy port-8088 route keeps the model resident. Cold starts take
-  longer. The voice engine is unloaded before text inference to preserve RAM.
+  longer. The voice engine is unloaded before text admission; the text model is unloaded before voice admission so the two engines do not compete for cold-load memory.
 - No credential or user-content logs in the broker. Existing application
   conversation/audit retention remains in effect. Speaker verification precedes
   authenticated local ASR; restricted Cloud App contexts cannot fall back into
@@ -95,39 +98,33 @@ sources. Their installed locations are `D:\PanthoriumAI\Start-LLM.ps1` and
 automatically. Model weights, Python/runtime dependencies, encrypted settings,
 receipts, logs and user data remain on the notebook and are not published.
 
-## Qwen 8B replacement
+## Qwen3.5-9B activation and Qwen3-8B removal
 
-`model-profile.json` pins the 8B weights and launch settings. The model supports
-text, code, translation, reasoning and tool calling. It is text-only: ASR/TTS are
-separate services, and image/video understanding is not enabled by this upgrade.
-The existing permission-filtered API/MCP registry, confirmation gates, zero local
-credit charge and buffered speech remain unchanged. Thinking is enabled for text;
-voice skips long thinking to limit latency. Context is 8192 tokens with one slot,
-2048 thinking tokens and a 3072-token completion ceiling to protect the notebook.
+`model-profile.json` pins the Unsloth Q3_K_S conversion, revision, size, checksum,
+launch options and resource policy. The selected model can process text, reasoning
+and tools. This installation does not enable images; ASR/TTS remain separate.
+Administrator/verified-owner authorization, tool permissions, confirmation gates,
+zero local billing and explicit-local requests never using paid fallback remain unchanged.
 
-After the main release is active, run the voice venv Python against that release's
-`deploy/hybrid/update_host_broker.py --expected-sha <active-sha> --remove-4b`.
-The installer verifies the pinned 8B checksum, pauses admission, backs up scripts,
-stops only identity-checked broker/model processes, installs the profile and both
-launchers, and checks broker identity before removing exactly the old 4B weights
-and its vision projector. The 2B/Llama models and user data are untouched.
-A failed code installation restores scripts; once 4B weights are explicitly
-removed, returning to 4B requires downloading and verifying them again.
+After main CI and normal notebook deployment succeed, run the active release's
+`deploy/hybrid/update_host_broker.py --expected-sha <active-sha>` using the voice venv.
+It verifies weights before moving them from the candidate directory, backs up host
+scripts, stops only verified owned processes, installs matching launchers, and
+requires the new broker's RAM guard to be alive. Startup hooks remain in place;
+the model loads on demand and unloads when idle or under pressure.
 
-Successful installation is not an inference benchmark. At high baseline RAM the
-configured 8B service remains resource-paused, while Sentinel's cloud route keeps
-its existing policy. It starts on demand only when global use plus the conservative
-cold-load budget fits below 65%; being barely below 65% is insufficient. Do not
-relax guards, close user applications or label mocked protocol tests as live model
-results. Record actual answer, tool and speech checks separately when resources
-permit them. Both direct startup and broker requests enforce admission.
+Verify real authenticated application inference before removing the old weights.
+`remove_previous_weights(ROOT, get('health'))` refuses removal unless the running
+9B broker has successfully served inference and its guard remains alive. It removes
+only Qwen3-8B weights and source receipts in the model/candidate directories.
+Other models and user data are preserved. The optional `--remove-8b` installer flag
+performs a small inference probe before this same gate. Failed inference retains 8B.
+Code rollback copies are kept, but after removal restoring 8B requires downloading
+and checksum-verifying its weights again.
 
-Resource denials now return immediately with an allowlisted reason instead of
-waiting 45 seconds in an idle queue. Busy admitted work still uses the bounded
-FIFO queue; CPU pressure may recover during that wait. RAM/VRAM limits, the
-6.5 GiB conservative cold-load estimate and account permissions are unchanged.
-The private local status page shows current RAM, the limit and the estimated
-additional headroom needed. These are admission estimates, not measured 8B peaks.
-Only authorized local users receive those host metrics. A resource refusal is
-non-billable and never grants permission to switch an explicit local request to
-the paid provider.
+`verify-qwen8b.cjs` retains its historical filename and now reads the selected
+profile. Set `TEST_BASE`, `TEST_RELEASE`, `TEST_EXPECTED_SHA` and optionally
+`TEST_INFERENCE=1` for real administrator chat/calculator and ordinary-user denial
+checks. It uses temporary synthetic accounts, checks zero billing and removes its
+fixtures. No messages are sent to third parties. Keep actual results separate from
+mocked protocol tests. The 2026-11-08 trial notes document the known quality limits.

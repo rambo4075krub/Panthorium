@@ -1,7 +1,8 @@
 """Real ASGI routes, controlled resource readings and synthetic voice work.
 Does not load Qwen or claim an LLM throughput measurement.
 """
-import asyncio, hashlib, time, unittest
+import asyncio, hashlib, time, unittest, threading
+from types import SimpleNamespace
 from unittest.mock import patch
 try:
     import hybrid_server as broker
@@ -12,6 +13,25 @@ except ImportError:
 
 @unittest.skipUnless(AVAILABLE,'Broker dependencies are installed on the notebook')
 class BrokerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fast_guard_stops_owned_model_on_ram_pressure_or_missing_metrics(self):
+        for missing in (False,True):
+            stop=unittest.mock.Mock();stop.wait.side_effect=[False,True]
+            failed=threading.Event()
+            kwargs={'side_effect':RuntimeError('metrics missing')} if missing else {'return_value':SimpleNamespace(total=16*1024**3,available=2*1024**3)}
+            with patch.object(broker,'guard_stop',stop),patch.object(broker,'guard_failed',failed),patch.object(broker,'pressure_latched',False),patch.object(broker.psutil,'virtual_memory',**kwargs),patch.object(broker,'stop_model') as unload:
+                broker.fast_ram_watch()
+                unload.assert_called_once()
+                self.assertEqual(failed.is_set(),missing)
+
+    async def test_voice_admission_reclaims_model_before_forecast(self):
+        from work_queue import WorkQueue
+        events=[]
+        request=unittest.mock.Mock(headers={'x-panthorium-account':'a'*64})
+        request.is_disconnected=unittest.mock.AsyncMock(return_value=False)
+        with patch.object(broker,'queue',WorkQueue()),patch.object(broker,'stop_model',side_effect=lambda:events.append('unload')),patch.object(broker,'snapshot',side_effect=lambda kind:events.append('forecast') or {'ready':True}):
+            async with broker.admission(request,'voice'):events.append('work')
+        self.assertEqual(events,['unload','forecast','work'])
+
     async def test_healthy_port_must_belong_to_selected_model(self):
         class Client:
             async def __aenter__(self):return self

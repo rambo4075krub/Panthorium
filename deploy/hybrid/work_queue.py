@@ -14,15 +14,16 @@ def admission_ready(snapshot):
     """
     if snapshot.get('ready'): return True
     reason=snapshot.get('reason')
-    if reason in {'ram_headroom','ram_pressure','vram_pressure',
+    if reason in {'ram_headroom','ram_pressure','vram_pressure','gpu_temperature',
                   'gpu_metrics_unavailable','resource_monitor_unavailable','model_not_installed'}:
         raise QueueError('local_resource_'+reason,503)
     return False
 
-def memory_budget(*,ram_used,total,model_loaded,voice_loaded,kind='chat',cold_budget=6.5):
-    budget=(cold_budget if not model_loaded else .5) if kind=='chat' else (.25 if voice_loaded else 2.0)
+def memory_budget(*,ram_used,total,model_loaded,voice_loaded,kind='chat',cold_budget=6.5,limits=None):
+    limits=limits or {}
+    budget=(cold_budget if not model_loaded else limits.get('warmRamBudgetGiB',.5)) if kind=='chat' else (.25 if voice_loaded else 2.0)
     required=math.ceil(budget*1024**3)
-    headroom=total*.65-ram_used*total
+    headroom=total*limits.get('ramLimit',.65)-ram_used*total
     return {'ramTotalBytes':total,'ramHeadroomBytes':max(0,int(headroom)),
             'ramRequiredAdditionalBytes':required,
             'ramShortfallBytes':max(0,math.ceil(required-headroom))}
@@ -58,15 +59,27 @@ class WorkQueue:
             if job in self.pending:self.pending.remove(job)
             if self.active is job:self.active=None
 
-def resource_reason(*,ram_used,total,available,local_ram,vram,cpu,model_loaded,voice_loaded,kind='chat',latched=False,cold_budget=6.5):
-    """Conservative cold-load estimate; no global OS hard cap or measured 8B peak claim."""
-    if available<1536*1024**2 or ram_used>=(.60 if latched else .65):return 'ram_pressure'
+def ram_pressure(ram_used, available, limits=None, latched=False):
+    limits=limits or {}
+    return (available<limits.get('minimumAvailableGiB',1.5)*1024**3 or
+            ram_used>=limits.get('ramRecovery' if latched else 'ramLimit',.60 if latched else .65))
+
+def resource_reason(*,ram_used,total,available,local_ram,vram,cpu,model_loaded,voice_loaded,kind='chat',latched=False,cold_budget=6.5,limits=None,vram_total=None,gpu_temperature=None):
+    """Model-specific forecasts plus sampled pressure limits; not an OS hard cap."""
+    limits=limits or {}
+    if ram_pressure(ram_used,available,limits,latched):return 'ram_pressure'
     if vram is None:return 'gpu_metrics_unavailable'
-    if vram>=(.55 if latched else .60):return 'vram_pressure'
+    if vram>=limits.get('vramRecovery' if latched else 'vramLimit',.55 if latched else .60):return 'vram_pressure'
+    if limits.get('gpuTemperatureLimit'):
+        if gpu_temperature is None:return 'gpu_metrics_unavailable'
+        if gpu_temperature>=limits.get('gpuTemperatureRecovery' if latched else 'gpuTemperatureLimit'):return 'gpu_temperature'
+    if kind=='chat' and not model_loaded and limits.get('coldVramBudgetGiB'):
+        if not vram_total:return 'gpu_metrics_unavailable'
+        if (limits['vramLimit']-vram)*vram_total<limits['coldVramBudgetGiB']*1024**3:return 'vram_pressure'
     if local_ram>total*.60:return 'ram_pressure'
     # Include load transients, not just the final model working set.
     if memory_budget(ram_used=ram_used,total=total,model_loaded=model_loaded,
-                     voice_loaded=voice_loaded,kind=kind,cold_budget=cold_budget)['ramShortfallBytes']:
+                     voice_loaded=voice_loaded,kind=kind,cold_budget=cold_budget,limits=limits)['ramShortfallBytes']:
         return 'ram_headroom'
     if cpu>=65:return 'cpu_pressure'
     return None

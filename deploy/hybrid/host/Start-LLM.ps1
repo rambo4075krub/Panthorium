@@ -7,7 +7,7 @@ $llmModel = Join-Path (Join-Path $llmRoot 'models') $profile.filename
 $llmPidFile = Join-Path $llmRoot 'llm.pid'
 $llmHealth = 'http://127.0.0.1:8088/health'
 $brokerHealth = Invoke-RestMethod 'http://127.0.0.1:8765/health' -TimeoutSec 3
-if ($brokerHealth.version -ne 'qwen8b-v1' -or $brokerHealth.model -ne $profile.name) { throw 'The matching resource-monitoring broker must be running first.' }
+if ($brokerHealth.version -ne $profile.brokerVersion -or $brokerHealth.model -ne $profile.name -or -not $brokerHealth.ramGuardAlive) { throw 'The matching resource-monitoring broker must be running first.' }
 function Test-LlmIdentity($ProcessInfo) {
     if (-not $ProcessInfo) { return $false }
     $actualPath = $ProcessInfo.ExecutablePath
