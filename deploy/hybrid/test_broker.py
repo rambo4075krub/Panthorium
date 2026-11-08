@@ -13,6 +13,40 @@ except ImportError:
 
 @unittest.skipUnless(AVAILABLE,'Broker dependencies are installed on the notebook')
 class BrokerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_background_never_cold_loads_or_queues_behind_users(self):
+        from work_queue import WorkQueue
+        request=unittest.mock.Mock(headers={'x-panthorium-account':'b'*64})
+        request.is_disconnected=unittest.mock.AsyncMock(return_value=False)
+        with patch.object(broker,'queue',WorkQueue()),patch.object(broker,'last_use',time.monotonic()-60),patch.object(broker,'engine',None),patch.object(broker,'snapshot',return_value={'ready':True,'modelLoaded':False}),patch.object(broker,'ensure_model') as load:
+            with self.assertRaises(broker.HTTPException):
+                async with broker.admission(request,background=True):self.fail('cold background work admitted')
+            load.assert_not_called();self.assertIsNone(broker.background_cancel)
+            broker.queue.active={'owner':'foreground'}
+            with self.assertRaises(broker.HTTPException):
+                async with broker.admission(request,background=True):self.fail('background work queued')
+            self.assertEqual(broker.queue.pending,[])
+
+    async def test_foreground_preempts_background_and_retains_slot_until_stop(self):
+        from work_queue import WorkQueue
+        entered=asyncio.Event();events=[]
+        class Client:
+            async def __aenter__(self):return self
+            async def __aexit__(self,*args):pass
+            async def post(self,*args,**kwargs):entered.set();await asyncio.Event().wait()
+        bg=unittest.mock.Mock(headers={'x-panthorium-account':'b'*64,'x-panthorium-background':'1'})
+        bg.body=unittest.mock.AsyncMock(return_value=b'{"model":"panthorium-local","stream":false}')
+        bg.is_disconnected=unittest.mock.AsyncMock(return_value=False)
+        async def receive():await asyncio.Event().wait()
+        bg.receive=receive
+        fg=unittest.mock.Mock(headers={'x-panthorium-account':'c'*64})
+        fg.is_disconnected=unittest.mock.AsyncMock(return_value=False)
+        with patch.object(broker,'queue',WorkQueue(interval=.001)),patch.object(broker,'last_use',time.monotonic()-60),patch.object(broker,'engine',None),patch.object(broker,'snapshot',return_value={'ready':True,'modelLoaded':True}),patch.object(broker.httpx,'AsyncClient',return_value=Client()),patch.object(broker,'drop_voice'),patch.object(broker,'ensure_model') as load,patch.object(broker,'stop_model',side_effect=lambda:events.append('stop')):
+            task=asyncio.create_task(broker.chat(bg));await asyncio.wait_for(entered.wait(),1)
+            async with broker.admission(fg):events.append('foreground')
+            with self.assertRaises(broker.HTTPException):await task
+            self.assertEqual(events,['stop','foreground']);load.assert_not_called()
+            self.assertIsNone(broker.background_cancel);self.assertIsNone(broker.queue.active)
+
     async def test_fast_guard_stops_owned_model_on_ram_pressure_or_missing_metrics(self):
         for missing in (False,True):
             stop=unittest.mock.Mock();stop.wait.side_effect=[False,True]

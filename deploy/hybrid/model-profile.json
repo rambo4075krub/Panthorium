@@ -12,7 +12,7 @@
     "tool-calling"
   ],
   "vision": false,
-  "brokerVersion": "qwen35-9b-v2",
+  "brokerVersion": "qwen35-9b-v3",
   "coldRamBudgetGiB": 2.15,
   "warmRamBudgetGiB": 0.25,
   "coldVramBudgetGiB": 3.18,

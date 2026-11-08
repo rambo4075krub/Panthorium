@@ -209,6 +209,14 @@ const productionIntelligence = new ProductionIntelligenceService({ databaseUrl: 
 const toolRegistry = new ToolRegistry({ sentinel, conversations, securityResponse, aiOperations, integrations, mediaStudio });
 const agentPolicy = new AgentPolicyService();
 const agentService = new AgentService({ tools: toolRegistry, audit, policy: agentPolicy, ledger: actionLedger });
+const localInsights = new (require('./services/localInsightsService').LocalInsightsService)({
+  repository:new (require('./services/localInsightsRepository').LocalInsightsRepository)(cloudStoreOptions),
+  auth:authService, providers:sentinel.providers, audit, notifications, security:securityResponse, agent:agentService
+});
+toolRegistry.register({id:'security.incident_response',description:'ยืนยันบล็อก IP ที่ตรวจพบในเหตุการณ์ชั่วคราว 10 นาทีหรือไม่',permission:'chat',risk:'high',mutates:true,requiresConfirmation:true,
+  argsSchema:{incidentId:'incident UUID',planHash:'approved plan hash'},
+  validateArgs:args=>Object.keys(args).length===2 && require('./services/localInsightsService').UUID.test(args.incidentId||'') && /^[a-f0-9]{64}$/.test(args.planHash||'') ? null : 'invalid_incident_plan',
+  run:input=>localInsights.execute(input)});
 const mcpOAuthRepository = config.mcpEnabled ? new (require('./services/mcpOAuthRepository').McpOAuthRepository)({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode, required: config.isProduction, allowMemory: !config.isProduction && !config.databaseUrl }) : null;
 const mcpOAuth = config.mcpEnabled ? new (require('./services/mcpOAuthService').McpOAuthService)({ repository: mcpOAuthRepository, authService, baseUrl: config.mcpBaseUrl, allowedRedirectUris: config.mcpRedirectUris }) : null;
 const mcpTools = config.mcpEnabled ? new (require('./services/mcpToolService').McpToolService)({ agentService, mediaStudio, baseUrl: config.mcpBaseUrl, audit }) : null;
@@ -326,6 +334,7 @@ app.use('/api/studio', createCreativeStudioRouter(authService, creativeStudio));
 app.use("/api/reminders", createReminderRouter(authService, reminders));
 app.use('/api/notifications', createNotificationRouter(authService, notifications));
 app.use('/api/actions', createActionsRouter(authService, agentService));
+app.use('/api/local-insights', require('./routes/localInsights').createLocalInsightsRouter(authService,localInsights));
 app.use('/api/cloud-apps', createCloudAppsRouter(authService, cloudApps));
 app.use('/api/privacy', createPrivacyRequestsRouter(authService, privacyRequests));
 app.use('/api/organizations', createOrganizationsRouter(authService, organizations));
@@ -357,7 +366,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-studio-ui.js", "social-rtc.js", "social-media-source.js", "social-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js"];
+const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-studio-ui.js", "social-rtc.js", "social-media-source.js", "social-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js"];
 app.get("/vendor/hls.min.js", (req, res) => res.type("application/javascript").sendFile(require.resolve("hls.js/dist/hls.min.js")));
 
 for (const script of [...shellScripts, "workspace-ui.css", "social-player.html", "social-player.js"]) {
@@ -535,6 +544,7 @@ async function start() {
   await audit.init();
   await securityResponse.init();
   await authService.init();
+  await localInsights.init();
   if (mcpOAuthRepository) await mcpOAuthRepository.init();
   await organizationRepository.init();
   await biometrics.init();
@@ -593,11 +603,13 @@ async function start() {
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== "1" && process.env.PANTHORIUM_LOCAL_PROFILE !== "1") sentinelTraining.start();
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== "1") { autonomousGovernance.start(); sentinelOrchestrator.start(); }
   server.on('close', stopBackgroundWorkers);
+  if (process.env.PANTHORIUM_DEPLOY_PROBE !== '1' && process.env.PANTHORIUM_LOCAL_PROFILE !== '1') localInsights.start();
   if (liveGateway) server.on('close', () => liveGateway.close());
   return server;
 }
 
 function stopBackgroundWorkers() {
+  localInsights.stop();
   if (localPushTimer) { clearInterval(localPushTimer); localPushTimer = null; }
   if (mailboxMaintenanceTimer) { clearInterval(mailboxMaintenanceTimer); mailboxMaintenanceTimer = null; }
   agentScheduler.stop();
@@ -633,5 +645,5 @@ if (require.main === module) {
   }).catch((error) => { console.error("[BOOT]", error); process.exit(1); });
 }
 
-module.exports = { app, notifications, notificationRepository, social, creativeStudio, organizationRepository, organizations, organizationResources, organizationGovernance, privacyRequests, actionLedger, voiceSessions, usageLedger, cloudApps, liveEntitlements, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
+module.exports = { app, localInsights, notifications, notificationRepository, social, creativeStudio, organizationRepository, organizations, organizationResources, organizationGovernance, privacyRequests, actionLedger, voiceSessions, usageLedger, cloudApps, liveEntitlements, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
 
