@@ -9,7 +9,7 @@ async function until(check) { for (let i = 0; i < 120; i++) { if (check()) retur
 (async () => {
   const f = fixture(), dom = new JSDOM('<!doctype html><div id="sm-apps"></div>', { url: 'https://work.panthorium.test', runScripts: 'outside-only' }), w = dom.window;
   w.OS = { state: { user: f.user }, config: { accessToken: 'fixture' } };
-  let windowOptions, failSave = false, conflict = false, slowAnalysis = false, pendingAnalysis;
+  let windowOptions, failSave = false, conflict = false, slowAnalysis = false, pendingAnalysis, actionOutput = {};
   const calls = [], voiceTexts = [];
   w.createWindow = (id, title, html, options) => { windowOptions = options; const root = w.document.createElement('div'); root.className = 'window'; root.dataset.id = id; root.innerHTML = html; w.document.body.append(root); };
   w.PanthoriumWindowManager = { restore() {} }; w.PanthoriumLiveVoice = { isActive: () => false, async toggle() {}, sendText: text => voiceTexts.push(text) };
@@ -21,8 +21,8 @@ async function until(check) { for (let i = 0; i < 120; i++) { if (check()) retur
     try {
       let data;
       if (path === '/api/work') data = await f.service.list({ user });
-      else if (path === '/api/files') data = { files: [...f.objects.values()].filter(file => file.owner === user.sub).map(({ body, owner, ...file }) => file) };
-      else if (path.startsWith('/api/actions/')) data = { output: {} };
+      else if (path === '/api/files') data = options.method === 'POST' ? { file: await f.files.upload(user.sub, decodeURIComponent(options.headers['x-file-name']), 'text/plain', options.body) } : { files: [...f.objects.values()].filter(file => file.owner === user.sub).map(({ body, owner, ...file }) => file) };
+      else if (path.startsWith('/api/actions/')) data = { output: actionOutput };
       else if (path.startsWith('/api/studio/jobs/')) data = await f.studio.get({ user, jobId: path.split('/').at(-1) });
       else if (/^\/api\/work\//.test(path)) {
         const projectId = path.split('/')[3];
@@ -72,6 +72,17 @@ async function until(check) { for (let i = 0; i < 120; i++) { if (check()) retur
   await until(() => /ประมวลผลแล้ว/.test(q('[data-work-status]').textContent)); assert.equal(q('[data-work-draft]').value, 'สรุปจากข้อมูล [INPUT]'); assert.match(q('[data-work-evidence]').textContent, /INPUT/);
   slowAnalysis = true; q('[data-work-mode="summary"]').click(); await until(() => !!pendingAnalysis); q('[data-work-stop]').click(); await until(() => /หยุดแล้ว/.test(q('[data-work-status]').textContent));
   assert.equal(q('[data-work-draft]').value, 'สรุปจากข้อมูล [INPUT]'); slowAnalysis = false;
+  let finishUpload;
+  const upload = q('[data-work-upload]'); Object.defineProperty(upload, 'files', { configurable: true, value: [{ name: 'notes.txt', size: 5, arrayBuffer: () => new Promise(resolve => { finishUpload = resolve; }) }] });
+  upload.dispatchEvent(new w.Event('change')); await until(() => !!finishUpload);
+  assert.equal(q('[data-work-new]').disabled, true); assert.equal(q('[data-work-projects]').disabled, true); assert.equal(q('[data-work-refresh]').disabled, true);
+  finishUpload(Buffer.from('notes')); await until(() => !upload.disabled);
+  assert.equal(q('[data-work-files] input').checked, true);
+  p = (await f.service.list({ user: f.user })).projects.find(item => item.title.endsWith('(ร่างกู้คืน)'));
+  w.dispatchEvent(new w.CustomEvent('panthorium:ai-done', { detail: { toolResults: [{ toolId: 'work.draft', ok: true, output: { projectId: p.id, saved: false, draft: 'ผลใหม่ที่ยังไม่บันทึก', proposedTasks: [{ title: 'ข้อเสนอหลังรีเฟรช' }] } }] } }));
+  await until(() => /ข้อเสนอหลังรีเฟรช/.test(q('[data-work-proposals]').textContent));
+  assert.match(q('[data-work-evidence]').textContent, /ผลใหม่ที่ยังไม่บันทึก/);
+  assert.equal(q('[data-work-draft]').value, 'สรุปจากข้อมูล [INPUT]', 'A conflicting voice result must not overwrite the current draft');
   p = (await f.service.list({ user: f.user })).projects.find(item => item.title.endsWith('(ร่างกู้คืน)'));
   await w.PanthoriumWorkAssistant.review({ toolId: 'work.save', requiresConfirmation: true, args: { patch: { text: 'WRONG OUTER PAYLOAD' } }, confirmation: { toolId: 'work.save', actionId: randomUUID(), approvalHash: 'a'.repeat(64), approvalExpiresAt: new Date(Date.now() + 60000).toISOString(), args: { projectId: p.id, expectedVersion: p.version, patch: { text: 'EXACT APPROVED CONTENT <script>bad()</script>' } } } });
   assert.match(q('[data-work-approvals]').textContent, /EXACT APPROVED CONTENT/); assert.doesNotMatch(q('[data-work-approvals]').textContent, /WRONG OUTER PAYLOAD/); assert.equal(q('[data-work-approvals] script'), null);

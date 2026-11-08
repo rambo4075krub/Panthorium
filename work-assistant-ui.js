@@ -167,19 +167,20 @@
     if (current(v) && seq === v.loadSeq) paint(v, result.project);
   }
   async function newProject(v, copied) {
+    if (v.busy) throw Error('work_busy');
     if (!copied && v.project) await save(v);
     const id = crypto.randomUUID(); const result = await api(v, '/api/work/' + id, { method: 'PUT', body: JSON.stringify({ expectedVersion: 0, operationId: crypto.randomUUID(), patch: copied || { title: 'งานใหม่', template: 'report', text: '', draft: '', sourceFileIds: [] } }) });
     if (current(v)) paint(v, result.project);
   }
   function busy(v, value) {
-    v.busy = value; q(v, '[data-work-stop]').hidden = !value;
-    for (const node of v.root.querySelectorAll('[data-work-mode],[data-work-export],[data-work-new],[data-work-projects],[data-work-voice]')) node.disabled = value;
+    v.busy = value; q(v, '[data-work-stop]').hidden = !value || !v.analysis;
+    for (const node of v.root.querySelectorAll('[data-work-mode],[data-work-export],[data-work-new],[data-work-projects],[data-work-voice],[data-work-upload],[data-work-refresh],[data-work-reload],[data-work-copy],[data-work-add-task]')) node.disabled = value;
   }
   async function analyze(v, mode) {
     if (v.busy) return;
     try {
-      await save(v); const projectId = v.project.id, editSeq = v.editSeq; busy(v, true);
-      const controller = new AbortController(); v.analysis = controller;
+      await save(v); const projectId = v.project.id, editSeq = v.editSeq;
+      const controller = new AbortController(); v.analysis = controller; busy(v, true);
       const abort = () => controller.abort(); v.controller.signal.addEventListener('abort', abort, { once: true });
       report(v, 'กำลังอ่านต้นฉบับและประมวลผล · หยุดได้');
       let result;
@@ -203,10 +204,10 @@
     finally { if (current(v)) { v.analysis = null; busy(v, false); } }
   }
   async function renderOutputs(v) {
-    const root = q(v, '[data-work-outputs]'), id = v.project.id; root.replaceChildren();
+    const root = q(v, '[data-work-outputs]'), id = v.project.id, generation = v.outputGeneration = (v.outputGeneration || 0) + 1; root.replaceChildren();
     for (const item of v.project.exports || []) {
       const result = await api(v, '/api/studio/jobs/' + encodeURIComponent(item.jobId));
-      if (!current(v) || v.project.id !== id) return;
+      if (!current(v) || v.project.id !== id || v.outputGeneration !== generation) return;
       const job = result.job, card = el('div', null, { class: 'wa-card' });
       if (job.status !== 'completed') card.append(el('p', ({ queued: 'รอสร้างไฟล์', running: 'กำลังสร้างไฟล์', failed: 'สร้างไฟล์ไม่สำเร็จ', needs_review: 'ยังยืนยันผลไม่ได้ กรุณาตรวจสถานะ' })[job.status] || job.status), button('ตรวจและทำงานต่อ', async () => { try { await post(v, '/api/studio/jobs/' + job.id + '/advance', {}); await renderOutputs(v); } catch (e) { report(v, friendly(e), true); } }));
       for (const file of job.files || []) {
@@ -254,6 +255,7 @@
     } catch (failure) { if (current(v)) { q(v, '[data-task-error]').textContent = friendly(failure); submit.disabled = false; } }
   }
   function taskDialog(v, original = {}) {
+    if (v.busy) return report(v, friendly(Error('work_busy')), true);
     const dialog = q(v, '[data-work-dialog]'); dialog.replaceChildren();
     const title = el('input', null, { maxlength: '240', required: '' }), due = el('input', null, { type: 'datetime-local', required: '' }), assignee = el('input', null, { maxlength: '120' }), details = el('textarea', null, { maxlength: '1000' }), offset = el('select'), consent = el('input', null, { type: 'checkbox' });
     title.value = original.title || ''; assignee.value = original.assignee || ''; details.value = original.details || ''; consent.checked = original.emailConsent === true;
@@ -262,7 +264,7 @@
     if (original.remindBeforeMinutes != null && ![0,30,60,1440].includes(original.remindBeforeMinutes)) offset.append(el('option', 'ก่อน ' + original.remindBeforeMinutes + ' นาที', { value: original.remindBeforeMinutes }));
     offset.value = original.remindBeforeMinutes == null ? '' : String(original.remindBeforeMinutes);
     dialog.append(el('h2', original.id ? 'แก้ไขรายการงานและการเตือน' : 'ตรวจรายการก่อนบันทึก'));
-    for (const [name, input] of [['ชื่องาน', title], ['กำหนดส่ง · เวลาไทย (Asia/Bangkok)', due], ['ผู้รับผิดชอบ (ชื่อสำหรับอ้างอิง ไม่มีการส่งคำเชิญ)', assignee], ['รายละเอียด', details], ['การเตือน', offset]]) { const label = el('label', name); label.append(input); dialog.append(label); }
+    for (const [name, input] of [['ชื่องาน', title], ['กำหนดส่ง · เวลาไทย (Asia/Bangkok)', due], ['ผู้รับผิดชอบ (ชื่อสำหรับอ้างอิง ไม่มีการส่งคำเชิญ)', assignee], ['รายละเอียด', details], ['การเตือน', offset]]) { const label = el('label', name); input.setAttribute('aria-label', name); label.append(input); dialog.append(label); }
     const label = el('label', null, { class: 'wa-file' }); label.append(consent, el('span', 'ยืนยันให้ส่งการเตือนถึงอีเมลที่ยืนยันแล้วของบัญชีฉัน')); dialog.append(label, el('p', '', { 'data-task-error': '', role: 'alert' }));
     const taskId = original.id || crypto.randomUUID(), operationId = crypto.randomUUID();
     const submit = button('ยืนยันและบันทึก', () => {
@@ -277,6 +279,7 @@
     const payload = { taskId: task.id, operationId: crypto.randomUUID(), action }, submit = button('ยืนยัน', () => submitTask(v, payload, dialog, submit)); dialog.append(submit, button('กลับ', () => dialog.close())); dialog.showModal();
   }
   async function refresh(v) {
+    if (v.busy) throw Error('work_busy');
     if (v.project) await save(v);
     const [data, files] = await Promise.all([api(v, '/api/work'), api(v, '/api/files')]); if (!current(v)) return;
     v.projects = data.projects; v.files = files.files || []; updateList(v); renderFiles(v);
@@ -307,20 +310,26 @@
     q(v, '[data-work-projects]').onchange = guard(() => q(v, '[data-work-projects]').value && load(v, q(v, '[data-work-projects]').value));
     q(v, '[data-work-search]').oninput = () => updateList(v); q(v, '[data-work-voice]').onclick = () => voice(v);
     q(v, '[data-work-copy]').onclick = guard(() => newProject(v, { ...patch(v), title: patch(v).title.slice(0, 145) + ' (ร่างกู้คืน)' }));
-    q(v, '[data-work-reload]').onclick = guard(async () => { const snapshot = patch(v); recovery(v); const result = await api(v, base(v)); paint(v, result.project); report(v, 'โหลดฉบับบนระบบแล้ว ร่างบนอุปกรณ์ยังเลือกกู้คืนได้'); });
+    q(v, '[data-work-reload]').onclick = guard(async () => { recovery(v); const result = await api(v, base(v)); paint(v, result.project); report(v, 'โหลดฉบับบนระบบแล้ว ร่างบนอุปกรณ์ยังเลือกกู้คืนได้'); });
     q(v, '[data-work-add-task]').onclick = () => taskDialog(v); q(v, '[data-work-stop]').onclick = () => v.analysis?.abort();
     const modes = [['summary', 'สรุปไฟล์'], ['question', 'ถามจากข้อมูล'], ['draft', 'ร่างเอกสาร'], ['rewrite', 'ปรับภาษา'], ['translate', 'แปลภาษา'], ['tasks', 'แยกรายการงาน']];
     for (const [mode, title] of modes) q(v, '[data-work-modes]').append(button(title, () => analyze(v, mode), { 'data-work-mode': mode }));
     for (const node of root.querySelectorAll('[data-work-export]')) node.onclick = () => exportDraft(v, node.dataset.workExport);
     q(v, '[data-work-upload]').onchange = guard(async () => {
-      const input = q(v, '[data-work-upload]'), pending = [...input.files];
-      for (const file of pending) {
-        if (file.size > 6 * 1024 * 1024) throw Error('work_source_too_large');
-        const body = await file.arrayBuffer(); if (!current(v)) return;
-        const result = await api(v, '/api/files', { method: 'POST', body, headers: { 'Content-Type': 'application/octet-stream', 'x-file-name': encodeURIComponent(file.name), 'x-file-content-type': file.type || 'application/octet-stream' } });
-        v.files.unshift(result.file); if (v.selected.size < 6) v.selected.add(result.file.id); renderFiles(v); changed(v);
-      }
-      input.value = ''; await save(v);
+      if (v.busy) return;
+      const input = q(v, '[data-work-upload]'), pending = [...input.files], projectId = v.project.id;
+      if (pending.some(file => file.size > 6 * 1024 * 1024)) throw Error('work_source_too_large');
+      if (pending.length + v.selected.size > 6) return report(v, 'เลือกไฟล์ต้นทางรวมได้ไม่เกิน 6 ไฟล์', true);
+      busy(v, true); report(v, 'กำลังเพิ่มไฟล์ลงแฟ้มงานนี้');
+      try {
+        for (const file of pending) {
+          const body = await file.arrayBuffer(); if (!current(v) || v.project.id !== projectId) return;
+          const result = await api(v, '/api/files', { method: 'POST', body, headers: { 'Content-Type': 'application/octet-stream', 'x-file-name': encodeURIComponent(file.name), 'x-file-content-type': file.type || 'application/octet-stream' } });
+          if (!current(v) || v.project.id !== projectId) return;
+          v.files.unshift(result.file); v.selected.add(result.file.id); renderFiles(v); changed(v);
+        }
+        await save(v);
+      } finally { input.value = ''; if (current(v)) busy(v, false); }
     });
     refresh(v).catch(failure => report(v, friendly(failure), true)); return root;
   }
@@ -367,18 +376,29 @@
     const run = async cancel => { approve.disabled = reject.disabled = true;
       try { const data = await post(v, '/api/actions/' + confirmation.actionId + (cancel ? '/cancel' : '/confirm'), cancel ? {} : { approvalHash: confirmation.approvalHash });
         if (!current(v)) return; card.replaceChildren(el('p', cancel ? 'ยกเลิกคำสั่งแล้ว' : 'ดำเนินการตามคำสั่งแล้ว'));
-        if (!cancel) await refresh(v);
-        if (data.output?.proposedTasks) renderProposals(v, data.output.proposedTasks);
+        if (!cancel) await receiveOutput(v, data.output, args.projectId);
       } catch (failure) { if (current(v)) { status.textContent = friendly(failure); approve.disabled = reject.disabled = false; } }
     };
     if (Date.parse(confirmation.approvalExpiresAt) <= Date.now()) { approve.disabled = true; status.textContent = 'คำขอหมดอายุ กรุณาสั่งใหม่'; }
     card.append(status, approve, reject); q(v, '[data-work-approvals]').append(card); return true;
   }
   window.PanthoriumWorkAssistant = Object.freeze({ open, review, refresh: () => view && refresh(view) });
+  async function receiveOutput(v, output, requestedProjectId) {
+    const id = output?.projectId || output?.project?.id || requestedProjectId;
+    if (!current(v)) return;
+    if (!v.dirty && !v.busy) await refresh(v);
+    if (!current(v) || id && v.project?.id !== id) return;
+    if (output?.saved === false && typeof output.draft === 'string') {
+      const card = el('div', null, { class: 'wa-card' });
+      card.append(el('p', 'แฟ้มงานเปลี่ยนระหว่างประมวลผล ผลใหม่ยังไม่ได้บันทึก ตรวจเทียบกับร่างปัจจุบันก่อนใช้'), el('pre', output.draft), button('นำผลใหม่มาแก้ไข', () => { q(v, '[data-work-draft]').value = output.draft; changed(v); card.remove(); }));
+      q(v, '[data-work-evidence]').append(card);
+    }
+    if (output?.proposedTasks) renderProposals(v, output.proposedTasks);
+  }
   window.addEventListener('panthorium:ai-done', event => {
     for (const result of event.detail?.toolResults || []) if (String(result.toolId || '').startsWith('work.')) {
       if (result.requiresConfirmation) review(result);
-      else if (result.ok && view && current(view)) { if (result.output?.proposedTasks) renderProposals(view, result.output.proposedTasks); if (!view.dirty) refresh(view).catch(() => {}); }
+      else if (result.ok && view && current(view)) receiveOutput(view, result.output).catch(failure => view && report(view, friendly(failure), true));
     }
   });
   window.addEventListener('beforeunload', event => { if (view?.dirty) { recovery(view); event.preventDefault(); event.returnValue = ''; } });

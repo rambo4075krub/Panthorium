@@ -116,6 +116,14 @@ async function main() {
   await assert.rejects(() => tools.get('work.export').run({ user, args: {} }), /immutable_action_confirmation_required/);
   await assert.rejects(() => service.list({ user: { ...user, roles: ['guest'] } }), /account_required/);
   const paged = await tools.get('work.read').run({ user, args: { action: 'sources', projectId, offset: 0 } }); assert(paged.parts.some(part => part.key === 'F1.P1'));
+  p = (await service.get({ user, projectId })).project;
+  const longDraft = 'ข้อมูลยาวที่ต้องอ่านครบ '.repeat(800).slice(0, 20000);
+  await service.save({ user, projectId, expectedVersion: p.version, operationId: randomUUID(), patch: { draft: longDraft } });
+  const meta = await tools.get('work.read').run({ user, args: { action: 'project', projectId } });
+  assert.equal(meta.project.draftChars, longDraft.length); assert(JSON.stringify(meta).length < 12000);
+  let allText = '', offset = 0, more = true;
+  while (more) { const page = await tools.get('work.read').run({ user, args: { action: 'content', field: 'draft', projectId, offset } }); assert(JSON.stringify(page).length < 12000); allText += page.content; offset = page.nextOffset; more = page.hasMore; }
+  assert.equal(allText, longDraft, 'Voice must be able to read a complete long draft without silent output truncation');
   assert.equal(repository.memory.size, 1);
   console.log('PASS work assistant: actual PDF/Office parsing, citations, account isolation, version conflicts, native exports, replay protection, linked task/calendar/reminder rollback and approval enforcement');
 }
