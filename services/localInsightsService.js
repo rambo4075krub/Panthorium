@@ -93,13 +93,14 @@ class LocalInsightsService {
     this.running=true;
     try {
       const control=await this.repository.control();
-      this.monitoring=!!control.actor_id && await canUseLocal(this.providers,control.actor_id);
-      this.enabled=control.enabled===true && this.monitoring;
+      const recipients=await this.recipients();
+      // Revoking the model operator cannot silence alerts to the remaining valid recipient.
+      this.monitoring=recipients.length>0;
+      this.enabled=control.enabled===true && !!control.actor_id && await canUseLocal(this.providers,control.actor_id);
       if(!this.enabled) { this.batch.clear(); this.abort?.abort(); }
       if(!this.monitoring)return;
       const batch=[...this.batch.values()]; this.batch.clear();
       await this.repository.addCounters(batch);
-      const recipients=await this.recipients();
       for(const alert of await this.signals()) {
         const rule=RULES[alert.code]; if(!rule || !this.security.normalizeIp(alert.ip)) continue;
         const incident=await this.repository.recordIncident(alert,rule.family);
@@ -172,7 +173,8 @@ class LocalInsightsService {
   async eligible(incident, userId) {
     const ip=publicIp(incident.ip); if(!ip || !RULES[incident.code] || Date.now()-new Date(incident.last_seen)>15*60000) return false;
     const recipients=[...new Set([userId,...await this.recipients()])];
-    const rows=(await this.repository.pool.query("SELECT 1 FROM panthorium_audit_events WHERE ip=$1 AND actor_user_id=ANY($2::text[]) AND time>NOW()-INTERVAL '24 hours' LIMIT 1",[incident.ip,recipients])).rows;
+    const aliases=[...new Set([incident.ip,ip,...(ip.includes(':')?[]:['::ffff:'+ip])])];
+    const rows=(await this.repository.pool.query("SELECT 1 FROM panthorium_audit_events WHERE ip=ANY($1::text[]) AND actor_user_id=ANY($2::text[]) AND time>NOW()-INTERVAL '24 hours' LIMIT 1",[aliases,recipients])).rows;
     return !rows.length;
   }
   async plan(user, id, requestIp) {
@@ -182,8 +184,9 @@ class LocalInsightsService {
     if(incident.state!=='observed') throw failure('incident_already_handled',409);
     if(this.security.normalizeIp(requestIp)===this.security.normalizeIp(incident.ip) || !await this.eligible(incident,user.sub)) throw failure('incident_manual_review_required',409);
     if(!incident.plan || Date.parse(incident.plan.expiresAt)<=Date.now()) {
-      const plan={incidentId:id,revision:incident.revision,action:'temporary_ip_block',ip:incident.ip,durationMinutes:10,expiresAt:new Date(Date.now()+5*60000).toISOString(),
-        summary:`บล็อก IP ${incident.ip} ชั่วคราว 10 นาที เพื่อลดคำขอผิดปกติ`,impact:'ผู้ใช้งานที่ใช้ IP เดียวกันอาจเข้าใช้งานไม่ได้ชั่วคราว',rollback:'ยกเลิกการบล็อกนี้ได้ หรือรอครบ 10 นาที',generation:control.generation,
+      const targetIp=this.security.normalizeIp(incident.ip);
+      const plan={incidentId:id,revision:incident.revision,action:'temporary_ip_block',ip:targetIp,durationMinutes:10,expiresAt:new Date(Date.now()+5*60000).toISOString(),
+        summary:`บล็อก IP ${targetIp} ชั่วคราว 10 นาที เพื่อลดคำขอผิดปกติ`,impact:'ผู้ใช้งานที่ใช้ IP เดียวกันอาจเข้าใช้งานไม่ได้ชั่วคราว',rollback:'ยกเลิกการบล็อกนี้ได้ หรือรอครบ 10 นาที',generation:control.action_epoch,
         analysisAvailable:!!(control.report_at && Date.now()-new Date(control.report_at)<7*86400000)};
       plan.hash=hash(plan); incident=await this.repository.savePlan(incident,plan);
     }
@@ -203,7 +206,7 @@ class LocalInsightsService {
       const control=(await c.query('SELECT * FROM panthorium_insights_control WHERE id=1 FOR UPDATE')).rows[0];
       const i=(await c.query('SELECT * FROM panthorium_insights_incidents WHERE id=$1 FOR UPDATE',[args.incidentId])).rows[0];
       const p=i?.plan;
-      if(!control.enabled || !p || p.generation!==control.generation || p.hash!==args.planHash || p.revision!==i.revision || Date.parse(p.expiresAt)<=Date.now()) throw failure('incident_plan_expired',409);
+      if(!control.enabled || !p || p.generation!==control.action_epoch || p.hash!==args.planHash || p.revision!==i.revision || Date.parse(p.expiresAt)<=Date.now()) throw failure('incident_plan_expired',409);
       if(i.state!=='observed') throw failure('incident_already_handled',409);
       const source='ai:'+i.id;
       await c.query('DELETE FROM panthorium_security_ip_blocks WHERE ip=$1 AND expires_at<=NOW()',[p.ip]);
@@ -223,7 +226,7 @@ class LocalInsightsService {
       const incident=(await c.query('SELECT * FROM panthorium_insights_incidents WHERE id=$1 FOR UPDATE',[id])).rows[0];
       if(!incident || incident.state!=='blocked') throw failure('incident_not_blocked',409);
       // Source ownership prevents removing a newer/manual/automatic protection.
-      const removed=await c.query('DELETE FROM panthorium_security_ip_blocks WHERE ip=$1 AND source=$2 RETURNING ip',[incident.ip,'ai:'+id]);
+      const removed=await c.query('DELETE FROM panthorium_security_ip_blocks WHERE ip=$1 AND source=$2 RETURNING ip',[this.security.normalizeIp(incident.ip),'ai:'+id]);
       await c.query("UPDATE panthorium_insights_incidents SET state='reverted' WHERE id=$1",[id]);
       return {ok:true,removed:removed.rowCount>0};
     });

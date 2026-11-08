@@ -20,6 +20,7 @@ class LocalInsightsRepository {
         actor_id UUID REFERENCES panthorium_users(id) ON DELETE SET NULL,
         generation INTEGER NOT NULL DEFAULT 0, next_analysis TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         report JSONB, report_at TIMESTAMPTZ, worker_status TEXT NOT NULL DEFAULT 'disabled');
+      ALTER TABLE panthorium_insights_control ADD COLUMN IF NOT EXISTS action_epoch INTEGER NOT NULL DEFAULT 0;
       INSERT INTO panthorium_insights_control(id) VALUES(1) ON CONFLICT DO NOTHING;
       CREATE TABLE IF NOT EXISTS panthorium_insights_preferences (
         user_id UUID PRIMARY KEY REFERENCES panthorium_users(id) ON DELETE CASCADE,
@@ -51,7 +52,7 @@ class LocalInsightsRepository {
   async control() { this.assertReady(); return (await this.pool.query('SELECT * FROM panthorium_insights_control WHERE id=1')).rows[0]; }
   async setEnabled(actor, enabled) {
     this.assertReady();
-    await this.pool.query("UPDATE panthorium_insights_control SET enabled=$1,actor_id=$2,generation=generation+1,worker_status=$3,next_analysis=NOW() WHERE id=1", [enabled, actor, enabled ? 'waiting_idle' : 'disabled']);
+    await this.pool.query("UPDATE panthorium_insights_control SET enabled=$1,actor_id=$2,generation=generation+1,action_epoch=action_epoch+1,worker_status=$3,next_analysis=NOW() WHERE id=1", [enabled, actor, enabled ? 'waiting_idle' : 'disabled']);
   }
   async preferences(userId) {
     this.assertReady();
