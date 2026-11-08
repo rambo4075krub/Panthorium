@@ -14,6 +14,7 @@ function createWorkAssistantRouter(authService, service) {
   const run = handler => async (req, res, next) => { try { res.json({ ok: true, ...await handler(req, res) }); } catch (failure) { next(failure); } };
   const body = (req, keys) => { if (!only(req.body, keys)) throw error('work_invalid_request'); return req.body; };
   router.get('/', run(req => service.list({ user: req.user })));
+  router.post('/import', run(req => service.importRun({ ...body(req, ['runId']), user: req.user })));
   router.get('/:projectId', run(req => service.get({ user: req.user, projectId: req.params.projectId })));
   router.put('/:projectId', run(req => service.save({ ...body(req, ['expectedVersion', 'patch', 'operationId']), user: req.user, projectId: req.params.projectId })));
   router.post('/:projectId/analyze', expensive, run(async (req, res) => {

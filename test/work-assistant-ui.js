@@ -45,6 +45,10 @@ async function until(check) { for (let i = 0; i < 120; i++) { if (check()) retur
   const q = selector => w.document.querySelector(selector), input = (selector, value) => { q(selector).value = value; q(selector).dispatchEvent(new w.Event('input', { bubbles: true })); };
   await until(() => q('[data-work-editor]')?.hidden === false);
   assert(q('#sm-apps [data-app-id="work-assistant"]'));
+  assert.equal(q('[data-work-audience]').options.length, 8);
+  q('[data-work-audience]').value = 'study'; q('[data-work-audience]').dispatchEvent(new w.Event('change'));
+  q('[data-work-prepare]').click(); assert.match(q('[data-work-instruction]').value, /สรุปบทเรียน/);
+  assert.equal(calls.filter(call => call.path.endsWith('/analyze')).length, 0, 'Selecting a starter must not spend AI quota');
   input('[data-work-title]', '<img src=x onerror=alert(1)> ลูกค้า'); input('[data-work-text]', 'กำหนดให้ส่งรายงานเมื่อผู้ใช้ยืนยัน');
   input('[data-work-draft]', 'รายงานฉบับแรก\nข้อมูลจริง 1200 บาท');
   q('[data-work-save]').click(); await until(() => /บันทึกแล้ว/.test(q('[data-work-status]').textContent));

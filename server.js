@@ -222,7 +222,7 @@ toolRegistry.register({
 const agentMemory = new AgentMemoryService({ repository: agentMemoryRepository, audit, knowledge: agentKnowledge });
 const workRepository = new (require('./services/workAssistantRepository').WorkAssistantRepository)({ ...cloudStoreOptions, allowMemory: !config.isProduction && !config.databaseUrl });
 const workAssistant = new (require('./services/workAssistantService').WorkAssistantService)({ repository: workRepository,
-  files: cloudFiles, gateway: sentinel.gateway, studio: creativeStudio, memory: agentMemory, reminders, authService, audit });
+  files: cloudFiles, gateway: sentinel.gateway, studio: creativeStudio, memory: agentMemory, reminders, authService, cloudApps, audit });
 agentMemory.workAssistant = workAssistant;
 require('./services/workAssistantTools').registerWorkAssistantTools(toolRegistry, { service: workAssistant });
 registerPublicWebTools(toolRegistry, { service: new PublicWebService() });

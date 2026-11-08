@@ -26,6 +26,7 @@
     file_not_found: 'ไม่พบไฟล์ในบัญชีนี้ กรุณาเลือกไฟล์อีกครั้ง', work_project_limit: 'บัญชีนี้มีแฟ้มงานครบ 40 แฟ้มแล้ว',
     work_storage_unavailable: 'พื้นที่เก็บแฟ้มงานยังไม่พร้อม', work_task_closed: 'งานนี้เสร็จหรือยกเลิกแล้ว',
     network_error: 'เชื่อมต่อไม่สำเร็จ ร่างที่ยังไม่บันทึกยังอยู่บนหน้าจอ', work_cancelled: 'หยุดประมวลผลแล้ว',
+    work_import_unavailable: 'ยังไม่พร้อมนำร่างเข้าผู้ช่วยงาน', work_import_not_ready: 'ร่างต้นทางยังไม่เสร็จ จึงยังเปิดเป็นแฟ้มงานไม่ได้', work_import_conflict: 'รหัสแฟ้มงานนี้ถูกใช้แล้ว กรุณาติดต่อผู้ดูแล',
     invalid_office_content: 'ร่างยาวหรือมีโครงสร้างที่ส่งออกไม่ได้ กรุณาแบ่งเป็นเอกสารย่อย', work_invalid_due_time: 'เลือกวันและเวลากำหนดส่งให้ครบ',
     work_invalid_text: 'กรุณาตรวจความยาวและข้อมูลในช่องกรอก', work_output_too_large: 'คำตอบยาวเกินขอบเขต กรุณาขอให้สรุปสั้นลง'
   };
@@ -107,6 +108,7 @@
     <p data-work-status class="wa-status" role="status" aria-live="polite">กำลังโหลดแฟ้มงาน</p>
     <div data-work-conflict hidden class="wa-card"><p>ร่างบนหน้าจอยังอยู่ การบันทึกอัตโนมัติหยุดจนกว่าจะจัดการฉบับที่ต่างกัน</p><div class="wa-actions"><button data-work-copy type="button">เก็บร่างนี้เป็นงานใหม่</button><button data-work-reload type="button">โหลดฉบับบนระบบ</button></div></div>
     <div data-work-approvals></div><div class="wa-grid" data-work-editor hidden>
+      <section class="wa-wide"><h2>เริ่มจากงานของคุณ</h2><div class="wa-row"><label style="flex:1">กลุ่มงาน<select data-work-audience></select></label><label style="flex:1">งานที่ต้องการ<select data-work-workflow></select></label></div><p data-work-needs class="wa-muted"></p><button type="button" data-work-prepare>เตรียมคำสั่งจากงานที่เลือก</button><small>ตรวจและปรับคำสั่งด้านล่างก่อนเริ่มใช้ AI</small></section>
       <section><h2>1. ข้อมูลต้นทาง</h2><label>ชื่อแฟ้มงาน<input data-work-title maxlength="160" required></label><label>รูปแบบงาน<select data-work-template><option value="report">รายงานประจำสัปดาห์</option><option value="minutes">สรุปประชุม</option><option value="letter">หนังสือหรืออีเมลธุรกิจ</option><option value="proposal">ข้อเสนองาน</option></select></label>
       <label>เลือกไฟล์จากบัญชี (สูงสุด 6 ไฟล์)</label><div data-work-files></div><label>เพิ่มไฟล์ต้นทาง<input data-work-upload type="file" accept=".pdf,.docx,.xlsx,.pptx,.txt,.csv,.tsv,.md,.json" multiple></label><small>ไฟล์ละไม่เกิน 6 MB · PDF ต้องมีข้อความที่เลือกได้</small>
       <label>ข้อความหรือบันทึกประชุม<textarea data-work-text maxlength="16000" placeholder="วางข้อมูลที่ต้องการให้ใช้เป็นต้นทาง"></textarea></label>
@@ -125,6 +127,27 @@
     select.replaceChildren(el('option', 'เลือกแฟ้มงาน', { value: '' }));
     for (const p of v.projects.filter(p => p.id === v.project?.id || [p.title, p.text, p.draft].join('\n').toLocaleLowerCase('th').includes(query))) select.append(el('option', p.title, { value: p.id }));
     select.value = v.project?.id || '';
+  }
+  function renderWorkflows(v) {
+    const audience = q(v, '[data-work-audience]'), workflows = q(v, '[data-work-workflow]'), previous = audience.value;
+    audience.replaceChildren();
+    for (const group of v.workflows || []) audience.append(el('option', group.title, { value: group.id }));
+    if ([...audience.options].some(option => option.value === previous)) audience.value = previous;
+    const choose = () => {
+      workflows.replaceChildren(); const group = v.workflows?.find(group => group.id === audience.value);
+      for (const task of group?.tasks || []) workflows.append(el('option', task.title, { value: task.id }));
+      q(v, '[data-work-needs]').textContent = group?.needs || '';
+    }; audience.onchange = choose; choose();
+    q(v, '[data-work-prepare]').onclick = () => {
+      if (v.busy) return report(v, friendly(Error('work_busy')), true);
+      const group = v.workflows?.find(group => group.id === audience.value), task = group?.tasks.find(task => task.id === workflows.value);
+      if (!task) return;
+      q(v, '[data-work-instruction]').value = task.instruction;
+      q(v, '[data-work-template]').value = task.template; changed(v);
+      const action = q(v, '[data-work-mode="' + task.mode + '"]');
+      report(v, 'เตรียมคำสั่งแล้ว เพิ่มข้อมูลต้นทางและตรวจคำสั่ง จากนั้นกด “' + action.textContent + '”');
+      q(v, '[data-work-instruction]').focus();
+    };
   }
   function renderFiles(v) {
     const root = q(v, '[data-work-files]'); root.replaceChildren();
@@ -278,13 +301,13 @@
     const dialog = q(v, '[data-work-dialog]'); dialog.replaceChildren(el('h2', action === 'complete' ? 'ยืนยันว่าทำงานเสร็จแล้ว' : 'ยืนยันยกเลิกรายการงาน'), el('p', task.title), el('p', 'การเตือนที่ยังไม่เริ่มส่งจะถูกยกเลิกพร้อมรายการในปฏิทิน'), el('p', '', { 'data-task-error': '', role: 'alert' }));
     const payload = { taskId: task.id, operationId: crypto.randomUUID(), action }, submit = button('ยืนยัน', () => submitTask(v, payload, dialog, submit)); dialog.append(submit, button('กลับ', () => dialog.close())); dialog.showModal();
   }
-  async function refresh(v) {
+  async function refresh(v, { createIfEmpty = true } = {}) {
     if (v.busy) throw Error('work_busy');
     if (v.project) await save(v);
     const [data, files] = await Promise.all([api(v, '/api/work'), api(v, '/api/files')]); if (!current(v)) return;
-    v.projects = data.projects; v.files = files.files || []; updateList(v); renderFiles(v);
+    v.projects = data.projects; v.files = files.files || []; v.workflows = data.workflows || []; renderWorkflows(v); updateList(v); renderFiles(v);
     if (v.project) { const p = v.projects.find(p => p.id === v.project.id); if (p && !v.dirty) paint(v, p); }
-    else if (v.projects.length) paint(v, v.projects[0]); else await newProject(v);
+    else if (v.projects.length) paint(v, v.projects[0]); else if (createIfEmpty) await newProject(v);
   }
   async function voice(v) {
     try { await save(v); const live = window.PanthoriumLiveVoice; if (!live) throw Error('voice_unavailable');
@@ -296,7 +319,7 @@
     if (!v) return; if (v.dirty && allowed() && v.owner === owner()) recovery(v); clearTimeout(v.saveTimer); v.analysis?.abort(); v.controller.abort();
     for (const url of v.urls) URL.revokeObjectURL(url); v.urls.clear(); v.root.replaceChildren(); if (view === v) view = null;
   }
-  function open() {
+  function open(options = {}) {
     if (!allowed()) { window.PanthoriumAccounts?.openLogin?.(); return false; }
     if (view && current(view)) { window.PanthoriumWindowManager?.restore?.(ID); if (typeof focusWindow === 'function') focusWindow(ID); return view.root; }
     if (view) cleanup(view); if (typeof createWindow !== 'function') return false;
@@ -331,7 +354,8 @@
         await save(v);
       } finally { input.value = ''; if (current(v)) busy(v, false); }
     });
-    refresh(v).catch(failure => report(v, friendly(failure), true)); return root;
+    v.ready = refresh(v, { createIfEmpty: options.deferCreate !== true });
+    v.ready.catch(failure => report(v, friendly(failure), true)); return root;
   }
   function installMenu() {
     const menu = document.getElementById('sm-apps'); if (!menu) return;
@@ -382,7 +406,17 @@
     if (Date.parse(confirmation.approvalExpiresAt) <= Date.now()) { approve.disabled = true; status.textContent = 'คำขอหมดอายุ กรุณาสั่งใหม่'; }
     card.append(status, approve, reject); q(v, '[data-work-approvals]').append(card); return true;
   }
-  window.PanthoriumWorkAssistant = Object.freeze({ open, review, refresh: () => view && refresh(view) });
+  async function importRun(runId) {
+    if (!open({ deferCreate: true })) throw Error('account_required');
+    const v = view; await v.ready;
+    if (!current(v)) throw Error('account_changed');
+    if (v.busy) throw Error('work_busy');
+    if (v.project) await save(v);
+    busy(v, true);
+    try { const result = await post(v, '/api/work/import', { runId }); if (!current(v)) throw Error('account_changed'); paint(v, result.project); return result.project.id; }
+    finally { if (current(v)) busy(v, false); }
+  }
+  window.PanthoriumWorkAssistant = Object.freeze({ open, review, importRun, refresh: () => view && refresh(view) });
   async function receiveOutput(v, output, requestedProjectId) {
     const id = output?.projectId || output?.project?.id || requestedProjectId;
     if (!current(v)) return;

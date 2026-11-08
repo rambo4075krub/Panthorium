@@ -19,7 +19,6 @@
     for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
     return el;
   };
-  const jsonText = value => typeof value === 'string' ? value : JSON.stringify(value, null, 2);
   const key = () => window.crypto?.randomUUID?.() || 'cloud-' + Date.now() + '-' + Math.random().toString(36).slice(2);
   const isOffline = () => window.navigator.onLine === false;
 
@@ -219,7 +218,26 @@
     const result = run.result || {};
     for (const [field, label] of [['draft', 'ร่างผลลัพธ์'], ['sources', 'ข้อมูลอ้างอิง'], ['unknowns', 'สิ่งที่ยังไม่ทราบ'], ['nextActions', 'ขั้นตอนที่เสนอ']]) {
       if (result[field] == null || Array.isArray(result[field]) && !result[field].length) continue;
-      target.append(node('h4', label), node('pre', jsonText(result[field])));
+      target.append(node('h4', label));
+      if (field === 'draft') target.append(node('pre', result.draft));
+      else if (field === 'sources') for (const source of result.sources) {
+        const details = node('details'), original = (run.sources || []).find(item => item.id === source.id);
+        details.append(node('summary', source.id + ' · ' + source.title + (source.cited ? ' · ใช้อ้างอิง' : '')));
+        if (original?.content) details.append(node('pre', original.content)); target.append(details);
+      }
+      else { const list = node('ul'); for (const text of result[field]) list.append(node('li', text)); target.append(list); }
+    }
+    if (['draft_ready', 'completed'].includes(run.status) && result.draft && run.id) {
+      const handoff = node('button', 'บันทึกเป็นแฟ้มงานเพื่อแก้ไข / ส่งออก', { type: 'button', 'data-work-handoff': '' });
+      handoff.onclick = async () => {
+        if (!current(v) || handoff.disabled) return; handoff.disabled = true;
+        try {
+          if (!window.PanthoriumWorkAssistant?.importRun) throw Error('work_import_unavailable');
+          await window.PanthoriumWorkAssistant.importRun(run.id);
+          if (current(v)) setStatus(v, 'เปิดแฟ้มงานส่วนตัวแล้ว แก้ร่าง สร้างไฟล์ หรือแยกรายการงานต่อได้');
+        } catch (error) { if (current(v)) setStatus(v, 'ยังเปิดแฟ้มงานไม่ได้ ร่างต้นทางยังอยู่ กรุณาลองอีกครั้ง'); }
+        finally { if (current(v)) handoff.disabled = false; }
+      }; target.append(handoff);
     }
     if (run.status === 'failed') target.append(node('p', 'ระบบไม่สามารถสร้างร่างได้ • ตรวจข้อมูลและการเชื่อมต่อก่อนเริ่มงานใหม่'));
     if (run.status === 'cancelled') target.append(node('p', 'Cloud ยืนยันการยกเลิกและจะไม่นำผลของงานนี้มาใช้'));
