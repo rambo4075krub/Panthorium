@@ -141,6 +141,16 @@
     if(!saved)remember('enabled',uid);
     enable(true).catch(()=>{});
   }
+  async function restore(settings){
+    const uid=owner();
+    // Older app versions removed the device record at logout. An existing
+    // account opt-in plus an already granted OS permission restores that choice.
+    if(!uid||uid.startsWith('guest:')||choice(uid)||accepted()||!settings?.channels?.browser||desktop())return;
+    try{
+      const granted=native()?(await plugin()?.checkPermissions())?.receive==='granted':window.Notification?.permission==='granted';
+      if(granted&&owner()===uid&&!choice(uid)){remember('enabled',uid);renewDevice();}
+    }catch{}
+  }
   window.addEventListener('panthorium:boot-complete',renewDevice);
   window.addEventListener('online',renewDevice);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')renewDevice();});
@@ -172,5 +182,5 @@
     if(!result.registered){verified=false;window.dispatchEvent(new Event('panthorium:push-changed'));}
     return result;
   }
-  window.PanthoriumPush={enable:()=>enable(false),disconnect,show,check,accepted,optedIn,active:()=>verified&&!!stored()&&!stored().disabled&&stored().owner===owner()&&(native()||desktop()||window.Notification?.permission==='granted'),native,desktop};
+  window.PanthoriumPush={enable:()=>enable(false),disconnect,show,check,accepted,optedIn,restore,active:()=>verified&&!!stored()&&!stored().disabled&&stored().owner===owner()&&(native()||desktop()||window.Notification?.permission==='granted'),native,desktop};
 })();

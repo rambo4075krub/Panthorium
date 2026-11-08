@@ -47,6 +47,7 @@ function harness(saved={},options={}){
   assert.equal(h.state.prompts,0);
 
   h.w.OS.state.user={sub:'beta',roles:['user'],permissions:['chat']};
+  h.state.settings.channels.browser=false;
   h.w.dispatchEvent(new h.w.Event('panthorium:auth-changed'));await tick();
   assert(!h.w.PanthoriumPush.accepted(),'another account does not inherit consent');
   assert(h.card());assert(!h.state.subscribed.includes('beta'));
@@ -77,5 +78,11 @@ function harness(saved={},options={}){
 
   h=harness({'panthorium-push-device-v1':JSON.stringify({owner:'alpha',id:'a'.repeat(64),base:'https://panthorium.test',revokeToken:'c'.repeat(43)})},{permission:'granted',fail:true});
   await tick();assert(!h.card(),'existing installations do not repeat onboarding during migration');h.close();
+  h=harness({},{permission:'granted',browser:true});await tick();await tick();
+  assert(!h.card(),'saved account opt-in and OS permission restore an older lost device record');
+  assert(h.w.PanthoriumPush.active());assert.equal(h.state.prompts,0);h.close();
+  h=harness({},{permission:'prompt',browser:true});await tick();
+  assert(h.card(),'account setting alone cannot grant OS permission on a new device');
+  assert.equal(h.state.prompts,0);assert.equal(h.state.registrations,0);h.close();
   console.log('Notification opt-in: first acceptance, reload, offline recovery, account isolation, logout/login, explicit disable, denial and legacy migration passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

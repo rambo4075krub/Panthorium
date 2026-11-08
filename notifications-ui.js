@@ -266,7 +266,9 @@
       }
     }
   }
-  function offerDevice(s) {
+  async function offerDevice(s) {
+    if(!current(s)||!s.settings?.enabled||!window.PanthoriumPush)return;
+    await window.PanthoriumPush.restore?.(s.settings);
     if(!current(s)||!s.settings?.enabled||!window.PanthoriumPush||window.PanthoriumPush.active()||window.PanthoriumPush.accepted?.()||document.querySelector('[data-notification-opt-in]'))return;
     try{if(sessionStorage.getItem('panthorium-notification-offer')===s.uid)return;}catch{}
     const prompt=node('div',null,{'data-notification-opt-in':'',role:'region','aria-label':'เปิดป๊อบอัพแจ้งเตือน'});
