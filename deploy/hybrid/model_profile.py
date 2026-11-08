@@ -39,28 +39,34 @@ def startup_args(root=ROOT):
     return ['-m', str(model_path(root)), '--host', '127.0.0.1', '--port', '8088',
             '-c', str(PROFILE['context']), '-np', '1', '-ngl', str(PROFILE['gpuLayers']),
             '-t', str(PROFILE['threads']), '-b', '128', '-ub', '64', '-fa', 'on',
-            '--cache-type-k', 'q8_0', '--cache-type-v', 'q8_0', '--cache-ram', '0',
-            '--jinja', '--reasoning', 'on', '--reasoning-budget', '2048',
+            '--cache-type-k', PROFILE['cacheType'], '--cache-type-v', PROFILE['cacheType'], '--cache-ram', '0',
+            '--load-mode', PROFILE['loadMode'], '--fit', 'off', '--no-agent', '--no-webui',
+            '--poll', '0', '--threads-batch', str(PROFILE['threads']),
+            '--jinja', '--reasoning', 'on', '--reasoning-budget', str(PROFILE['reasoningBudget']),
             '--reasoning-format', 'deepseek', '--alias', 'panthorium-local']
 
 def preflight(root=ROOT):
     import psutil
     from work_queue import resource_reason
     mem = psutil.virtual_memory()
-    vram = None
+    vram = vram_total = temperature = None
     try:
-        result = subprocess.run(['nvidia-smi', '--query-gpu=memory.total,memory.used',
+        result = subprocess.run(['nvidia-smi', '--query-gpu=memory.total,memory.used,temperature.gpu',
                                  '--format=csv,noheader,nounits'], capture_output=True,
                                 text=True, check=True, timeout=4,
                                 creationflags=0x08000000 if os.name == 'nt' else 0)
         pairs = [tuple(map(float, line.split(','))) for line in result.stdout.strip().splitlines()]
-        vram = max(used / total for total, used in pairs)
+        if len(pairs)!=1:raise ValueError('Expected the profiled single GPU')
+        vram_total,used,temperature=pairs[0]
+        vram=used/vram_total
+        vram_total*=1024**2
     except (OSError, ValueError, subprocess.SubprocessError, ZeroDivisionError): pass
     used = 1 - mem.available / mem.total
     reason = resource_reason(ram_used=used, total=mem.total, available=mem.available,
                              local_ram=psutil.Process().memory_info().rss, vram=vram,
                              cpu=psutil.cpu_percent(interval=.2), model_loaded=False,
-                             voice_loaded=False, cold_budget=PROFILE['coldRamBudgetGiB'])
+                             voice_loaded=False, cold_budget=PROFILE['coldRamBudgetGiB'],
+                             limits=PROFILE,vram_total=vram_total,gpu_temperature=temperature)
     if (root / 'qwen.disabled').exists(): reason = 'disabled'
     return {'ready': reason is None, 'reason': reason, 'ramUsedFraction': used,
             'vramUsedFraction': vram, 'coldRamBudgetGiB': PROFILE['coldRamBudgetGiB']}

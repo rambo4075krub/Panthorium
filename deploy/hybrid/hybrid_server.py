@@ -4,7 +4,7 @@ No credentials, remote tools or user content are persisted by this process.
 from pathlib import Path
 import asyncio, contextlib, gc, io, json, os, subprocess, sys, time
 import httpx, psutil, threading, re
-from work_queue import WorkQueue, QueueError, resource_reason, admission_ready, memory_budget
+from work_queue import WorkQueue, QueueError, resource_reason, admission_ready, memory_budget, ram_pressure
 from model_profile import PROFILE, model_path, owns_model
 queue=WorkQueue()
 metrics_lock=threading.Lock()
@@ -14,8 +14,12 @@ from fastapi.responses import Response
 BASE=Path(__file__).resolve().parent
 ROOT=Path(os.environ.get('PANTHORIUM_AI_ROOT',r'D:\PanthoriumAI'))
 sys.path.insert(0,str(ROOT/'voice'))
-RESERVE=1536*1024**2
+RESERVE=PROFILE['minimumAvailableGiB']*1024**3
 LIMIT=.60
+guard_stop=threading.Event()
+guard_failed=threading.Event()
+ram_guard=None
+inference_verified=False
 DISABLED=ROOT/'qwen.disabled'
 FLAGS=0x08000000 if os.name=='nt' else 0
 app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
@@ -26,6 +30,8 @@ engine=None
 latest={'ready':False,'reason':'starting'}
 last_gpu=0
 cached_gpu=None
+cached_gpu_total=None
+cached_temperature=None
 
 def run(args,timeout=15):
     return subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,stdin=subprocess.DEVNULL,timeout=timeout,creationflags=FLAGS,text=True)
@@ -40,15 +46,30 @@ def model_process():
 def stop_model():
     p=model_process()
     if p:
-        p.terminate()
-        try:p.wait(8)
-        except psutil.TimeoutExpired:p.kill()
+        with contextlib.suppress(psutil.NoSuchProcess):
+            p.terminate()
+            try:p.wait(8)
+            except psutil.TimeoutExpired:p.kill()
+
+def fast_ram_watch():
+    """Separate from GPU subprocesses: watch startup RAM every 50 ms."""
+    global pressure_latched
+    while not guard_stop.wait(.05):
+        try:
+            mem=psutil.virtual_memory()
+            if ram_pressure(1-mem.available/mem.total,mem.available,PROFILE) or DISABLED.exists():
+                pressure_latched=True
+                stop_model()
+        except Exception:
+            guard_failed.set()
+            with contextlib.suppress(Exception):stop_model()
+            return
 
 def snapshot(kind="chat"):
     with metrics_lock:return _snapshot(kind)
 
 def _snapshot(kind="chat"):
-    global cached_gpu,last_gpu,pressure_latched
+    global cached_gpu,cached_gpu_total,cached_temperature,last_gpu,pressure_latched
     mem=psutil.virtual_memory()
     p=model_process()
     local=psutil.Process().memory_info().rss
@@ -57,20 +78,23 @@ def _snapshot(kind="chat"):
         except psutil.Error:pass
     if time.monotonic()-last_gpu>2:
         try:
-            r=run(['nvidia-smi','--query-gpu=memory.total,memory.used','--format=csv,noheader,nounits'],4)
+            r=run(['nvidia-smi','--query-gpu=memory.total,memory.used,temperature.gpu','--format=csv,noheader,nounits'],4)
             pairs=[tuple(map(float,line.split(','))) for line in r.stdout.strip().splitlines()]
-            cached_gpu=max(used/total for total,used in pairs)
-        except Exception:cached_gpu=None
+            if r.returncode or len(pairs)!=1:raise ValueError('GPU metrics unavailable')
+            total,used,cached_temperature=pairs[0]
+            cached_gpu=used/total;cached_gpu_total=total*1024**2
+        except Exception:cached_gpu=cached_gpu_total=cached_temperature=None
         last_gpu=time.monotonic()
     ram_used=1-mem.available/mem.total
     cpu=psutil.cpu_percent()
-    hard='ram_pressure' if ram_used>=.65 or mem.available<RESERVE else 'vram_pressure' if cached_gpu is not None and cached_gpu>=.60 else None
+    hard='ram_pressure' if ram_pressure(ram_used,mem.available,PROFILE) else 'vram_pressure' if cached_gpu is not None and cached_gpu>=PROFILE['vramLimit'] else 'gpu_temperature' if cached_temperature is not None and cached_temperature>=PROFILE['gpuTemperatureLimit'] else None
     if hard:pressure_latched=True
-    elif ram_used<.60 and cached_gpu is not None and cached_gpu<.55:pressure_latched=False
-    reason='disabled' if DISABLED.exists() else resource_reason(ram_used=ram_used,total=mem.total,available=mem.available,local_ram=local,vram=cached_gpu,cpu=cpu,model_loaded=p is not None,voice_loaded=engine is not None,kind=kind,latched=pressure_latched,cold_budget=PROFILE['coldRamBudgetGiB'])
+    elif ram_used<PROFILE['ramRecovery'] and cached_gpu is not None and cached_gpu<PROFILE['vramRecovery'] and cached_temperature<PROFILE['gpuTemperatureRecovery']:pressure_latched=False
+    reason='disabled' if DISABLED.exists() else resource_reason(ram_used=ram_used,total=mem.total,available=mem.available,local_ram=local,vram=cached_gpu,cpu=cpu,model_loaded=p is not None,voice_loaded=engine is not None,kind=kind,latched=pressure_latched,cold_budget=PROFILE['coldRamBudgetGiB'],limits=PROFILE,vram_total=cached_gpu_total,gpu_temperature=cached_temperature)
+    if guard_failed.is_set() or not ram_guard or not ram_guard.is_alive():reason='resource_monitor_unavailable'
     if kind=='chat' and (not model_path(ROOT).is_file() or model_path(ROOT).stat().st_size!=PROFILE['bytes']):reason='model_not_installed'
-    budget=memory_budget(ram_used=ram_used,total=mem.total,model_loaded=p is not None,voice_loaded=engine is not None,kind=kind,cold_budget=PROFILE['coldRamBudgetGiB'])
-    return {'ready':reason is None,'reason':reason,'pressure':hard,'busy':busy,'ramAvailableBytes':mem.available,'ramUsedFraction':ram_used,'ramLimit':.65,'cpuPercent':cpu,'localRamBytes':local,'localRamLimitBytes':int(mem.total*LIMIT),'vramUsedFraction':cached_gpu,'vramLimit':LIMIT,'modelLoaded':p is not None,'queue':queue.status(),**budget}
+    budget=memory_budget(ram_used=ram_used,total=mem.total,model_loaded=p is not None,voice_loaded=engine is not None,kind=kind,cold_budget=PROFILE['coldRamBudgetGiB'],limits=PROFILE)
+    return {'ready':reason is None,'reason':reason,'pressure':hard,'busy':busy,'ramAvailableBytes':mem.available,'ramUsedFraction':ram_used,'ramLimit':PROFILE['ramLimit'],'cpuPercent':cpu,'localRamBytes':local,'localRamLimitBytes':int(mem.total*LIMIT),'vramUsedFraction':cached_gpu,'vramLimit':PROFILE['vramLimit'],'gpuTemperature':cached_temperature,'modelLoaded':p is not None,'queue':queue.status(),**budget}
 
 def drop_voice():
     global engine
@@ -119,6 +143,10 @@ async def admission(request,kind='chat'):
     global busy,last_use,latest,phase
     async def ready():
         global latest
+        # The queue calls readiness only when no operation is active. Reclaim the
+        # other engine before forecasting a cold load; speech follows text turns.
+        if kind=='voice':await asyncio.to_thread(stop_model)
+        else:await asyncio.to_thread(drop_voice)
         latest=await asyncio.to_thread(snapshot,kind)
         if DISABLED.exists():raise QueueError('local_disabled',503)
         return admission_ready(latest)
@@ -142,7 +170,7 @@ async def monitor():
     while True:
         try:
             latest=await asyncio.to_thread(snapshot)
-            if DISABLED.exists() or latest.get('pressure') in ('ram_pressure','vram_pressure'):
+            if DISABLED.exists() or latest.get('pressure') in ('ram_pressure','vram_pressure','gpu_temperature') or latest.get('reason') in ('gpu_metrics_unavailable','resource_monitor_unavailable'):
                 # Free our own process only. Never stop a database, app or other GPU task.
                 await asyncio.to_thread(stop_model)
                 if not busy:await asyncio.to_thread(drop_voice)
@@ -152,24 +180,33 @@ async def monitor():
                 # port 8088 directly. Keep that model resident for compatibility.
                 if (BASE/'production-installed.json').exists():
                     await asyncio.to_thread(stop_model)
-        except Exception:latest={'ready':False,'reason':'resource_monitor_unavailable','busy':busy}
+        except Exception:
+            latest={'ready':False,'reason':'resource_monitor_unavailable','busy':busy}
+            with contextlib.suppress(Exception):await asyncio.to_thread(stop_model)
         await asyncio.sleep(2)
 
 @app.on_event('startup')
 async def start():
+    global ram_guard
     with contextlib.suppress(psutil.Error):psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+    guard_stop.clear();guard_failed.clear()
+    ram_guard=threading.Thread(target=fast_ram_watch,name='local-ai-ram-guard',daemon=True)
+    ram_guard.start()
     app.state.monitor=asyncio.create_task(monitor())
 @app.on_event('shutdown')
 async def end():
     app.state.monitor.cancel()
+    guard_stop.set()
+    await asyncio.to_thread(stop_model)
+    if ram_guard:await asyncio.to_thread(ram_guard.join,2)
 @app.get('/status')
 async def status(request:Request):return {**latest,'model':PROFILE['name'],'capabilities':PROFILE['capabilities'],'vision':False,'voice':'external-asr-tts','busy':busy,'phase':phase,'ready':latest.get('ready',False) and not DISABLED.exists(),'queue':queue.status(owner(request))}
 @app.get('/health')
-async def health():return {'ok':True,'service':'panthorium-free-ai-broker','version':'qwen8b-v1','model':PROFILE['name'],'capabilities':PROFILE['capabilities'],'vision':False,'voice':'external-asr-tts'}
+async def health():return {'ok':True,'service':'panthorium-free-ai-broker','version':PROFILE['brokerVersion'],'model':PROFILE['name'],'capabilities':PROFILE['capabilities'],'vision':False,'voice':'external-asr-tts','ramGuardAlive':bool(ram_guard and ram_guard.is_alive() and not guard_failed.is_set()),'inferenceVerified':inference_verified}
 
 @app.post('/v1/chat/completions')
 async def chat(request:Request):
-    global phase
+    global phase,inference_verified
     if int(request.headers.get('content-length','0'))>60000:raise HTTPException(413,'too_large')
     raw=await request.body()
     if len(raw)>60000:raise HTTPException(413,'too_large')
@@ -193,6 +230,11 @@ async def chat(request:Request):
                     await asyncio.to_thread(stop_model)
                     raise HTTPException(499 if watcher in done else 503,'cancelled_or_timeout')
                 r=await task
+                if r.status_code==200:
+                    with contextlib.suppress(ValueError,KeyError,IndexError,TypeError):
+                        choice=r.json()['choices'][0]
+                        if choice.get('finish_reason')!='length' and (choice['message'].get('content') or choice['message'].get('tool_calls')):
+                            inference_verified=True
                 return Response(r.content,status_code=r.status_code,media_type='application/json')
             except httpx.HTTPError:raise HTTPException(503,'local_inference_unavailable')
             finally:

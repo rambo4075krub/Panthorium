@@ -1,13 +1,14 @@
 'use strict';
-// Post-deploy wiring/access verification. Does not claim inference quality or send messages.
+// Post-deploy wiring/access verification; optional real inference uses synthetic accounts.
 const {createRequire}=require('node:module');
 const req=createRequire(process.env.TEST_RELEASE+'/server.js');
 const {Pool}=req('pg'),bcrypt=req('bcryptjs');
 const {randomUUID,randomBytes}=require('node:crypto'),assert=require('node:assert/strict');
 const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:false});
-const base='http://127.0.0.1:8790',fixtures=[],results=[];
+const profile=require('./model-profile.json');
+const base=process.env.TEST_BASE||'http://127.0.0.1:8790',fixtures=[],results=[];
 async function api(path,token,body){
- const r=await fetch(base+path,{method:body?'POST':'GET',headers:{...(token?{authorization:'Bearer '+token}:{}),...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});
+ const r=await fetch(base+path,{method:body?'POST':'GET',headers:{...(token?{authorization:'Bearer '+token}:{}),...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(process.env.TEST_INFERENCE==='1'?180000:15000)});
  return{status:r.status,data:await r.json()};
 }
 (async()=>{
@@ -19,9 +20,18 @@ async function api(path,token,body){
   const login=await api('/api/auth/login',null,{username:f.username,password:f.password});assert.equal(login.status,200);const token=login.data.accessToken;assert(token);
   const policy=await api('/api/hybrid/status',token);assert.equal(policy.status,200);assert.equal(policy.data.local.enabled,admin);
   if(admin){
-   assert.equal(policy.data.local.model,'Qwen3-8B-Q4_K_M');assert.equal(policy.data.local.vision,false);
+   assert.equal(policy.data.local.model,profile.name);assert.equal(policy.data.local.vision,false);
    assert.deepEqual(policy.data.local.capabilities,['text','thinking','tool-calling']);assert.equal(policy.data.primary,'local');
-   results.push({test:'authorized 8B wiring',ready:policy.data.local.ready,reason:policy.data.local.reason,model:policy.data.local.model});
+   results.push({test:'authorized model wiring',ready:policy.data.local.ready,reason:policy.data.local.reason,model:policy.data.local.model});
+   if(process.env.TEST_INFERENCE==='1'){
+    for(const message of ['ตอบสั้น ๆ ว่า ทดสอบสำเร็จ','ของราคา 546.02 บาท ลด 10 บาท เหลือเท่าไร ตอบสั้น ๆ']){
+     const start=Date.now();const answer=await api('/api/local/chat',token,{message,voice:true,requestId:randomUUID()});
+     assert.equal(answer.status,200,JSON.stringify(answer.data));assert.equal(answer.data.provider,'local');
+     assert.equal(answer.data.creditsCharged,0);assert.ok(answer.data.text?.trim());
+     if(message.includes('546.02')){assert.match(answer.data.text,/536\.02/);assert.ok(answer.data.functionCallCount>0);}
+     results.push({test:'authenticated real inference',text:answer.data.text,tools:answer.data.functionCallCount,ms:Date.now()-start});
+    }
+   }
    if(process.env.TEST_RESOURCE_DENIAL==='1'){
     assert.equal(policy.data.local.ready,false,'Resource denial probe requires a paused model');
     assert.ok(policy.data.local.resources.ramTotalBytes>0);
@@ -40,7 +50,7 @@ async function api(path,token,body){
   const used=(await pool.query('select used from panthorium_entitlement_grants where order_id=$1',[f.order])).rows[0].used;assert.deepEqual(used,{});
  }
  assert.equal((await api('/api/local/chat',null,{message:'test'})).status,401);
- console.log(JSON.stringify({passed:true,sha:process.env.TEST_EXPECTED_SHA,inferenceTested:false,results}));
+ console.log(JSON.stringify({passed:true,sha:process.env.TEST_EXPECTED_SHA,inferenceTested:process.env.TEST_INFERENCE==='1',results}));
 })().catch(e=>{console.error(e.message);process.exitCode=1;}).finally(async()=>{
  for(const f of fixtures){
   await pool.query('delete from panthorium_conversation_messages where user_id=$1',[f.id]);

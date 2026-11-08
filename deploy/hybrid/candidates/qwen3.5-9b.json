@@ -1,0 +1,15 @@
+{
+  "name": "Qwen3.5-9B-Q4_K_M",
+  "baseModel": "Qwen/Qwen3.5-9B",
+  "repository": "unsloth/Qwen3.5-9B-GGUF",
+  "revision": "3885219b6810b007914f3a7950a8d1b469d598a5",
+  "filename": "Qwen3.5-9B-Q4_K_M.gguf",
+  "bytes": 5680522464,
+  "sha256": "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
+  "license": "Apache-2.0",
+  "productionApproved": false,
+  "context": 2048,
+  "threads": 4,
+  "visionEnabledForTrial": false,
+  "notes": "Isolated text/tool trial only. No production, broker or startup changes. Vision requires a separate projector."
+}

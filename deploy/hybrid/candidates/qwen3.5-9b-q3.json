@@ -1,0 +1,14 @@
+{
+  "name": "Qwen3.5-9B-Q3_K_S",
+  "baseModel": "Qwen/Qwen3.5-9B",
+  "repository": "unsloth/Qwen3.5-9B-GGUF",
+  "revision": "3885219b6810b007914f3a7950a8d1b469d598a5",
+  "filename": "Qwen3.5-9B-Q3_K_S.gguf",
+  "bytes": 4316865760,
+  "sha256": "162050d39ebae6b8a87435f282bcb7a0e3fab7b2444db730966b3fef1ed0179e",
+  "license": "Apache-2.0",
+  "productionApproved": false,
+  "context": 2048,
+  "threads": 4,
+  "visionEnabledForTrial": false
+}

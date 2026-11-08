@@ -12,7 +12,7 @@ slot until it actually finishes even if its awaiting task is cancelled.
 
 Admission forecasts total RAM using a conservative 4.5 GiB cold model load,
 0.5 GiB warm inference, 2 GiB cold voice and 0.25 GiB warm voice allowance.
-Target total RAM is 65%, VRAM 60%, with recovery thresholds of 60% and 55%.
+The selected 9B profile targets total RAM below 82%, VRAM below 80%, with recovery thresholds of 77% and 75%, a 2.5 GiB RAM reserve and a separate 50 ms RAM watchdog.
 Unavailable GPU readings fail closed. CPU admission also pauses at 65%.
 These are service guardrails, not OS-wide hard resource quotas: other programs
 and load transients can still exceed them. The monitor stops only the verified
