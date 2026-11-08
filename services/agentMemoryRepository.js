@@ -203,7 +203,7 @@ class AgentMemoryRepository {
     } finally { client.release(); }
   }
 
-  async create(input) {
+  async create(input, client = this.pool) {
     const item = this.normalize(input);
     if (this.notesRepository && item.kind === 'note') {
       await this.ensureNotesMigrated(item.userId);
@@ -212,7 +212,7 @@ class AgentMemoryRepository {
       return { ...note, ...this.metadata(item) };
     }
     if (!this.pool) { this.memory.set(item.memoryId,item); return item; }
-    const result = await this.pool.query(`INSERT INTO panthorium_agent_memories(memory_id,user_id,kind,title,content,tags,source,importance,confidence,expires_at,scope,provenance,confirmation,sensitivity,created_at,updated_at)
+    const result = await client.query(`INSERT INTO panthorium_agent_memories(memory_id,user_id,kind,title,content,tags,source,importance,confidence,expires_at,scope,provenance,confirmation,sensitivity,created_at,updated_at)
       VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16) RETURNING ${COLUMNS}`,
       [item.memoryId,item.userId,item.kind,item.title,item.content,JSON.stringify(item.tags),item.source,item.importance,item.confidence,item.expiresAt,item.scope,JSON.stringify(item.provenance),item.confirmation,item.sensitivity,item.createdAt,item.updatedAt]);
     return this.mapRow(result.rows[0]);
@@ -301,7 +301,7 @@ class AgentMemoryRepository {
       .sort((a,b) => b.relevance-a.relevance || Date.parse(b.item.updatedAt)-Date.parse(a.item.updatedAt)).slice(0,safe).map(entry => entry.item);
   }
 
-  async update(userId, memoryId, patch = {}, scope = 'personal') {
+  async update(userId, memoryId, patch = {}, scope = 'personal', client = this.pool) {
     scopeValue(scope);
     if (patch.scope !== undefined && patch.scope !== scope) throw new TypeError('memory_scope_immutable');
     const current = await this.get(userId,memoryId,scope);
@@ -315,12 +315,12 @@ class AgentMemoryRepository {
       return note ? { ...note,...this.metadata(item) } : null;
     }
     if (!this.pool) { this.memory.set(item.memoryId,item); return item; }
-    const result = await this.pool.query(`UPDATE panthorium_agent_memories SET title=$4,content=$5,tags=$6::jsonb,source=$7,importance=$8,confidence=$9,expires_at=$10,provenance=$11::jsonb,confirmation=$12,sensitivity=$13,updated_at=NOW()
+    const result = await client.query(`UPDATE panthorium_agent_memories SET title=$4,content=$5,tags=$6::jsonb,source=$7,importance=$8,confidence=$9,expires_at=$10,provenance=$11::jsonb,confirmation=$12,sensitivity=$13,updated_at=NOW()
       WHERE memory_id=$1 AND user_id=$2 AND scope=$3 AND (expires_at IS NULL OR expires_at>NOW()) RETURNING ${COLUMNS}`,
       [memoryId,userId,scope,item.title,item.content,JSON.stringify(item.tags),item.source,item.importance,item.confidence,item.expiresAt,JSON.stringify(item.provenance),item.confirmation,item.sensitivity]);
     return this.mapRow(result.rows[0]);
   }
-  async delete(userId, memoryId, scope = 'personal') {
+  async delete(userId, memoryId, scope = 'personal', client = this.pool) {
     scopeValue(scope);
     // Expired memories are not retrievable but their owner can still erase them.
     const current = await this.get(userId,memoryId,scope,{ includeExpired:true });
@@ -331,7 +331,7 @@ class AgentMemoryRepository {
       return removed;
     }
     if (!this.pool) return this.memory.delete(String(memoryId));
-    const result = await this.pool.query('DELETE FROM panthorium_agent_memories WHERE memory_id=$1 AND user_id=$2 AND scope=$3',[memoryId,userId,scope]);
+    const result = await client.query('DELETE FROM panthorium_agent_memories WHERE memory_id=$1 AND user_id=$2 AND scope=$3',[memoryId,userId,scope]);
     return (result.rowCount || 0)>0;
   }
 }

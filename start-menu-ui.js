@@ -4,7 +4,7 @@
   const lists = new WeakMap();
   const groupState = new WeakMap();
   let sequence = 0;
-  const menuOrder = ['sentinel', 'files', 'user-mailbox', 'calendar', 'notes', 'cloud-group-social', 'cloud-group-creative', 'billing', 'privacy-policy', 'cloud-group-settings'];
+  const menuOrder = ['sentinel', 'files', 'user-mailbox', 'work-assistant', 'calendar', 'notes', 'cloud-group-social', 'cloud-group-creative', 'billing', 'privacy-policy', 'cloud-group-settings'];
   const settingsOrder = ['goals', 'assistant-preferences', 'contact', 'reminders', 'account-logout'];
   const hiddenApps = new Set(['calculator', 'organizations', 'cloud-group-life', 'cloud-group-study', 'cloud-group-work', 'cloud-group-specialist', 'cloud-apps']);
   const curated = list => list?.dataset.startLayout === 'curated';
