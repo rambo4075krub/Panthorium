@@ -50,10 +50,10 @@ class ReminderRepository {
   }
   mapRow(row) { return row ? this.normalize(row) : null; }
 
-  async create(input) { this.ensureStorage();
+  async create(input, client = this.pool) { this.ensureStorage();
     const item = this.normalize(input);
     if (!this.pool) { this.memory.set(item.reminderId, item); return { ...item }; }
-    const r = await this.pool.query(`INSERT INTO panthorium_reminders
+    const r = await client.query(`INSERT INTO panthorium_reminders
       (reminder_id,user_id,kind,title,details,due_at,scheduled_at,time_zone,status,recurrence,occurrence,created_at,updated_at,account_version)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14) RETURNING ${COLUMNS}`,
     [item.reminderId,item.userId,item.kind,item.title,item.details,item.dueAt,item.scheduledAt,item.timeZone,item.status,JSON.stringify(item.recurrence),item.occurrence,item.createdAt,item.updatedAt,item.accountVersion]);
@@ -67,14 +67,14 @@ class ReminderRepository {
     return r.rows.map(row => this.mapRow(row));
   }
 
-  async cancel(userId, reminderId) { this.ensureStorage();
+  async cancel(userId, reminderId, client = this.pool) { this.ensureStorage();
     if (!this.pool) {
       const item = this.memory.get(String(reminderId || ''));
       if (!item || item.userId !== userId || !['scheduled','delivery_unknown','failed'].includes(item.status)) return null;
       const next = { ...item, status: 'cancelled', updatedAt: new Date().toISOString() };
       this.memory.set(next.reminderId, next); return { ...next };
     }
-    const r = await this.pool.query(`UPDATE panthorium_reminders SET status='cancelled',updated_at=NOW()
+    const r = await client.query(`UPDATE panthorium_reminders SET status='cancelled',updated_at=NOW()
       WHERE reminder_id=$1 AND user_id=$2 AND status IN ('scheduled','delivery_unknown','failed') RETURNING ${COLUMNS}`, [reminderId,userId]);
     return this.mapRow(r.rows[0]);
   }
@@ -89,6 +89,22 @@ class ReminderRepository {
     const r = await this.pool.query(`UPDATE panthorium_reminders SET due_at=$3,updated_at=NOW()
       WHERE reminder_id=$1 AND user_id=$2 AND status='scheduled' RETURNING ${COLUMNS}`, [reminderId,userId,dueAt]);
     return this.mapRow(r.rows[0]);
+  }
+
+  async get(userId, reminderId, client = this.pool) { this.ensureStorage();
+    if (!client) { const row = this.memory.get(reminderId); return row?.userId === userId ? { ...row } : null; }
+    return this.mapRow((await client.query(`SELECT ${COLUMNS} FROM panthorium_reminders WHERE user_id=$1 AND reminder_id=$2 FOR UPDATE`, [userId, reminderId])).rows[0]);
+  }
+
+  async rescheduleLinked(userId, reminderId, { dueAt, title, details, timeZone }, client = this.pool) { this.ensureStorage();
+    if (!client) {
+      const row = this.memory.get(reminderId);
+      if (!row || row.userId !== userId || row.status !== 'scheduled') return null;
+      const next = { ...row, dueAt, scheduledAt: dueAt, title, details, timeZone, updatedAt: new Date().toISOString() };
+      this.memory.set(reminderId, next); return { ...next };
+    }
+    return this.mapRow((await client.query(`UPDATE panthorium_reminders SET due_at=$3,scheduled_at=$3,title=$4,details=$5,time_zone=$6,updated_at=NOW()
+      WHERE user_id=$1 AND reminder_id=$2 AND status='scheduled' RETURNING ${COLUMNS}`, [userId, reminderId, dueAt, title, details, timeZone])).rows[0]);
   }
 
   async claimDue(limit = 10) { this.ensureStorage();
