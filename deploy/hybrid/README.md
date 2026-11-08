@@ -21,7 +21,7 @@ outbound MCP connector and does not grant credentials/scopes to external clients
   `LOCAL_QWEN_DISABLE_FILE=D:\PanthoriumAI\qwen.disabled`.
 - Application requests go through the broker to port 8088. One operation at a time across
   production and staging; excess requests receive a retryable busy response.
-- Qwen3.5-9B Q3_K_S uses 20 GPU layers, 8192 context tokens, four CPU threads,
+- Qwen3.5-9B Q3_K_S uses 22 GPU layers, 8192 context tokens, four CPU threads,
   below-normal priority and `--load-mode none`. F16 caches and fixed batches match
   the notebook trial. Reasoning is bounded to 512 tokens; voice skips thinking.
   Arithmetic uses the registered bounded calculator. This compressed model can
@@ -29,10 +29,14 @@ outbound MCP connector and does not grant credentials/scopes to external clients
 - The separate RAM watchdog samples every 50 ms, independently of GPU queries.
   Global thresholds are 82% RAM and 80% VRAM, with at least 2.5 GiB available RAM;
   recovery thresholds are 77% and 75%. GPU temperatures stop work at 82 C and
-  recover below 77 C. Cold admission forecasts 2.3 GiB additional RAM and 3.1 GiB
+  recover below 77 C. Cold admission forecasts 2.15 GiB additional RAM and 3.18 GiB
   VRAM. These are sampled stop thresholds with forecasts, not OS hard caps.
   Startup rejects a missing watchdog, and unknown GPU metrics fail closed.
   Only the identity-checked model is stopped; databases and other apps are untouched.
+  The 2026-11-08 22-layer trial completed seven synthetic prompts with peak system
+  RAM 80.22% (67.02% before loading) and VRAM 75.56%. Moving two layers from RAM
+  to GPU reduces cold-start contention; the stop thresholds remain unchanged.
+  This short trial is resource evidence, not a concurrency or sustained-load guarantee.
 - Idle voice memory is unloaded after three minutes. Model idle unloading is
   enabled only after production has migrated to the broker; until then its
   legacy port-8088 route keeps the model resident. Cold starts take
