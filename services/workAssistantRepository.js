@@ -13,7 +13,7 @@ function fingerprint(value) {
 
 class WorkAssistantRepository {
   constructor({ pool, databaseUrl, databaseSslMode = 'require', allowMemory = false } = {}) {
-    this.pool = pool || (databaseUrl ? getDatabasePool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: false } }) : null);
+    this.pool = pool || (databaseUrl ? getDatabasePool({ connectionString: databaseUrl, ssl: databaseSslMode === 'disable' ? false : { rejectUnauthorized: true } }) : null);
     this.available = !!this.pool || allowMemory; this.memory = new Map(); this.tail = Promise.resolve();
   }
   requireReady() { if (!this.available) throw error('work_storage_unavailable', 503); }
