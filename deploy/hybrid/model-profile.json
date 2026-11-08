@@ -12,10 +12,10 @@
     "tool-calling"
   ],
   "vision": false,
-  "brokerVersion": "qwen35-9b-v1",
-  "coldRamBudgetGiB": 2.3,
+  "brokerVersion": "qwen35-9b-v2",
+  "coldRamBudgetGiB": 2.15,
   "warmRamBudgetGiB": 0.25,
-  "coldVramBudgetGiB": 3.1,
+  "coldVramBudgetGiB": 3.18,
   "minimumAvailableGiB": 2.5,
   "ramLimit": 0.82,
   "ramRecovery": 0.77,
@@ -27,7 +27,7 @@
   "cacheType": "f16",
   "reasoningBudget": 512,
   "context": 8192,
-  "gpuLayers": 20,
+  "gpuLayers": 22,
   "threads": 4,
   "productionApproved": true
 }

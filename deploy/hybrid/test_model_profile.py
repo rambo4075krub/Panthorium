@@ -20,7 +20,7 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(args[args.index('--alias')+1],'panthorium-local')
         self.assertEqual(args[args.index('--load-mode')+1],'none')
         self.assertEqual(args[args.index('-c')+1],'8192')
-        self.assertEqual(args[args.index('-ngl')+1],'20')
+        self.assertEqual(args[args.index('-ngl')+1],'22')
         self.assertIn('--no-agent',args)
 
     def test_model_hash_size_and_magic_are_verified(self):
