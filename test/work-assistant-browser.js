@@ -82,6 +82,7 @@ const { createCloudAppsRouter } = require('../routes/cloudApps');
     await page.setViewportSize({ width: 1360, height: 1000 });
     await page.evaluate(() => window.PanthoriumCloudApps.open('profession_3'));
     await page.locator('[data-cloud-apps] [data-input]').fill('ช่วยร่างเอกสารส่งต่องานจากหลักฐานที่ให้');
+    await page.locator('[data-cloud-apps] details > summary').click();
     await page.locator('[data-add-source]').click();
     await page.locator('[data-sources] input').fill('รายการราคา'); await page.locator('[data-sources] textarea').fill('ยอดรวม 2400 บาท');
     await page.getByRole('button', { name: 'สร้างร่างบน Cloud', exact: true }).click();
