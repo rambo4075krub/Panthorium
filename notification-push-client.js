@@ -1,13 +1,23 @@
 (function(){
   'use strict';
   const key='panthorium-push-device-v1';
-  let pendingEnable=null,pendingDisconnect=null,generation=0,lastRenewal=0,verified=false;
+  const choiceKey='panthorium-push-choice-v1:',choices=new Map();
+  let pendingEnable=null,pendingDisconnect=null,generation=0,lastRenewal=0,verified=false,retryTimer=null;
   const os=()=>typeof OS!=='undefined'?OS:window.OS;
   const owner=()=>String(os()?.state?.user?.sub||os()?.state?.user?.id||'');
   const native=()=>window.Capacitor?.isNativePlatform?.()===true;
   const desktop=()=>window.panthoriumDesktop?.isElectron===true;
   const plugin=()=>window.Capacitor?.Plugins?.PushNotifications;
   const stored=()=>{try{return JSON.parse(localStorage.getItem(key)||'null');}catch{return null;}};
+  const choice=(uid=owner())=>{try{return localStorage.getItem(choiceKey+encodeURIComponent(uid))||choices.get(uid)||null;}catch{return choices.get(uid)||null;}};
+  function remember(value,uid=owner()){
+    if(!uid||uid.startsWith('guest:'))return;
+    choices.set(uid,value);try{localStorage.setItem(choiceKey+encodeURIComponent(uid),value);}catch{}
+  }
+  // Consent survives registration expiry, network errors and sign-out. It is
+  // scoped to this account/device and is never evidence of delivery readiness.
+  function accepted(){const d=stored();return !!choice()||!!(d&&!d.disabled&&d.owner===owner());}
+  function optedIn(){const d=stored(),saved=choice();return saved==='enabled'||(!saved&&!!(d&&!d.disabled&&d.owner===owner()));}
   const base=()=>String(os()?.config?.backendUrl||'').replace(/\/$/,'');
   async function api(path,options={}){
     const response=await authorizedFetch(base()+'/api/notifications/push/'+path,{...options,headers:{'Content-Type':'application/json'}});
@@ -34,7 +44,11 @@
     }
     localStorage.removeItem(key);window.dispatchEvent(new Event('panthorium:push-changed'));
   }
-  function disconnect(){
+  function disconnect({preserveChoice=false}={}){
+    const device=stored(),uid=device?.owner||owner();
+    if(!preserveChoice)remember('disabled',uid);
+    else if(device&&!device.disabled&&!choice(uid))remember('enabled',uid);
+    clearTimeout(retryTimer);lastRenewal=0;
     generation++;
     if(!pendingDisconnect)pendingDisconnect=(async()=>{await pendingEnable?.catch(()=>{});await disconnectDevice();})().finally(()=>{pendingDisconnect=null;});
     return pendingDisconnect;
@@ -42,8 +56,15 @@
   function enable(renew=false){
     if(pendingEnable)return pendingEnable;
     // Invoke the browser prompt in the user gesture, before any network await.
-    const permissionRequest=!native()&&!desktop()&&window.Notification?Promise.resolve(renew?Notification.permission:Notification.requestPermission()).catch(()=> 'denied'):null;
-    pendingEnable=register(renew,permissionRequest).finally(()=>{pendingEnable=null;});
+    const permissionRequest=!native()&&!desktop()&&window.Notification?Promise.resolve(renew||Notification.permission==='granted'?Notification.permission:Notification.requestPermission()).catch(()=> 'denied'):null;
+    const uid=owner();
+    pendingEnable=register(renew,permissionRequest).catch(error=>{
+      if(owner()===uid){
+        verified=false;window.dispatchEvent(new Event('panthorium:push-changed'));
+        if(optedIn()){clearTimeout(retryTimer);retryTimer=setTimeout(renewDevice,60000);}
+      }
+      throw error;
+    }).finally(()=>{pendingEnable=null;});
     return pendingEnable;
   }
   async function register(renew,permissionRequest){
@@ -58,14 +79,23 @@
       const result=await bridge.setNotificationBackground(true);
       if(!result.ok)throw Error('เปิดการแจ้งเตือนบนคอมพิวเตอร์ไม่สำเร็จ: '+result.error);
       if(owner()!==uid||epoch!==generation){await bridge.setNotificationBackground(false);throw Error('ยกเลิกการลงทะเบียนอุปกรณ์แล้ว');}
+      remember('enabled',uid);
       localStorage.setItem(key,JSON.stringify({kind:'desktop',owner:uid}));verified=true;lastRenewal=Date.now();
       window.dispatchEvent(new Event('panthorium:push-changed'));return result;
     }
-    const config=await api('config');if(!config.available)throw Error('เซิร์ฟเวอร์ยังไม่พร้อมรับ Push Notification');
     let subscription,reg;
     if(native()){
-      const p=plugin();if(!config.nativeAvailable||!p)throw Error('แอป Android ยังไม่ได้เชื่อม Firebase หรือจำเป็นต้องอัปเดต APK');
-      const permission=await (renew?p.checkPermissions():p.requestPermissions());if(permission.receive!=='granted')throw Error('ยังไม่ได้อนุญาตแจ้งเตือนบนอุปกรณ์');
+      const p=plugin();if(!p)throw Error('กรุณาอัปเดต Panthorium Browser เพื่อเปิดการแจ้งเตือน');
+      let permission=await p.checkPermissions();
+      if(!renew&&permission.receive!=='granted')permission=await p.requestPermissions();
+      if(permission.receive!=='granted')throw Error('ยังไม่ได้อนุญาตแจ้งเตือนบนอุปกรณ์');
+    }else if(!window.Notification||await permissionRequest!=='granted')throw Error('ยังไม่ได้อนุญาตแจ้งเตือนบนอุปกรณ์');
+    if(owner()!==uid||epoch!==generation)throw Error('ยกเลิกการลงทะเบียนอุปกรณ์แล้ว');
+    remember('enabled',uid);
+    window.dispatchEvent(new Event('panthorium:push-changed'));
+    const config=await api('config');if(!config.available)throw Error('เซิร์ฟเวอร์ยังไม่พร้อมรับ Push Notification');
+    if(native()){
+      const p=plugin();if(!config.nativeAvailable)throw Error('แอป Android ยังไม่ได้เชื่อม Firebase หรือจำเป็นต้องอัปเดต APK');
       const channels=await window.Capacitor?.Plugins?.PanthoriumNotifications?.prepareChannels();
       if(channels&&channels.enabled!==true)throw Error('ระบบ Android ปิดการแจ้งเตือนของแอพอยู่ กรุณาเปิดในการตั้งค่าอุปกรณ์');
       if(!channels){
@@ -79,7 +109,6 @@
       });subscription={kind:'fcm',token,...(channels?.version===2?{popupChannels:2}:{})};
     }else{
       // Permission request stays inside the explicit user action.
-      if(!window.Notification||await permissionRequest!=='granted')throw Error('ยังไม่ได้อนุญาตแจ้งเตือนบนอุปกรณ์');
       reg=await worker();
       const raw=config.publicKey.replace(/-/g,'+').replace(/_/g,'/');const bytes=Uint8Array.from(atob(raw),c=>c.charCodeAt(0));
       const sub=await reg.pushManager.getSubscription()||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:bytes});subscription=sub.toJSON();
@@ -97,12 +126,21 @@
   function open(){window.PanthoriumNotifications?.open();}
   window.addEventListener('panthorium:open-notifications',open);
   navigator.serviceWorker?.addEventListener('message',e=>{if(e.data?.type==='panthorium:open-notifications')open();});
+  let sessionOwner=owner();
   window.addEventListener('panthorium:auth-changed',()=>{
-    const device=stored(),uid=owner();if(device&&device.owner!==uid)disconnect().catch(()=>{});
+    const device=stored(),uid=owner();if(sessionOwner!==uid){lastRenewal=0;clearTimeout(retryTimer);sessionOwner=uid;}
+    if(device&&device.owner!==uid)disconnect({preserveChoice:true}).then(renewDevice).catch(()=>{});
     else renewDevice();
     if(uid&&!uid.startsWith('guest:')&&new URL(location.href).searchParams.get('notifications')==='1'){open();const url=new URL(location.href);url.searchParams.delete('notifications');history.replaceState(null,'',url);}
   });
-  function renewDevice(){const device=stored();if(device&&!device.disabled&&device.owner===owner()&&Date.now()-lastRenewal>3600000)enable(true).catch(()=>{verified=false;window.dispatchEvent(new Event('panthorium:push-changed'));});}
+  function renewDevice(){
+    clearTimeout(retryTimer);
+    const device=stored(),uid=owner(),saved=choice(uid);
+    const enabled=saved==='enabled'||(!saved&&device&&!device.disabled&&device.owner===uid);
+    if(!uid||uid.startsWith('guest:')||!enabled||Date.now()-lastRenewal<=3600000)return;
+    if(!saved)remember('enabled',uid);
+    enable(true).catch(()=>{});
+  }
   window.addEventListener('panthorium:boot-complete',renewDevice);
   window.addEventListener('online',renewDevice);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')renewDevice();});
@@ -134,5 +172,5 @@
     if(!result.registered){verified=false;window.dispatchEvent(new Event('panthorium:push-changed'));}
     return result;
   }
-  window.PanthoriumPush={enable:()=>enable(false),disconnect,show,check,active:()=>verified&&!!stored()&&!stored().disabled&&stored().owner===owner()&&(native()||desktop()||window.Notification?.permission==='granted'),native,desktop};
+  window.PanthoriumPush={enable:()=>enable(false),disconnect,show,check,accepted,optedIn,active:()=>verified&&!!stored()&&!stored().disabled&&stored().owner===owner()&&(native()||desktop()||window.Notification?.permission==='granted'),native,desktop};
 })();
