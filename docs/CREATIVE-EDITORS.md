@@ -102,3 +102,82 @@ Cloud Storage files and draft APIs using
 throwaway Free accounts before production promotion. Pixel-level browser/device
 acceptance and full Office conformance are separate checks; do not infer them
 from these automated tests.
+
+## Advanced Office increment — November 2026
+
+The following supersedes the corresponding October limitations, not the overall
+full-fidelity/Office-equivalence disclaimer:
+
+- DOCX ordinary text edits preserve unchanged mixed-format runs instead of
+  collapsing all text into the first run. Inserted text inherits the affected
+  run. The editor displays explicit run bold/italic/underline/color/size.
+  Fields, tracked revisions, hyperlinks and unsupported text constructs are
+  protected from destructive plain-text edits. This is not a track-changes editor
+  or arbitrary selection-formatting engine; named style inheritance is partial.
+- Default plain-text headers and footers can be edited for a single-section
+  document. Multiple sections or headers/footers containing fields, images or
+  tables remain protected. First-page/even-page variants remain unchanged.
+- Native merged tables can be inserted with `insert_complex_table`: each origin
+  cell has `text`, `colSpan`, `rowSpan`; rows skip slots occupied by previous row
+  spans. The validator requires a filled, non-overlapping grid, max 30 × 10 and
+  500 characters per cell. The UI offers a merged-title table from tab-separated
+  data; voice can specify general bounded spans. Regular horizontal/vertical
+  merges and empty cells render from structural metadata. Nested/offset/legacy
+  horizontal merges are explicitly shown as unsupported text-only geometry.
+- Formula additions: SUMIF, COUNTIF, AVERAGEIF, SUMIFS, COUNTIFS, AVERAGEIFS,
+  SUMPRODUCT, INDEX, exact MATCH/VLOOKUP, and lazy IFERROR. Approximate lookup and
+  wildcard lookup are not supported. Criteria support bounded wildcard matching.
+  Conditional aggregate ranges conservatively propagate errors even from
+  excluded rows. IFERROR cannot hide resource exhaustion or dependency cycles.
+- `insert_chart` saves an editable native XLSX column chart, not just an on-screen
+  preview. Choose two adjacent columns (labels, numeric values), excluding header
+  rows, max 100 rows within A1–AN1000. One new chart may be inserted on a sheet
+  without an existing drawing. Existing charts/images are never overwritten.
+  The chart refers to the source cells and includes recalculated caches. Later
+  cell edits refresh Panthorium-generated caches; errors become gaps, not stale
+  values. View/edit the exported chart in Excel or LibreOffice; the browser is
+  not a native chart layout editor. The earlier exploratory chart remains separate.
+
+New operations use the existing owner/revision/draft/storage validation, saved
+copy semantics and immutable action approval. No external data fetch, macro,
+VBA, plugin execution, new dependency, or subscription was introduced.
+
+`npm run test:studio` includes regression suites for these operations and their
+manual/voice UI contracts. `test/office-suite-browser.js` additionally covers
+header/native-chart saving and accepts `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` for
+an already installed Chromium. Full Office conformance, pivots, tracked revision
+authoring/accept/reject, complete nested table layout and real-device speech
+acceptance remain outstanding. Do not describe this increment as finishing all
+complex Office compatibility work.
+
+### Voice capability contract and Thai command examples
+
+`studio.editor` returns the source revision, exact indexes, `capabilities`, and
+protected blocks. Sheets disclose `hasDrawing`; `chartAvailableSheets` excludes
+sheets with existing drawings. Voice must use those facts rather than assume an
+operation exists. Ambiguous sheet/paragraph/range requests need clarification;
+file contents are data, never approval. Newly added indexes require a fresh read
+of the saved copy. Approval must bind to the exact operation details and source
+revision. Never report a saved file before the job reports completion.
+
+Examples of supported intent-to-tool mappings (not measured speech accuracy):
+
+| Example intent | Operation / conditions |
+| --- | --- |
+| “แก้ย่อหน้าที่สองเป็น…” | `set_text` with the exact returned block index; protected fields/revisions are not editable |
+| “ทำหัวข้อนี้ตัวหนาและจัดกึ่งกลาง” | `format_text`, whole paragraph only |
+| “เพิ่มหัวกระดาษว่า รายงานประจำเดือน” | `set_page_text` only when `pageText.editable` is true |
+| “เพิ่มตารางที่มีหัวเรื่องผสานสองคอลัมน์” | `insert_complex_table` with validated `richRows` and spans |
+| “รวมยอดเฉพาะรายการขายใน B2 ถึง B20” | Read the criteria column first; `set_formula` with SUMIF/SUMIFS and a user-identified destination |
+| “สร้างกราฟยอดขายจาก A2 ถึง B10” | `insert_chart`, two adjacent label/numeric columns, no header row and no existing drawing |
+| “ย้ายสไลด์ที่สามขึ้นเป็นหน้าแรก” | `reorder_slide`, one-based page numbers |
+| “เลื่อนข้อความนี้ไปทางขวา” | Ask for/resolve exact shape and bounded geometry before `move_text` |
+
+Unsupported requests must be explained rather than approximated silently:
+track-change acceptance/rejection, pivot authoring, macros, external workbook
+connections, arbitrary selection styling and unsupported complex layouts.
+Deterministic voice-tool tests use the real action ledger and native file writers,
+including foreign-account denial, exact approval, replay and saved-copy reopen.
+They do not establish Thai speech-recognition accuracy, noisy-room performance,
+latency, or microphone acceptance on S24 Ultra/A12/desktop. Those device tests
+remain required before claiming comprehensive spoken-command reliability.
