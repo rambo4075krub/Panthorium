@@ -3,6 +3,8 @@
 // (styles, pictures, relationships, formulas, layouts) remain byte-for-byte intact.
 const crypto = require('node:crypto');
 const suite = require('./officeSuiteService');
+const charts = require('./officeChartService');
+const {replaceDocumentText,protectionReason,documentRuns} = require('./officeRichText');
 const formulaCore = require('../office-suite-core');
 const path = require('node:path');
 const fs = require('node:fs/promises');
@@ -73,7 +75,7 @@ function officeModel(entries, pluginId) {
       for (const match of xmlMatches(addressedSheet(xml),'c')) {
         const cell=attr(match[0],'r'), type=attr(match[0],'t'); if (!/^[A-Z]{1,3}[1-9]\d*$/.test(cell)) fail('editor_office_unsupported',422);
         const raw=textOf(match[0],'v'), formula=xmlMatches(match[0],'f').length>0;
-        const value=type==='b' ? raw==='1' : type==='s' ? shared[Number(raw)] ?? '' : type==='inlineStr' ? textOf(match[0],'t') : raw && !type && Number.isFinite(Number(raw)) ? Number(raw) : raw;
+        const value=type==='b' ? raw==='1' : type==='s' ? shared[Number(raw)] ?? '' : type==='inlineStr' ? textOf(match[0],'t') : raw && (!type || type==='n') && Number.isFinite(Number(raw)) ? Number(raw) : raw;
         const f=xmlMatches(match[0],'f',true)[0];
         cells.push({cell,value,...(type==='e'?{cellError:raw}:{}),...(formula?{formula:true,formulaText:f&&!/\bt=/.test(f[0].split('>')[0])?'='+decode(f[1]):null}:{})});
       }
@@ -96,7 +98,10 @@ function officeModel(entries, pluginId) {
     let ordinal=0;
     for(const match of xmlMatches(entries[file].toString(),prefix+':p',true)) {
       const text=xmlParagraphMatches(match[0],prefix+':t',prefix).map(m=>decode(m[1])).join('');
-      if(text) blocks.push({index:blocks.length,page:page+1,file,ordinal,text});
+      if(text) {
+        const protection=pluginId==='document'?protectionReason(match[0]):null;
+        blocks.push({index:blocks.length,page:page+1,file,ordinal,text,...(pluginId==='document'?{runs:documentRuns(match[0])}:{}),...(protection?{textEditProtection:protection}:{})});
+      }
       ordinal++;
     }
   });
@@ -107,6 +112,7 @@ function patchOffice(entries, pluginId, operations) {
   // Resolve indexes once. Operations cannot shift the meaning of later indexes.
   const model=officeModel(entries,pluginId);
   for(const op of operations) {
+    if(op.type==='insert_chart')continue; // Render chart caches from the final cell values.
     if(op.type==='format_cell'&&model.sheets?.[op.sheet]){const sf=model.sheets[op.sheet].file;entries[sf]=Buffer.from(addressedSheet(entries[sf].toString()));}
     if(suite.apply(entries,pluginId,op,model))continue;
     if(['set_cell','set_formula'].includes(op.type) && pluginId==='spreadsheet') {
@@ -141,6 +147,7 @@ function patchOffice(entries, pluginId, operations) {
       const prefix=pluginId==='document'?'w':'a',source=entries[block.file].toString();
       const paragraph=xmlMatches(source,prefix+':p',true)[block.ordinal];if(!paragraph)fail('editor_text_not_found');
       const xml=xmlReplaceSelected(source,[paragraph],p=>{
+        if(pluginId==='document')return replaceDocumentText(p,op.value);
         let first=true;
         return xmlReplaceSelected(p,xmlParagraphMatches(p,prefix+':t',prefix),()=>{const v=first?escape(op.value):'';first=false;return `<${prefix}:t xml:space="preserve">${v}</${prefix}:t>`;});
       }); entries[block.file]=Buffer.from(xml);
@@ -175,6 +182,8 @@ function patchOffice(entries, pluginId, operations) {
     entries['[Content_Types].xml']=Buffer.from(xmlReplace(entries['[Content_Types].xml'].toString(),'Override',m=>attr(m,'PartName')==='/xl/calcChain.xml'?'':m));
   }
   }
+  for(const op of operations)if(op.type==='insert_chart')charts.apply(entries,pluginId,op,model);
+  if(pluginId==='spreadsheet'&&operations.some(op=>['set_cell','set_formula','insert_chart'].includes(op.type)))charts.refresh(entries,model);
   return entries;
 }
 class StudioEditorService {

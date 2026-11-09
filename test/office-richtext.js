@@ -1,0 +1,45 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {replaceDocumentText,protectionReason,documentRuns}=require('../services/officeRichText');
+const {patchOffice,officeModel}=require('../services/studioEditorService');
+const {_internals}=require('../services/officeArtifactService');
+const {xmlMatches}= _internals;
+const base='<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Hello </w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t>world</w:t></w:r><w:r><w:rPr><w:color w:val="AA0000"/></w:rPr><w:t>!</w:t></w:r></w:p>';
+assert.deepEqual(documentRuns(base),[{text:'Hello ',style:{bold:true}},{text:'world',style:{italic:true}},{text:'!',style:{color:'AA0000'}}]);
+const texts=p=>xmlMatches(p,'w:t').map(m=>m[1]);
+assert.equal(replaceDocumentText(base,'Hello world!'),base,'no-op preserves exact bytes');
+let edited=replaceDocumentText(base,'Hello Thai world!');
+assert.deepEqual(texts(edited),['Hello Thai ','world','!']);
+assert(edited.includes('<w:r><w:rPr><w:i/></w:rPr><w:t>world</w:t></w:r>'),'unaffected run remains exact');
+edited=replaceDocumentText(base,'Hello earth!');
+assert.deepEqual(texts(edited),['Hello ','earth','!']);
+assert(edited.includes('<w:rPr><w:i/></w:rPr><w:t xml:space="preserve">earth</w:t>'));
+assert.deepEqual(texts(replaceDocumentText(base,'Hello !')),['Hello ','','!']);
+assert.deepEqual(texts(replaceDocumentText(base,'Hello world!?')),['Hello ','world','!?']);
+assert.deepEqual(texts(replaceDocumentText(base,'Hi world!')),['Hi ','world','!']);
+assert.deepEqual(texts(replaceDocumentText(base,'')),['','','']);
+assert.deepEqual(texts(replaceDocumentText(base,'<ไทย&>')),['&lt;ไทย&amp;&gt;','','']);
+const unicode='<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>สวัสดี 😀</w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t>🌏!</w:t></w:r></w:p>';
+assert.deepEqual(texts(replaceDocumentText(unicode,'สวัสดี 😃🌏!')),['สวัสดี 😃','🌏!']);
+const entity='<w:p><w:r><w:t>A &amp; B </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>&#x1f600;</w:t></w:r></w:p>';
+assert.equal(replaceDocumentText(entity,'A & B 😀'),entity);
+assert.deepEqual(texts(replaceDocumentText(entity,'A & C 😀')),['A &amp; C ','&#x1f600;']);
+for(const markup of ['<w:fldChar w:fldCharType="begin"/>','<w:tab/>','<w:br/>','<w:ins><w:r><w:t>revision</w:t></w:r></w:ins>','<w:hyperlink r:id="rId1"><w:r><w:t>link</w:t></w:r></w:hyperlink>']){
+ const p=base.replace('</w:p>',markup+'</w:p>');
+ assert.equal(protectionReason(p),'editor_rich_text_protected');
+ assert.throws(()=>replaceDocumentText(p,'edit'),/editor_rich_text_protected/);
+}
+// Unrelated drawing markup and nested textboxes are not rewritten.
+const nested=base.replace('</w:p>','<w:r><w:drawing><w:txbxContent><w:p><w:r><w:t>nested</w:t></w:r></w:p></w:txbxContent></w:drawing></w:r></w:p>');
+assert(replaceDocumentText(nested,'Hello earth!').includes('<w:t>nested</w:t>'));
+const entries=_internals.unzip(_internals.documentBuffer({title:'Mixed',sections:[{paragraphs:['Body']}]},[]));
+const originalDocument=entries['word/document.xml'].toString();
+const originalParagraph=xmlMatches(originalDocument,'w:p',true)[0];
+entries['word/document.xml']=Buffer.from(_internals.xmlReplaceSelected(originalDocument,[originalParagraph],base));
+const untouched=Object.fromEntries(Object.entries(entries).filter(([name])=>name!=='word/document.xml').map(([name,body])=>[name,Buffer.from(body)]));
+patchOffice(entries,'document',[{type:'set_text',index:0,value:'Hello earth!'}]);
+assert.equal(officeModel(entries,'document').blocks[0].text,'Hello earth!');
+assert(entries['word/document.xml'].toString().includes('<w:rPr><w:i/></w:rPr><w:t xml:space="preserve">earth</w:t>'));
+for(const [name,body] of Object.entries(untouched))assert(body.equals(entries[name]),name+' unchanged');
+_internals.validateOfficeXmlEntries(_internals.unzip(_internals.zip(entries)));
+console.log('PASS Office rich text: mixed-format edits, insert/delete, Thai/Unicode, escaping, protected semantics, native round trip and unchanged parts');
