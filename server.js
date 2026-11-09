@@ -228,6 +228,11 @@ toolRegistry.register({
   run: async ({ user, args }) => agentKnowledge.search({ user, query: args.query, limit: args.limit == null ? 8 : Number(args.limit) })
 });
 const agentMemory = new AgentMemoryService({ repository: agentMemoryRepository, audit, knowledge: agentKnowledge });
+const workRepository = new (require('./services/workAssistantRepository').WorkAssistantRepository)({ ...cloudStoreOptions, allowMemory: !config.isProduction && !config.databaseUrl });
+const workAssistant = new (require('./services/workAssistantService').WorkAssistantService)({ repository: workRepository,
+  files: cloudFiles, gateway: sentinel.gateway, studio: creativeStudio, memory: agentMemory, reminders, authService, cloudApps, audit });
+agentMemory.workAssistant = workAssistant;
+require('./services/workAssistantTools').registerWorkAssistantTools(toolRegistry, { service: workAssistant });
 registerPublicWebTools(toolRegistry, { service: new PublicWebService() });
 registerPersonalFunctionTools(toolRegistry, { memory: agentMemory, reminders, files: cloudFiles, knowledge: agentKnowledge });
 registerNotificationTools(toolRegistry, { notifications });
@@ -331,6 +336,7 @@ app.use("/api/files", createFilesRouter(authService, cloudFiles));
 app.use("/api/media", createMediaStudioRouter(authService, mediaStudio));
 app.use('/api/social',require('./routes/social').createSocialRouter(authService,social));
 app.use('/api/studio', createCreativeStudioRouter(authService, creativeStudio));
+app.use('/api/work', require('./routes/workAssistant').createWorkAssistantRouter(authService, workAssistant));
 app.use("/api/reminders", createReminderRouter(authService, reminders));
 app.use('/api/notifications', createNotificationRouter(authService, notifications));
 app.use('/api/actions', createActionsRouter(authService, agentService));
@@ -366,7 +372,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-studio-ui.js", "social-rtc.js", "social-media-source.js", "social-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js"];
+const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-studio-ui.js", "work-assistant-ui.js", "social-rtc.js", "social-media-source.js", "social-ui.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js"];
 app.get("/vendor/hls.min.js", (req, res) => res.type("application/javascript").sendFile(require.resolve("hls.js/dist/hls.min.js")));
 
 for (const script of [...shellScripts, "workspace-ui.css", "social-player.html", "social-player.js"]) {
@@ -538,6 +544,7 @@ async function start() {
   await usageLedger.init();
   await cloudApps.init();
   await creativeStudio.init();
+  await workRepository.init();
   await social.init();
   await privacyRequests.init();
   if (liveEntitlements) await liveEntitlements.init();

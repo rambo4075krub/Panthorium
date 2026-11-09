@@ -14,7 +14,8 @@ async function main() {
   w.OS = { config: { accessToken: 'test-token', backendUrl: '' }, state: { user: { id: 'user-1', permissions: ['chat'], roles: ['user'] } }, windows: new Map() };
   w.PanthoriumAuth = { refreshSession: async () => { w.dispatchEvent(new w.Event('panthorium:auth-changed')); return true; } };
   w.PanthoriumWindowManager = { restore() {} };
-  let reportedResult = null;
+  let reportedResult = null, importedRun = null;
+  w.PanthoriumWorkAssistant = { async importRun(runId) { importedRun = runId; } };
   w.PanthoriumPrivacyPolicy = { openAIReport(target) { reportedResult = target; } };
   w.createWindow = (id, title, html) => {
     const el = d.createElement('div'); el.className = 'window'; el.dataset.id = id; el.innerHTML = '<div class="window-titlebar"></div><div class="window-body">' + html + '</div>'; d.body.append(el); w.OS.windows.set(id, el);
@@ -107,6 +108,8 @@ async function main() {
   await until(() => q('[data-result]').textContent.includes('ร่างพร้อม'), 'draft result missing');
   await until(() => !q('[data-execute]').disabled, 'execution did not settle');
   assert.equal(q('[data-result] img'), null, 'model output is rendered as plain text');
+  assert.equal(q('[data-result] details summary').textContent, 'S1 · ข้อมูลของฉัน');
+  q('[data-work-handoff]').click(); await until(() => importedRun === 'run-1', 'reviewed result handoff missing');
   q('[data-report-result]').click();
   assert.deepEqual(JSON.parse(JSON.stringify(reportedResult)), { sourceType: 'cloud_app_run', sourceId: 'run-1' }, 'result report references owned Cloud run without resending output text');
   const request = requests.find(r => r.path.endsWith('/execute'));

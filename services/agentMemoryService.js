@@ -50,6 +50,7 @@ class AgentMemoryService {
     const safeTags=this.validateTags(tags); if (!safeTags) return { ok:false,error:'invalid_memory_tags' };
     const score=importance==null ? 50 : Number(importance); if (!Number.isInteger(score) || score<1 || score>100) return { ok:false,error:'invalid_memory_importance' };
     if (source!=null && (typeof source!=='string' || source.length>120)) return { ok:false,error:'invalid_memory_source' };
+    if (typeof source === 'string' && source.startsWith('work-assistant:')) return { ok:false,error:'invalid_memory_source' };
     const metadata=validateMetadata({ confidence,expiresAt,provenance,confirmation,sensitivity });
     if (metadata.error) return { ok:false,error:metadata.error };
     const memory=await this.repository.create({ userId:user.sub,scope,kind:safeKind,title:safeTitle,content:safeContent,tags:safeTags,source:source || null,importance:score,...metadata.changes });
@@ -83,12 +84,17 @@ class AgentMemoryService {
     const id=String(memoryId || ''); if (!/^[0-9a-f-]{36}$/i.test(id)) return { ok:false,error:'invalid_memory_id' };
     const current=await this.repository.get(user.sub,id,scope);
     if (!current) return { ok:false,error:'memory_not_found' };
+    if (current.kind === 'calendar-event' && current.source?.startsWith('work-assistant:') && this.workAssistant) {
+      if (Object.entries(input).some(([key,value]) => value !== undefined && !['user','memoryId','scope','title','content','requestId'].includes(key))) return { ok:false,error:'work_linked_calendar_fields_protected' };
+      if (title === undefined && content === undefined) return { ok:false,error:'empty_memory_update' };
+      return this.workAssistant.updateLinkedCalendar({ user,current,title,content });
+    }
     const changes={};
     if (title!==undefined) { if (typeof title!=='string' || !title.trim() || title.length>240) return { ok:false,error:'invalid_memory_title' }; changes.title=title.trim(); }
     if (content!==undefined) { if (typeof content!=='string' || !content.trim() || content.length>12000) return { ok:false,error:'invalid_memory_content' }; changes.content=content.trim(); }
     if (tags!==undefined) { const value=this.validateTags(tags); if (!value) return { ok:false,error:'invalid_memory_tags' }; changes.tags=value; }
     if (importance!==undefined) { const value=Number(importance); if (!Number.isInteger(value) || value<1 || value>100) return { ok:false,error:'invalid_memory_importance' }; changes.importance=value; }
-    if (source!==undefined) { if (source!==null && (typeof source!=='string' || source.length>120)) return { ok:false,error:'invalid_memory_source' }; changes.source=source || null; }
+    if (source!==undefined) { if (source!==null && (typeof source!=='string' || source.length>120 || source.startsWith('work-assistant:'))) return { ok:false,error:'invalid_memory_source' }; changes.source=source || null; }
     const metadata=validateMetadata(input,{ partial:true });
     if (metadata.error) return { ok:false,error:metadata.error };
     Object.assign(changes,metadata.changes);
@@ -115,6 +121,7 @@ class AgentMemoryService {
     if (!this.validScope(scope)) return { ok:false,error:'invalid_memory_scope' };
     const id=String(memoryId || ''); if (!/^[0-9a-f-]{36}$/i.test(id)) return { ok:false,error:'invalid_memory_id' };
     const current=await this.repository.get(user.sub,id,scope);
+    if (current?.kind === 'calendar-event' && current.source?.startsWith('work-assistant:') && this.workAssistant) return this.workAssistant.updateLinkedCalendar({ user,current,remove:true });
     const deleted=await this.repository.delete(user.sub,id,scope); if (!deleted) return { ok:false,error:'memory_not_found' };
     this.audit?.record('agent.memory_deleted',{ userId:user.sub,requestId,memoryId:id,scope,kind:current?.kind });
     return { ok:true };

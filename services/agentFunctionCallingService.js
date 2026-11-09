@@ -6,6 +6,7 @@ const { SOCIAL_TOOL_DEFINITIONS } = require('./socialTools');
 const { PUBLIC_WEB_TOOL_DEFINITIONS } = require('./publicWebTools');
 const { NOTIFICATION_TOOL_DEFINITIONS } = require('./notificationTools');
 const { STUDIO_TOOL_DEFINITIONS } = require('./creativeStudioTools');
+const { WORK_TOOL_DEFINITIONS } = require('./workAssistantTools');
 
 const TOOL_DEFINITIONS = [
   {name:'panthorium_calculate',toolId:'calculator.evaluate',description:'Calculate arithmetic accurately. Always use for addition/subtraction/percentages, including Thai money questions. Pass the exact numbers and operations in the question, e.g. 546.02-10. Do not do arithmetic from memory.',properties:{expression:{type:'STRING',description:'Arithmetic expression using numbers + - * / parentheses, maximum 200 characters.'}},required:['expression']},
@@ -13,6 +14,7 @@ const TOOL_DEFINITIONS = [
   ...NOTIFICATION_TOOL_DEFINITIONS,
   ...MAILBOX_TOOL_DEFINITIONS,
   ...STUDIO_TOOL_DEFINITIONS,
+  ...WORK_TOOL_DEFINITIONS,
   ...SOCIAL_TOOL_DEFINITIONS,
   ...['minimize', 'maximize', 'fullscreen', 'restore'].map(operation => ({ name: `panthorium_window_${operation}`, toolId: `window.${operation}`, description: `${operation} a Panthorium window. Thai/English requests: ย่อ/minimize, ขยาย/maximize, เต็มจอ/fullscreen, คืนขนาด/restore. Use desktop-browser for the installed Panthorium Browser app; active-window for the current window.`, properties: { appId: { type: 'STRING', description: 'Window id, desktop-browser (native app), or active-window (current window).' } }, required: ['appId'], windowOperation: operation })),
   { name: 'panthorium_window_open', toolId: 'window.open', description: 'Open one Panthorium window for the current user.', properties: { appId: { type: 'STRING', description: 'Window id: desktop-browser for the installed Panthorium app, browser for its internal Web Browser, active-window for this/current window.' } }, required: ['appId'], windowOperation: 'open' },
@@ -47,8 +49,9 @@ const TOOL_DEFINITIONS = [
   { name: 'panthorium_conversation_clear', toolId: 'conversation.clear', description: 'Delete one conversation owned by the current user. Panthorium will ask for on-screen confirmation.', properties: { sessionId: { type: 'STRING', description: 'Conversation session id.' } }, required: ['sessionId'] }
 ];
 
-const CHAT_APPROVAL_TOOL_IDS = new Set(['studio.create', 'studio.edit', 'notifications.write', 'mailbox.write']);
+const CHAT_APPROVAL_TOOL_IDS = new Set(['studio.create', 'studio.edit', 'notifications.write', 'mailbox.write', 'work.save', 'work.draft', 'work.export', 'work.task']);
 const ACCOUNT_ONLY_TOOL_IDS = new Set([
+  ...WORK_TOOL_DEFINITIONS.map(tool => tool.toolId),
   ...MAILBOX_TOOL_DEFINITIONS.map(tool => tool.toolId),
   ...NOTIFICATION_TOOL_DEFINITIONS.map(tool => tool.toolId),
   ...STUDIO_TOOL_DEFINITIONS.map(tool => tool.toolId),
