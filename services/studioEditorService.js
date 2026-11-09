@@ -134,9 +134,9 @@ function recalculateFormulaCaches(entries){
     entries['[Content_Types].xml']=Buffer.from(xmlReplace(entries['[Content_Types].xml'].toString(),'Override',m=>attr(m,'PartName')==='/xl/calcChain.xml'?'':m));
   }
   }
-function patchOffice(entries, pluginId, operations) {
-  // Resolve indexes once. Operations cannot shift the meaning of later indexes.
-  const model=officeModel(entries,pluginId);
+function patchOffice(entries, pluginId, operations, newImages=new Map()) {
+  // Preserve existing snapshot indexes; appended content receives fresh indexes.
+  const model=officeModel(entries,pluginId);model.newImages=newImages;
   for(const op of operations) {
     if(['insert_chart','insert_pivot'].includes(op.type)){if(pluginId!=='spreadsheet'||!model.sheets?.[op.sheet])fail('editor_sheet_not_in_snapshot');continue;} // Render chart caches from the final cell values.
     if(['set_cell','set_formula','format_cell'].includes(op.type)&&pluginId==='spreadsheet'&&model.sheets?.[op.sheet])pivots.assertCellEditable(entries,model.sheets[op.sheet].file,op.cell);
@@ -180,6 +180,8 @@ function patchOffice(entries, pluginId, operations) {
       }); entries[block.file]=Buffer.from(xml);
     } else if(op.type==='append_paragraph' && pluginId==='document') {
       let xml=entries['word/document.xml'].toString();
+      if(model.blocks.length>=2000)fail('editor_file_too_complex',413);
+      model.blocks.push({index:model.blocks.length,page:1,file:'word/document.xml',ordinal:xmlMatches(xml,'w:p',true).length,text:op.value});
       const p='<w:p><w:r><w:t xml:space="preserve">'+escape(op.value)+'</w:t></w:r></w:p>';
       const section=xmlMatches(xml,'w:sectPr').at(-1);
       if(section && /^\s*<\/w:body>/.test(xml.slice(section.index+section[0].length)))xml=xml.slice(0,section.index)+p+xml.slice(section.index);
@@ -209,7 +211,7 @@ class StudioEditorService {
     if(typeOf(file)!==pluginId)fail('editor_operation_type_mismatch');
     if(hash(file.body)!==edit.revision)fail('editor_source_changed',409);
     let body,contentType=file.contentType,extension=String(file.name).split('.').pop().toLowerCase();
-    if(['document','spreadsheet','presentation'].includes(pluginId)) body=_internals.zip(patchOffice(_internals.unzip(file.body),pluginId,edit.operations));
+    if(['document','spreadsheet','presentation'].includes(pluginId)){const images=new Map();let bytes=0;for(const op of edit.operations.filter(o=>o.type==='insert_image')){if(!['document','presentation'].includes(pluginId))fail('editor_operation_type_mismatch');if(!images.has(op.fileId)){const source=await this.files.readOwned(user.sub,op.fileId);if(!Buffer.isBuffer(source.body)||source.body.length>2*1024*1024)fail('editor_image_budget',413);const image=_internals.imageInfo(source);if(image.width*image.height>16777216)fail('editor_image_budget',413);images.set(op.fileId,image);}bytes+=images.get(op.fileId).body.length;if(bytes>4*1024*1024||images.size>16)fail('editor_image_budget',413);}body=_internals.zip(patchOffice(_internals.unzip(file.body),pluginId,edit.operations,images));}
     else if(pluginId==='image') {
       const filters=edit.operations.map(op=>{
         if(op.type==='rotate')return op.degrees===90?'transpose=1':op.degrees===270?'transpose=2':'hflip,vflip';

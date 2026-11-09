@@ -189,6 +189,7 @@ class MediaStudioService {
     this.tempRoot = tempRoot;
     this.busy = false;
     this.generationCompletions = new Map();
+    this.timelineRequests = new Map();
   }
 
   requireAccount(user) {
@@ -249,7 +250,7 @@ class MediaStudioService {
         throw new MediaStudioError(413, 'video_audio_parameters_too_large');
       }
     }
-    return { duration, format };
+    return { duration, format, hasAudio: streams.some(stream => stream.codec_type === 'audio') };
   }
 
   async durationSeconds(inputPath) {
@@ -505,6 +506,108 @@ class MediaStudioService {
       if (error.code === 'transcription_uncertain') throw new MediaStudioError(422, 'transcription_uncertain');
       if (error.code === 'transcription_provider_unavailable') throw new MediaStudioError(503, 'transcription_provider_unavailable');
       throw new MediaStudioError(422, 'media_transcription_failed');
+    } finally {
+      if (directory) await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
+      this.busy = false;
+    }
+  }
+
+  async renderTimeline(input = {}) {
+    const userId = this.requireAccount(input.user);
+    if (input.requestId == null) return this.renderTimelineNow(input);
+    if (typeof input.requestId !== 'string' || !/^[0-9a-f-]{36}$/i.test(input.requestId)) throw new MediaStudioError(400, 'invalid_timeline_request_id');
+    const key = userId + ':' + input.requestId;
+    const signature = crypto.createHash('sha256').update(JSON.stringify({ clips: input.clips, aspect: input.aspect, captions: input.captions, name: input.name })).digest('hex');
+    const now = Date.now();
+    for (const [id, record] of this.timelineRequests) if (record.completed && record.expires < now) this.timelineRequests.delete(id);
+    const existing = this.timelineRequests.get(key);
+    if (existing) {
+      if (existing.signature !== signature) throw new MediaStudioError(409, 'timeline_request_conflict');
+      return existing.promise;
+    }
+    if (this.timelineRequests.size >= 100) {
+      const oldest = [...this.timelineRequests].find(([, r]) => r.completed);
+      if (oldest) this.timelineRequests.delete(oldest[0]);
+      else throw new MediaStudioError(429, 'media_worker_busy');
+    }
+    const record = { signature, completed: false, expires: now + 15 * 60 * 1000 };
+    record.promise = this.renderTimelineNow(input).then(result => { record.completed = true; return result; }, error => { this.timelineRequests.delete(key); throw error; });
+    this.timelineRequests.set(key, record);
+    return record.promise;
+  }
+
+  async renderTimelineNow({ user, clips, aspect = 'widescreen', captions = '', name = '' } = {}) {
+    const userId = this.requireAccount(user);
+    const fail = code => { throw new MediaStudioError(400, code); };
+    if (!Array.isArray(clips) || !clips.length || clips.length > 8 || !['widescreen', 'vertical', 'square'].includes(aspect)) fail('timeline_invalid');
+    let duration = 0;
+    const sequence = clips.map(c => {
+      if (!c || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(c.fileId) ||
+          !['start', 'end', 'speed', 'volume'].every(k => typeof c[k] === 'number' && Number.isFinite(c[k])) ||
+          c.start < 0 || c.end <= c.start || c.end > MAX_SOURCE_SECONDS || c.speed < .5 || c.speed > 2 || c.volume < 0 || c.volume > 1 || typeof c.fade !== 'boolean') fail('timeline_invalid');
+      const seconds = (c.end - c.start) / c.speed;
+      if (seconds < .05) fail('timeline_invalid');
+      duration += seconds;
+      return { fileId: c.fileId, start: c.start, end: c.end, speed: c.speed, volume: c.volume, fade: c.fade, seconds };
+    });
+    if (duration > MAX_CLIP_SECONDS) fail('timeline_invalid');
+    if (typeof captions !== 'string' || typeof name !== 'string' || name.length > 180) fail('timeline_invalid');
+    const srt = normalizeSrt(captions, duration);
+    if (this.busy) throw new MediaStudioError(429, 'media_worker_busy');
+    this.busy = true;
+    let directory;
+    try {
+      directory = await fs.mkdtemp(path.join(this.tempRoot, 'panthorium-timeline-'));
+      const sources = new Map(); let bytes = 0, partBytes = 0;
+      // Decode one source at a time. Never let user data become an input URL,
+      // concat manifest, filter expression, executable name, or FFmpeg option.
+      for (const clip of sequence) if (!sources.has(clip.fileId)) {
+        const folder = path.join(directory, 'source-' + sources.size); await fs.mkdir(folder, { mode: 0o700 });
+        const { file, inputPath } = await this.source(userId, clip.fileId, folder);
+        bytes += file.body.length;
+        if (bytes > 60 * 1024 * 1024) throw new MediaStudioError(413, 'timeline_source_budget');
+        const metadata = await this.inspectVideo(inputPath);
+        sources.set(clip.fileId, { inputPath, ...metadata });
+      }
+      const [width, height] = aspect === 'vertical' ? [720, 1280] : aspect === 'square' ? [720, 720] : [1280, 720];
+      const parts = [];
+      for (const [index, clip] of sequence.entries()) {
+        const source = sources.get(clip.fileId);
+        if (clip.end > source.duration + .05) fail('clip_range_exceeds_video');
+        const outputPath = path.join(directory, 'part-' + index + '.mp4'); parts.push('part-' + index + '.mp4');
+        const args = ['-hide_banner', '-loglevel', 'error', ...localVideoInputArgs(source.format), '-ss', clip.start.toFixed(3), '-t', (clip.end - clip.start).toFixed(3), '-i', source.inputPath];
+        const audioFilter = `atempo=${clip.speed},volume=${clip.volume},aresample=44100,apad,atrim=duration=${clip.seconds.toFixed(3)},asetpts=PTS-STARTPTS`;
+        if (!source.hasAudio) args.push('-filter_complex_threads', '1', '-filter_complex', 'anullsrc=channel_layout=stereo:sample_rate=44100,' + audioFilter + '[silent]');
+        args.push('-t', clip.seconds.toFixed(3), '-map', '0:v:0', '-map', source.hasAudio ? '0:a:0' : '[silent]', '-sn', '-dn');
+        const vf = [`setpts=(PTS-STARTPTS)/${clip.speed}`, `scale=${width}:${height}:force_original_aspect_ratio=decrease`, `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`, 'setsar=1', 'fps=30'];
+        if (clip.fade && clip.seconds >= .5) vf.push('fade=t=in:st=0:d=0.25', `fade=t=out:st=${(clip.seconds - .25).toFixed(3)}:d=0.25`);
+        if (source.hasAudio) args.push('-af', audioFilter);
+        args.push('-vf', vf.join(','), '-filter_threads', '1', '-threads', '2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '25', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ac', '2', '-ar', '44100', '-b:a', '128k', '-movflags', '+faststart', '-fs', String(MAX_FILE_BYTES + 1), '-f', 'mp4', outputPath);
+        await this.runner(this.ffmpeg, args, { timeoutMs: 180000 });
+        const size = (await fs.stat(outputPath)).size; partBytes += size;
+        if (!size || size > MAX_FILE_BYTES || partBytes > 60 * 1024 * 1024) throw new MediaStudioError(413, 'render_too_large');
+      }
+      // Only locally encoded, numeric filenames enter this internal manifest.
+      const manifest = path.join(directory, 'segments.txt');
+      await fs.writeFile(manifest, parts.map(n => "file '" + n + "'").join('\n'), { mode: 0o600, flag: 'wx' });
+      const outputPath = path.join(directory, 'timeline.mp4');
+      const args = ['-hide_banner', '-loglevel', 'error', '-max_alloc', '67108864', '-protocol_whitelist', 'file', '-format_whitelist', 'concat,mov', '-f', 'concat', '-safe', '1', '-i', manifest, '-t', duration.toFixed(3), '-map', '0:v:0', '-map', '0:a:0', '-sn', '-dn'];
+      if (srt) {
+        const subtitlePath = path.join(directory, 'captions.srt'); await fs.writeFile(subtitlePath, srt, { mode: 0o600, flag: 'wx' });
+        const escaped = subtitlePath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''");
+        args.push('-vf', "subtitles='" + escaped + "'", '-filter_threads', '1', '-threads', '2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '25', '-pix_fmt', 'yuv420p', '-c:a', 'copy');
+      } else args.push('-c', 'copy');
+      args.push('-movflags', '+faststart', '-fs', String(MAX_FILE_BYTES + 1), '-f', 'mp4', outputPath);
+      await this.runner(this.ffmpeg, args, { timeoutMs: 180000 });
+      const size = (await fs.stat(outputPath)).size;
+      if (!size || size > MAX_FILE_BYTES) throw new MediaStudioError(413, 'render_too_large');
+      const output = await fs.readFile(outputPath), base = sanitizeFilename(name || 'timeline');
+      const file = await this.files.upload(userId, /\.mp4$/i.test(base) ? base : base + '.mp4', 'video/mp4', output);
+      this.audit?.record('media.timeline_rendered', { userId, outputFileId: file.id, sourceCount: sources.size, clipCount: sequence.length, durationSeconds: duration, aspect });
+      return { ok: true, file, durationSeconds: duration, clipCount: sequence.length, aspect, captionsIncluded: Boolean(srt) };
+    } catch (error) {
+      this.audit?.record('media.timeline_failed', { userId, error: error.code || error.message });
+      throw error instanceof MediaStudioError ? error : new MediaStudioError(422, 'media_render_failed');
     } finally {
       if (directory) await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
       this.busy = false;

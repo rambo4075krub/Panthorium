@@ -33,18 +33,18 @@
  background:linear-gradient(90deg,transparent,#a5ffff,transparent);box-shadow:0 0 18px #46ddff;pointer-events:none;
 }
 :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(.window-titlebar,[data-pt-titlebar]) {
- min-height:70px!important;height:auto!important;flex-shrink:0;
+ min-height:52px!important;height:auto!important;flex-shrink:0;
  background:var(--pt-title-background)!important;border-bottom:1px solid var(--pt-border)!important;
- padding:12px 23px!important;gap:12px;color:var(--pt-text)!important;
+ padding:7px 14px!important;gap:12px;color:var(--pt-text)!important;
 }
 :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(.window-title,[data-pt-titlebar] h2) {
- font-size:20px!important;font-weight:600!important;letter-spacing:.3px;text-shadow:none!important;
+ font-size:16px!important;font-weight:600!important;letter-spacing:.3px;text-shadow:none!important;
 }
 :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(.window-body,[data-pt-body]) {
  background:transparent!important;color:var(--pt-text);scrollbar-width:thin;scrollbar-color:#34617b transparent;
 }
 :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(button,input,select,textarea) {font-family:inherit!important;}
-:is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),textarea),
+:is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),textarea):not(.po-sheet [data-cell]),
 :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) select {
  background:var(--pt-input-background)!important;color:#e8f7ff!important;
  border:1px solid #77e0ff6a!important;border-radius:12px!important;
@@ -113,10 +113,10 @@
  :is(#panthorium-theme-specificity,.window,.panthorium-window,.panthorium-managed-window,[data-panthorium-window]) select:focus-visible {outline:2px solid Highlight!important;outline-offset:3px;}
 }
 @media(max-height:800px) and (min-width:761px){
- :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(.window-titlebar,[data-pt-titlebar]){min-height:60px!important;}
+ :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(.window-titlebar,[data-pt-titlebar]){min-height:48px!important;}
 }
 @media(max-width:600px){
- :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(.window-titlebar,[data-pt-titlebar]){min-height:62px!important;padding:10px 13px!important;gap:5px;}
+ :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(.window-titlebar,[data-pt-titlebar]){min-height:52px!important;padding:7px 13px!important;gap:5px;}
  :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(.window-title,[data-pt-titlebar] h2){font-size:16px!important;}
  :is(#panthorium-theme-specificity,.window,.panthorium-managed-window,[data-panthorium-window]) :is(.win-btn,.panthorium-window-control){width:28px!important;min-width:28px!important;}
 }

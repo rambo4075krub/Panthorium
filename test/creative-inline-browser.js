@@ -1,0 +1,78 @@
+'use strict';
+// Real shared window shell + editor APIs: catch clipped workspaces and theme collisions.
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const fs = require('node:fs');
+const { randomUUID } = require('node:crypto');
+const express = require('express');
+const { chromium } = require('playwright');
+const os = require('node:os');
+const { execFileSync } = require('node:child_process');
+const { MediaStudioService } = require('../services/mediaStudioService');
+const { createMediaStudioRouter } = require('../routes/mediaStudio');
+const { Resvg } = require('@resvg/resvg-js');
+const { CreativeStudioService } = require('../services/creativeStudioService');
+const { MemoryCreativeStudioRepository } = require('../services/creativeStudioRepository');
+const { createCreativeStudioRouter } = require('../routes/creativeStudio');
+const { OfficeArtifactService, _internals } = require('../services/officeArtifactService');
+(async () => {
+  const user = { sub: randomUUID(), roles: ['user'], permissions: ['chat'] }, store = new Map();
+  const files = { bucket: 'ui-test', ensureConfigured() {}, async upload(owner, name, contentType, body) { const file = { id: randomUUID(), name, contentType, size: body.length }; store.set(file.id, { ...file, owner, body }); return file; }, async findObject(owner, id) { const file = store.get(id); if (!file || file.owner !== owner) throw Error('file_not_found'); return { id, name: file.name, contentType: file.contentType }; }, async readOwned(owner, id) { return { ...await this.findObject(owner, id), body: store.get(id).body }; } };
+  files.download=files.readOwned;
+  const studio = new CreativeStudioService({ files, office: new OfficeArtifactService({ files }), repository: new MemoryCreativeStudioRepository(), resolveUser: async u => u }); await studio.init();
+  const doc = await files.upload(user.sub, 'แผนโครงการ.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', _internals.documentBuffer({ title: 'แผนโครงการ / PROJECT PLAN', sections: [{ paragraphs: ['ภาพรวมโครงการ', 'สร้างพื้นที่ทำงานที่เรียบง่าย ให้ความสำคัญกับเนื้อหาและชิ้นงาน ลดเวลาค้นหาเครื่องมือ และเก็บต้นฉบับทุกครั้งที่บันทึก'], rows: [['งาน', 'ผู้รับผิดชอบ', 'สถานะ'], ['ออกแบบ', 'ทีมสร้างสรรค์', 'กำลังดำเนินการ']] }] }, []));
+  const sheet = await files.upload(user.sub, 'งบประมาณ.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', _internals.spreadsheetBuffer({ title: 'Budget', sheets: [{ name: 'งบประมาณ', rows: [['รายการ', 'จำนวนเงิน'], ['ออกแบบ', 12000], ['ผลิตสื่อ', 18000]] }] }));
+  const deck = await files.upload(user.sub, 'นำเสนอโครงการ.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', _internals.presentationBuffer({ title: 'Project', slides: [{ title: 'CREATIVE WORKSPACE', bullets: ['พื้นที่สำหรับความคิดและชิ้นงาน', 'เครื่องมือที่ต้องการ อยู่ใกล้มือ'] }, { title: 'ขั้นตอนถัดไป', bullets: ['ตรวจทานและบันทึก'] }] }, []));
+  const png = new Resvg('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="#e2ecea"/><rect x="200" y="120" width="400" height="360" rx="40" fill="#30665f"/><circle cx="400" cy="300" r="90" fill="#b8d9c3"/></svg>').render().asPng();
+  const picture = await files.upload(user.sub, 'ตัวอย่างสินค้า.png', 'image/png', png);
+  const clipPath=path.join(os.tmpdir(),'panthorium-ui-'+randomUUID()+'.webm');
+  execFileSync('ffmpeg',['-v','error','-f','lavfi','-i','color=c=teal:s=320x180:r=30:d=4','-threads','1','-c:v','libvpx-vp9','-deadline','realtime','-cpu-used','8','-pix_fmt','yuv420p',clipPath]);
+  const clip=await files.upload(user.sub,'คลิปตัวอย่าง.webm','video/webm',fs.readFileSync(clipPath));fs.unlinkSync(clipPath);
+  const app = express(); app.use(express.json());
+  app.post('/api/files',express.raw({type:'application/octet-stream',limit:'20mb'}),async(req,res)=>res.json({ok:true,file:await files.upload(user.sub,decodeURIComponent(req.get('x-file-name')),req.get('x-file-content-type'),req.body)}));
+  app.use('/api/media-studio',createMediaStudioRouter({verifyAccessToken:()=>user,validateAccountPrincipal:async u=>u},new MediaStudioService({files})));
+  app.get('/api/files', (req, res) => res.json({ ok: true, files: [...store.values()].map(({ body, owner, ...file }) => file) }));
+  app.get('/api/files/:id/preview', (req, res) => { const file = store.get(req.params.id); res.type(file.contentType).send(file.body); });
+  app.use('/api/studio', createCreativeStudioRouter({ verifyAccessToken: () => user, validateAccountPrincipal: async u => u }, studio));
+  const scripts = ['voice-window-catalog.js', 'panthorium-window-base.js', 'window-theme-ui.js', 'workspace-ui.js', 'start-menu-ui.js', 'office-suite-core.js', 'office-suite-ui.js', 'studio-editor-ui.js', 'creative-editors-ui.js', 'creative-studio-ui.js'];
+  for (const name of [...scripts, 'panthorium-window-base.css', 'workspace-ui.css', 'panthorium-logo.svg']) app.get('/' + name, (req, res) => res.sendFile(path.join(__dirname, '..', name)));
+  app.get('/', (req, res) => res.type('html').send(`<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/panthorium-window-base.css"><link rel="stylesheet" href="/workspace-ui.css"><style>html,body{margin:0;height:100%;background:#030912;font-family:system-ui}#windows{height:100%;position:relative}</style><body><div id="windows"></div><script>window.OS={state:{user:${JSON.stringify(user)}},config:{accessToken:'test'}};</script>${scripts.map(s => '<script src="/' + s + '"></script>').join('')}<script>window.createWindow=(id,title,content,options)=>{const w=PanthoriumWindow.create({id,title,content,...options});PanthoriumWorkspace.apply(w);return w};window.closeWindow=id=>PanthoriumWindow.close(id);window.PanthoriumWindowManager={restore:id=>PanthoriumWindow.focus(id)};</script></body></html>`));
+  const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));let browser;
+  try{
+    browser=await chromium.launch({headless:true,args:['--no-sandbox']});const page=await browser.newPage({viewport:{width:1600,height:1000},reducedMotion:'reduce'}),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(15000);await page.goto('http://127.0.0.1:'+server.address().port);
+    const shot=async name=>{if(process.env.PANTHORIUM_QA_DIR){fs.mkdirSync(process.env.PANTHORIUM_QA_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.PANTHORIUM_QA_DIR,'inline-'+name+'.png')});}};
+    const switchTab=async name=>{await page.getByRole('tab',{name,exact:true}).click();};
+    const open=async id=>{await page.locator('[data-editor-files]').selectOption(id);await page.locator('[data-editor-open]').click();};
+    const host=kind=>page.locator('[data-workspace-kind="'+kind+'"]');
+    await page.evaluate(()=>PanthoriumCreativeStudio.open('image'));await page.waitForFunction(()=>document.querySelector('[data-editor-files]')?.options.length>1);await open(picture.id);
+    const img=host('image');await page.waitForFunction(()=>document.querySelector('[data-media-editor="image"] canvas')?.width===800);
+    await img.locator('[data-tool="text"]').click();await img.getByLabel('ข้อความบนภาพ',{exact:true}).fill('PANTHORIUM\nแก้ไขในหน้านี้');await img.getByLabel('ข้อความบนภาพ',{exact:true}).press('Tab');assert.equal(await img.locator('[data-layer-id]').count(),2);
+    await img.getByLabel('ความทึบ',{exact:true}).fill('0.8');await img.getByLabel('ความทึบ',{exact:true}).dispatchEvent('change');
+    await img.getByRole('button',{name:'บันทึกภาพ',exact:true}).click();await page.waitForFunction(()=>document.querySelector('[data-media-editor="image"] [role=status]').textContent.includes('บันทึก ภาพใหม่.png แล้ว'));
+    assert([...store.values()].some(f=>f.name==='ภาพใหม่.png'&&f.body.length>png.length));await shot('image-desktop');
+    await switchTab('วิดีโอ');await open(clip.id);const vid=host('video');await vid.locator('[data-clip-index="0"]').waitFor();
+    await vid.getByLabel('ตำแหน่งเล่นบนไทม์ไลน์',{exact:true}).fill('1');await vid.getByLabel('ตำแหน่งเล่นบนไทม์ไลน์',{exact:true}).dispatchEvent('input');await vid.getByRole('button',{name:'✂ แบ่งคลิป',exact:true}).click();assert.equal(await vid.locator('[data-clip-index]').count(),2);
+    await vid.getByLabel('ย้อนกลับวิดีโอ',{exact:true}).click();assert.equal(await vid.locator('[data-clip-index]').count(),1);await vid.getByLabel('ทำซ้ำวิดีโอ',{exact:true}).click();assert.equal(await vid.locator('[data-clip-index]').count(),2);
+    await vid.getByLabel('ความเร็ว',{exact:true}).fill('2');await vid.getByLabel('ความเร็ว',{exact:true}).press('Tab');await vid.getByLabel('คำบรรยาย SRT',{exact:true}).fill('1\n00:00:00,000 --> 00:00:00,400\nPANTHORIUM');await vid.getByLabel('คำบรรยาย SRT',{exact:true}).press('Tab');await shot('video-desktop');
+    await vid.getByRole('button',{name:'ส่งออก MP4',exact:true}).click();await vid.getByRole('button',{name:'ดาวน์โหลด MP4',exact:true}).waitFor();assert([...store.values()].some(f=>f.name==='วิดีโอใหม่.mp4'&&f.body.length>0));
+    await switchTab('เอกสาร');await open(doc.id);const docHost=host('document');await docHost.locator('[data-text-index="0"]').fill('PROJECT / เอกสารในหน้าเดียว');await docHost.getByLabel('แบบอักษร',{exact:true}).selectOption('Tahoma');await docHost.getByRole('tab',{name:'แทรก',exact:true}).click();const imageChooser=page.waitForEvent('filechooser');await docHost.getByRole('button',{name:'＋ รูปภาพ',exact:true}).click();await (await imageChooser).setFiles({name:'illustration.png',mimeType:'image/png',buffer:png});await docHost.locator('.po-paper img').waitFor();await docHost.getByRole('button',{name:'＋ ย่อหน้า',exact:true}).click();const appended=docHost.locator('[data-text-index]').last();await appended.fill('ย่อหน้าใหม่แก้ได้ทันที');await shot('document-desktop');
+    await switchTab('ตาราง');await open(sheet.id);const book=host('spreadsheet');await book.locator('[data-cell="A5"]').focus();await book.locator('[data-cell="A5"]').evaluate(n=>{const data=new DataTransfer();data.setData('text/plain','ใหม่\t120\nเพิ่ม\t230');n.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,clipboardData:data}));});assert.equal(await book.locator('[data-cell="B6"]').inputValue(),'230');await book.locator('[data-undo]').click();assert.equal(await book.locator('[data-cell="B6"]').inputValue(),'');await book.locator('[data-redo]').click();assert.equal(await book.locator('[data-cell="B6"]').inputValue(),'230');
+    page.once('dialog',d=>d.accept('สรุป'));await book.getByRole('button',{name:'＋ ชีต',exact:true}).click();await book.locator('[data-cell="A1"]').fill('42');await book.locator('[data-cell="A1"]').press('Tab');assert.equal(await book.locator('[data-cell="A1"]').inputValue(),'42');await shot('spreadsheet-desktop');
+    await switchTab('งานนำเสนอ');await open(deck.id);const slides=host('presentation');await slides.getByRole('tab',{name:'แทรก',exact:true}).click();page.once('dialog',d=>d.accept('สไลด์เพิ่มทันที'));await slides.getByRole('button',{name:'＋ สไลด์',exact:true}).click();await slides.locator('.po-slide [data-text-index]').first().fill('สไลด์ใหม่พร้อมแก้');await slides.getByLabel('ซ้าย %',{exact:true}).fill('12');await slides.getByRole('button',{name:'ใช้ตำแหน่ง / ขนาด',exact:true}).click();await slides.getByRole('tab',{name:'มุมมอง',exact:true}).click();await slides.getByRole('button',{name:'นำเสนอ',exact:true}).click();assert(await slides.getByRole('dialog',{name:'นำเสนอสไลด์'}).isVisible());await page.keyboard.press('ArrowLeft');await page.keyboard.press('Escape');await shot('slides-desktop');
+    await page.evaluate(id=>PanthoriumStudioEditor.open(id),doc.id);assert.equal(await docHost.locator('[data-text-index]').last().textContent(),'ย่อหน้าใหม่แก้ได้ทันที','external edit actions return to the retained inline editor');
+    assert.equal(await page.locator('.window').count(),1,'all five editors and external edit actions stay in the original window');
+    await switchTab('รูปภาพ');assert.equal(await img.locator('[data-layer-id]').count(),2,'image layers survive tab changes');await switchTab('เอกสาร');assert.equal(await docHost.locator('[data-text-index]').last().textContent(),'ย่อหน้าใหม่แก้ได้ทันที','unsaved Office edits survive tab changes');
+    for(const kind of ['document','spreadsheet','presentation']){
+      await switchTab({document:'เอกสาร',spreadsheet:'ตาราง',presentation:'งานนำเสนอ'}[kind]);const pane=host(kind);await pane.locator('[data-save]').click();await pane.locator('[data-saved]').getByRole('button',{name:'เปิดฉบับแก้ไขต่อ',exact:true}).waitFor().catch(async e=>{console.error('Save status',kind,await pane.locator('[data-status]').textContent());await shot('save-failed');throw e;});
+    }
+    const savedDoc=[...store.values()].filter(f=>/edited\.docx$/.test(f.name)).at(-1),savedSheet=[...store.values()].filter(f=>/edited\.xlsx$/.test(f.name)).at(-1),savedDeck=[...store.values()].filter(f=>/edited\.pptx$/.test(f.name)).at(-1);
+    assert(savedDoc&&savedSheet&&savedDeck,'all native formats persisted');assert.equal((await studio.editor.read(user,savedDoc.id)).media.length,1);assert((await studio.editor.read(user,savedDoc.id)).blocks.some(b=>b.text==='ย่อหน้าใหม่แก้ได้ทันที'));assert.equal((await studio.editor.read(user,savedSheet.id)).sheets[1].cells.find(c=>c.cell==='A1').value,42);assert((await studio.editor.read(user,savedDeck.id)).blocks.some(b=>b.text==='สไลด์ใหม่พร้อมแก้'&&Math.abs(b.geometry.x-12)<.01));
+    await page.setViewportSize({width:390,height:844});await switchTab('รูปภาพ');await shot('image-mobile');assert(!(await img.locator('.ce-inspector').isVisible()));assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+    await img.getByRole('button',{name:'เลเยอร์ / ปรับแต่ง',exact:true}).click();assert(await img.locator('.ce-inspector').isVisible());await img.getByRole('button',{name:'เลเยอร์ / ปรับแต่ง',exact:true}).click();assert(!(await img.locator('.ce-inspector').isVisible()));
+    await switchTab('วิดีโอ');await shot('video-mobile');assert(!(await vid.locator('.ce-inspector').isVisible()));assert(await vid.locator('video').isVisible());await vid.getByRole('button',{name:'ปรับคลิป / คำบรรยาย',exact:true}).click();assert(await vid.locator('.ce-inspector').isVisible());await vid.getByRole('button',{name:'ปรับคลิป / คำบรรยาย',exact:true}).click();assert(!(await vid.locator('.ce-inspector').isVisible()));
+    await switchTab('ตาราง');await shot('sheet-mobile');assert(await book.locator('.po-sheet').isVisible());
+    page.once('dialog',d=>d.dismiss());await page.getByRole('button',{name:'ปิดหน้าต่าง',exact:true}).click();assert.equal(await page.locator('.window').count(),1,'cancelled close keeps unsaved project');
+    await page.evaluate(()=>{OS.state.user={sub:'guest:new',roles:['guest'],permissions:[]};window.dispatchEvent(new Event('panthorium:auth-changed'));});assert.equal(await page.locator('[data-media-editor],[data-studio-editor]').count(),0);assert.deepEqual(errors,[]);
+    console.log('PASS inline Chromium: one window/five retained editors, image layers and PNG save, video split/undo/speed/subtitle/actual export, multi-cell paste/atomic undo, new sheet/slide edits, native save/reopen, responsive layout, slideshow and account cleanup');
+  }finally{if(browser)await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}
+})().catch(e=>{console.error(e);process.exitCode=1;});

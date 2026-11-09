@@ -207,6 +207,11 @@
     const rec = store.get(id);
     if (!rec) return;
 
+    if (rec.el && typeof global.CustomEvent === 'function') {
+      const event = new global.CustomEvent('panthorium:before-window-close', { cancelable: true });
+      rec.el.dispatchEvent(event);
+      if (event.defaultPrevented) return false;
+    }
     if (typeof rec.onClose === 'function') {
       try { rec.onClose(); } catch (_) {}
     }

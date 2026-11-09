@@ -109,6 +109,8 @@ jobs:
           node test/social-watch-browser.js
           node test/social-tv-browser.js
           node test/office-suite-browser.js
+          node test/creative-workspace-browser.js
+          node test/creative-inline-browser.js
           node test/work-assistant-browser.js
       - name: Speaker service contract tests
         run: |

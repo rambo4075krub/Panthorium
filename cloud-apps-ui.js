@@ -84,8 +84,8 @@
     style.textContent = `
       #sm-apps [data-start-group] .sm-app[data-search-hidden="true"]{display:none!important}
       #sm-apps [data-start-group]{flex:none} #sm-apps [data-start-group] .sm-app{width:100%;text-align:left}
-      [data-cloud-apps]{height:100%;overflow:auto;padding:18px;box-sizing:border-box;color:var(--text);font:14px/1.55 inherit}
-      [data-cloud-apps] *{box-sizing:border-box} [data-cloud-apps] h2{margin:0 0 5px;font-size:22px}
+      [data-cloud-apps]{height:100%;overflow:auto;padding:12px;box-sizing:border-box;color:var(--text);font:14px/1.55 inherit}
+      [data-cloud-apps] *{box-sizing:border-box} [data-cloud-apps] h2{margin:0 0 5px;font-size:18px}
       [data-cloud-apps] p{margin:7px 0} [data-cloud-apps] small{color:var(--text-dim);line-height:1.55}
       [data-cloud-apps] label{display:grid;gap:5px;margin:10px 0} [data-cloud-apps] textarea,[data-cloud-apps] input,[data-cloud-apps] select{width:100%;padding:10px;font:inherit}
       [data-cloud-apps] textarea{resize:vertical} [data-cloud-apps] button{padding:9px 12px;font:inherit;cursor:pointer}
@@ -136,7 +136,7 @@
   }
   function markup() {
     return `<div data-cloud-apps>
-      <header><small>PANTHORIUM CLOUD APPS</small><h2 data-title>ผู้ช่วยตามบริบท</h2><p data-goal></p></header>
+      <header><h2 data-title>ผู้ช่วยตามบริบท</h2><p data-goal></p></header>
       <label>เลือกชุดผู้ช่วย<select data-pack aria-label="ชุดผู้ช่วย"></select></label>
       <div data-pt-card><strong>สร้างร่างจากข้อมูลที่คุณให้</strong><p data-readiness></p><small>ยังไม่เชื่อมข้อมูลภายนอกหรือสั่งอุปกรณ์อัตโนมัติ ทุกผลลัพธ์ต้องตรวจทานก่อนนำไปใช้</small></div>
       <p data-status role="status" aria-live="polite"></p><progress data-progress aria-label="กำลังทำงานบน Cloud" hidden></progress>
