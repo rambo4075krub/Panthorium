@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const { JSDOM } = require('jsdom');
 const dom = new JSDOM('<body><div id="windows"></div></body>', { runScripts: 'outside-only', pretendToBeVisual: true });
 const w = dom.window;
+const frames = [];
+w.requestAnimationFrame = callback => { frames.push(callback); return frames.length; };
 w.eval(fs.readFileSync('panthorium-window-base.js', 'utf8'));
 const state = { windows: new w.Map(), zCounter: 10030 };
 const manager = {
@@ -15,6 +17,9 @@ const manager = {
 w.PanthoriumWindow.connectShell(state, manager);
 const api = w.PanthoriumWindow;
 const native = api.create({ id: 'notes', title: 'Notes', content: '<input value="draft">' });
+native.querySelector('input').focus();
+for (const frame of frames.splice(0)) frame(0);
+assert.equal(w.document.activeElement, native.querySelector('input'), 'deferred window focus preserves a control selected before the first paint');
 assert.equal(state.windows.get('notes').el, native);
 api.minimize('notes'); api.focus('notes');
 assert.equal(native.querySelector('input').value, 'draft');
@@ -41,6 +46,6 @@ const style = w.document.createElement('style'); style.textContent = css; w.docu
 assert.equal(w.getComputedStyle(native.querySelector('.win-btn.close')).borderRadius, '50%');
 const shell = fs.readFileSync('sentinel.html', 'utf8');
 assert(shell.indexOf('/panthorium-window-base.css?v=workspace-ux-20261015') < shell.indexOf('</head>'));
-assert(shell.indexOf('/panthorium-window-base.js?v=4') < shell.indexOf('const OS ='));
+assert(shell.indexOf('/panthorium-window-base.js?v=5') < shell.indexOf('const OS ='));
 dom.window.close();
 console.log('Base Window: shared state, native/external controls, restore and draft preservation passed');
