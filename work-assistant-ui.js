@@ -88,9 +88,9 @@
   }
   function markup() { return `<div data-work>
     <style>
-    [data-work]{height:100%;overflow:auto;padding:22px;background:var(--bg,#0d121b);color:var(--text,#f2f4f8);font:14px/1.65 system-ui,sans-serif;box-sizing:border-box}
-    [data-work] *{box-sizing:border-box}[data-work] h1{font-size:26px;margin:0}[data-work] h2{font-size:18px;margin:0 0 12px}[data-work] h3{font-size:15px;margin:8px 0}[data-work] p{margin:7px 0}
-    [data-work] header,.wa-actions,.wa-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}[data-work] header{justify-content:space-between;margin-bottom:18px}
+    [data-work]{height:100%;overflow:auto;padding:12px;background:var(--bg,#0d121b);color:var(--text,#f2f4f8);font:14px/1.65 system-ui,sans-serif;box-sizing:border-box}
+    [data-work] *{box-sizing:border-box}[data-work] h1{font-size:18px;margin:0}[data-work] h2{font-size:18px;margin:0 0 12px}[data-work] h3{font-size:15px;margin:8px 0}[data-work] p{margin:7px 0}
+    [data-work] header,.wa-actions,.wa-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}[data-work] header{justify-content:space-between;margin-bottom:10px}
     [data-work] button,[data-work] input,[data-work] select,[data-work] textarea{font:inherit;color:inherit;background:var(--panel,#17202e);border:1px solid #596477;border-radius:9px;padding:10px;min-height:44px}
     [data-work] button{cursor:pointer}[data-work] button:disabled{opacity:.5;cursor:wait}[data-work] :focus-visible{outline:3px solid #ffc084;outline-offset:2px}[data-work] .wa-primary{background:#ce7338;color:#fff;border-color:#fca56c}
     [data-work] input:not([type=checkbox]),[data-work] textarea,[data-work] select{width:100%}[data-work] input[type=checkbox]{width:20px;min-height:20px;accent-color:#f5a063}
@@ -103,7 +103,7 @@
     [data-work] dialog{color:inherit;background:#121b29;border:1px solid #697c93;border-radius:14px;width:min(560px,94vw);max-height:88vh;overflow:auto}[data-work] dialog::backdrop{background:#0009}
     [data-work] [hidden]{display:none!important}@media(max-width:760px){[data-work]{padding:12px}[data-work] .wa-grid{grid-template-columns:1fr}[data-work] h1{font-size:22px}[data-work] section{padding:12px}}
     </style>
-    <header><div><h1>ผู้ช่วยงาน</h1><p class="wa-muted">อ่านไฟล์ ร่างเอกสาร และติดตามกำหนดส่ง</p></div><div class="wa-actions"><button data-work-new type="button">งานใหม่</button><button data-work-voice type="button">สั่งด้วยเสียง</button><button data-work-refresh type="button">โหลดล่าสุด</button></div></header>
+    <header><div><h1 title="อ่านไฟล์ ร่างเอกสาร และติดตามกำหนดส่ง">ผู้ช่วยงาน</h1></div><div class="wa-actions"><button data-work-new type="button">งานใหม่</button><button data-work-voice type="button">สั่งด้วยเสียง</button><button data-work-refresh type="button">โหลดล่าสุด</button></div></header>
     <div class="wa-row"><label style="flex:1">ค้นหาแฟ้มงาน<input data-work-search placeholder="ชื่อโครงการ ลูกค้า หรือข้อความในงาน"></label><label style="flex:1">แฟ้มงาน<select data-work-projects aria-label="เลือกแฟ้มงาน"></select></label></div>
     <p data-work-status class="wa-status" role="status" aria-live="polite">กำลังโหลดแฟ้มงาน</p>
     <div data-work-conflict hidden class="wa-card"><p>ร่างบนหน้าจอยังอยู่ การบันทึกอัตโนมัติหยุดจนกว่าจะจัดการฉบับที่ต่างกัน</p><div class="wa-actions"><button data-work-copy type="button">เก็บร่างนี้เป็นงานใหม่</button><button data-work-reload type="button">โหลดฉบับบนระบบ</button></div></div>

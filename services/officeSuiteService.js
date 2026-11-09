@@ -5,6 +5,7 @@ const {xmlMatches,xmlReplace,xmlReplaceSelected,xmlDirectMatches,xmlParagraphMat
 const path=require('node:path');
 const core=require('../office-suite-core');
 const pageText=require('./officePageText');
+const images=require('./officeImageService');
 const charts=require('./officeChartService');
 const tables=require('./officeTableService');
 const revisions=require('./officeRevisionService');
@@ -18,21 +19,25 @@ const prop=(s,tag,value)=>{
   const matches=xmlDirectMatches(s,tag);return matches.length?xmlReplaceSelected(s,matches,value,true):xmlInsertChild(s,value,true);
 };
 const tagval=(s,t,k='w:val')=>attr(tags(s,t)[0]||'',k);
-const TYPES=['add_slide','reorder_slide','set_formula','format_text','format_cell','move_text','slide_background','insert_table','add_slide_text'];
-const styleKeys=['bold','italic','underline','fontSize','color','align','numberFormat'];
+const TYPES=['add_sheet','add_slide','reorder_slide','set_formula','format_text','format_cell','move_text','slide_background','insert_table','add_slide_text'];
+const styleKeys=['bold','italic','underline','fontSize','color','align','numberFormat','fontFamily','background','wrap'];
 function validateStyle(s,cell=false){
-  if(!s||Array.isArray(s)||typeof s!=='object'||!Object.keys(s).length||Object.keys(s).some(k=>!styleKeys.includes(k)||!cell&&k==='numberFormat'))fail('invalid_office_style');
+  if(!s||Array.isArray(s)||typeof s!=='object'||!Object.keys(s).length||Object.keys(s).some(k=>!styleKeys.includes(k)||!cell&&['numberFormat','wrap'].includes(k)))fail('invalid_office_style');
   for(const k of ['bold','italic','underline'])if(s[k]!=null&&typeof s[k]!=='boolean')fail('invalid_office_style');
+  if(s.fontFamily!=null&&(typeof s.fontFamily!=='string'||s.fontFamily.length>64||!s.fontFamily.trim()||/[<>&"\x00-\x1f]/.test(s.fontFamily)))fail('invalid_office_style');
+  if(s.background!=null&&!/^[0-9a-f]{6}$/i.test(s.background))fail('invalid_office_style');
+  if(s.wrap!=null&&typeof s.wrap!=='boolean')fail('invalid_office_style');
   if(s.fontSize!=null&&(!Number.isInteger(s.fontSize)||s.fontSize<8||s.fontSize>96))fail('invalid_office_style');
   if(s.color!=null&&!/^[0-9a-f]{6}$/i.test(s.color))fail('invalid_office_style');
   if(s.align!=null&&!['left','center','right','justify'].includes(s.align))fail('invalid_office_style');
   if(s.numberFormat!=null&&!['general','integer','decimal','percent'].includes(s.numberFormat))fail('invalid_office_style');
 }
 function validateOperation(op){
-  if(pageText.validateOperation(op)||charts.validateOperation(op)||tables.validateOperation(op)||revisions.validateOperation(op)||pivots.validateOperation(op))return true;
+  if(images.validateOperation(op)||pageText.validateOperation(op)||charts.validateOperation(op)||tables.validateOperation(op)||revisions.validateOperation(op)||pivots.validateOperation(op))return true;
   if(!TYPES.includes(op?.type))return false;
-  const keys={add_slide:['type','value'],reorder_slide:['type','page','toPage'],set_formula:['type','sheet','cell','value'],format_cell:['type','sheet','cell','style'],format_text:['type','index','style'],move_text:['type','index','x','y','width','height'],slide_background:['type','page','color'],insert_table:['type','rows'],add_slide_text:['type','page','value']}[op.type];
+  const keys={add_sheet:['type','name'],add_slide:['type','value'],reorder_slide:['type','page','toPage'],set_formula:['type','sheet','cell','value'],format_cell:['type','sheet','cell','style'],format_text:['type','index','style'],move_text:['type','index','x','y','width','height'],slide_background:['type','page','color'],insert_table:['type','rows'],add_slide_text:['type','page','value']}[op.type];
   if(Object.keys(op).length!==keys.length||!keys.every(k=>Object.hasOwn(op,k)))fail('invalid_editor_operation');
+  if(op.type==='add_sheet'&&(typeof op.name!=='string'||!op.name.trim()||op.name.length>31||/[\\/?*\[\]:\x00-\x1f]/.test(op.name)||op.name.startsWith("'")||op.name.endsWith("'")))fail('invalid_editor_sheet_name');
   if(keys.includes('style'))validateStyle(op.style,op.type==='format_cell');
   if(keys.includes('index')&&(!Number.isInteger(op.index)||op.index<0||op.index>1999))fail('invalid_editor_text');
   if(keys.includes('toPage')&&(!Number.isInteger(op.toPage)||op.toPage<1||op.toPage>100))fail('invalid_editor_page');
@@ -47,12 +52,12 @@ function validateOperation(op){
   return true;
 }
 function textStyle(p,prefix){
-  if(prefix==='w')return {bold:!!tags(p,'w:b').length&&tagval(p,'w:b')!=='0',italic:!!tags(p,'w:i').length&&tagval(p,'w:i')!=='0',underline:!!tags(p,'w:u').length&&tagval(p,'w:u')!=='none',fontSize:Number(tagval(p,'w:sz'))/2||12,color:tagval(p,'w:color')||'20252C',align:tagval(p,'w:jc')||'left'};
-  const r=tags(p,'a:rPr')[0]||'';return {bold:attr(r,'b')==='1',italic:attr(r,'i')==='1',underline:attr(r,'u')==='sng',fontSize:Number(attr(r,'sz'))/100||24,color:tagval(r,'a:srgbClr','val')||'20252C',align:({l:'left',ctr:'center',r:'right',just:'justify'})[attr(tags(p,'a:pPr')[0]||'','algn')]||'left'};
+  if(prefix==='w')return {fontFamily:tagval(p,'w:rFonts','w:ascii')||'',background:tagval(p,'w:shd','w:fill')||'',bold:!!tags(p,'w:b').length&&tagval(p,'w:b')!=='0',italic:!!tags(p,'w:i').length&&tagval(p,'w:i')!=='0',underline:!!tags(p,'w:u').length&&tagval(p,'w:u')!=='none',fontSize:Number(tagval(p,'w:sz'))/2||12,color:tagval(p,'w:color')||'20252C',align:tagval(p,'w:jc')||'left'};
+  const r=tags(p,'a:rPr')[0]||'';return {fontFamily:tagval(r,'a:latin','typeface')||'',background:tagval(tags(r,'a:highlight')[0]||'','a:srgbClr','val')||'',bold:attr(r,'b')==='1',italic:attr(r,'i')==='1',underline:attr(r,'u')==='sng',fontSize:Number(attr(r,'sz'))/100||24,color:tagval(r,'a:srgbClr','val')||'20252C',align:({l:'left',ctr:'center',r:'right',just:'justify'})[attr(tags(p,'a:pPr')[0]||'','algn')]||'left'};
 }
 function shapeFor(xml,ordinal){
   const paragraph=xmlMatches(xml,'a:p',true)[ordinal];if(!paragraph)return null;
-  let index=0;for(const m of xmlMatches(xml,'p:sp',true)){if(paragraph.index>=m.index&&paragraph.index<m.index+m[0].length)return {index,shape:m[0]};index++;}return null;
+  let index=0;for(const m of xmlMatches(xml,'p:sp',true)){if(paragraph.index>=m.index&&paragraph.index<m.index+m[0].length)return {index,shape:m[0],order:m.index};index++;}return null;
 }
 function visualContent(entries,kind,model){
   model.media=[];let bytesUsed=0;
@@ -78,7 +83,7 @@ function visualContent(entries,kind,model){
       if(!body||!/^\w+\/media\//.test(name)||body.length>2*1024*1024||bytesUsed+body.length>4*1024*1024){model.mediaOmitted=true;continue;}
       let info;try{info=_internals.imageInfo({name,body});}catch(_){model.mediaOmitted=true;continue;}
       if(!['image/png','image/jpeg'].includes(info.contentType)){model.mediaOmitted=true;continue;}
-      const media={page:page+1,dataUrl:'data:'+info.contentType+';base64,'+body.toString('base64'),width:info.width,height:info.height};
+      const media={page:page+1,order:pic.index,dataUrl:'data:'+info.contentType+';base64,'+body.toString('base64'),width:info.width,height:info.height};
       if(kind==='document')media.beforeIndex=model.blocks.find(b=>b.file===file&&paragraphs[b.ordinal]?.index>pic.index)?.index??null;
       else {const transform=tags(tags(pic[0],'p:spPr')[0]||'','a:xfrm')[0]||'',off=tags(transform,'a:off')[0]||'',ext=tags(transform,'a:ext')[0]||'';
         if(!transform||/<p:grpSp\b/.test(xml)){model.mediaOmitted=true;continue;}
@@ -93,7 +98,7 @@ function enrich(entries,kind,model){
   if(kind==='spreadsheet'){
     const styles=entries['xl/styles.xml']?.toString()||'',fonts=tags(tags(styles,'fonts')[0]||'','font'),xfs=tags(tags(styles,'cellXfs')[0]||'','xf');
     for(const s of model.sheets){s.hasDrawing=xmlMatches(entries[s.file].toString(),'drawing').length>0;const cellMap=new Map(tags(entries[s.file].toString(),'c').map((x,i)=>[attr(x,'r')||s.cells[i]?.cell,x]));for(const c of s.cells){const xml=cellMap.get(c.cell),xf=xfs[Number(attr(xml||'','s'))]||'',font=fonts[Number(attr(xf,'fontId'))]||'';
-      c.style={bold:!!tags(font,'b').length,italic:!!tags(font,'i').length,underline:!!tags(font,'u').length,fontSize:Number(tagval(font,'sz','val'))||12,color:tagval(font,'color','rgb').slice(-6)||'20252C',align:attr(tags(xf,'alignment')[0]||'','horizontal')||'left',numberFormat:({'1':'integer','2':'decimal','9':'percent','10':'percent'})[attr(xf,'numFmtId')]||'general'};
+      c.style={fontFamily:tagval(font,'name','val')||'',background:tagval(tags(tags(styles,'fills')[0]||'','fill')[Number(attr(xf,'fillId'))]||'','fgColor','rgb').slice(-6)||'',wrap:attr(tags(xf,'alignment')[0]||'','wrapText')==='1',bold:!!tags(font,'b').length,italic:!!tags(font,'i').length,underline:!!tags(font,'u').length,fontSize:Number(tagval(font,'sz','val'))||12,color:tagval(font,'color','rgb').slice(-6)||'20252C',align:attr(tags(xf,'alignment')[0]||'','horizontal')||'left',numberFormat:({'1':'integer','2':'decimal','9':'percent','10':'percent'})[attr(xf,'numFmtId')]||'general'};
     }}const state=pivots.describe(entries);model.pivotState={importedPivotCount:state.importedPivotCount,...(state.warning?{warning:state.warning}:{})};for(const sheet of model.sheets){const output=state.outputs.find(p=>p.file===sheet.file);if(output){const {file,...meta}=output;sheet.pivotOutput=meta;}sheet.readonly=!!output||state.importedPivotCount>0;}return model;
   }
   const prefix=kind==='document'?'w':'a';
@@ -102,7 +107,7 @@ function enrich(entries,kind,model){
   for(const b of model.blocks){if(!documents.has(b.file)){const xml=entries[b.file].toString();documents.set(b.file,xml);paragraphs.set(b.file,xmlMatches(xml,prefix+':p',true).map(m=>m[0]));}const xml=documents.get(b.file),p=paragraphs.get(b.file)[b.ordinal]||'',own=xmlReplaceSelected(p,xmlMatches(p,prefix+':p',true).slice(1),'');const inherited=kind==='document'?styles.find(t=>attr(t,'w:styleId')===tagval(own,'w:pStyle'))||'':'';b.style=textStyle(own+inherited,prefix);
     if(kind==='presentation'){
       const shape=shapeFor(xml,b.ordinal);if(shape){const transform=tags(tags(shape.shape,'p:spPr')[0]||'','a:xfrm')[0]||'',off=tags(transform,'a:off')[0]||'',ext=tags(transform,'a:ext')[0]||'';
-        b.shapeIndex=shape.index;b.geometry=transform&&!/<p:grpSp\b/.test(xml)?{x:Number(attr(off,'x'))/width*100,y:Number(attr(off,'y'))/height*100,width:Number(attr(ext,'cx'))/width*100,height:Number(attr(ext,'cy'))/height*100}:null;
+        b.shapeIndex=shape.index;b.order=shape.order;b.geometry=transform&&!/<p:grpSp\b/.test(xml)?{x:Number(attr(off,'x'))/width*100,y:Number(attr(off,'y'))/height*100,width:Number(attr(ext,'cx'))/width*100,height:Number(attr(ext,'cy'))/height*100}:null;
       }
     }
   }
@@ -114,12 +119,16 @@ function formatParagraph(p,style,prefix){
     if(style.align){let pr=xmlDirectMatches(p,'w:pPr')[0]?.[0]||'<w:pPr></w:pPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></w:pPr>';pr=replaceTag(pr,'w:jc','<w:jc w:val="'+style.align+'"/>');p=prop(p,'w:pPr',pr);}
     return xmlReplaceSelected(p,xmlParagraphMatches(p,'w:r','w'),r=>{let pr=xmlDirectMatches(r,'w:rPr')[0]?.[0]||'<w:rPr></w:rPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></w:rPr>';
       for(const [k,t]of [['bold','w:b'],['italic','w:i'],['underline','w:u'],['fontSize','w:sz'],['color','w:color']])if(style[k]!=null)pr=replaceTag(pr,t,`<${t} w:val="${k==='fontSize'?style[k]*2:k==='underline'?(style[k]?'single':'none'):typeof style[k]==='boolean'?+style[k]:style[k]}"/>`);
+      if(style.fontFamily)pr=replaceTag(pr,'w:rFonts','<w:rFonts w:ascii="'+escape(style.fontFamily)+'" w:hAnsi="'+escape(style.fontFamily)+'" w:cs="'+escape(style.fontFamily)+'" w:eastAsia="'+escape(style.fontFamily)+'"/>');
+      if(style.background)pr=replaceTag(pr,'w:shd','<w:shd w:val="clear" w:fill="'+style.background+'"/>');
       if(style.fontSize)pr=replaceTag(pr,'w:szCs','<w:szCs w:val="'+style.fontSize*2+'"/>');return prop(r,'w:rPr',pr);
     });
   }
   if(style.align){let pr=xmlDirectMatches(p,'a:pPr')[0]?.[0]||'<a:pPr/>';pr=xmlWithoutAttributes(pr,['algn']).replace('<a:pPr','<a:pPr algn="'+({left:'l',center:'ctr',right:'r',justify:'just'})[style.align]+'"');p=prop(p,'a:pPr',pr);}
   return xmlReplaceSelected(p,xmlParagraphMatches(p,'a:r','a'),r=>{let pr=xmlDirectMatches(r,'a:rPr')[0]?.[0]||'<a:rPr></a:rPr>';if(pr.endsWith('/>'))pr=pr.slice(0,-2)+'></a:rPr>';
     for(const [k,a]of [['bold','b'],['italic','i'],['underline','u'],['fontSize','sz']])if(style[k]!=null)pr=xmlWithoutAttributes(pr,[a]).replace('<a:rPr',`<a:rPr ${a}="${k==='fontSize'?style[k]*100:k==='underline'?(style[k]?'sng':'none'):+style[k]}"`);
+    if(style.fontFamily)for(const tag of ['a:latin','a:ea','a:cs'])pr=replaceTag(pr,tag,'<'+tag+' typeface="'+escape(style.fontFamily)+'"/>');
+    if(style.background)pr=replaceTag(pr,'a:highlight','<a:highlight><a:srgbClr val="'+style.background+'"/></a:highlight>');
     if(style.color)pr=replaceTag(pr,'a:solidFill','<a:solidFill><a:srgbClr val="'+style.color+'"/></a:solidFill>');return prop(r,'a:rPr',pr);
   });
 }
@@ -129,16 +138,33 @@ function formatCell(entries,op,sheet){
   const fonts=tags(tags(styles,'fonts')[0]||'','font'),xfs=tags(tags(styles,'cellXfs')[0]||'','xf');if(!fonts.length||!xfs.length||fonts.length>4000||xfs.length>4000)fail('editor_styles_unsupported');
   let xf=xfs[Number(attr(old,'s'))||0],font=fonts[Number(attr(xf,'fontId'))||0];if(!xf||!font)fail('editor_styles_unsupported');if(font.endsWith('/>'))font='<font></font>';
   for(const [k,t]of [['bold','b'],['italic','i'],['underline','u'],['fontSize','sz'],['color','color']])if(op.style[k]!=null)font=replaceTag(font,t,typeof op.style[k]==='boolean'?(op.style[k]?'<'+t+'/>':''):`<${t} ${k==='color'?'rgb':'val'}="${k==='color'?'FF'+op.style[k]:op.style[k]}"/>`);
+  if(op.style.fontFamily)font=replaceTag(font,'name','<name val="'+escape(op.style.fontFamily)+'"/>');
   const fontId=fonts.length;xf=xmlWithoutAttributes(xf,['fontId','applyFont']).replace('<xf',`<xf fontId="${fontId}" applyFont="1"`);
   if(op.style.numberFormat)xf=xmlWithoutAttributes(xf,['numFmtId','applyNumberFormat']).replace('<xf',`<xf numFmtId="${({general:0,integer:1,decimal:2,percent:10})[op.style.numberFormat]}" applyNumberFormat="1"`);
+  if(op.style.background){const fills=tags(tags(styles,'fills')[0]||'','fill');if(!fills.length||fills.length>4000)fail('editor_styles_unsupported');const fill='<fill><patternFill patternType="solid"><fgColor rgb="FF'+op.style.background+'"/><bgColor indexed="64"/></patternFill></fill>';styles=xmlReplace(styles,'fills',part=>xmlWithoutAttributes(part,['count']).replace('<fills','<fills count="'+(fills.length+1)+'"').replace('</fills>',()=>fill+'</fills>'),{first:true});xf=xmlWithoutAttributes(xf,['fillId','applyFill']).replace('<xf','<xf fillId="'+fills.length+'" applyFill="1"');}
+  if(op.style.wrap!=null){if(xf.endsWith('/>'))xf=xf.slice(0,-2)+'></xf>';let alignment=tags(xf,'alignment')[0]||'<alignment/>';alignment=xmlWithoutAttributes(alignment,['wrapText']).replace('<alignment','<alignment wrapText="'+Number(op.style.wrap)+'"');xf=xmlWithoutAttributes(prop(xf,'alignment',alignment),['applyAlignment']).replace('<xf','<xf applyAlignment="1"');}
   if(op.style.align){if(xf.endsWith('/>'))xf=xf.slice(0,-2)+'></xf>';let align=tags(xf,'alignment')[0]||'<alignment/>';align=xmlWithoutAttributes(align,['horizontal']).replace('<alignment','<alignment horizontal="'+op.style.align+'"');xf=xmlWithoutAttributes(prop(xf,'alignment',align),['applyAlignment']).replace('<xf','<xf applyAlignment="1"');}
   for(const [tag,content,count]of [['fonts',font,fontId+1],['cellXfs',xf,xfs.length+1]])styles=xmlReplace(styles,tag,part=>xmlWithoutAttributes(part,['count']).replace('<'+tag,'<'+tag+' count="'+count+'"').replace('</'+tag+'>',()=>content+'</'+tag+'>'),{first:true});
   entries['xl/styles.xml']=Buffer.from(styles);xml=xml.replace(old,()=>xmlWithoutAttributes(old,['s']).replace('<c','<c s="'+xfs.length+'"'));entries[sheet.file]=Buffer.from(xml);
 }
 function apply(entries,kind,op,model){
-  if(pageText.apply(entries,kind,op)||revisions.apply(entries,kind,op,model))return true;
+  if(images.apply(entries,kind,op,model)||pageText.apply(entries,kind,op)||revisions.apply(entries,kind,op,model))return true;
   if(['insert_complex_table','insert_nested_table'].includes(op?.type)){if(kind!=='document')fail('editor_operation_type_mismatch');return tables.apply(entries,op,model);}
   if(!validateOperation(op))return false;
+  if(op.type==='add_sheet'){
+    if(kind!=='spreadsheet')fail('editor_operation_type_mismatch');
+    if(model.pivotState?.importedPivotCount)fail('editor_imported_pivot_edit_unsupported');
+    if(model.sheets.length>=32||model.sheets.some(sheet=>sheet.name.toLocaleLowerCase()===op.name.toLocaleLowerCase()))fail('invalid_editor_sheet_name');
+    let serial=1;while(entries['xl/worksheets/panthorium'+serial+'.xml'])serial++;
+    const file='xl/worksheets/panthorium'+serial+'.xml',ns='http://schemas.openxmlformats.org';
+    let workbook=entries['xl/workbook.xml'].toString(),rels=entries['xl/_rels/workbook.xml.rels'].toString(),rid='panthoriumSheet'+serial;while(rels.includes('Id="'+rid+'"'))rid+='x';
+    const sheetId=Math.max(0,...tags(workbook,'sheet').map(t=>Number(attr(t,'sheetId'))||0))+1;
+    entries[file]=Buffer.from('<worksheet xmlns="'+ns+'/spreadsheetml/2006/main"><sheetData></sheetData></worksheet>');
+    entries['xl/workbook.xml']=Buffer.from(xmlReplace(workbook,'sheets',part=>xmlInsertChild(part,'<sheet name="'+escape(op.name)+'" sheetId="'+sheetId+'" r:id="'+rid+'"/>'),{first:true}));
+    entries['xl/_rels/workbook.xml.rels']=Buffer.from(xmlInsertChild(rels,'<Relationship Id="'+rid+'" Type="'+ns+'/officeDocument/2006/relationships/worksheet" Target="worksheets/panthorium'+serial+'.xml"/>'));
+    entries['[Content_Types].xml']=Buffer.from(xmlInsertChild(entries['[Content_Types].xml'].toString(),'<Override PartName="/'+file+'" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'));
+    model.sheets.push({name:op.name,file,cells:[]});return true;
+  }
   if(op.type==='set_formula')return false; // Cell insertion uses the existing bounded writer.
   if(op.type==='format_cell'){if(kind!=='spreadsheet'||!model.sheets[op.sheet])fail('editor_operation_type_mismatch');formatCell(entries,op,model.sheets[op.sheet]);return true;}
   if(['format_text','move_text'].includes(op.type)){
@@ -159,7 +185,7 @@ function apply(entries,kind,op,model){
       if(!items[op.page-1]||!items[op.toPage-1])fail('editor_page_not_found');const [item]=items.splice(op.page-1,1);items.splice(op.toPage-1,0,item);
       presentation=xmlReplace(presentation,'p:sldIdLst','<p:sldIdLst>'+items.join('')+'</p:sldIdLst>',{first:true});entries['ppt/presentation.xml']=Buffer.from(presentation);return true;
     }
-    if(items.length>=100)fail('editor_slide_limit');
+    if(items.length>=100)fail('editor_slide_limit');if(model.blocks.length>=2000)fail('editor_file_too_complex');
     let serial=1;while(entries['ppt/slides/panthorium'+serial+'.xml'])serial++;
     const filename='ppt/slides/panthorium'+serial+'.xml',id=Math.max(255,...items.map(t=>Number(attr(t,'id'))||255))+1;
     let rels=entries['ppt/_rels/presentation.xml.rels'].toString(),rid='panthoriumSlide'+serial;while(rels.includes('Id="'+rid+'"'))rid+='x';
@@ -171,11 +197,13 @@ function apply(entries,kind,op,model){
     entries[filename]=Buffer.from(slide);entries['ppt/slides/_rels/panthorium'+serial+'.xml.rels']=Buffer.from(`<Relationships xmlns="${ns}/package/2006/relationships">${layout}</Relationships>`);
     rels=rels.replace('</Relationships>',()=>`<Relationship Id="${rid}" Type="${ns}/officeDocument/2006/relationships/slide" Target="slides/panthorium${serial}.xml"/></Relationships>`);entries['ppt/_rels/presentation.xml.rels']=Buffer.from(rels);
     presentation=presentation.replace('</p:sldIdLst>',()=>`<p:sldId id="${id}" r:id="${rid}"/></p:sldIdLst>`);entries['ppt/presentation.xml']=Buffer.from(presentation);
-    entries['[Content_Types].xml']=Buffer.from(entries['[Content_Types].xml'].toString().replace('</Types>',()=>`<Override PartName="/${filename}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`));return true;
+    entries['[Content_Types].xml']=Buffer.from(entries['[Content_Types].xml'].toString().replace('</Types>',()=>`<Override PartName="/${filename}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`));model.slideFiles.push(filename);model.blocks.push({index:model.blocks.length,page:model.slideFiles.length,file:filename,ordinal:0,text:op.value,geometry:{x:8,y:15,width:84,height:30}});return true;
   }
   if(kind!=='presentation')fail('editor_operation_type_mismatch');const file=model.slideFiles?.[op.page-1];if(!file)fail('editor_page_not_found');let xml=entries[file].toString();
   if(op.type==='slide_background'){const bg='<p:bg><p:bgPr><a:solidFill><a:srgbClr val="'+op.color+'"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>';if(xmlMatches(xml,'p:bg').length)xml=xmlReplace(xml,'p:bg',bg,{first:true});else{const parent=xmlMatches(xml,'p:cSld')[0]?.node;if(!parent||parent.selfClosing)fail('editor_office_unsupported');xml=xml.slice(0,parent.openEnd)+bg+xml.slice(parent.openEnd);}}
   if(op.type==='add_slide_text'){
+    if(model.blocks.length>=2000)fail('editor_file_too_complex');
+    model.blocks.push({index:model.blocks.length,page:op.page,file,ordinal:xmlMatches(xml,'a:p',true).length,text:op.value,geometry:{x:609600/model.slideSize.width*100,y:609600/model.slideSize.height*100,width:5486400/model.slideSize.width*100,height:914400/model.slideSize.height*100}});
     const id=Math.max(1,...tags(xml,'p:cNvPr').map(t=>Number(attr(t,'id'))||0))+1;const shape=`<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Panthorium text ${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="609600" y="609600"/><a:ext cx="5486400" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="2400"/><a:t>${escape(op.value)}</a:t></a:r></a:p></p:txBody></p:sp>`;xml=xml.replace('</p:spTree>',()=>shape+'</p:spTree>');
   }entries[file]=Buffer.from(xml);return true;
 }

@@ -75,6 +75,10 @@ function createMediaStudioRouter(authService, mediaStudio) {
     } catch (error) { next(error); }
   });
 
+  router.post('/render-timeline', auth, account, renderLimiter, async (req, res, next) => {
+    try { res.set('Cache-Control', 'private, no-store').json(await mediaStudio.renderTimeline({ ...req.body, user: req.user })); } catch (error) { next(error); }
+  });
+
   router.post('/render', auth, account, renderLimiter, async (req, res, next) => {
     try {
       const body = req.body || {};

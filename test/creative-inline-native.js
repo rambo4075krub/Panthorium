@@ -1,0 +1,53 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs/promises');
+const os=require('node:os');
+const path=require('node:path');
+const {randomUUID}=require('node:crypto');
+const {StudioEditorService}=require('../services/studioEditorService');
+const {_internals}=require('../services/officeArtifactService');
+const {MediaStudioService,runProcess}=require('../services/mediaStudioService');
+(async()=>{
+ const user={sub:randomUUID(),roles:['user'],permissions:['chat']},store=new Map();
+ const files={async upload(owner,name,contentType,body){const file={id:randomUUID(),name,contentType,size:body.length};store.set(file.id,{...file,owner,body:Buffer.from(body)});return file;},async readOwned(owner,id){const f=store.get(id);if(!f||f.owner!==owner)throw Error('file_not_found');return f;}};
+ const editor=new StudioEditorService({files});
+ const edit=async(kind,file,operations)=>{const model=await editor.read(user,file.id);const result=await editor.apply({user,pluginId:kind,input:{edit:{fileId:file.id,revision:model.revision,operations}}});return editor.read(user,result.files[0].id);};
+ const doc=await files.upload(user.sub,'note.docx','application/octet-stream',_internals.documentBuffer({title:'รายงาน',sections:[{paragraphs:['รายละเอียด']}]},[]));
+ const before=await editor.read(user,doc.id),index=before.blocks.length;
+ const savedDoc=await edit('document',doc,[{type:'append_paragraph',value:'ย่อหน้าใหม่'},{type:'set_text',index,value:'แก้ย่อหน้าใหม่ก่อนบันทึก'},{type:'format_text',index,style:{fontFamily:'Tahoma',background:'FFF2AA',fontSize:18}}]);
+ assert.equal(savedDoc.blocks.at(-1).text,'แก้ย่อหน้าใหม่ก่อนบันทึก');assert.equal(savedDoc.blocks.at(-1).style.fontFamily,'Tahoma');assert.equal(savedDoc.blocks.at(-1).style.background,'FFF2AA');
+ const sheet=await files.upload(user.sub,'book.xlsx','application/octet-stream',_internals.spreadsheetBuffer({title:'งบประมาณ',sheets:[{name:'เดิม',rows:[[1,2]]}]}));
+ const savedSheet=await edit('spreadsheet',sheet,[{type:'add_sheet',name:'ใหม่'},{type:'set_cell',sheet:1,cell:'A1',value:20},{type:'set_formula',sheet:1,cell:'B1',value:'=A1+10'},{type:'format_cell',sheet:1,cell:'A1',style:{fontFamily:'Tahoma',background:'D4EFFF',wrap:true}}]);
+ assert.equal(savedSheet.sheets.length,2);assert.equal(savedSheet.sheets[1].cells.find(c=>c.cell==='B1').value,30);assert.equal(savedSheet.sheets[1].cells[0].style.fontFamily,'Tahoma');assert.equal(savedSheet.sheets[1].cells[0].style.background,'D4EFFF');assert.equal(savedSheet.sheets[1].cells[0].style.wrap,true);
+ const deck=await files.upload(user.sub,'deck.pptx','application/octet-stream',_internals.presentationBuffer({title:'สไลด์',slides:[{title:'แรก',bullets:['เก็บต้นฉบับ']}]},[])),initial=await editor.read(user,deck.id),next=initial.blocks.length;
+ const savedDeck=await edit('presentation',deck,[{type:'add_slide',value:'สอง'},{type:'set_text',index:next,value:'แก้ทันที'},{type:'format_text',index:next,style:{fontFamily:'Tahoma',fontSize:40,color:'234567'}},{type:'move_text',index:next,x:10,y:10,width:80,height:25},{type:'add_slide_text',page:2,value:'ใหม่'},{type:'set_text',index:next+1,value:'ข้อความเพิ่มทันที'},{type:'move_text',index:next+1,x:20,y:40,width:60,height:20},{type:'reorder_slide',page:2,toPage:1}]);
+ assert.equal(savedDeck.pageCount,2);assert.equal(savedDeck.blocks[0].text,'แก้ทันที');assert.equal(savedDeck.blocks[0].geometry.x,10);assert.equal(savedDeck.blocks[0].style.fontFamily,'Tahoma');assert(savedDeck.blocks.some(b=>b.text==='ข้อความเพิ่มทันที'&&b.page===1&&b.geometry.y===40));
+ assert.equal((await editor.read(user,doc.id)).blocks.length,before.blocks.length);assert.equal((await editor.read(user,sheet.id)).sheets.length,1);
+ const count=store.size;await assert.rejects(()=>edit('spreadsheet',sheet,[{type:'add_sheet',name:'เดิม'}]));assert.equal(store.size,count);
+ await assert.rejects(()=>edit('document',doc,[{type:'format_text',index:0,style:{fontFamily:'"/><evil/>'}}]));
+ const imageBody=new (require('@resvg/resvg-js').Resvg)('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="#19bb88"/></svg>').render().asPng();
+ const picture=await files.upload(user.sub,'picture.png','image/png',imageBody);
+ const withDocImage=await edit('document',doc,[{type:'insert_image',fileId:picture.id},{type:'append_paragraph',value:'หลังภาพ'}]);assert.equal(withDocImage.media.length,1);assert.equal(withDocImage.media[0].beforeIndex,withDocImage.blocks.at(-1).index);assert.equal(withDocImage.media[0].dataUrl,'data:image/png;base64,'+imageBody.toString('base64'));
+ const withSlideImage=await edit('presentation',deck,[{type:'insert_image',fileId:picture.id,page:1,x:20,y:30,width:60,height:40}]);assert.equal(withSlideImage.media.length,1);assert.equal(withSlideImage.media[0].geometry.x,20);assert.equal(withSlideImage.media[0].geometry.height,40);
+ const foreign=await files.upload(randomUUID(),'foreign.png','image/png',imageBody),beforeReject=store.size;await assert.rejects(()=>edit('document',doc,[{type:'insert_image',fileId:foreign.id}]));assert.equal(store.size,beforeReject);
+ console.log('PASS inline Office native roundtrip: new paragraphs, sheets, slides and text editable before save; fonts, fills, wrap, formulas, ordering, immutable originals and atomic rejection');
+ const folder=await fs.mkdtemp(path.join(os.tmpdir(),'panthorium-timeline-test-'));
+ try{
+  const first=path.join(folder,'red.mp4'),second=path.join(folder,'blue.mp4');
+  await runProcess('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','color=c=red:s=320x180:r=30:d=2','-f','lavfi','-i','sine=frequency=440:duration=2','-threads','1','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest',first]);
+  await runProcess('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','color=c=blue:s=180x320:r=30:d=1.5','-threads','1','-c:v','libx264','-pix_fmt','yuv420p',second]);
+  const red=await files.upload(user.sub,'red.mp4','video/mp4',await fs.readFile(first)),blue=await files.upload(user.sub,'blue.mp4','video/mp4',await fs.readFile(second));
+  const media=new MediaStudioService({files,tempRoot:folder}),clips=[{fileId:red.id,start:.2,end:1.6,speed:2,volume:.5,fade:false},{fileId:blue.id,start:.2,end:1.2,speed:.5,volume:0,fade:false}];
+  const started=performance.now();const request={user,clips,aspect:'widescreen',name:'sequence',requestId:randomUUID()};const [output,replayed]=await Promise.all([media.renderTimeline(request),media.renderTimeline(request)]);assert.equal(replayed.file.id,output.file.id);await assert.rejects(()=>media.renderTimeline({...request,name:'changed'}),e=>e.code==='timeline_request_conflict');const elapsed=performance.now()-started;
+  const rendered=path.join(folder,'actual.mp4');await fs.writeFile(rendered,store.get(output.file.id).body);
+  const probe=JSON.parse((await runProcess('ffprobe',['-v','error','-show_streams','-show_format','-of','json',rendered])).stdout);
+  assert(Math.abs(Number(probe.format.duration)-2.7)<.15,probe.format.duration);assert.equal(probe.streams.find(s=>s.codec_type==='video').width,1280);assert(probe.streams.some(s=>s.codec_type==='audio'&&s.channels===2));
+  for(const [at,dominant]of [[.3,0],[1.3,2]]){const raw=path.join(folder,'frame-'+at+'.rgb');await runProcess('ffmpeg',['-v','error','-ss',String(at),'-i',rendered,'-vf','crop=100:100:590:310,scale=1:1','-frames:v','1','-f','rawvideo','-pix_fmt','rgb24',raw]);const pixel=await fs.readFile(raw);assert(pixel[dominant]>150&&pixel[1]<30,'timeline order and speed preserve the correct source frame');}
+  const subtitle=await media.renderTimeline({user,clips:[{...clips[0],end:.8,speed:1,fade:true}],aspect:'square',captions:'1\n00:00:00,000 --> 00:00:00,500\nTest caption',name:'captioned'});assert(subtitle.captionsIncluded);
+  const oldCount=store.size;for(const invalid of [[{...clips[0],speed:0}],[{...clips[0],fileId:'https://evil.test/a.mp4'}],Array(9).fill(clips[0]),[{...clips[0],end:1000}]])await assert.rejects(()=>media.renderTimeline({user,clips:invalid}));assert.equal(store.size,oldCount);
+  await assert.rejects(()=>media.renderTimeline({user:{...user,sub:randomUUID()},clips}));assert.equal(media.busy,false);
+  media.busy=true;await assert.rejects(()=>media.renderTimeline({user,clips}),e=>e.code==='media_worker_busy');media.busy=false;
+  assert.deepEqual((await fs.readdir(folder)).filter(n=>n.startsWith('panthorium-timeline-')),[]);
+  console.log('PASS actual FFmpeg timeline: trim, speed, ordered clips, silent input/audio normalization, subtitles, fades, ownership, limits, worker exclusion and cleanup; 2.7s export in '+(elapsed/1000).toFixed(2)+'s on TEST runner (not user hardware)');
+ }finally{await fs.rm(folder,{recursive:true,force:true});}
+})().catch(e=>{console.error(e);process.exitCode=1;});

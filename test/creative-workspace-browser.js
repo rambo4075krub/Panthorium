@@ -1,0 +1,73 @@
+'use strict';
+// Real shared window shell + editor APIs: catch clipped workspaces and theme collisions.
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const fs = require('node:fs');
+const { randomUUID } = require('node:crypto');
+const express = require('express');
+const { chromium } = require('playwright');
+const { Resvg } = require('@resvg/resvg-js');
+const { CreativeStudioService } = require('../services/creativeStudioService');
+const { MemoryCreativeStudioRepository } = require('../services/creativeStudioRepository');
+const { createCreativeStudioRouter } = require('../routes/creativeStudio');
+const { OfficeArtifactService, _internals } = require('../services/officeArtifactService');
+(async () => {
+  const user = { sub: randomUUID(), roles: ['user'], permissions: ['chat'] }, store = new Map();
+  const files = { bucket: 'ui-test', ensureConfigured() {}, async upload(owner, name, contentType, body) { const file = { id: randomUUID(), name, contentType, size: body.length }; store.set(file.id, { ...file, owner, body }); return file; }, async findObject(owner, id) { const file = store.get(id); if (!file || file.owner !== owner) throw Error('file_not_found'); return { id, name: file.name, contentType: file.contentType }; }, async readOwned(owner, id) { return { ...await this.findObject(owner, id), body: store.get(id).body }; } };
+  files.download=files.readOwned;
+  const studio = new CreativeStudioService({ files, office: new OfficeArtifactService({ files }), repository: new MemoryCreativeStudioRepository(), resolveUser: async u => u }); await studio.init();
+  const doc = await files.upload(user.sub, 'แผนโครงการ.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', _internals.documentBuffer({ title: 'แผนโครงการ / PROJECT PLAN', sections: [{ paragraphs: ['ภาพรวมโครงการ', 'สร้างพื้นที่ทำงานที่เรียบง่าย ให้ความสำคัญกับเนื้อหาและชิ้นงาน ลดเวลาค้นหาเครื่องมือ และเก็บต้นฉบับทุกครั้งที่บันทึก'], rows: [['งาน', 'ผู้รับผิดชอบ', 'สถานะ'], ['ออกแบบ', 'ทีมสร้างสรรค์', 'กำลังดำเนินการ']] }] }, []));
+  const sheet = await files.upload(user.sub, 'งบประมาณ.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', _internals.spreadsheetBuffer({ title: 'Budget', sheets: [{ name: 'งบประมาณ', rows: [['รายการ', 'จำนวนเงิน'], ['ออกแบบ', 12000], ['ผลิตสื่อ', 18000]] }] }));
+  const deck = await files.upload(user.sub, 'นำเสนอโครงการ.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', _internals.presentationBuffer({ title: 'Project', slides: [{ title: 'CREATIVE WORKSPACE', bullets: ['พื้นที่สำหรับความคิดและชิ้นงาน', 'เครื่องมือที่ต้องการ อยู่ใกล้มือ'] }, { title: 'ขั้นตอนถัดไป', bullets: ['ตรวจทานและบันทึก'] }] }, []));
+  const png = new Resvg('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="#e2ecea"/><rect x="200" y="120" width="400" height="360" rx="40" fill="#30665f"/><circle cx="400" cy="300" r="90" fill="#b8d9c3"/></svg>').render().asPng();
+  const picture = await files.upload(user.sub, 'ตัวอย่างสินค้า.png', 'image/png', png);
+  const app = express(); app.use(express.json());
+  app.get('/api/files', (req, res) => res.json({ ok: true, files: [...store.values()].map(({ body, owner, ...file }) => file) }));
+  app.get('/api/files/:id/preview', (req, res) => { const file = store.get(req.params.id); res.type(file.contentType).send(file.body); });
+  app.use('/api/studio', createCreativeStudioRouter({ verifyAccessToken: () => user, validateAccountPrincipal: async u => u }, studio));
+  const scripts = ['voice-window-catalog.js', 'panthorium-window-base.js', 'window-theme-ui.js', 'workspace-ui.js', 'start-menu-ui.js', 'office-suite-core.js', 'office-suite-ui.js', 'studio-editor-ui.js', 'creative-studio-ui.js'];
+  for (const name of [...scripts, 'panthorium-window-base.css', 'workspace-ui.css', 'panthorium-logo.svg']) app.get('/' + name, (req, res) => res.sendFile(path.join(__dirname, '..', name)));
+  app.get('/', (req, res) => res.type('html').send(`<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/panthorium-window-base.css"><link rel="stylesheet" href="/workspace-ui.css"><style>html,body{margin:0;height:100%;background:#030912;font-family:system-ui}#windows{height:100%;position:relative}</style><body><div id="windows"></div><script>window.OS={state:{user:${JSON.stringify(user)}},config:{accessToken:'test'}};</script>${scripts.map(s => '<script src="/' + s + '"></script>').join('')}<script>window.createWindow=(id,title,content,options)=>{const w=PanthoriumWindow.create({id,title,content,...options});PanthoriumWorkspace.apply(w);return w};window.closeWindow=id=>PanthoriumWindow.close(id);window.PanthoriumWindowManager={restore:id=>PanthoriumWindow.focus(id)};</script></body></html>`));
+  const server = app.listen(0, '127.0.0.1'); await new Promise(r => server.once('listening', r)); let browser;
+  try {
+    browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined, args: ['--no-sandbox'] });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' }), errors = [];
+    page.on('pageerror', e => errors.push(e.message)); await page.goto('http://127.0.0.1:' + server.address().port);
+    const shot = async name => { if (process.env.PANTHORIUM_QA_DIR) { fs.mkdirSync(process.env.PANTHORIUM_QA_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.PANTHORIUM_QA_DIR, name + '.png') }); } };
+    const open = async id => { await page.evaluate(async id => { PanthoriumCreativeStudio.close(); PanthoriumStudioEditor.close(); await PanthoriumStudioEditor.open(id,{standalone:true}); }, id); await page.waitForSelector('[data-body] :is(.po-layout,canvas)'); };
+    await page.evaluate(() => PanthoriumCreativeStudio.open('document')); await page.waitForFunction(() => document.querySelector('[data-editor-files]')?.options.length > 1);
+    const command = await page.locator('.cs-commandbar').boundingBox(), title = await page.locator('.window-titlebar').boundingBox(), panel = await page.locator('[data-inline-workspace]').boundingBox();
+    assert(title.height <= 54); assert(command.height <= 65); assert(panel.y - title.y < 145, 'work starts directly below the compact navigation');
+    await page.locator('[data-toggle-create]').click();await page.getByRole('button', { name: 'รายงาน', exact: true }).click(); assert((await page.locator('[data-studio-prompt]').inputValue()).includes('จัดทำรายงาน'));
+    await page.locator('[data-editor-files]').selectOption(doc.id); assert(await page.locator('[data-editor-open]').isEnabled());
+    await page.locator('[data-toggle-create]').click();await shot('creative-desktop'); await open(doc.id);
+    const workspace = await page.locator('.po-work').boundingBox(), save = await page.locator('[data-save]').boundingBox();
+    assert(workspace.height > 450, 'document receives the majority of window height'); assert(save.y < workspace.y, 'save stays above the workspace');
+    await page.locator('[data-text-index="0"]').fill('PROJECT PLAN / ฉบับปรับปรุง');
+    await page.locator('[data-focus][type=button]').click(); assert(!(await page.locator('.po-inspector').isVisible())); assert((await page.locator('.po-work').boundingBox()).width > workspace.width);
+    await page.keyboard.press('Escape'); assert(await page.locator('.po-inspector').isVisible()); assert((await page.locator('[data-text-index="0"]').textContent()).includes('ฉบับปรับปรุง'));
+    await page.locator('[data-undo]').click(); assert(!(await page.locator('[data-text-index="0"]').textContent()).includes('ฉบับปรับปรุง')); await shot('document-desktop');
+    await open(sheet.id); const grid = await page.locator('.po-sheet').boundingBox(); assert(grid.height > 380); assert(grid.y - (await page.locator('.window-titlebar').boundingBox()).y < 270);
+    assert(await page.locator('[data-cell="B2"]').evaluate(n => Math.abs(n.getBoundingClientRect().width - n.parentElement.getBoundingClientRect().width) < 3), 'cell input fills its column');
+    assert.equal(await page.locator('[data-cell="B2"]').evaluate(n => getComputedStyle(n).backgroundColor), 'rgb(252, 252, 253)', 'glass theme does not recolor sheet cells');
+    await page.locator('[data-cell="B2"]').fill('15000'); await page.locator('[data-cell="B2"]').press('Tab'); assert.equal(await page.locator('[data-cell="B2"]').inputValue(), '15000'); await page.locator('[data-undo]').click(); await shot('spreadsheet-desktop');
+    await open(deck.id); assert(await page.getByLabel('ซ้าย %', { exact: true }).isVisible()); assert((await page.locator('.po-work').boundingBox()).height > 450); await shot('slides-desktop');
+    await open(picture.id); await page.waitForFunction(() => document.querySelector('canvas')?.width === 800); await page.getByRole('button', { name: 'เลือกครอป 1:1', exact: true }).click();
+    assert.equal(await page.getByLabel('กว้าง (px)', { exact: true }).inputValue(), '600'); assert(await page.locator('.se-crop-selection').isVisible()); await page.getByRole('button', { name: 'ครอป', exact: true }).click();
+    assert.equal(await page.locator('canvas').evaluate(n => n.width), 600); await page.locator('[data-undo]').click(); assert.equal(await page.locator('canvas').evaluate(n => n.width), 800);
+    const canvas = await page.locator('canvas').boundingBox(); await page.mouse.move(canvas.x + canvas.width / 4, canvas.y + canvas.height / 4); await page.mouse.down(); await page.mouse.move(canvas.x + canvas.width * .75, canvas.y + canvas.height * .75); await page.mouse.up();
+    assert(Math.abs(Number(await page.getByLabel('กว้าง (px)', { exact: true }).inputValue()) - 400) <= 2); await shot('image-desktop');
+    for (const width of [390, 768]) {
+      await page.setViewportSize({ width, height: 844 }); await open(doc.id);
+      assert(await page.locator('.po-paper').isVisible()); assert(!(await page.locator('.po-inspector').isVisible()), 'narrow editor starts with its canvas visible');
+      if(await page.locator('[data-menu]').isVisible())await page.locator('[data-menu]').click();await page.locator('[data-panels][type=button]').click(); assert(await page.locator('.po-inspector').isVisible()); await page.getByLabel('หัวกระดาษ', { exact: true }).fill('หัวกระดาษทดสอบ'); await page.getByLabel('หัวกระดาษ', { exact: true }).press('Tab');
+      if(await page.locator('[data-menu]').isVisible())await page.locator('[data-menu]').click();await page.locator('[data-panels][type=button]').click();if(await page.locator('[data-menu]').isVisible())await page.locator('[data-menu]').click(); await page.locator('[data-undo]').click(); assert(!(await page.locator('.po-inspector').isVisible()));
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)); await shot('document-' + width);
+      await open(deck.id); assert(await page.locator('.po-nav').isVisible()); await page.getByRole('button', { name: '2 · ขั้นตอนถัดไป', exact: true }).click(); assert(await page.getByLabel('พื้นที่จัดข้อความสไลด์ 2').isVisible());
+      await page.evaluate(() => { PanthoriumStudioEditor.close(); PanthoriumCreativeStudio.open('document'); }); await page.waitForSelector('.cs-tabs');
+      assert((await page.locator('.cs-commandbar').boundingBox()).height < 115); await page.getByRole('tab', { name: 'รูปภาพ', exact: true }).focus(); await page.keyboard.press('End'); assert.equal(await page.getByRole('tab', { name: 'งานนำเสนอ', exact: true }).getAttribute('aria-selected'), 'true');
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)); await shot('creative-' + width);
+    }
+    assert.deepEqual(errors, []); console.log('PASS compact workspace: real shell geometry, responsive panels/tabs, preserved edits, canvas focus, readable cells, crop presets/drag/undo and mobile slide navigation');
+  } finally { if (browser) await browser.close(); server.closeAllConnections(); await new Promise(r => server.close(r)); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

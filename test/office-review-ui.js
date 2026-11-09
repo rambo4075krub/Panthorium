@@ -58,10 +58,10 @@ pivot({name:'summary'});assert.equal(v.ops.length,1,'pending name is case insens
 // Reopen actual output, protect both grid and all mutation entry points.
 patchOffice(book,'spreadsheet',JSON.parse(JSON.stringify(v.ops)));load('spreadsheet',book);click('Summary');
 assert(body.textContent.includes('ผล Pivot แบบอ่านอย่างเดียว'));
-assert([...body.querySelectorAll('input[data-cell]')].every(n=>n.readOnly));
+assert([...body.querySelectorAll('[data-cell]')].every(n=>n.readOnly));
 assert(input('ค่าหรือสูตร').readOnly);assert(findButton('ใช้ค่า / สูตร').disabled);assert(input('รูปแบบตัวเลข').disabled);
 input('ค่าหรือสูตร').value='999';submit(input('ค่าหรือสูตร').closest('form'));assert.equal(v.ops.length,0);
 click('ตัวหนา');assert.equal(v.ops.length,0);pivot({name:'Derived'});assert.equal(v.ops.length,0);
-const grid=body.querySelector('input[data-cell="B2"]');grid.value='123';grid.dispatchEvent(new w.Event('change'));assert.equal(v.ops.length,0,'readonly handler remains safe under synthetic change');
-click('Source');assert.equal(body.querySelector('input[data-cell="B2"]').readOnly,false,'source stays editable');assert.equal(input('ค่าหรือสูตร').readOnly,false);assert.equal(findButton('ใช้ค่า / สูตร').disabled,false);
+const grid=body.querySelector('[data-cell="B2"]');grid.value='123';grid.dispatchEvent(new w.Event('change'));assert.equal(v.ops.length,0,'readonly handler remains safe under synthetic change');
+click('Source');assert.equal(body.querySelector('[data-cell="B2"]').readOnly,false,'source stays editable');assert.equal(input('ค่าหรือสูตร').readOnly,false);assert.equal(findButton('ใช้ค่า / สูตร').disabled,false);
 dom.window.close();console.log('PASS Office review UI: native nested hierarchy, revision cancel/pending/repeated decisions/delete-only review, pivot validation/names and readonly output guards');

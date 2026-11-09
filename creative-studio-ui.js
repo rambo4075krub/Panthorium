@@ -29,7 +29,7 @@
   const stateName = value => ({ queued: 'อยู่ในคิว', running: 'กำลังทำงาน', completed: 'เสร็จแล้ว', failed: 'ไม่สำเร็จ', needs_review: 'ยังยืนยันผลไม่ได้ · หยุดเพื่อกันงานซ้ำ', blocked: 'หยุดเพราะขั้นตอนก่อนหน้าไม่สำเร็จ' })[value] || 'กำลังตรวจสถานะ';
   const terminal = job => !['queued', 'running'].includes(job.status);
   let view = null, generation = 0, lastIdentity = identity(), menuObserver = null;
-  const current = v => view === v && v.root.isConnected && v.owner === principal() && v.generation === generation && allowed();
+  const current = v => view === v && !v.closing && v.root.isConnected && v.owner === principal() && v.generation === generation && allowed();
   const messages = {
     office_tabular_data_required: 'ยังไม่ได้ข้อมูลเป็นตาราง จึงยังไม่มีไฟล์ กรุณาแนบ CSV/XLSX หรือระบุหัวคอลัมน์และข้อมูล ถ้าต้องการแบบฟอร์มเปล่า ให้สั่ง เช่น สร้างตารางวางแผนค่าใช้จ่ายรายเดือน',
     invalid_office_ai_output: 'AI ส่งเนื้อหากลับมาในรูปแบบที่สร้างไฟล์ไม่ได้ ยังไม่มีไฟล์จากขั้นตอนนี้ กรุณาปรับคำสั่งแล้วสร้างใหม่',
@@ -77,7 +77,7 @@
   const post = (v, path, body) => api(v, path, { method: 'POST', body: JSON.stringify(body) });
   const markup = () => `<div data-studio data-studio-active="image">
     <style>
-      [data-studio]{height:100%;box-sizing:border-box;overflow:auto;padding:24px;color:var(--text,#f4f1ee);background:radial-gradient(ellipse at 95% 0,rgba(245,126,54,.09),transparent 45%),var(--bg,#0c1017);font:14px/1.5 system-ui,sans-serif}
+      [data-studio]{height:100%;box-sizing:border-box;overflow:auto;padding:12px;container:creative / inline-size;color:var(--text,#f4f1ee);background:radial-gradient(ellipse at 95% 0,rgba(245,126,54,.09),transparent 45%),var(--bg,#0c1017);font:14px/1.5 system-ui,sans-serif}
       [data-studio] *{box-sizing:border-box}[data-studio] h1{font-size:28px;letter-spacing:-.6px;margin:4px 0 6px}[data-studio] h2{font-size:18px;margin:0 0 12px}[data-studio] h3{font-size:15px;margin:0}[data-studio] p{margin:8px 0}[data-studio] small,.cs-muted{color:var(--text-dim,#aab0bd)}
       [data-studio] header{display:flex;justify-content:space-between;gap:18px;align-items:center;margin-bottom:22px}[data-studio] .cs-eyebrow{font-size:10px;font-weight:700;letter-spacing:2px;color:#ffaf7b}[data-studio] .cs-head-actions,[data-studio] .cs-actions{display:flex;gap:8px;flex-wrap:wrap}
       [data-studio] button,[data-studio] input,[data-studio] textarea,[data-studio] select{font:inherit;border:1px solid rgba(174,183,197,.23);border-radius:10px;background:#151c26;color:#f4f1ee;padding:10px 12px}
@@ -100,20 +100,93 @@
       [data-studio] .cs-preview-body iframe{display:block;width:100%;height:520px;border:0;background:white}
       [data-studio] .cs-preview-body pre{white-space:pre-wrap;overflow-wrap:anywhere}[data-studio] .cs-preview-note{padding:0 14px 12px;font-size:12px}
       [data-studio] .cs-job details{font-size:12px;overflow-wrap:anywhere;margin:8px 0}[data-studio] .cs-result-name{overflow-wrap:anywhere}
+
+      /* One compact navigation row, matching Social Media. */
+      [data-studio] .cs-commandbar{display:flex;gap:12px;align-items:center;position:sticky;top:-12px;z-index:2;padding:8px 0;margin-bottom:12px;background:var(--bg,#0c1017);border-bottom:1px solid #87dfff25}
+      [data-studio] .cs-tabs{display:flex;gap:5px;margin:0;min-width:0;flex:1;overflow-x:auto;scrollbar-width:thin;padding:2px}
+      [data-studio] .cs-tabs button{flex:none;white-space:nowrap;flex-direction:row;font-size:13px;gap:6px;min-height:40px;padding:7px 11px}
+      [data-studio] .cs-tabs svg{width:16px;height:16px}
+      [data-studio] .cs-head-actions{flex:none;flex-wrap:nowrap;margin:0;gap:5px}
+      [data-studio] .cs-head-actions button{white-space:nowrap;font-size:12px;padding:7px 10px;min-height:40px}
+      [data-studio] .cs-layout{gap:12px;grid-template-columns:minmax(280px,.9fr) minmax(300px,1.1fr)}
+      [data-studio] .cs-panel{padding:16px;border-radius:12px}
+      [data-studio] .cs-capability{margin:8px 0;font-size:12px;padding:7px 10px}
+      [data-studio] .cs-open-file{display:flex;flex-wrap:wrap;gap:8px;padding:12px 0 16px;border-bottom:1px solid #87dfff25;margin-bottom:14px}
+      [data-studio] .cs-open-file label{flex-basis:100%;margin:0}
+      [data-studio] .cs-open-file button{font-size:12px;min-height:38px}
+      [data-studio] .cs-create-heading{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px}
+      [data-studio] .cs-starters{display:flex;gap:6px;flex-wrap:wrap}
+      [data-studio] .cs-starters button{font-size:12px;padding:5px 9px;min-height:32px;border-radius:20px}
+      [data-studio] textarea{min-height:120px}
+      [data-studio] .cs-options{border-block:1px solid #87dfff25;margin:16px 0;padding:10px 0}
+      [data-studio] summary{cursor:pointer;color:#b4d9e9;font-size:12px;padding:4px 0}
+      [data-studio] .cs-preview{margin-bottom:16px}
+      [data-studio] .cs-preview-body{min-height:220px}
+      [data-studio] [data-studio-status]:empty{display:none}
+      @container creative (max-width:760px){[data-studio] .cs-layout{grid-template-columns:1fr}[data-studio] .cs-commandbar{flex-wrap:wrap;gap:4px}[data-studio] .cs-tabs{flex-basis:100%}[data-studio] .cs-head-actions{margin-left:auto}[data-studio] .cs-panel{padding:12px}}
+
+      [data-studio]{display:flex;flex-direction:column;overflow:hidden;padding:0;position:relative;min-height:0}
+      [data-studio] .cs-commandbar{position:relative;top:auto;padding:3px 10px;margin:0;flex:none;gap:8px;min-height:46px}
+      [data-studio] .cs-commandbar button{min-height:34px}
+      [data-studio] .cs-head-actions [data-open-sentinel],[data-studio] .cs-head-actions [data-open-files]{display:none}
+      [data-studio] .cs-open-file{padding:5px 12px;margin:0;flex:none;align-items:center;gap:6px;flex-wrap:nowrap;background:#101d2b;min-height:43px}
+      [data-studio] .cs-open-file label{font-size:0;flex:1;min-width:80px;max-width:360px}
+      [data-studio] .cs-open-file select{margin:0;padding:5px 8px;font-size:12px;height:32px}
+      [data-studio] .cs-open-file button{font-size:12px;min-height:32px;padding:5px 9px;white-space:nowrap}
+      [data-studio] .cs-file-label{font-size:12px;color:#9fb2c4}
+      [data-studio] [data-inline-workspace]{flex:1;min-height:0;position:relative;overflow:hidden}
+      [data-studio] .cs-workspace{height:100%;min-height:0;overflow:hidden}
+      [data-studio] .cs-layout{position:absolute;z-index:8;top:50px;right:0;bottom:0;display:block;width:min(480px,100%);overflow:auto;background:#0c1420;border-left:1px solid #365168;box-shadow:-12px 0 40px #0008}
+      [data-studio] .cs-layout .cs-panel{border:0;border-radius:0}
+      [data-studio] .cs-welcome{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:radial-gradient(ellipse at 50% 45%,#1c3343,transparent 65%);padding:25px;text-align:center}
+      [data-studio] .cs-welcome h2{font-size:28px;margin:0}[data-studio] .cs-welcome p{color:#adc0cf;margin:0 0 12px}[data-studio] .cs-welcome small{letter-spacing:2px}
+      [data-studio] [data-studio-status]{margin:0;padding:0 12px;flex:none;font-size:12px}
+      [data-studio] [data-studio-editor] input:not([type=checkbox]),[data-studio] [data-studio-editor] select{width:auto}
+      [data-studio] [data-studio-editor] .se-file input{width:100%}
+      [data-studio] [data-studio-editor] label{margin:0}
+      @container creative (max-width:680px){[data-studio] .cs-commandbar{flex-wrap:nowrap;gap:4px;padding:4px}[data-studio] .cs-head-actions button{font-size:11px;padding:4px 7px;min-height:36px}[data-studio] .cs-tabs button{padding:6px 9px;min-height:36px}[data-studio] .cs-open-file{padding:4px;flex-wrap:wrap}[data-studio] .cs-open-file label{max-width:none;flex-basis:60%}[data-studio] .cs-file-label{display:none}[data-studio] .cs-open-file button{flex:1}[data-studio] .cs-layout{top:45px}}
     </style>
-    <header><div><span class="cs-eyebrow">PANTHORIUM / CREATIVE STUDIO</span><h1>สร้างสรรค์และเอกสาร</h1><p class="cs-muted">หนึ่งพื้นที่ทำงาน · สั่งผ่าน Sentinel AI หรือเริ่มจากเครื่องมือที่ต้องการ</p></div><div class="cs-head-actions"><button type="button" data-open-sentinel>เปิด Sentinel AI</button><button type="button" data-open-files>ไฟล์ของฉัน</button></div></header>
-    <nav class="cs-tabs" role="tablist" aria-label="เครื่องมือสร้างสรรค์" data-studio-tabs></nav>
-    <div class="cs-layout"><section class="cs-panel" role="tabpanel" id="studio-editor-panel" aria-labelledby="studio-tab-image">
+    <div class="cs-commandbar" aria-label="สร้างสรรค์และเอกสาร">
+      <nav class="cs-tabs" role="tablist" aria-label="เครื่องมือสร้างสรรค์" data-studio-tabs></nav>
+      <div class="cs-head-actions"><button type="button" data-toggle-create aria-expanded="false">สร้างด้วย AI</button><button type="button" data-toggle-history aria-expanded="false">ผลงาน</button><button type="button" data-open-sentinel>Sentinel AI</button><button type="button" data-open-files>ไฟล์ของฉัน</button></div>
+    </div>
+    <div data-inline-workspace role="tabpanel" id="studio-editor-panel" aria-labelledby="studio-tab-image"></div><div class="cs-layout" hidden><section class="cs-panel" data-create-panel>
       <h2 data-studio-title>รูปภาพ</h2><p class="cs-muted" data-studio-output></p><div class="cs-capability" data-studio-capability>กำลังตรวจความพร้อมของปลั๊กอิน…</div>
-      <div class="cs-actions"><button type="button" data-editor-open>แก้ไขไฟล์ / เปิดตัวแก้ไขเต็ม</button><button type="button" data-editor-blank>เริ่มเอกสารเปล่า</button></div><label>เลือกไฟล์ที่จะแก้ไข<select data-editor-files aria-label="ไฟล์ที่จะแก้ไข"></select></label><p class="cs-muted">แก้ไขด้วยมือหรือคำสั่งเสียง · บันทึกฉบับใหม่โดยเก็บต้นฉบับ</p><form data-studio-form><label>ชื่อผลงาน<input data-studio-name maxlength="120" placeholder="เช่น แผนงานเดือนนี้"></label><label>บอกสิ่งที่ต้องการ<textarea data-studio-prompt maxlength="12000" required></textarea></label>
+      <div class="cs-open-file"><label>เปิดงานที่มีอยู่<select data-editor-files aria-label="ไฟล์ที่จะแก้ไข"></select></label><button type="button" data-editor-open>เปิดในพื้นที่ทำงาน</button><button type="button" data-editor-blank>เริ่มเอกสารเปล่า</button></div>
+      <form data-studio-form><div class="cs-create-heading"><h3>สร้างผลงานใหม่</h3><small>เริ่มจากคำอธิบาย หรือเลือกแนวทางด้านล่าง</small></div><div class="cs-starters" data-studio-starters aria-label="แนวทางเริ่มงาน"></div><label>บอกสิ่งที่ต้องการ<textarea data-studio-prompt maxlength="12000" required></textarea></label><label>ชื่อผลงาน<input data-studio-name maxlength="120" placeholder="เช่น แผนงานเดือนนี้"></label>
+      <details class="cs-options"><summary>ตัวเลือก · ไฟล์ต้นทาง · ทำงานต่อเนื่อง</summary>
       <div class="cs-field-row"><label>การเรียกใช้ปลั๊กอิน<select data-studio-mode aria-label="โหมดปลั๊กอิน"><option value="auto">Auto · อนุญาตให้เรียกใช้</option><option value="never">Never · ไม่อนุญาตให้เรียกใช้</option></select></label><label data-aspect-label>สัดส่วน<select data-studio-aspect><option value="16:9">16:9 · แนวนอน</option><option value="9:16">9:16 · แนวตั้ง</option><option value="1:1">1:1 · จัตุรัส</option></select></label><label data-duration-label hidden>ความยาววิดีโอ<select data-studio-duration><option value="8">8 วินาที</option><option value="6">6 วินาที</option><option value="4">4 วินาที</option></select></label></div>
       <label>ไฟล์ต้นทาง <small data-studio-source-limit>เลือกได้สูงสุด 6 ไฟล์</small></label><div class="cs-files" data-studio-files></div><button type="button" data-studio-refresh-files>โหลดรายการไฟล์ใหม่</button>
       <div class="cs-next"><label>ส่งผลลัพธ์ไปทำต่อ<select data-studio-next><option value="">จบที่เครื่องมือนี้</option></select></label><label data-next-prompt-label hidden>คำสั่งสำหรับขั้นตอนถัดไป<textarea data-studio-next-prompt maxlength="12000" rows="3" placeholder="เช่น นำภาพที่สร้างมาเป็นภาพประกอบงานนำเสนอ 5 สไลด์"></textarea></label></div>
-      <label class="cs-check" data-confirm-label hidden><input type="checkbox" data-studio-confirm><span>ยืนยันเริ่มสร้างสื่อ โดยใช้โควตาหรือค่าใช้จ่ายของบริการที่เชื่อมต่อ</span></label>
+      </details><label class="cs-check" data-confirm-label hidden><input type="checkbox" data-studio-confirm><span>ยืนยันเริ่มสร้างสื่อ โดยใช้โควตาหรือค่าใช้จ่ายของบริการที่เชื่อมต่อ</span></label>
       <p role="status" aria-live="polite" data-studio-status></p><button class="cs-primary" type="submit" data-studio-submit disabled>สร้างผลงาน</button><p><small data-studio-durability></small></p>
       </form></section>
-      <section class="cs-panel"><section class="cs-preview" aria-label="ตัวอย่างผลงาน"><div class="cs-preview-heading"><div><h2>ตัวอย่างผลงาน</h2><small data-preview-name>ภาพ วิดีโอ และเอกสาร</small></div><button type="button" data-preview-close hidden>ปิดตัวอย่าง</button></div><div class="cs-preview-body" data-preview-body aria-live="polite"><p class="cs-muted">เมื่อมีผลงาน กด “เปิดดู” ที่ไฟล์ด้านล่าง ภาพ วิดีโอ และฉบับอ่านของเอกสารจะแสดงที่นี่</p></div><p class="cs-preview-note" data-preview-note></p></section><div data-studio-approvals></div><div class="cs-history-title"><h2>งานและผลงานของฉัน</h2><button type="button" data-studio-refresh>รีเฟรช</button></div><p class="cs-muted">กดเปิดดูเพื่อแสดงตัวอย่าง · กดแก้ไขเพื่อเปิดตัวแก้ไขเต็มรูปแบบ · ส่งต่อไปยังเครื่องมืออื่น</p><div data-studio-jobs></div></section></div>
+      <section class="cs-panel" data-history-panel><section class="cs-preview" aria-label="ตัวอย่างผลงาน"><div class="cs-preview-heading"><div><h2>ตัวอย่างผลงาน</h2><small data-preview-name>ภาพ วิดีโอ และเอกสาร</small></div><button type="button" data-preview-close hidden>ปิดตัวอย่าง</button></div><div class="cs-preview-body" data-preview-body aria-live="polite"><p class="cs-muted">เมื่อมีผลงาน กด “เปิดดู” ที่ไฟล์ด้านล่าง ภาพ วิดีโอ และฉบับอ่านของเอกสารจะแสดงที่นี่</p></div><p class="cs-preview-note" data-preview-note></p></section><div data-studio-approvals></div><div class="cs-history-title"><h2>งานและผลงานของฉัน</h2><button type="button" data-studio-refresh>รีเฟรช</button></div><p class="cs-muted">กดเปิดดูเพื่อแสดงตัวอย่าง · กดแก้ไขเพื่อทำงานในแท็บนี้ · ส่งต่อไปยังเครื่องมืออื่น</p><div data-studio-jobs></div></section></div>
     </div>`;
+  function showWorkspace(v,id){
+    if(!current(v))return;const area=v.root.querySelector('[data-inline-workspace]');
+    for(const [key,item]of v.workspaces){item.host.hidden=key!==id;if(key!==id)item.editor?.pause?.();}
+    if(v.workspaces.has(id))return;
+    const host=el('div',null,{'data-workspace-kind':id,class:'cs-workspace'});area.append(host);const item={host};v.workspaces.set(id,item);
+    if(['image','video'].includes(id)&&window.PanthoriumCreativeEditors){item.editor=window.PanthoriumCreativeEditors.mount(id,host,{valid:()=>current(v),request:(...args)=>api(v,...args),files:()=>v.files,onSaved:file=>{if(!current(v))return;v.files.unshift(file);renderFiles(v);}});return;}
+    const welcome=el('div',null,{class:'cs-welcome'});welcome.append(el('small','PANTHORIUM / '+id.toUpperCase()),el('h2',{document:'เริ่มเขียนเรื่องถัดไป',spreadsheet:'จากข้อมูล สู่คำตอบ',presentation:'เล่าเรื่องให้ชัดเจน'}[id]||'เริ่มสร้างผลงาน'),el('p',{document:'กระดาษ · ย่อหน้า · ตาราง · ตรวจทาน',spreadsheet:'เซลล์ · สูตรคำนวณ · กราฟ · Pivot Table',presentation:'สไลด์ · กล่องข้อความ · จัดวาง · นำเสนอ'}[id]||''));
+    welcome.append(button('＋ สร้าง'+plugin(id).title+'ใหม่',()=>v.root.querySelector('[data-editor-blank]').click(),{class:'cs-primary'}),button('เปิดไฟล์ของฉัน',()=>v.root.querySelector('[data-editor-files]').focus()));host.append(welcome);
+  }
+  async function openFile(v,fileId,kind){
+    if(!fileId||!current(v))return false;if(v.busy||v.modeBusy){status(v,'รอคำขอปัจจุบันเสร็จก่อนเปิดไฟล์',true);return false;}const file=v.files.find(f=>f.id===fileId)||v.jobs.flatMap(j=>j.files||[]).find(f=>f.id===fileId);
+    kind=kind||(/\.docx$/i.test(file?.name)?'document':/\.xlsx$/i.test(file?.name)?'spreadsheet':/\.pptx$/i.test(file?.name)?'presentation':/\.(mp4|webm|mov|mkv)$/i.test(file?.name)?'video':/\.(png|jpe?g|webp)$/i.test(file?.name)?'image':v.active);
+    v.selectedFiles[kind]=fileId;if(file&&!v.files.some(f=>f.id===fileId))v.files.unshift(file);selectPlugin(v,kind);showWorkspace(v,kind);const item=v.workspaces.get(kind);if(!item)return false;
+    v.root.querySelector('.cs-layout').hidden=true;for(const n of v.root.querySelectorAll('[data-toggle-create],[data-toggle-history]'))n.setAttribute('aria-expanded','false');
+    if(item.editor)return item.editor.openFile(fileId);
+    return window.PanthoriumStudioEditor?.open(fileId,{container:item.host,onClose:()=>{v.workspaces.delete(kind);item.host.remove();showWorkspace(v,v.active);},onSaved:job=>{if(current(v)){putJob(v,job);renderJobs(v);for(const f of job.files||[])if(!v.files.some(x=>x.id===f.id))v.files.unshift(f);renderFiles(v);}}});
+  }
+  async function editFile(fileId){
+    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fileId||'')||!open(view?.active||'document'))return false;
+    const v=view;if(!v.files.some(file=>file.id===fileId))await loadFiles(v);if(!current(v))return false;
+    const file=v.files.find(file=>file.id===fileId)||v.jobs.flatMap(job=>job.files||[]).find(file=>file.id===fileId);
+    if(!file||!editable(file)){status(v,file?'ไฟล์ชนิดนี้ยังเปิดแก้ไขไม่ได้':'ไม่พบไฟล์ในบัญชีนี้ กรุณาโหลดรายการไฟล์ใหม่',true);return false;}
+    return openFile(v,fileId);
+  }
   function saveDraft(v) {
     if (!current(v)) return;
     const q = name => v.root.querySelector('[data-studio-' + name + ']');
@@ -140,6 +213,19 @@
     for (const tab of v.root.querySelectorAll('[data-studio-tabs] button')) { tab.setAttribute('aria-selected', String(tab.dataset.pluginId === id)); tab.tabIndex = tab.dataset.pluginId === id ? 0 : -1; }
     q('title').textContent = selected.title; q('output').textContent = selected.output + (['document', 'presentation'].includes(id) ? ' · ภาพแนบใช้เป็นภาพประกอบ โดยยังไม่วิเคราะห์เนื้อหาในภาพ' : '');
     q('name').value = draft.name || ''; q('prompt').value = draft.prompt || ''; q('prompt').placeholder = selected.example;
+    const starters = {
+      image: [['ภาพสินค้า','สร้างภาพสินค้า พื้นหลังสะอาด แสงสตูดิโอนุ่ม อัตราส่วน 1:1 โดยใช้รายละเอียดสินค้า: '],['โพสต์โซเชียล',selected.example]],
+      video: [['แนะนำสินค้า',selected.example],['ภาพเป็นวิดีโอ','ใช้ภาพต้นทางที่เลือก สร้างวิดีโอเคลื่อนกล้องช้า ๆ รักษารูปร่างสินค้า ความยาว 8 วินาที']],
+      document: [['รายงาน',selected.example],['ข้อเสนอโครงการ','ร่างข้อเสนอโครงการภาษาไทย มีวัตถุประสงค์ ขอบเขตงาน กำหนดการ และงบประมาณ จากข้อมูล: ']],
+      spreadsheet: [['ค่าใช้จ่าย',selected.example],['ติดตามงาน','สร้างแบบฟอร์มตารางติดตามงาน มีคอลัมน์ งาน ผู้รับผิดชอบ กำหนดส่ง สถานะ และหมายเหตุ']],
+      presentation: [['นำเสนอโครงการ',selected.example],['สรุปรายงาน','สร้างสไลด์สรุปข้อมูลจากไฟล์ที่เลือก มีสาระสำคัญ ตัวเลขหลัก ข้อเสนอแนะ และขั้นตอนถัดไป']]
+    };
+    const examples = q('starters'); examples.replaceChildren();
+    for (const [title, prompt] of starters[id]) examples.append(button(title, () => {
+      if (v.busy) return;
+      if (q('prompt').value.trim() && !window.confirm('แทนที่คำอธิบายปัจจุบันด้วยแนวทางนี้หรือไม่?')) return;
+      q('prompt').value = prompt; q('prompt').focus(); saveDraft(v);
+    }));
     q('prompt').maxLength = promptLimit(id); q('source-limit').textContent = 'เลือกได้สูงสุด ' + sourceLimit(id) + ' ไฟล์ · แสดงเฉพาะรูปแบบที่เลือกใช้ได้';
     q('aspect').value = draft.aspect || '16:9'; q('duration').value = draft.duration || '8'; q('confirm').checked = draft.confirmed === true;
     v.root.querySelector('[data-aspect-label]').hidden = !['image', 'video'].includes(id);
@@ -151,9 +237,10 @@
     q('next').value = targets.includes(draft.next) ? draft.next : ''; q('next-prompt').value = draft.nextPrompt || '';
     q('next-prompt').maxLength = promptLimit(q('next').value);
     v.root.querySelector('[data-next-prompt-label]').hidden = !q('next').value;
+    if (Array.isArray(sourceIds) && sourceIds.length) v.root.querySelector('.cs-options').open = true;
     if (Array.isArray(sourceIds)) v.sources = new Set(sourceIds.slice(0, sourceLimit(id)));
     v.sources = new Set([...v.sources].filter(fileId => { const file = v.files.find(item => item.id === fileId); return !file || sourceCompatible(file, id); }).slice(0, sourceLimit(id)));
-    renderFiles(v); renderCapability(v); controls(v);
+    renderFiles(v); renderCapability(v); controls(v); showWorkspace(v,id);
   }
   function renderCapability(v) {
     if (!current(v)) return;
@@ -163,10 +250,12 @@
   }
   function renderFiles(v) {
     if (!current(v)) return;
-    const select = v.root.querySelector('[data-editor-files]'), selected = select.value; select.replaceChildren(el('option','เลือกไฟล์…',{value:''}));
+    const select = v.root.querySelector('[data-editor-files]'), selected = v.selectedFiles[v.active] || select.value; select.replaceChildren(el('option','เลือกไฟล์…',{value:''}));
     const pattern = {image:/\.(png|jpe?g|webp)$/i,video:/\.(mp4|webm)$/i,document:/\.docx$/i,spreadsheet:/\.xlsx$/i,presentation:/\.pptx$/i}[v.active];
     for(const file of v.files) if(pattern.test(file.name || '')) select.append(el('option',file.name,{value:file.id})); select.value=selected;
-    v.root.querySelector('[data-editor-blank]').hidden = !['document','spreadsheet','presentation'].includes(v.active);
+    v.root.querySelector('[data-editor-open]').disabled = !select.value;
+    select.onchange = () => {v.selectedFiles[v.active]=select.value; v.root.querySelector('[data-editor-open]').disabled = !select.value; };
+    v.root.querySelector('[data-editor-blank]').hidden = !['document','spreadsheet','presentation'].includes(v.active);v.root.querySelector('[data-editor-blank]').textContent={document:'＋ เอกสารใหม่',spreadsheet:'＋ สมุดงานใหม่',presentation:'＋ งานนำเสนอใหม่'}[v.active]||'เริ่มงานใหม่';
     const list = v.root.querySelector('[data-studio-files]'); list.replaceChildren();
     if (!v.files.length) list.append(el('p', v.filesError || 'ยังไม่มีไฟล์ต้นทาง เปิด “ไฟล์ของฉัน” เพื่ออัปโหลด หรือสร้างผลงานจากคำสั่งได้เลย', { class: 'cs-muted' }));
     for (const file of v.files) {
@@ -174,7 +263,7 @@
       const label = el('label', null, { class: 'cs-check' }), check = el('input', null, { type: 'checkbox', 'data-source-file-id': file.id });
       check.checked = v.sources.has(file.id); check.disabled = v.busy;
       check.onchange = () => { if (check.checked && v.sources.size >= sourceLimit(v.active)) { check.checked = false; status(v, 'เครื่องมือนี้เลือกไฟล์ต้นทางได้ไม่เกิน ' + sourceLimit(v.active) + ' ไฟล์', true); return; } if (check.checked) v.sources.add(file.id); else v.sources.delete(file.id); };
-      const name = el('span', file.name || file.id); name.append(el('small', String(file.contentType || 'ไฟล์') + ' · ' + Math.ceil(Number(file.size || 0) / 1024) + ' KB')); label.append(check, name); const row = el('div'); row.append(label, button('เปิดดู', () => previewFile(v, file, v.jobs.find(job => job.files?.some(item => item.id === file.id))), { 'data-preview-source': file.id })); if(editable(file)) row.append(button('แก้ไข',()=>window.PanthoriumStudioEditor?.open(file.id),{'data-edit-source':file.id})); list.append(row);
+      const name = el('span', file.name || file.id); name.append(el('small', String(file.contentType || 'ไฟล์') + ' · ' + Math.ceil(Number(file.size || 0) / 1024) + ' KB')); label.append(check, name); const row = el('div'); row.append(label, button('เปิดดู', () => previewFile(v, file, v.jobs.find(job => job.files?.some(item => item.id === file.id))), { 'data-preview-source': file.id })); if(editable(file)) row.append(button('แก้ไข',()=>openFile(v,file.id),{'data-edit-source':file.id})); list.append(row);
     }
     if (v.files.length && !list.childElementCount) list.append(el('p', 'ยังไม่มีไฟล์ต้นทางที่เครื่องมือนี้รองรับ สร้างผลงานจากคำสั่งได้เลย', { class: 'cs-muted' }));
   }
@@ -267,7 +356,7 @@
         const result = el('div', null, { class: 'cs-result' }), actions = el('div', null, { class: 'cs-actions' }); result.append(el('strong', file.name || file.id, { class: 'cs-result-name' }));
         actions.append(button('แชร์ไป Social Media', () => window.PanthoriumSocial?.open(file.contentType?.startsWith('video/') ? 'short' : file.contentType?.startsWith('image/') ? 'feed' : 'community', { sourceFileIds: [file.id] })));
         actions.append(button('เปิดดู', () => previewFile(v, file, job), { 'data-preview-file': file.id }));
-        if(editable(file)) actions.append(button('แก้ไข / ตัวแก้ไขเต็ม',()=>window.PanthoriumStudioEditor?.open(file.id),{'data-edit-file':file.id}));
+        if(editable(file)) actions.append(button('แก้ไขในหน้านี้',()=>openFile(v,file.id),{'data-edit-file':file.id}));
         actions.append(button('ดาวน์โหลด', event => download(v, file, event.currentTarget), { 'data-download-file': file.id }));
         const type = String(file.contentType || '');
         const targets = ['document', 'spreadsheet', 'presentation'].filter(id => sourceCompatible(file, id));
@@ -347,11 +436,12 @@
     finally { if (current(v)) { v.busy = false; controls(v); } }
   }
   function cleanup(v) {
-    if (!v) return; clearPreview(v); clearTimeout(v.timer); v.controller.abort();
+    if (!v) return; v.closing=true;for(const [id,item]of v.workspaces||[]){item.editor?.destroy();window.PanthoriumStudioEditor?.dispose(item.host);}v.workspaces?.clear();clearPreview(v); clearTimeout(v.timer); v.controller.abort();
     for (const timer of v.urlTimers) clearTimeout(timer); for (const url of v.urls) URL.revokeObjectURL(url);
     v.urls.clear(); v.urlTimers.clear(); v.jobs = []; v.files = []; v.sources.clear(); v.drafts = {}; v.pending = null; v.approvals.clear();
     v.root.replaceChildren(); if (view === v) view = null;
   }
+  function hasUnsaved(v){return current(v)&&[...v.workspaces.values()].some(item=>item.editor?.isDirty?.()||window.PanthoriumStudioEditor?.isDirty(item.host));}
   function close() {
     const v = view; cleanup(v);
     if (typeof closeWindow === 'function') closeWindow(ID); else if (window.PanthoriumWindowManager?.close) window.PanthoriumWindowManager.close(ID); else document.querySelector('.window[data-id="creative-studio"]')?.remove();
@@ -362,24 +452,32 @@
     if (view && current(view)) { window.PanthoriumWindowManager?.restore?.(ID); if (typeof focusWindow === 'function') focusWindow(ID); selectPlugin(view, id, options.sourceFileIds); return view.root; }
     if (view) cleanup(view);
     if (typeof createWindow !== 'function') return false;
-    createWindow(ID, 'สร้างสรรค์และเอกสาร', markup(), { width: 1180, height: 820, onClose: () => cleanup(view) });
+    createWindow(ID, 'สร้างสรรค์และเอกสาร', markup(), { width: 1440, height: 820, onClose: () => cleanup(view) });
     const root = document.querySelector('.window[data-id="creative-studio"] [data-studio]'); if (!root) return false;
-    const v = view = { root, owner: principal(), generation, active: 'image', drafts: {}, catalog: [], files: [], jobs: [], sources: new Set(), urls: new Set(), urlTimers: new Set(), advancing: new Set(), approvals: new Map(), controller: new AbortController(), busy: false, modeBusy: false, timer: null };
+    const v = view = { root, owner: principal(), generation, active: 'image', drafts: {}, catalog: [], files: [], jobs: [], sources: new Set(), urls: new Set(), urlTimers: new Set(), advancing: new Set(), approvals: new Map(), workspaces:new Map(), selectedFiles:{}, controller: new AbortController(), busy: false, modeBusy: false, timer: null };
+    root.closest('.window')?.addEventListener('panthorium:before-window-close',event=>{if(hasUnsaved(v)&&!window.confirm('มีงานที่ยังไม่ได้บันทึกหรือเก็บโปรเจกต์ ต้องการปิดหรือไม่?'))event.preventDefault();});
+    const workspace=root.querySelector('[data-inline-workspace]'),filebar=root.querySelector('.cs-open-file');workspace.before(filebar);workspace.after(root.querySelector('[data-studio-status]'));
+    filebar.prepend(el('span','ไฟล์',{class:'cs-file-label'}));
+    const importInput=el('input',null,{type:'file',accept:'.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.mp4,.webm',hidden:''});
+    filebar.append(button('นำเข้าไฟล์',()=>importInput.click()),importInput);
+    importInput.onchange=async()=>{const file=importInput.files?.[0];if(!file)return;if(file.size>20*1024*1024)return status(v,'รองรับไฟล์ไม่เกิน 20 MB',true);try{const data=await api(v,'/api/files',{method:'POST',body:file,headers:{'Content-Type':'application/octet-stream','x-file-name':encodeURIComponent(file.name),'x-file-content-type':file.type||'application/octet-stream'}});if(!current(v))return;v.files.unshift(data.file);renderFiles(v);await openFile(v,data.file.id);}catch(e){status(v,friendly(e),true);}finally{importInput.value='';}};
+    const drawer=which=>{const layout=root.querySelector('.cs-layout'),panel=root.querySelector('[data-'+which+'-panel]'),same=!layout.hidden&&!panel.hidden;layout.hidden=same;for(const key of ['create','history']){root.querySelector('[data-'+key+'-panel]').hidden=key!==which;root.querySelector('[data-toggle-'+key+']').setAttribute('aria-expanded',String(!same&&key===which));}};
+    root.querySelector('[data-toggle-create]').onclick=()=>drawer('create');root.querySelector('[data-toggle-history]').onclick=()=>drawer('history');
     const tabs = root.querySelector('[data-studio-tabs]');
     for (const item of PLUGINS) {
       const tab = button('', () => selectPlugin(v, item.id), { id: 'studio-tab-' + item.id, role: 'tab', 'aria-selected': 'false', 'aria-controls': 'studio-editor-panel', 'data-plugin-id': item.id });
       const icon = window.PanthoriumStartMenuUI?.icon?.(item.icon); if (icon) tab.append(icon); tab.append(el('span', item.title)); tabs.append(tab);
-      tab.onkeydown = event => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return; event.preventDefault(); const i = PLUGINS.findIndex(p => p.id === v.active), target = event.key === 'Home' ? 0 : event.key === 'End' ? PLUGINS.length - 1 : (i + (event.key === 'ArrowRight' ? 1 : -1) + PLUGINS.length) % PLUGINS.length; selectPlugin(v, PLUGINS[target].id); tabs.children[target].focus(); };
+      tab.onkeydown = event => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return; event.preventDefault(); const i = PLUGINS.findIndex(p => p.id === v.active), target = event.key === 'Home' ? 0 : event.key === 'End' ? PLUGINS.length - 1 : (i + (event.key === 'ArrowRight' ? 1 : -1) + PLUGINS.length) % PLUGINS.length; selectPlugin(v, PLUGINS[target].id); tabs.children[target].focus(); tabs.children[target].scrollIntoView?.({block:'nearest',inline:'nearest'}); };
     }
     root.querySelector('[data-preview-close]').onclick = () => { clearPreview(v); root.querySelector('[data-preview-body]').append(el('p', 'เลือกเปิดดูจากไฟล์ผลงานด้านล่าง')); root.querySelector('[data-preview-name]').textContent = 'ภาพ วิดีโอ และเอกสาร'; root.querySelector('[data-preview-note]').textContent = ''; root.querySelector('[data-preview-close]').hidden = true; };
     root.querySelector('[data-studio-form]').onsubmit = event => submit(v, event);
     root.querySelector('[data-studio-refresh]').onclick = () => refresh(v);
     root.querySelector('[data-studio-refresh-files]').onclick = () => loadFiles(v);
-    root.querySelector('[data-editor-open]').onclick=()=>{const id=root.querySelector('[data-editor-files]').value;if(id)window.PanthoriumStudioEditor?.open(id);else status(v,'เลือกไฟล์ที่ต้องการแก้ไขก่อน',true);};
+    root.querySelector('[data-editor-open]').onclick=()=>{const id=root.querySelector('[data-editor-files]').value;if(id)openFile(v,id);else status(v,'เลือกไฟล์ที่ต้องการแก้ไขก่อน',true);};
     root.querySelector('[data-editor-blank]').onclick=async event=>{
       const contents={document:{title:'เอกสารใหม่',sections:[{paragraphs:['เริ่มเขียนที่นี่']}]},spreadsheet:{title:'ตารางใหม่',sheets:[{name:'ข้อมูล',rows:[['หัวข้อ','ค่า'],['', '']]}]},presentation:{title:'งานนำเสนอใหม่',slides:[{title:'หัวข้อสไลด์',bullets:['เริ่มเขียนที่นี่']}]}};
       if(!contents[v.active])return;const pluginId=v.active;event.currentTarget.disabled=true;
-      try {const data=await post(v,'/api/studio/jobs',{pluginId,input:{prompt:'สร้างไฟล์เปล่าเพื่อแก้ไขด้วยมือ',content:contents[pluginId]},idempotencyKey:'blank:'+crypto.randomUUID(),confirmed:true});if(!current(v))return;putJob(v,data.job);renderJobs(v);if(data.job.status==='completed')window.PanthoriumStudioEditor?.open(data.job.files.find(f=>/\.(docx|xlsx|pptx)$/i.test(f.name))?.id);else schedule(v,1000);}
+      try {const data=await post(v,'/api/studio/jobs',{pluginId,input:{prompt:'สร้างไฟล์เปล่าเพื่อแก้ไขด้วยมือ',content:contents[pluginId]},idempotencyKey:'blank:'+crypto.randomUUID(),confirmed:true});if(!current(v))return;putJob(v,data.job);renderJobs(v);if(data.job.status==='completed')openFile(v,data.job.files.find(f=>/\.(docx|xlsx|pptx)$/i.test(f.name))?.id,pluginId);else schedule(v,1000);}
       catch(error){status(v,friendly(error),true);}finally{if(current(v))root.querySelector('[data-editor-blank]').disabled=false;}
     };
     root.querySelector('[data-open-sentinel]').onclick = () => { if (typeof openSentinel === 'function') openSentinel(); };
@@ -446,7 +544,8 @@
     const record = { busy: false }, approve = button('ยืนยันและเริ่มงาน', () => run(false), { class: 'cs-primary', 'data-studio-approve': '' }), reject = button('ยกเลิก', () => run(true), { 'data-studio-reject': '' });
     approve.disabled = expired; controls.append(approve, reject); card.append(report, controls); v.root.querySelector('[data-studio-approvals]').append(card); v.approvals.set(confirmation.actionId, record); return true;
   }
-  window.PanthoriumCreativeStudio = Object.freeze({ open, close, review, showJob, refresh: () => view && refresh(view), openImage: () => open('image'), openVideo: () => open('video'), openDocument: () => open('document'), openSpreadsheet: () => open('spreadsheet'), openPresentation: () => open('presentation') });
+  window.addEventListener('beforeunload',event=>{if(view&&hasUnsaved(view)){event.preventDefault();event.returnValue='';}});
+  window.PanthoriumCreativeStudio = Object.freeze({ open, close, editFile, review, showJob, refresh: () => view && refresh(view), openImage: () => open('image'), openVideo: () => open('video'), openDocument: () => open('document'), openSpreadsheet: () => open('spreadsheet'), openPresentation: () => open('presentation') });
   window.addEventListener('panthorium:ai-done', event => {
     for (const result of event.detail?.toolResults || []) {
       if (result.toolId === 'studio.editor' && result.ok && result.output?.openEditor) { window.PanthoriumStudioEditor?.open(result.output.file?.id); continue; }

@@ -5,13 +5,13 @@
 .pt-external-content :where(button) { min-height:36px; padding:8px 12px; cursor:pointer; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell:is(#pt-workspace-specificity,.pt-shell).pt-shell { position:fixed!important; padding:0!important; margin:0!important; min-width:0!important; min-height:0!important; max-width:none!important; max-height:none!important; overflow:hidden!important; flex-direction:column!important; box-sizing:border-box!important; container:pt-window / inline-size; font-size:15px; --pt-border:#87dfff25; --pt-cyan:#57f5ff; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell:not(.maximized):not(.panthorium-window-fullscreen):not(.pw-maximized-workspace):not(.pt-snapped) { max-width:calc(100vw - 24px)!important; max-height:calc(100dvh - 90px)!important; }
-:is(#pt-workspace-specificity,.pt-shell).pt-shell .window-titlebar { display:flex!important; align-items:center; justify-content:space-between; height:70px!important; min-height:70px!important; padding:0 23px!important; cursor:grab; }
+:is(#pt-workspace-specificity,.pt-shell).pt-shell .window-titlebar { display:flex!important; align-items:center; justify-content:space-between; height:52px!important; min-height:52px!important; padding:0 14px!important; box-sizing:border-box; min-width:0; cursor:grab; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .window-titlebar:active { cursor:grabbing; }
 .pt-brand { display:flex; align-items:center; gap:13px; min-width:0; }
 .pt-brand > div { min-width:0; overflow:hidden; }
-.pt-brand > .pt-brand-logo { width:38px!important; height:42px!important; object-fit:contain; flex-shrink:0; }
-.pt-brand strong { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:20px; letter-spacing:.3px; font-weight:600; }
-.pt-brand small { font-size:10px; color:#89a6bf; display:block; letter-spacing:3px; margin-top:4px; max-width:35vw; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
+.pt-brand > .pt-brand-logo { width:28px!important; height:32px!important; object-fit:contain; flex-shrink:0; }
+.pt-brand strong { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:16px; letter-spacing:.3px; font-weight:600; }
+.pt-brand small { font-size:10px; color:#89a6bf; display:block; letter-spacing:1.6px; margin-top:1px; max-width:35vw; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
 :where(.pt-shell,.pt-overlay) svg { width:21px; height:21px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
 .pt-window-tools { display:flex; align-items:center; gap:8px; flex-shrink:0; }
 :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-window-tools button { display:grid; place-items:center; width:34px!important; height:32px!important; min-width:34px!important; padding:0!important; border:1px solid #81d7f21c!important; border-radius:8px!important; background:#132a3e50!important; color:#d4e9f7!important; box-shadow:none!important; }
@@ -126,7 +126,7 @@
  .pt-action { min-height:125px; }
 }
 @media(max-height:800px) and (min-width:761px) {
- :is(#pt-workspace-specificity,.pt-shell).pt-shell .window-titlebar { height:60px!important; min-height:60px!important; }
+ :is(#pt-workspace-specificity,.pt-shell).pt-shell .window-titlebar { height:48px!important; min-height:48px!important; }
  .pt-hero { min-height:210px; padding-top:30px; padding-bottom:20px; }
  .pt-hero h1 { font-size:35px; }
  .pt-action { min-height:100px; padding:13px; }
@@ -142,10 +142,10 @@
  :is(#pt-workspace-specificity,.pt-shell).pt-shell > .pt-workspace > .window-sidebar { display:flex; flex-direction:row; width:100%; min-width:0; max-width:none; max-height:30%; padding:8px; gap:6px; overflow:auto; border-right:0; border-bottom:1px solid var(--pt-border); }
  :is(#pt-workspace-specificity,.pt-shell).pt-shell > .pt-workspace > .window-sidebar .sidebar-item { flex-shrink:0; white-space:nowrap; padding:8px 10px; }
  :is(#pt-workspace-specificity,.pt-shell).pt-shell > .pt-workspace > .window-sidebar .sidebar-item span:not(.ico) { display:inline; }
- :is(#pt-workspace-specificity,.pt-shell).pt-shell .window-titlebar { padding:0 13px!important; height:62px!important; min-height:62px!important; }
+ :is(#pt-workspace-specificity,.pt-shell).pt-shell .window-titlebar { padding:0 13px!important; height:52px!important; min-height:52px!important; }
  .pt-brand strong { font-size:16px; }
  .pt-brand small { font-size:8px; letter-spacing:2px; }
- .pt-brand > .pt-brand-logo { width:30px!important; height:38px!important; }
+ .pt-brand > .pt-brand-logo { width:26px!important; height:30px!important; }
  .pt-brand { gap:8px; }
  .pt-window-tools { gap:5px; }
  :is(#pt-workspace-specificity,.pt-shell).pt-shell .pt-window-tools button { width:28px!important; min-width:28px!important; }
@@ -175,3 +175,9 @@
 @media(prefers-reduced-motion:reduce) {
  :is(#pt-workspace-specificity,.pt-shell).pt-shell *, .pt-overlay * { animation:none!important; transition:none!important; scroll-behavior:auto!important; }
 }
+
+/* Keep greetings proportional to the workspace, including narrow app windows. */
+.pt-shell .pt-hero { min-height:0; padding:20px 0 16px; }
+.pt-shell .pt-hero h1 { font-size:clamp(23px,2.3vw,32px); margin-bottom:8px; }
+.pt-shell .pt-eyebrow { margin-bottom:8px; }
+.pt-shell .pt-hero-line { margin-top:14px; }
