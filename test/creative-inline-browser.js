@@ -30,7 +30,7 @@ const { OfficeArtifactService, _internals } = require('../services/officeArtifac
   const clip=await files.upload(user.sub,'คลิปตัวอย่าง.webm','video/webm',fs.readFileSync(clipPath));fs.unlinkSync(clipPath);
   const app = express(); app.use(express.json());
   app.post('/api/files',express.raw({type:'application/octet-stream',limit:'20mb'}),async(req,res)=>res.json({ok:true,file:await files.upload(user.sub,decodeURIComponent(req.get('x-file-name')),req.get('x-file-content-type'),req.body)}));
-  app.use('/api/media-studio',createMediaStudioRouter({verifyAccessToken:()=>user,validateAccountPrincipal:async u=>u},new MediaStudioService({files})));
+  app.use('/api/media',createMediaStudioRouter({verifyAccessToken:()=>user,validateAccountPrincipal:async u=>u},new MediaStudioService({files})));
   app.get('/api/files', (req, res) => res.json({ ok: true, files: [...store.values()].map(({ body, owner, ...file }) => file) }));
   app.get('/api/files/:id/preview', (req, res) => { const file = store.get(req.params.id); res.type(file.contentType).send(file.body); });
   app.use('/api/studio', createCreativeStudioRouter({ verifyAccessToken: () => user, validateAccountPrincipal: async u => u }, studio));

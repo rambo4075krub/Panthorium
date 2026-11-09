@@ -37,6 +37,8 @@ const { app } = require("../server");
       if (asset.status !== 200 || !asset.headers.get('cache-control')?.includes('no-store')) throw new Error('editor dependency must bypass caches: ' + file);
       if (await asset.text() !== fs.readFileSync(require('node:path').join(__dirname, '..', file), 'utf8')) throw new Error('editor dependency differs from source: ' + file);
     }
+    const timeline = await fetch(base + '/api/media/render-timeline', { method: 'POST' });
+    if (timeline.status !== 401) throw new Error('timeline export must exist at the production media route and require authentication');
     if (shell.indexOf('/privacy-notice.js') < 0 || shell.indexOf('/privacy-notice.js') > shell.indexOf('/privacy-policy-ui.js')) throw new Error('shared policy must load before policy UI');
     let r = await fetch(base + "/api/health");
     if (r.status !== 200) throw new Error("health failed");

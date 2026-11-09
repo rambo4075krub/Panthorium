@@ -29,5 +29,7 @@ const { JSDOM } = require('jsdom');
     const data = await response.json();
     assert.equal(data.ok, false);
   }
+  const timeline = await fetch(origin + '/api/media/render-timeline', { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20000) });
+  assert.equal(timeline.status, 401, 'timeline export exists at the production route and requires authentication');
   console.log('PASS deployed Studio: user/admin shell, exact frontend assets, private API authentication. Live provider generation requires a separate signed-in acceptance check.');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });
