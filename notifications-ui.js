@@ -129,8 +129,8 @@
   }
   function deliver(s, items) {
     const settings = s.settings;
-    if (!current(s) || !settings?.enabled || quietNow(settings)) return;
-    const eligible = items.filter(item => !item.readAt && eventCatalog()?.enabled(settings, item) === true);
+    if (!current(s) || !settings?.enabled) return;
+    const eligible = items.filter(item => !item.readAt && eventCatalog()?.enabled(settings, item) === true && (!quietNow(settings) || eventCatalog()?.urgent(item)));
     if (!eligible.length) return;
     const latest = eligible[0];
     const text = preview(latest, settings) + (eligible.length > 1 ? ` (และอีก ${eligible.length - 1} รายการ)` : '');
@@ -369,7 +369,7 @@
     privacy.append(switchRow('แสดงและอ่านรายละเอียด', 'เมื่อปิด ป๊อปอัปและเสียงบอกเพียงว่ามีการแจ้งเตือนใหม่ รายละเอียดยังอ่านได้ในศูนย์นี้', settings.privacyPreview, value => saveSettings({ privacyPreview: value }), 'privacyPreview'));
     privacy.append(switchRow('ให้ Sentinel ถามก่อนเสนอส่งแจ้งเตือน', 'เช่น “ให้ส่งแจ้งเตือนไหม” ต้องตอบรับก่อนสร้างรายการที่เสนอ', settings.askBeforeNotify, value => saveSettings({ askBeforeNotify: value }), 'askBeforeNotify')); advancedContent.append(privacy);
     const quiet = node('section', null, { class: 'pn-card' }); quiet.append(node('h3', 'ช่วงห้ามรบกวน'));
-    quiet.append(switchRow('เปิดช่วงห้ามรบกวน', 'พักป๊อปอัปและเสียง รายการยังอยู่ในศูนย์แจ้งเตือน', settings.quietHours?.enabled, value => saveSettings({ quietHours: { enabled: value } }), 'quietHours.enabled'));
+    quiet.append(switchRow('เปิดช่วงห้ามรบกวน', 'พักป๊อปอัปและเสียง ยกเว้นคำเตือนความเสี่ยงที่ส่งให้ผู้ดูแล รายการยังอยู่ในศูนย์แจ้งเตือน', settings.quietHours?.enabled, value => saveSettings({ quietHours: { enabled: value } }), 'quietHours.enabled'));
     const form = node('form', null, { class: 'pn-quiet' });
     for (const [key, title, type] of [['start', 'เริ่ม', 'time'], ['end', 'สิ้นสุด', 'time'], ['timeZone', 'เขตเวลา', 'text']]) {
       const label = node('label', title), field = node('input', null, { type, name: key, 'aria-label': title, required: '', maxlength: '64' }); field.value = settings.quietHours?.[key] || ''; label.append(field); form.append(label);

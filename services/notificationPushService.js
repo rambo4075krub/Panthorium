@@ -112,7 +112,7 @@ class NotificationPushService {
       if(!d)return finish('cancelled');
       const n=await this.notifications.repository.get(d.user_id,job.notification_id);
       const settings=await this.notifications.repository.getSettings(d.user_id,DEFAULT_SETTINGS);
-      if(!n||n.readAt||this.now()-new Date(n.createdAt).getTime()>86400000||!catalog.enabled(settings,n)||!settings.channels.browser||quiet(settings,this.now()))return finish('suppressed');
+      if(!n||n.readAt||this.now()-new Date(n.createdAt).getTime()>86400000||!catalog.enabled(settings,n)||!settings.channels.browser||quiet(settings,this.now())&&!catalog.urgent(n))return finish('suppressed');
       if(this.authorizeOwner && !await this.authorizeOwner(d.user_id,d.subscription.accountVersion||0))return finish('suppressed');
       if((n.type==='social.activity'||n.type.startsWith('social.activity.')) && await this.notifications.socialVisibility?.(d.user_id,n.sourceId)!==true)return finish('suppressed');
       const payload={v:1,binding:d.binding,id:n.id,title:settings.privacyPreview === false ? 'Panthorium' : String(n.title || 'Panthorium').slice(0,160),body:settings.privacyPreview === false ? 'มีการแจ้งเตือนใหม่ เปิด Panthorium เพื่อดูรายละเอียด' : String(n.body || n.title || 'มีการแจ้งเตือนใหม่').slice(0,500),url:'/?notifications=1',silent:!settings.channels.sound};

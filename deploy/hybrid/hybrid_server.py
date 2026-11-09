@@ -26,6 +26,7 @@ app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
 busy=False
 phase="idle"
 last_use=time.monotonic()
+background_cancel=None
 engine=None
 latest={'ready':False,'reason':'starting'}
 last_gpu=0
@@ -139,23 +140,36 @@ def owner(request):
     return value
 
 @contextlib.asynccontextmanager
-async def admission(request,kind='chat'):
-    global busy,last_use,latest,phase
+async def admission(request,kind='chat',background=False):
+    global busy,last_use,latest,phase,background_cancel
+    cancel=None
+    if not background and background_cancel is not None:background_cancel.set()
+    if background:
+        # Never queue background work, cold-load an engine, or compete with speech.
+        if queue.active is not None or queue.pending or engine is not None or time.monotonic()-last_use<30:
+            raise HTTPException(503,'background_waiting_idle')
+        cancel=asyncio.Event();background_cancel=cancel
     async def ready():
         global latest
         # The queue calls readiness only when no operation is active. Reclaim the
         # other engine before forecasting a cold load; speech follows text turns.
-        if kind=='voice':await asyncio.to_thread(stop_model)
+        if background:
+            if cancel.is_set() or len(queue.pending)>1:raise QueueError('background_preempted',503)
+        elif kind=='voice':await asyncio.to_thread(stop_model)
         else:await asyncio.to_thread(drop_voice)
         latest=await asyncio.to_thread(snapshot,kind)
+        if background and (not latest.get('modelLoaded') or cancel.is_set() or len(queue.pending)>1):
+            raise QueueError('background_waiting_idle',503)
         if DISABLED.exists():raise QueueError('local_disabled',503)
         return admission_ready(latest)
     try:
         async with queue.lease(owner(request),ready,request.is_disconnected):
             busy=True;phase='admission'
-            try:yield
+            try:yield cancel
             finally:busy=False;phase='idle';last_use=time.monotonic()
     except QueueError as e:raise HTTPException(e.status,e.code,headers={'Retry-After':'10'})
+    finally:
+        if cancel is not None and background_cancel is cancel:background_cancel=None
 
 async def voice_work(call):
     # A cancelled HTTP task must not release the slot while native synthesis still runs.
@@ -202,7 +216,7 @@ async def end():
 @app.get('/status')
 async def status(request:Request):return {**latest,'model':PROFILE['name'],'capabilities':PROFILE['capabilities'],'vision':False,'voice':'external-asr-tts','busy':busy,'phase':phase,'ready':latest.get('ready',False) and not DISABLED.exists(),'queue':queue.status(owner(request))}
 @app.get('/health')
-async def health():return {'ok':True,'service':'panthorium-free-ai-broker','version':PROFILE['brokerVersion'],'model':PROFILE['name'],'capabilities':PROFILE['capabilities'],'vision':False,'voice':'external-asr-tts','ramGuardAlive':bool(ram_guard and ram_guard.is_alive() and not guard_failed.is_set()),'inferenceVerified':inference_verified}
+async def health():return {'ok':True,'service':'panthorium-free-ai-broker','version':PROFILE['brokerVersion'],'backgroundPreemption':True,'model':PROFILE['name'],'capabilities':PROFILE['capabilities'],'vision':False,'voice':'external-asr-tts','ramGuardAlive':bool(ram_guard and ram_guard.is_alive() and not guard_failed.is_set()),'inferenceVerified':inference_verified}
 
 @app.post('/v1/chat/completions')
 async def chat(request:Request):
@@ -212,10 +226,15 @@ async def chat(request:Request):
     if len(raw)>60000:raise HTTPException(413,'too_large')
     data=json.loads(raw)
     if data.get('model')!='panthorium-local' or data.get('stream') is not False:raise HTTPException(400,'invalid_request')
-    data['max_tokens']=min(3072,max(1,int(data.get('max_tokens',768))))
-    async with admission(request):
-        await asyncio.to_thread(drop_voice)
-        await ensure_model()
+    background=request.headers.get('x-panthorium-background')=='1'
+    data['max_tokens']=min(256 if background else 3072,max(1,int(data.get('max_tokens',768))))
+    if background:
+        if data.get('tools') or data.get('tool_choice'):raise HTTPException(400,'background_tools_forbidden')
+        data['chat_template_kwargs']={'enable_thinking':False}
+    async with admission(request,background=background) as cancel:
+        if not background:
+            await asyncio.to_thread(drop_voice)
+            await ensure_model()
         phase="inference"
         async with httpx.AsyncClient(timeout=135) as client:
             task=asyncio.create_task(client.post('http://127.0.0.1:8088/v1/chat/completions',json=data))
@@ -224,8 +243,11 @@ async def chat(request:Request):
                     event=await request.receive()
                     if event['type']=='http.disconnect':return
             watcher=asyncio.create_task(disconnected())
+            preemption=asyncio.create_task(cancel.wait()) if cancel is not None else None
             try:
-                done,_=await asyncio.wait({task,watcher},timeout=130,return_when=asyncio.FIRST_COMPLETED)
+                waiting={task,watcher}
+                if preemption is not None:waiting.add(preemption)
+                done,_=await asyncio.wait(waiting,timeout=30 if background else 130,return_when=asyncio.FIRST_COMPLETED)
                 if task not in done:
                     await asyncio.to_thread(stop_model)
                     raise HTTPException(499 if watcher in done else 503,'cancelled_or_timeout')
@@ -236,10 +258,16 @@ async def chat(request:Request):
                         if choice.get('finish_reason')!='length' and (choice['message'].get('content') or choice['message'].get('tool_calls')):
                             inference_verified=True
                 return Response(r.content,status_code=r.status_code,media_type='application/json')
-            except httpx.HTTPError:raise HTTPException(503,'local_inference_unavailable')
+            except asyncio.CancelledError:
+                if background:await asyncio.to_thread(stop_model)
+                raise
+            except httpx.HTTPError:
+                if background:await asyncio.to_thread(stop_model)
+                raise HTTPException(503,'local_inference_unavailable')
             finally:
                 task.cancel();watcher.cancel()
-                await asyncio.gather(task,watcher,return_exceptions=True)
+                if preemption is not None:preemption.cancel()
+                await asyncio.gather(*waiting,return_exceptions=True)
 
 @app.post('/speech')
 async def speech(request:Request):

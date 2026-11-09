@@ -11,6 +11,7 @@
     ['app_update', 'system', 'มีอัปเดต Panthorium', 'แจ้งเมื่อระบบตรวจพบเวอร์ชันใหม่พร้อมอัปเดต', ['app.update_available']],
     ['self_notification', 'system', 'แจ้งเตือนที่ฉันขอให้ส่ง', 'รายการที่สั่งให้ Sentinel ส่งถึงคุณทันที', ['user.requested']],
     ['system_notice', 'system', 'ข้อความแจ้งเตือนทั่วไปของระบบ', 'ข้อความจากระบบที่ไม่มีประเภทเฉพาะ', ['system.notice']],
+    ['security_incident', 'security', 'ความเสี่ยงและแผนรับมือ', 'เหตุการณ์ความปลอดภัยและแผนที่รอผู้ดูแลอนุมัติ', ['security.incident', 'security.plan_ready']],
     ['security_login', 'security', 'มีการเข้าสู่ระบบบัญชี', 'แจ้งเมื่อบัญชีของคุณเข้าสู่ระบบสำเร็จ', ['auth.login_success']],
     ['security_password', 'security', 'รหัสผ่านถูกเปลี่ยน', 'แจ้งเมื่อรหัสผ่านบัญชีถูกตั้งใหม่', ['auth.user_password_reset', 'auth.voice_password_reset']],
     ['security_access', 'security', 'สิทธิ์บัญชีเปลี่ยนแปลง', 'แจ้งเมื่อสิทธิ์การเข้าถึงบัญชีถูกปรับ', ['auth.user_access_updated']],
@@ -81,5 +82,8 @@
     // Old stored preferences have no events object; preserve their existing behavior.
     return !key || settings.events?.[key] !== false;
   }
-  return Object.freeze({ entries, defaults, keyFor, enabled });
+  // Only trusted security producers emit this type; user-requested notices cannot
+  // select it. Immediate incident warnings bypass quiet hours, never OS permission.
+  const urgent = item => item?.category === 'security' && item?.type === 'security.incident';
+  return Object.freeze({ entries, defaults, keyFor, enabled, urgent });
 });
