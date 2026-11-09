@@ -355,9 +355,9 @@
 
     // Focus after paint
     requestAnimationFrame(() => {
-      if (!win.isConnected || store.get(id)?.minimized) return;
+      if (!win.isConnected || store.get(id) !== record || record.minimized) return;
       focus(id);
-      try { win.focus(); } catch (_) {}
+      try { if (!win.contains(document.activeElement)) win.focus({ preventScroll: true }); } catch (_) {}
     });
 
     return win;
