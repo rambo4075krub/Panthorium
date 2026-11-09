@@ -31,11 +31,57 @@ for(const bad of [[],[[]],[[cell('a',0)]],[[cell('a',1.5)]],[[cell('a',11)]],[[c
 assert.throws(()=>tables.validateOperation({...op,extra:true}),/invalid_editor_table/);
 for(const replacement of [
  '<w:tbl><w:tr><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p><w:r><w:t>orphan</w:t></w:r></w:p></w:tc></w:tr></w:tbl>',
- '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>outer</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>inner</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:tc></w:tr></w:tbl>',
  '<w:tbl><w:tr><w:trPr><w:gridBefore w:val="1"/></w:trPr><w:tc><w:p><w:r><w:t>offset</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
 ]){
  const unsafe={...entries,'word/document.xml':Buffer.from(_internals.xmlReplace(xml,'w:tbl',replacement,{first:true}))};
  const before=Buffer.from(unsafe['word/document.xml']);const read=tables.enrich(unsafe,officeModel(unsafe,'document'));
  assert.equal(read.tables[0].supported,false);assert(read.blocks.some(b=>b.table?.unsupported));assert(before.equals(unsafe['word/document.xml']));
 }
+// Bounded nesting: exact original block identity survives inserted paragraphs.
+const nestedEntries=Object.fromEntries(Object.entries(entries).map(([k,v])=>[k,Buffer.from(v)]));
+const batchModel=officeModel(nestedEntries,'document');
+const target=batchModel.blocks.find(b=>b.text==='หัวข้อ'),later=batchModel.blocks.find(b=>b.text==='รวม');
+const oldLater=later.ordinal;
+const nestedOp={type:'insert_nested_table',index:target.index,rows:[[cell('ชั้นสอง',2),cell('ข้อมูล')],[cell('A'),cell('B'),cell('C')]]};
+assert.equal(tables.validateOperation(nestedOp),true);
+assert(tables.apply(nestedEntries,nestedOp,batchModel));
+assert(later.ordinal>oldLater,'later original paragraph ordinal shifts safely');
+let currentXml=nestedEntries['word/document.xml'].toString();
+assert(_internals.xmlMatches(currentXml,'w:p',true)[later.ordinal][0].includes('รวม'));
+assert(_internals.xmlMatches(currentXml,'w:p',true)[target.ordinal][0].includes('หัวข้อ'),'target unchanged');
+// Repeated insert in same cell preserves both original target and previous child.
+assert(tables.apply(nestedEntries,{...nestedOp,rows:[[cell('ตารางเพื่อน')]]},batchModel));
+currentXml=nestedEntries['word/document.xml'].toString();
+const originalLater=_internals.xmlMatches(currentXml,'w:p',true)[later.ordinal];
+nestedEntries['word/document.xml']=Buffer.from(_internals.xmlReplaceSelected(currentXml,[originalLater],p=>p.replace('รวม','รวมแก้ไข')));
+let nestedModel=officeModel(nestedEntries,'document');
+assert.equal(nestedModel.tables.length,3);assert(nestedModel.tables.every(t=>t.supported));
+assert.equal(nestedModel.tables[0].parentTable,null);
+assert.deepEqual(nestedModel.tables[1].parentCell,{row:0,column:0});assert.equal(nestedModel.tables[1].parentTable,0);assert.equal(nestedModel.tables[1].depth,2);
+const outerCell=nestedModel.tables[0].rows[0][0];
+assert.deepEqual(outerCell.childTables,[1,2]);assert.equal(outerCell.blockIndices.length,1,'inner paragraphs excluded from parent cell');
+assert.deepEqual(outerCell.content.map(x=>x.type),['paragraph','table','table']);
+assert(nestedModel.blocks.some(b=>b.text==='รวมแก้ไข'));
+assert.equal(nestedModel.blocks.find(b=>b.text==='ชั้นสอง').table.index,1);
+const inner=nestedModel.blocks.find(b=>b.text==='ชั้นสอง');
+tables.apply(nestedEntries,{type:'insert_nested_table',index:inner.index,rows:[[cell('ชั้นสาม')]]},nestedModel);
+nestedModel=officeModel(nestedEntries,'document');
+assert.equal(nestedModel.tables.find(t=>t.depth===3).parentTable,1);
+const deepest=nestedModel.blocks.find(b=>b.text==='ชั้นสาม'),beforeTooDeep=Buffer.from(nestedEntries['word/document.xml']);
+assert.throws(()=>tables.apply(nestedEntries,{type:'insert_nested_table',index:deepest.index,rows:[[cell('เกิน')]]},nestedModel),/editor_table_nesting_limit/);
+assert(beforeTooDeep.equals(nestedEntries['word/document.xml']));
+assert.throws(()=>tables.apply(nestedEntries,{type:'insert_nested_table',index:0,rows:[[cell('outside')]]},nestedModel),/editor_nested_table_target/);
+for(const index of [-1,2000,1.2,'1'])assert.throws(()=>tables.validateOperation({...nestedOp,index}),/invalid_editor_table/);
+assert.throws(()=>tables.validateOperation({...nestedOp,extra:true}),/invalid_editor_table/);
+_internals.validateOfficeXmlEntries(_internals.unzip(_internals.zip(nestedEntries)));
+for(const [name,body]of Object.entries(original))if(name!=='word/document.xml')assert(body.equals(nestedEntries[name]),'nested preserve '+name);
+// The document-wide table budget applies equally to root and nested insertion.
+const limited=Object.fromEntries(Object.entries(original).map(([k,v])=>[k,Buffer.from(v)]));
+for(let i=0;i<100;i++)tables.apply(limited,{type:'insert_complex_table',rows:[[cell('table '+i)]]});
+const limitBytes=Buffer.from(limited['word/document.xml']);
+assert.equal(_internals.xmlMatches(limitBytes.toString(),'w:tbl').length,100);
+assert.throws(()=>tables.apply(limited,{type:'insert_complex_table',rows:[[cell('overflow')]]}),/editor_table_limit/);
+const limitModel=officeModel(limited,'document'),limitTarget=limitModel.blocks.find(b=>b.text==='table 0');
+assert.throws(()=>tables.apply(limited,{type:'insert_nested_table',index:limitTarget.index,rows:[[cell('overflow')]]},limitModel),/editor_table_limit/);
+assert(limitBytes.equals(limited['word/document.xml']),'budget rejection is atomic');
 console.log('PASS advanced Office tables: bounded spans, occupancy validation, native vertical/horizontal merges, metadata, round trip and unsupported geometry protection');

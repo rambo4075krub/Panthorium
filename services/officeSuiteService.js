@@ -7,6 +7,8 @@ const core=require('../office-suite-core');
 const pageText=require('./officePageText');
 const charts=require('./officeChartService');
 const tables=require('./officeTableService');
+const revisions=require('./officeRevisionService');
+const pivots=require('./officePivotService');
 const fail=code=>{throw new OfficeArtifactError(400,code);};
 const escape=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 const attr=(s,k)=>s.split('>')[0].match(new RegExp('(?:^|\\s)'+k+'=["\x27]([^"\x27]*)["\x27]'))?.[1]||'';
@@ -27,7 +29,7 @@ function validateStyle(s,cell=false){
   if(s.numberFormat!=null&&!['general','integer','decimal','percent'].includes(s.numberFormat))fail('invalid_office_style');
 }
 function validateOperation(op){
-  if(pageText.validateOperation(op)||charts.validateOperation(op)||tables.validateOperation(op))return true;
+  if(pageText.validateOperation(op)||charts.validateOperation(op)||tables.validateOperation(op)||revisions.validateOperation(op)||pivots.validateOperation(op))return true;
   if(!TYPES.includes(op?.type))return false;
   const keys={add_slide:['type','value'],reorder_slide:['type','page','toPage'],set_formula:['type','sheet','cell','value'],format_cell:['type','sheet','cell','style'],format_text:['type','index','style'],move_text:['type','index','x','y','width','height'],slide_background:['type','page','color'],insert_table:['type','rows'],add_slide_text:['type','page','value']}[op.type];
   if(Object.keys(op).length!==keys.length||!keys.every(k=>Object.hasOwn(op,k)))fail('invalid_editor_operation');
@@ -92,7 +94,7 @@ function enrich(entries,kind,model){
     const styles=entries['xl/styles.xml']?.toString()||'',fonts=tags(tags(styles,'fonts')[0]||'','font'),xfs=tags(tags(styles,'cellXfs')[0]||'','xf');
     for(const s of model.sheets){s.hasDrawing=xmlMatches(entries[s.file].toString(),'drawing').length>0;const cellMap=new Map(tags(entries[s.file].toString(),'c').map((x,i)=>[attr(x,'r')||s.cells[i]?.cell,x]));for(const c of s.cells){const xml=cellMap.get(c.cell),xf=xfs[Number(attr(xml||'','s'))]||'',font=fonts[Number(attr(xf,'fontId'))]||'';
       c.style={bold:!!tags(font,'b').length,italic:!!tags(font,'i').length,underline:!!tags(font,'u').length,fontSize:Number(tagval(font,'sz','val'))||12,color:tagval(font,'color','rgb').slice(-6)||'20252C',align:attr(tags(xf,'alignment')[0]||'','horizontal')||'left',numberFormat:({'1':'integer','2':'decimal','9':'percent','10':'percent'})[attr(xf,'numFmtId')]||'general'};
-    }}return model;
+    }}const state=pivots.describe(entries);model.pivotState={importedPivotCount:state.importedPivotCount,...(state.warning?{warning:state.warning}:{})};for(const sheet of model.sheets){const output=state.outputs.find(p=>p.file===sheet.file);if(output){const {file,...meta}=output;sheet.pivotOutput=meta;}sheet.readonly=!!output||state.importedPivotCount>0;}return model;
   }
   const prefix=kind==='document'?'w':'a';
   const presentation=entries['ppt/presentation.xml']?.toString()||'',size=tags(presentation,'p:sldSz')[0]||'',width=Number(attr(size,'cx'))||12192000,height=Number(attr(size,'cy'))||6858000;
@@ -105,7 +107,7 @@ function enrich(entries,kind,model){
     }
   }
   if(kind==='presentation'){model.slideSize={width,height};model.backgrounds=model.slideFiles.map(f=>tagval(tags(entries[f].toString(),'p:bg')[0]||'','a:srgbClr','val')||'FFFFFF');}
-  visualContent(entries,kind,model);if(kind==='document'){pageText.enrich(entries,model);tables.enrich(entries,model);}return model;
+  visualContent(entries,kind,model);if(kind==='document'){pageText.enrich(entries,model);tables.enrich(entries,model);revisions.enrich(entries,model);}return model;
 }
 function formatParagraph(p,style,prefix){
   if(prefix==='w'){
@@ -134,14 +136,14 @@ function formatCell(entries,op,sheet){
   entries['xl/styles.xml']=Buffer.from(styles);xml=xml.replace(old,()=>xmlWithoutAttributes(old,['s']).replace('<c','<c s="'+xfs.length+'"'));entries[sheet.file]=Buffer.from(xml);
 }
 function apply(entries,kind,op,model){
-  if(pageText.apply(entries,kind,op))return true;
-  if(op?.type==='insert_complex_table'){if(kind!=='document')fail('editor_operation_type_mismatch');return tables.apply(entries,op);}
+  if(pageText.apply(entries,kind,op)||revisions.apply(entries,kind,op,model))return true;
+  if(['insert_complex_table','insert_nested_table'].includes(op?.type)){if(kind!=='document')fail('editor_operation_type_mismatch');return tables.apply(entries,op,model);}
   if(!validateOperation(op))return false;
   if(op.type==='set_formula')return false; // Cell insertion uses the existing bounded writer.
   if(op.type==='format_cell'){if(kind!=='spreadsheet'||!model.sheets[op.sheet])fail('editor_operation_type_mismatch');formatCell(entries,op,model.sheets[op.sheet]);return true;}
   if(['format_text','move_text'].includes(op.type)){
     const b=model.blocks?.[op.index];if(!b)fail('editor_text_not_found');let xml=entries[b.file].toString();
-    if(op.type==='format_text'){const prefix=kind==='document'?'w':'a',paragraph=xmlMatches(xml,prefix+':p',true)[b.ordinal];if(!paragraph)fail('editor_text_not_found');xml=xmlReplaceSelected(xml,[paragraph],p=>formatParagraph(p,op.style,prefix));}
+    if(op.type==='format_text'){const prefix=kind==='document'?'w':'a',paragraph=xmlMatches(xml,prefix+':p',true)[b.ordinal];if(!paragraph)fail('editor_text_not_found');if(kind==='document'&&revisions.paragraphRevisions(paragraph[0]).length)fail('editor_revision_pending');xml=xmlReplaceSelected(xml,[paragraph],p=>formatParagraph(p,op.style,prefix));}
     else {if(kind!=='presentation')fail('editor_operation_type_mismatch');const info=shapeFor(xml,b.ordinal);if(!info||/<p:grpSp\b/.test(xml)||!tags(info.shape,'a:xfrm').length)fail('editor_geometry_unsupported');const size=model.slideSize,off=`<a:off x="${Math.round(op.x/100*size.width)}" y="${Math.round(op.y/100*size.height)}"/>`,ext=`<a:ext cx="${Math.round(op.width/100*size.width)}" cy="${Math.round(op.height/100*size.height)}"/>`;let i=0;xml=xmlReplace(xml,'p:sp',s=>i++===info.index?xmlReplace(s,'a:xfrm','<a:xfrm>'+off+ext+'</a:xfrm>',{first:true}):s);}
     entries[b.file]=Buffer.from(xml);return true;
   }

@@ -4,14 +4,16 @@
 const crypto = require('node:crypto');
 const suite = require('./officeSuiteService');
 const charts = require('./officeChartService');
+const pivots = require('./officePivotService');
 const {capabilities}=require('./officeCapabilities');
+const revisions=require('./officeRevisionService');
 const {replaceDocumentText,protectionReason,documentRuns} = require('./officeRichText');
 const formulaCore = require('../office-suite-core');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const { _internals, OfficeArtifactError } = require('./officeArtifactService');
-const { xmlMatches, xmlReplace, xmlReplaceSelected, xmlParagraphMatches, xmlWithoutAttributes, validateOfficeXmlEntries } = _internals;
+const { xmlMatches, xmlReplace, xmlReplaceSelected, xmlDirectMatches, xmlInsertChild, xmlParagraphMatches, xmlWithoutAttributes, validateOfficeXmlEntries } = _internals;
 const { sanitizeFilename } = require('./cloudFilesService');
 const { runProcess } = require('./mediaStudioService');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -99,7 +101,7 @@ function officeModel(entries, pluginId) {
     let ordinal=0;
     for(const match of xmlMatches(entries[file].toString(),prefix+':p',true)) {
       const text=xmlParagraphMatches(match[0],prefix+':t',prefix).map(m=>decode(m[1])).join('');
-      if(text) {
+      if(text||pluginId==='document'&&revisions.paragraphRevisions(match[0]).length) {
         const protection=pluginId==='document'?protectionReason(match[0]):null;
         blocks.push({index:blocks.length,page:page+1,file,ordinal,text,...(pluginId==='document'?{runs:documentRuns(match[0])}:{}),...(protection?{textEditProtection:protection}:{})});
       }
@@ -109,11 +111,35 @@ function officeModel(entries, pluginId) {
   if(blocks.length>2000) fail('editor_file_too_complex',413);
   return suite.enrich(entries,pluginId,{blocks,...(pluginId==='presentation'?{slideFiles:files}:{})});
 }
+function recalculateFormulaCaches(entries){
+    const updated=officeModel(entries,'spreadsheet'),calculated=formulaCore.calculate(updated.sheets);
+    for(const [si,sheet]of updated.sheets.entries()) {
+      const byCell=new Map(calculated[si].cells.filter(c=>c.formula).map(c=>[c.cell,c]));
+      if(!byCell.size)continue;
+      entries[sheet.file]=Buffer.from(xmlReplace(addressedSheet(entries[sheet.file].toString()),'c',c=>{
+        const item=byCell.get(attr(c,'r'));if(!item)return c;
+        // Unsupported/shared formula caches must not look current after edits.
+        c=xmlWithoutAttributes(xmlReplace(c,'v',''),['t']);
+        if(item.calculationError)return c;
+        const value=item.calculated,type=typeof value==='boolean'?'b':typeof value==='string'?'str':'';
+        if(type)c=c.replace('<c','<c t="'+type+'"');return c.replace('</c>',()=>'<v>'+escape(typeof value==='boolean'?+value:value)+'</v></c>');
+      }));
+    }
+    if(updated.sheets.some(s=>s.cells.some(c=>c.formula))) {
+    // Recalculate also in external Office engines, including unsupported formulas.
+    let workbook=entries['xl/workbook.xml'].toString();workbook=xmlReplaceSelected(workbook,xmlDirectMatches(workbook,'calcPr'),'');const calc='<calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/>',after=['oleSize','customWorkbookViews','pivotCaches','smartTagPr','smartTagTypes','webPublishing','fileRecoveryPr','webPublishObjects','extLst'].flatMap(tag=>xmlDirectMatches(workbook,tag)).sort((a,b)=>a.index-b.index)[0];workbook=after?workbook.slice(0,after.index)+calc+workbook.slice(after.index):xmlInsertChild(workbook,calc);entries['xl/workbook.xml']=Buffer.from(workbook);
+    // A stale dependency chain is invalid after changing formulas.
+    delete entries['xl/calcChain.xml'];
+    if(entries['xl/_rels/workbook.xml.rels'])entries['xl/_rels/workbook.xml.rels']=Buffer.from(xmlReplace(entries['xl/_rels/workbook.xml.rels'].toString(),'Relationship',m=>attr(m,'Type').endsWith('/calcChain')?'':m));
+    entries['[Content_Types].xml']=Buffer.from(xmlReplace(entries['[Content_Types].xml'].toString(),'Override',m=>attr(m,'PartName')==='/xl/calcChain.xml'?'':m));
+  }
+  }
 function patchOffice(entries, pluginId, operations) {
   // Resolve indexes once. Operations cannot shift the meaning of later indexes.
   const model=officeModel(entries,pluginId);
   for(const op of operations) {
-    if(op.type==='insert_chart')continue; // Render chart caches from the final cell values.
+    if(['insert_chart','insert_pivot'].includes(op.type)){if(pluginId!=='spreadsheet'||!model.sheets?.[op.sheet])fail('editor_sheet_not_in_snapshot');continue;} // Render chart caches from the final cell values.
+    if(['set_cell','set_formula','format_cell'].includes(op.type)&&pluginId==='spreadsheet'&&model.sheets?.[op.sheet])pivots.assertCellEditable(entries,model.sheets[op.sheet].file,op.cell);
     if(op.type==='format_cell'&&model.sheets?.[op.sheet]){const sf=model.sheets[op.sheet].file;entries[sf]=Buffer.from(addressedSheet(entries[sf].toString()));}
     if(suite.apply(entries,pluginId,op,model))continue;
     if(['set_cell','set_formula'].includes(op.type) && pluginId==='spreadsheet') {
@@ -160,31 +186,11 @@ function patchOffice(entries, pluginId, operations) {
       else xml=xml.replace('</w:body>',()=>p+'</w:body>');entries['word/document.xml']=Buffer.from(xml);
     } else fail('editor_operation_type_mismatch');
   }
-  if(pluginId==='spreadsheet' && operations.some(op=>['set_cell','set_formula'].includes(op.type))) {
-    const updated=officeModel(entries,pluginId),calculated=formulaCore.calculate(updated.sheets);
-    for(const [si,sheet]of updated.sheets.entries()) {
-      const byCell=new Map(calculated[si].cells.filter(c=>c.formula).map(c=>[c.cell,c]));
-      if(!byCell.size)continue;
-      entries[sheet.file]=Buffer.from(xmlReplace(addressedSheet(entries[sheet.file].toString()),'c',c=>{
-        const item=byCell.get(attr(c,'r'));if(!item)return c;
-        // Unsupported/shared formula caches must not look current after edits.
-        c=xmlReplace(c,'v','');if(['str','b','e'].includes(attr(c,'t')))c=xmlWithoutAttributes(c,['t']);
-        if(item.calculationError)return c;
-        const value=item.calculated,type=typeof value==='boolean'?'b':typeof value==='string'?'str':'';
-        if(type)c=c.replace('<c','<c t="'+type+'"');return c.replace('</c>',()=>'<v>'+escape(typeof value==='boolean'?+value:value)+'</v></c>');
-      }));
-    }
-    if(updated.sheets.some(s=>s.cells.some(c=>c.formula))) {
-    // Recalculate also in external Office engines, including unsupported formulas.
-    let workbook=entries['xl/workbook.xml'].toString();workbook=xmlReplace(workbook,'calcPr','').replace('</workbook>','<calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>');entries['xl/workbook.xml']=Buffer.from(workbook);
-    // A stale dependency chain is invalid after changing formulas.
-    delete entries['xl/calcChain.xml'];
-    if(entries['xl/_rels/workbook.xml.rels'])entries['xl/_rels/workbook.xml.rels']=Buffer.from(xmlReplace(entries['xl/_rels/workbook.xml.rels'].toString(),'Relationship',m=>attr(m,'Type').endsWith('/calcChain')?'':m));
-    entries['[Content_Types].xml']=Buffer.from(xmlReplace(entries['[Content_Types].xml'].toString(),'Override',m=>attr(m,'PartName')==='/xl/calcChain.xml'?'':m));
-  }
-  }
-  for(const op of operations)if(op.type==='insert_chart')charts.apply(entries,pluginId,op,model);
-  if(pluginId==='spreadsheet'&&operations.some(op=>['set_cell','set_formula','insert_chart'].includes(op.type)))charts.refresh(entries,model);
+  if(pluginId==='spreadsheet'&&operations.some(op=>['set_cell','set_formula'].includes(op.type)))recalculateFormulaCaches(entries);
+  for(const op of operations)if(op.type==='insert_pivot')pivots.apply(entries,pluginId,op,officeModel(entries,pluginId));
+  if(pluginId==='spreadsheet'&&operations.some(op=>['set_cell','set_formula','insert_pivot'].includes(op.type))){pivots.refresh(entries);recalculateFormulaCaches(entries);}
+  for(const op of operations)if(op.type==='insert_chart')charts.apply(entries,pluginId,op,officeModel(entries,pluginId));
+  if(pluginId==='spreadsheet'&&operations.some(op=>['set_cell','set_formula','insert_chart','insert_pivot'].includes(op.type)))charts.refresh(entries,officeModel(entries,pluginId));
   return entries;
 }
 class StudioEditorService {

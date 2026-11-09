@@ -8,7 +8,7 @@ const NS='http://schemas.openxmlformats.org';
 const fail=code=>{throw new OfficeArtifactError(400,code);};
 const escape=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 const attr=(s,k)=>xmlMatches(s, s.match(/^<([^\s/>]+)/)?.[1]||'__none')[0]?.node.attributes[k]||'';
-const decode=v=>String(v).replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);/gi,s=>({'&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&apos;':"'"}[s]??String.fromCodePoint(s[2].toLowerCase()==='x'?parseInt(s.slice(3,-1),16):Number(s.slice(2,-1)))));
+const decode=v=>String(v).replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);/gi,s=>{const named={'&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&apos;':"'"};if(Object.hasOwn(named,s))return named[s];const n=s[2].toLowerCase()==='x'?parseInt(s.slice(3,-1),16):Number(s.slice(2,-1));return n>0&&n<=0x10ffff?String.fromCodePoint(n):'';});
 function validateOperation(op){
   if(op?.type!=='set_page_text')return false;
   if(Object.keys(op).length!==3||!['header','footer'].includes(op.part)||typeof op.value!=='string'||op.value.length>2000||/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(op.value))fail('invalid_editor_page_text');
