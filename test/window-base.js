@@ -41,6 +41,6 @@ const style = w.document.createElement('style'); style.textContent = css; w.docu
 assert.equal(w.getComputedStyle(native.querySelector('.win-btn.close')).borderRadius, '50%');
 const shell = fs.readFileSync('sentinel.html', 'utf8');
 assert(shell.indexOf('/panthorium-window-base.css?v=workspace-ux-20261015') < shell.indexOf('</head>'));
-assert(shell.indexOf('/panthorium-window-base.js?v=4') < shell.indexOf('const OS ='));
+assert(shell.indexOf('/panthorium-window-base.js?v=5') < shell.indexOf('const OS ='));
 dom.window.close();
 console.log('Base Window: shared state, native/external controls, restore and draft preservation passed');
