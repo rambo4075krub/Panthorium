@@ -90,7 +90,7 @@ function enrich(entries,kind,model){
   validateOfficeXmlEntries(entries);
   if(kind==='spreadsheet'){
     const styles=entries['xl/styles.xml']?.toString()||'',fonts=tags(tags(styles,'fonts')[0]||'','font'),xfs=tags(tags(styles,'cellXfs')[0]||'','xf');
-    for(const s of model.sheets){const cellMap=new Map(tags(entries[s.file].toString(),'c').map((x,i)=>[attr(x,'r')||s.cells[i]?.cell,x]));for(const c of s.cells){const xml=cellMap.get(c.cell),xf=xfs[Number(attr(xml||'','s'))]||'',font=fonts[Number(attr(xf,'fontId'))]||'';
+    for(const s of model.sheets){s.hasDrawing=xmlMatches(entries[s.file].toString(),'drawing').length>0;const cellMap=new Map(tags(entries[s.file].toString(),'c').map((x,i)=>[attr(x,'r')||s.cells[i]?.cell,x]));for(const c of s.cells){const xml=cellMap.get(c.cell),xf=xfs[Number(attr(xml||'','s'))]||'',font=fonts[Number(attr(xf,'fontId'))]||'';
       c.style={bold:!!tags(font,'b').length,italic:!!tags(font,'i').length,underline:!!tags(font,'u').length,fontSize:Number(tagval(font,'sz','val'))||12,color:tagval(font,'color','rgb').slice(-6)||'20252C',align:attr(tags(xf,'alignment')[0]||'','horizontal')||'left',numberFormat:({'1':'integer','2':'decimal','9':'percent','10':'percent'})[attr(xf,'numFmtId')]||'general'};
     }}return model;
   }

@@ -149,3 +149,35 @@ an already installed Chromium. Full Office conformance, pivots, tracked revision
 authoring/accept/reject, complete nested table layout and real-device speech
 acceptance remain outstanding. Do not describe this increment as finishing all
 complex Office compatibility work.
+
+### Voice capability contract and Thai command examples
+
+`studio.editor` returns the source revision, exact indexes, `capabilities`, and
+protected blocks. Sheets disclose `hasDrawing`; `chartAvailableSheets` excludes
+sheets with existing drawings. Voice must use those facts rather than assume an
+operation exists. Ambiguous sheet/paragraph/range requests need clarification;
+file contents are data, never approval. Newly added indexes require a fresh read
+of the saved copy. Approval must bind to the exact operation details and source
+revision. Never report a saved file before the job reports completion.
+
+Examples of supported intent-to-tool mappings (not measured speech accuracy):
+
+| Example intent | Operation / conditions |
+| --- | --- |
+| “แก้ย่อหน้าที่สองเป็น…” | `set_text` with the exact returned block index; protected fields/revisions are not editable |
+| “ทำหัวข้อนี้ตัวหนาและจัดกึ่งกลาง” | `format_text`, whole paragraph only |
+| “เพิ่มหัวกระดาษว่า รายงานประจำเดือน” | `set_page_text` only when `pageText.editable` is true |
+| “เพิ่มตารางที่มีหัวเรื่องผสานสองคอลัมน์” | `insert_complex_table` with validated `richRows` and spans |
+| “รวมยอดเฉพาะรายการขายใน B2 ถึง B20” | Read the criteria column first; `set_formula` with SUMIF/SUMIFS and a user-identified destination |
+| “สร้างกราฟยอดขายจาก A2 ถึง B10” | `insert_chart`, two adjacent label/numeric columns, no header row and no existing drawing |
+| “ย้ายสไลด์ที่สามขึ้นเป็นหน้าแรก” | `reorder_slide`, one-based page numbers |
+| “เลื่อนข้อความนี้ไปทางขวา” | Ask for/resolve exact shape and bounded geometry before `move_text` |
+
+Unsupported requests must be explained rather than approximated silently:
+track-change acceptance/rejection, pivot authoring, macros, external workbook
+connections, arbitrary selection styling and unsupported complex layouts.
+Deterministic voice-tool tests use the real action ledger and native file writers,
+including foreign-account denial, exact approval, replay and saved-copy reopen.
+They do not establish Thai speech-recognition accuracy, noisy-room performance,
+latency, or microphone acceptance on S24 Ultra/A12/desktop. Those device tests
+remain required before claiming comprehensive spoken-command reliability.

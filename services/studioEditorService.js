@@ -4,6 +4,7 @@
 const crypto = require('node:crypto');
 const suite = require('./officeSuiteService');
 const charts = require('./officeChartService');
+const {capabilities}=require('./officeCapabilities');
 const {replaceDocumentText,protectionReason,documentRuns} = require('./officeRichText');
 const formulaCore = require('../office-suite-core');
 const path = require('node:path');
@@ -195,7 +196,7 @@ class StudioEditorService {
     if(model.blocks) model.blocks=model.blocks.map(({file,ordinal,...block})=>block);
     if(model.sheets) model.sheets=formulaCore.calculate(model.sheets.map(({file,...sheet})=>sheet));
     if(model.slideFiles){model.pageCount=model.slideFiles.length;delete model.slideFiles;}
-    return {file:{id:file.id,name:file.name,contentType:file.contentType},pluginId,revision:hash(file.body),...model};
+    return {file:{id:file.id,name:file.name,contentType:file.contentType},pluginId,revision:hash(file.body),...model,...(capabilities(pluginId,model)?{capabilities:capabilities(pluginId,model)}:{})};
   }
   async apply({user,pluginId,input}) {
     const edit=validateEdit(input.edit), file=await this.files.readOwned(user.sub,edit.fileId);
