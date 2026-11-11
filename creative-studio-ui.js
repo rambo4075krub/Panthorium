@@ -442,6 +442,66 @@
     v.root.replaceChildren(); if (view === v) view = null;
   }
   function hasUnsaved(v){return current(v)&&[...v.workspaces.values()].some(item=>item.editor?.isDirty?.()||window.PanthoriumStudioEditor?.isDirty(item.host));}
+  function voiceSnapshot(v){const item=v.workspaces.get(v.active);return JSON.stringify({owner:identity(),kind:v.active,state:item?.editor?.voiceSnapshot?.()??window.PanthoriumStudioEditor?.voiceSnapshot?.(item?.host)??'empty'});}
+  function clearVoicePending(v){v.voicePending=null;v.root.querySelector('[data-voice-confirmation]')?.remove();}
+  function voiceBackground(v,run,text){
+    v.voiceBusy=true;status(v,text);
+    Promise.resolve().then(run).then(result=>{if(current(v)&&result)status(v,result.text,!result.ok);}).catch(error=>{if(current(v))status(v,friendly(error),true);}).finally(()=>{v.voiceBusy=false;});
+    return {ok:true,pending:true,text};
+  }
+  async function command(input){
+    const ui=window.PanthoriumCreativeVoice,c=window.PanthoriumCreativeVoiceCatalog?.parse(input);
+    if(!ui||!c)return {ok:false,error:'invalid_creative_command',text:'ยังไม่รู้จักคำสั่งนี้ พูด “คำสั่งเสียงสร้างสรรค์” เพื่อดูตัวอย่าง'};
+    if(!allowed())return ui.fail('เข้าสู่ระบบด้วยบัญชีผู้ใช้ก่อนสั่งงานสร้างสรรค์');
+    if(c.error)return {ok:false,...c};
+    if(['open','new','help','open_file'].includes(c.action)&&!view)open(c.kind||'image');
+    const v=view;if(!v||!current(v))return ui.fail('เปิดหมวดสร้างสรรค์และเอกสารก่อนสั่งแก้ไข');
+    const shell=v.root.closest('.window');
+    if(c.action==='open') {if(v.voicePending)return ui.fail('มีคำสั่งรอยืนยัน พูด ยืนยัน หรือ ยกเลิก ก่อน');open(c.kind);return v.active===c.kind?ui.ok('เปิด'+plugin(c.kind).title+'แล้ว'):ui.fail('รอคำขอปัจจุบันให้เสร็จก่อนเปลี่ยนหมวด');}
+    if(shell&&(shell.hidden||getComputedStyle(shell).display==='none'))return ui.fail('เปิดหน้าต่างสร้างสรรค์ที่ย่อไว้ก่อนสั่งแก้ไข');
+    if(c.action==='help'){v.root.querySelector('[data-creative-voice-help]').hidden=false;return ui.ok('แสดงตัวอย่างคำสั่งเสียงแล้ว เลือกเปิดไฟล์และชิ้นงานก่อนสั่งแก้ไข');}
+    if(c.action==='cancel'){if(!v.voicePending)return ui.fail('ไม่มีคำสั่งสร้างสรรค์รอยืนยัน');clearVoicePending(v);return ui.ok('ยกเลิกคำสั่งแล้ว');}
+    if(v.voiceBusy||v.busy||v.modeBusy)return ui.fail('กำลังดำเนินงานก่อนหน้า รอให้เสร็จก่อนสั่งอีกครั้ง');
+    if(c.action==='confirm'){
+      const activeHost=v.workspaces.get(v.active)?.host;if(activeHost?.contains(document.activeElement))document.activeElement.blur();
+      const pending=v.voicePending;if(!pending)return ui.fail('ไม่มีคำสั่งสร้างสรรค์รอยืนยัน');clearVoicePending(v);
+      if(pending.expires<Date.now()||pending.host!==v.workspaces.get(v.active)?.host||pending.snapshot!==voiceSnapshot(v))return ui.fail('งานหรือบัญชีเปลี่ยนหลังเสนอคำสั่ง หรือคำขอหมดอายุ กรุณาสั่งใหม่');
+      return voiceBackground(v,pending.run,'กำลัง'+pending.label+' · ติดตามผลในพื้นที่งาน');
+    }
+    if(v.voicePending)return {ok:true,confirmationRequired:true,text:'มีคำสั่งรอยืนยัน พูด ยืนยัน หรือ ยกเลิก ก่อนสั่งงานถัดไป'};
+    if(c.action==='new') {open(c.kind);if(v.active!==c.kind)return ui.fail('ยังเปลี่ยนหมวดไม่ได้');}
+    const item=v.workspaces.get(v.active);if(!item)return ui.fail('พื้นที่งานยังไม่พร้อม');
+    if(item.host.contains(document.activeElement))document.activeElement.blur();
+    if(c.action==='open_file')return voiceBackground(v,async()=>{
+      await loadFiles(v);if(!current(v))return;
+      const name=c.text.normalize('NFC').toLocaleLowerCase(),matches=v.files.filter(f=>String(f.name).normalize('NFC').toLocaleLowerCase()===name);
+      if(matches.length!==1)return ui.fail(matches.length?'มีไฟล์ชื่อนี้มากกว่าหนึ่งไฟล์ กรุณาเลือกไฟล์ในรายการ':'ไม่พบชื่อไฟล์นี้ในบัญชี ระบุชื่อและนามสกุลให้ตรงรายการ');
+      const opened=await openFile(v,matches[0].id),message=v.workspaces.get(v.active)?.host.querySelector('.ce-message');
+      return opened===false||message?.dataset.error==='true'?ui.fail(message?.textContent||'ยังเปิดไฟล์ไม่ได้'):ui.ok('เปิดไฟล์ '+matches[0].name+' แล้ว');
+    },'กำลังค้นหาและเปิดไฟล์ในบัญชีนี้');
+    if(c.action==='export'&&v.active!=='video')return ui.fail('เปิดหมวดวิดีโอก่อนส่งออก MP4 · เอกสารใช้คำสั่ง บันทึก');
+    if(c.action==='download_png'&&v.active!=='image')return ui.fail('เปิดหมวดรูปภาพก่อนดาวน์โหลด PNG');
+    if(c.action==='project'&&!item.editor)return ui.fail('เก็บโปรเจกต์ใช้กับรูปภาพและวิดีโอ · เอกสารใช้คำสั่ง บันทึก');
+    if(c.action==='new'&&(item.editor?.isDirty?.()||window.PanthoriumStudioEditor?.isDirty(item.host)))return ui.fail('เก็บโปรเจกต์หรือบันทึกการแก้ไขในหมวดนี้ก่อนเริ่มงานใหม่');
+    const run=async()=>{
+      if(!current(v))return ui.fail('บัญชีเปลี่ยนแล้ว');
+      if(c.action==='new'){
+        const b=item.editor?ui.button(item.host,v.active==='image'?'＋ ใหม่':'โปรเจกต์ใหม่'):v.root.querySelector('[data-editor-blank]');
+        await ui.click(b);return v.root.querySelector('[data-studio-status]').dataset.error==='true'?ui.fail(v.root.querySelector('[data-studio-status]').textContent):ui.ok('สร้างพื้นที่งานใหม่แล้ว');
+      }
+      return item.editor?item.editor.command(c):window.PanthoriumStudioEditor.command(item.host,c);
+    };
+    if(window.PanthoriumCreativeVoiceCatalog.needsConfirmation(c)){
+      if(!item.editor&&!window.PanthoriumStudioEditor.voiceSnapshot(item.host)&&c.action!=='new')return ui.fail('เปิดไฟล์ที่ต้องการแก้ไขก่อน');
+      const label=({save:'บันทึกฉบับใหม่',export:'ส่งออก MP4',download_png:'ดาวน์โหลด PNG',project:'เก็บโปรเจกต์',new:'เริ่ม'+plugin(v.active).title+'ใหม่'})[c.action];
+      const card=el('div',null,{'data-voice-confirmation':'',role:'status',class:'cs-actions'});
+      card.append(el('span',label+'ในหมวด'+plugin(v.active).title+' — พูด ยืนยัน หรือ ยกเลิก'),button('ยืนยัน',()=>command('ยืนยัน')),button('ยกเลิก',()=>command('ยกเลิก')));
+      v.root.querySelector('[data-inline-workspace]').before(card);
+      v.voicePending={run,label,host:item.host,snapshot:voiceSnapshot(v),expires:Date.now()+120000};
+      return {ok:true,confirmationRequired:true,text:label+'ในหมวด'+plugin(v.active).title+'หรือไม่? พูด ยืนยัน หรือ ยกเลิก'};
+    }
+    const result=await run();if(current(v)&&result)status(v,result.text,!result.ok);return result;
+  }
   function close() {
     const v = view; cleanup(v);
     if (typeof closeWindow === 'function') closeWindow(ID); else if (window.PanthoriumWindowManager?.close) window.PanthoriumWindowManager.close(ID); else document.querySelector('.window[data-id="creative-studio"]')?.remove();
@@ -458,6 +518,10 @@
     root.closest('.window')?.addEventListener('panthorium:before-window-close',event=>{if(hasUnsaved(v)&&!window.confirm('มีงานที่ยังไม่ได้บันทึกหรือเก็บโปรเจกต์ ต้องการปิดหรือไม่?'))event.preventDefault();});
     const workspace=root.querySelector('[data-inline-workspace]'),filebar=root.querySelector('.cs-open-file');workspace.before(filebar);workspace.after(root.querySelector('[data-studio-status]'));
     filebar.prepend(el('span','ไฟล์',{class:'cs-file-label'}));
+    const voiceHelp=el('section',null,{'data-creative-voice-help':'',hidden:'','aria-label':'คำสั่งเสียงสร้างสรรค์'});
+    voiceHelp.style.cssText='position:absolute;right:12px;top:90px;z-index:15;width:min(430px,90%);max-height:65%;overflow:auto;padding:14px;background:#102332;border:1px solid #548598;border-radius:10px;box-shadow:0 12px 35px #0009';
+    voiceHelp.append(el('strong','สั่งงานในพื้นที่ที่เปิดอยู่'),el('p','รูปภาพ: เพิ่มข้อความ สวัสดี · หมุนภาพ 90 องศา'),el('p','วิดีโอ: เลื่อนไป 1 วินาที · แบ่งคลิป · เพิ่มคำบรรยาย สวัสดี'),el('p','เอกสาร: เพิ่มย่อหน้า รายละเอียดงาน · เลือกย่อหน้าที่ 2 · ตัวหนา'),el('p','ตาราง: เปลี่ยน B2 เป็น 500 · ใส่สูตร B3 เป็น =SUM(B1:B2)'),el('p','นำเสนอ: เพิ่มสไลด์ สรุปงาน · สไลด์ถัดไป · เริ่มนำเสนอ'),el('p','ทุกหมวด: ย้อนกลับ · ทำซ้ำ · บันทึก · ยืนยัน / ยกเลิก'),button('เริ่มสั่งด้วยเสียง',async()=>{const r=await window.PanthoriumCreativeVoice.start(v.active);if(current(v)){status(v,r.text,!r.ok);if(r.ok)voiceHelp.hidden=true;}}),button('ปิดตัวอย่าง',()=>{voiceHelp.hidden=true;}));
+    root.append(voiceHelp);filebar.append(button('🎙 เสียง',()=>{voiceHelp.hidden=!voiceHelp.hidden;},{'aria-label':'สั่งด้วยเสียงและดูตัวอย่างคำสั่ง'}));
     const importInput=el('input',null,{type:'file',accept:'.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.mp4,.webm',hidden:''});
     filebar.append(button('นำเข้าไฟล์',()=>importInput.click()),importInput);
     importInput.onchange=async()=>{const file=importInput.files?.[0];if(!file)return;if(file.size>20*1024*1024)return status(v,'รองรับไฟล์ไม่เกิน 20 MB',true);try{const data=await api(v,'/api/files',{method:'POST',body:file,headers:{'Content-Type':'application/octet-stream','x-file-name':encodeURIComponent(file.name),'x-file-content-type':file.type||'application/octet-stream'}});if(!current(v))return;v.files.unshift(data.file);renderFiles(v);await openFile(v,data.file.id);}catch(e){status(v,friendly(e),true);}finally{importInput.value='';}};
@@ -477,7 +541,7 @@
     root.querySelector('[data-editor-blank]').onclick=async event=>{
       const contents={document:{title:'เอกสารใหม่',sections:[{paragraphs:['เริ่มเขียนที่นี่']}]},spreadsheet:{title:'ตารางใหม่',sheets:[{name:'ข้อมูล',rows:[['หัวข้อ','ค่า'],['', '']]}]},presentation:{title:'งานนำเสนอใหม่',slides:[{title:'หัวข้อสไลด์',bullets:['เริ่มเขียนที่นี่']}]}};
       if(!contents[v.active])return;const pluginId=v.active;event.currentTarget.disabled=true;
-      try {const data=await post(v,'/api/studio/jobs',{pluginId,input:{prompt:'สร้างไฟล์เปล่าเพื่อแก้ไขด้วยมือ',content:contents[pluginId]},idempotencyKey:'blank:'+crypto.randomUUID(),confirmed:true});if(!current(v))return;putJob(v,data.job);renderJobs(v);if(data.job.status==='completed')openFile(v,data.job.files.find(f=>/\.(docx|xlsx|pptx)$/i.test(f.name))?.id,pluginId);else schedule(v,1000);}
+      try {const data=await post(v,'/api/studio/jobs',{pluginId,input:{prompt:'สร้างไฟล์เปล่าเพื่อแก้ไขด้วยมือ',content:contents[pluginId]},idempotencyKey:'blank:'+crypto.randomUUID(),confirmed:true});if(!current(v))return;putJob(v,data.job);renderJobs(v);if(data.job.status==='completed')await openFile(v,data.job.files.find(f=>/\.(docx|xlsx|pptx)$/i.test(f.name))?.id,pluginId);else schedule(v,1000);}
       catch(error){status(v,friendly(error),true);}finally{if(current(v))root.querySelector('[data-editor-blank]').disabled=false;}
     };
     root.querySelector('[data-open-sentinel]').onclick = () => { if (typeof openSentinel === 'function') openSentinel(); };
@@ -545,9 +609,10 @@
     approve.disabled = expired; controls.append(approve, reject); card.append(report, controls); v.root.querySelector('[data-studio-approvals]').append(card); v.approvals.set(confirmation.actionId, record); return true;
   }
   window.addEventListener('beforeunload',event=>{if(view&&hasUnsaved(view)){event.preventDefault();event.returnValue='';}});
-  window.PanthoriumCreativeStudio = Object.freeze({ open, close, editFile, review, showJob, refresh: () => view && refresh(view), openImage: () => open('image'), openVideo: () => open('video'), openDocument: () => open('document'), openSpreadsheet: () => open('spreadsheet'), openPresentation: () => open('presentation') });
+  window.PanthoriumCreativeStudio = Object.freeze({ open, close, editFile, review, showJob, command, hasVoicePending:()=>!!view&&current(view)&&!!view.voicePending, refresh: () => view && refresh(view), openImage: () => open('image'), openVideo: () => open('video'), openDocument: () => open('document'), openSpreadsheet: () => open('spreadsheet'), openPresentation: () => open('presentation') });
   window.addEventListener('panthorium:ai-done', event => {
     for (const result of event.detail?.toolResults || []) {
+      if(event.detail?.source!=='gemini-live'&&event.detail?.accountId===principal()&&result.toolId==='studio.command'&&result.ok&&result.output?.uiAction?.startsWith('studio_command:')){window.PanthoriumVoiceCommands?.windowAction(result.output.uiAction);continue;}
       if (result.toolId === 'studio.editor' && result.ok && result.output?.openEditor) { window.PanthoriumStudioEditor?.open(result.output.file?.id); continue; }
       if (!['studio.create','studio.edit'].includes(result.toolId)) continue;
       if (result.requiresConfirmation) review(result);

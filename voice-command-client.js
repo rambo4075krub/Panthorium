@@ -3,12 +3,12 @@
   const catalog = window.PanthoriumWindowCatalog;
   if (!catalog) return;
   const system = () => typeof OS !== 'undefined' ? OS : null;
-  const identity = () => JSON.stringify([system()?.state?.user?.id, system()?.state?.user?.roles, system()?.state?.user?.permissions]);
+  const identity = () => JSON.stringify([(system()?.state?.user?.id || system()?.state?.user?.sub), system()?.state?.user?.roles, system()?.state?.user?.permissions]);
   let lastIdentity = identity();
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   let pending = null;
   let busy = false;
-  const applied = new Map();
+  const applied = new Map(), studioActions = new Map();
   const errors = {
     voice_action_permission_denied: 'บัญชีนี้ไม่มีสิทธิ์ใช้ฟังก์ชันนี้',
     voice_command_permission_denied: 'บัญชีนี้ไม่มีสิทธิ์ดำเนินคำสั่งนี้',
@@ -79,6 +79,16 @@
     else root.querySelector(app.closeButton)?.click();
   }
   async function windowAction(action) {
+    if (typeof action === 'string' && action.startsWith('studio_command:')) {
+      try {
+        const [encoded,id]=action.slice(15).split('#'),key=id?identity()+':'+id:null;
+        if(key&&studioActions.has(key))return await studioActions.get(key);
+        const run=Promise.resolve(window.PanthoriumCreativeStudio?.command(decodeURIComponent(encoded))||failure('module_unavailable'));
+        if(key){studioActions.set(key,run);if(studioActions.size>200)studioActions.delete(studioActions.keys().next().value);}
+        return await run;
+      }
+      catch (_) { return failure('function_not_available'); }
+    }
     if (typeof action === 'string' && action.startsWith('calendar_view:')) {
       const app = catalog.apps.find(item=>item.id==='calendar');
       if (!catalog.allowed(app,system()?.state?.user)) return failure('voice_action_permission_denied');
@@ -187,7 +197,7 @@
   }
   async function consume(data, command) {
     const outcomes = [];
-    const userId = system()?.state?.user?.id;
+    const userId = system()?.state?.user?.id || system()?.state?.user?.sub;
     const key = data.workflowId ? `${userId}:${data.workflowId}` : null;
     const seen = key ? (applied.get(key) || new Set()) : new Set();
     if (key) { applied.set(key, seen); if (applied.size > 100) applied.delete(applied.keys().next().value); }
@@ -195,7 +205,7 @@
       if (!result.ok || result.output?.ok === false || seen.has(index)) continue;
       // Only trusted navigation tool outputs may invoke the client. A search
       // document, integration payload or planner answer is never executable.
-      if (!['window.open', 'window.close', 'window.refresh', 'window.minimize', 'window.maximize', 'window.fullscreen', 'window.restore', 'window.function', 'calendar.view', 'learning_lab.open'].includes(result.toolId)) continue;
+      if (!['window.open', 'window.close', 'window.refresh', 'window.minimize', 'window.maximize', 'window.fullscreen', 'window.restore', 'window.function', 'calendar.view', 'learning_lab.open', 'studio.command'].includes(result.toolId)) continue;
       const action = result.output?.uiAction;
       const outcome = action?.startsWith('function_') ? await functionAction(action) : await windowAction(action);
       outcomes.push(outcome);
@@ -234,7 +244,7 @@
     // A planner answer alone is not evidence that a requested action happened.
     if (!text) text = 'ยังไม่มีการดำเนินการ กรุณาระบุชื่อหน้าต่างหรือคำสั่งที่รองรับ';
     showResult(text, data);
-    return { ok: true, text, provider: 'Sentinel', via: 'sentinel-command', uiResults: outcomes, voiceAction: Boolean(data.voiceAction || data.confirmationRequired || data.workflowId) };
+    return { ok: true, text, provider: 'Sentinel', via: 'sentinel-command', uiResults: outcomes, ...(outcomes.some(x=>x.confirmationRequired)?{confirmationRequired:true}:{}), ...(outcomes.some(x=>x.pending)?{pending:true}:{}), voiceAction: Boolean(data.voiceAction || data.confirmationRequired || data.workflowId) };
   }
   async function execute(commandInput) {
     if (busy) return { ok: false, text: 'กำลังดำเนินคำสั่งก่อนหน้า กรุณารอสักครู่' };
@@ -247,7 +257,7 @@
         return { ok: true, text: 'ปิดผลคำสั่ง' };
       }
       if (window.PanthoriumAuth?.ensureSession && !(await window.PanthoriumAuth.ensureSession())) return failure('authentication_required');
-      const userId = system()?.state?.user?.id;
+      const userId = system()?.state?.user?.id || system()?.state?.user?.sub;
       if (!userId) return failure('authentication_required');
       if (/^(ปิด|ปิดหน้าต่าง|ปิดหน้าต่างนี้|ปิดอันนี้|closethiswindow)$/.test(normalized)) {
         const active = catalog.apps.filter(app => visible(rootFor(app)) && catalog.allowed(app, system()?.state?.user))
@@ -257,6 +267,9 @@
       }
       const confirmation = /^(ยืนยัน|ยืนยันคำสั่ง|ยืนยันคำสั่งนี้|confirm)$/.test(normalized);
       const cancellation = /^(ยกเลิก|ยกเลิกคำสั่ง|ยกเลิกคำสั่งนี้|cancel)$/.test(normalized);
+      if (window.PanthoriumCreativeStudio?.hasVoicePending?.() && !pending) {
+        const result=await window.PanthoriumCreativeStudio.command(command);showResult(result.text,result);return result;
+      }
       let path = '/api/sentinel/command';
       let confirmed = false;
       let requestBody = null;
@@ -277,7 +290,7 @@
       const base = (system()?.config?.backendUrl || '').replace(/\/$/, '');
       const response = await authorizedFetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody || { command, confirmed }), signal: AbortSignal.timeout(30000) });
       const data = await response.json();
-      if (system()?.state?.user?.id !== userId) return failure('authentication_required');
+      if ((system()?.state?.user?.id || system()?.state?.user?.sub) !== userId) return failure('authentication_required');
       if (!response.ok && response.status !== 409) return await consume({ ...data, ok: false }, command);
       const result = await consume(data, command);
       if (confirmation) result.confirmedCommand = true;
@@ -295,7 +308,7 @@
     // Clear cached data on account/permission changes; a token refresh for the
     // same identity must not discard an explicit pending confirmation.
     catalog.apps.forEach(dismiss);
-    pending = null; applied.clear(); document.getElementById('sentinel-command-result')?.remove();
+    pending = null; applied.clear(); studioActions.clear(); document.getElementById('sentinel-command-result')?.remove();
   });
   window.PanthoriumVoiceCommands = { execute, windowAction, functionAction };
 })();

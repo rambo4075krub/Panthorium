@@ -14,10 +14,10 @@ const { JSDOM } = require('jsdom');
     assert.equal(response.status, 200, route);
     const dom = new JSDOM(await response.text());
     for (const script of dom.window.document.scripts) if (script.src) { const url = new URL(script.src, origin); if (url.origin === origin) scriptPaths.set(url.pathname.slice(1), url.pathname + url.search); }
-    for (const asset of ['panthorium-window-base.js', 'creative-editors-ui.js', 'creative-studio-ui.js']) assert.equal([...dom.window.document.scripts].filter(script => new URL(script.src || '/', origin).pathname === '/' + asset).length, 1, route + ' loads ' + asset + ' exactly once');
+    for (const asset of ['panthorium-window-base.js', 'creative-voice-catalog.js', 'creative-voice-ui.js', 'creative-editors-ui.js', 'creative-studio-ui.js']) assert.equal([...dom.window.document.scripts].filter(script => new URL(script.src || '/', origin).pathname === '/' + asset).length, 1, route + ' loads ' + asset + ' exactly once');
     dom.window.close();
   }
-  for (const asset of ['panthorium-window-base.js', 'creative-editors-ui.js', 'file-preview-ui.js', 'office-suite-core.js', 'office-suite-ui.js', 'studio-editor-ui.js', 'creative-studio-ui.js', 'start-menu-ui.js', 'voice-window-catalog.js', 'ai-stream-client.js']) {
+  for (const asset of ['creative-voice-catalog.js', 'creative-voice-ui.js', 'panthorium-window-base.js', 'creative-editors-ui.js', 'file-preview-ui.js', 'office-suite-core.js', 'office-suite-ui.js', 'studio-editor-ui.js', 'creative-studio-ui.js', 'start-menu-ui.js', 'voice-window-catalog.js', 'voice-command-client.js', 'live-voice-client.js', 'hybrid-voice-client.js', 'ai-stream-client.js']) {
     const response = await get(scriptPaths.get(asset) || '/' + asset);
     assert.equal(response.status, 200, asset);
     assert.match(response.headers.get('cache-control') || '', /no-store/, asset + ' bypasses caches');

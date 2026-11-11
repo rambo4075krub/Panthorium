@@ -27,9 +27,11 @@
       const transcription=await(await api('/api/hybrid/transcribe',{audio},controller.signal)).json();check();
       if(!transcription.text?.trim())throw new Error('ได้ยินเสียงไม่ชัด กรุณาลองพูดใหม่');
       row('user',transcription.text);
-      const result=await(await api('/api/local/chat',{message:transcription.text,sessionId,voice:true,requestId:crypto.randomUUID()},controller.signal)).json();check();
-      if(!result.ok)throw new Error('Qwen ยังตอบไม่ได้ กรุณาลองอีกครั้ง');
-      sessionId=result.sessionId||sessionId;row('ai',result.text);window.dispatchEvent(new CustomEvent('panthorium:ai-done',{detail:{...result,source:'local'}}));
+      const creative=window.PanthoriumCreativeVoiceCatalog?.parse(transcription.text);
+      const localCommand=creative&&(!['confirm','cancel'].includes(creative.action)||window.PanthoriumCreativeStudio?.hasVoicePending?.());
+      const result=localCommand&&window.PanthoriumVoiceCommands?await window.PanthoriumVoiceCommands.execute(transcription.text):await(await api('/api/local/chat',{message:transcription.text,sessionId,voice:true,requestId:crypto.randomUUID()},controller.signal)).json();check();
+      if(!result.ok)throw new Error(result.text||'Qwen ยังตอบไม่ได้ กรุณาลองอีกครั้ง');
+      sessionId=result.sessionId||sessionId;row('ai',result.text);window.dispatchEvent(new CustomEvent('panthorium:ai-done',{detail:{...result,source:'local',accountId:identity}}));
       status('Qwen ฟรี · กำลังเตรียมเสียงต่อเนื่อง','processing');
       speech=new window.PanthoriumSpeechBuffer.BufferedSpeech(context,async(text,signal)=>{check();return(await api('/api/hybrid/speech',{text},signal)).arrayBuffer();});
       window.dispatchEvent(new CustomEvent('panthorium:ai-speaking',{detail:{speaking:true}}));

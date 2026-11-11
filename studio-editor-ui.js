@@ -12,7 +12,7 @@
   const el=(tag,text,attrs={})=>{const n=document.createElement(tag);if(text!=null)n.textContent=text;for(const [k,v]of Object.entries(attrs))n.setAttribute(k,v);return n;};
   const button=(text,fn,attrs={})=>{const n=el('button',text,{type:'button',...attrs});n.onclick=fn;return n;};
   const messages={editor_sheet_not_in_snapshot:'กรุณาบันทึกและเปิดฉบับใหม่ก่อนเลือกชีตที่เพิ่งสร้าง',editor_pivot_ambiguous_headers:'หัวตาราง Pivot ต้องเป็นข้อความที่ไม่ว่างและไม่ซ้ำกัน',editor_pivot_ambiguous_group:'ชื่อกลุ่ม Pivot ต่างกันเฉพาะตัวพิมพ์ กรุณาจัดชื่อให้ชัดเจนก่อน',editor_pivot_numeric_values_required:'ผลรวมและค่าเฉลี่ย Pivot ต้องมีตัวเลขทุกแถวในคอลัมน์ค่า',editor_pivot_derived_dependency_unsupported:'ข้อมูลต้นทางอ้างกลับมายังผล Pivot จึงคำนวณอย่างปลอดภัยไม่ได้',editor_pivot_group_limit:'Pivot รองรับไม่เกิน 998 กลุ่ม',editor_pivot_result_readonly:'ชีตผล Pivot เป็นข้อมูลคำนวณ กรุณาแก้ชีตต้นทาง',editor_imported_pivot_edit_unsupported:'Pivot ที่นำเข้ายังแก้ข้อมูลที่นี่ไม่ได้ เพื่อป้องกันผลสรุปเก่า กรุณาใช้ Excel/LibreOffice',editor_pivot_modified_externally:'Pivot นี้ถูกแก้จากภายนอกและยังอัปเดตอย่างปลอดภัยไม่ได้ กรุณาใช้ Excel/LibreOffice',editor_pivot_sheet_exists:'มีชื่อชีตผล Pivot นี้แล้ว กรุณาใช้ชื่อใหม่',editor_pivot_formula_cycle:'สูตรต้นทางวนกลับหา Pivot จึงยังสร้างหรืออัปเดตไม่ได้',editor_pivot_formula_error:'สูตรต้นทางมีข้อผิดพลาดหรือยังไม่รองรับ',invalid_editor_pivot_range:'ช่วง Pivot ต้องรวมหัวตารางและข้อมูล อยู่ภายใน A1–AN1000',editor_pivot_range_too_large:'ช่วง Pivot รองรับไม่เกิน 10,000 เซลล์',editor_revision_pending:'มีประวัติการแก้ไขค้าง กรุณารับ/ปฏิเสธและบันทึกก่อนจัดรูปแบบ',editor_revision_unsupported:'ข้อความหรือประวัติการแก้ไขนี้มีโครงสร้างที่ยังไม่รองรับ จึงเก็บไว้โดยไม่แก้ไข',editor_revision_not_found:'รหัสการแก้ไขไม่ตรงกับฉบับที่อ่าน กรุณาเปิดไฟล์ใหม่',editor_nested_table_target:'เลือกข้อความในเซลล์ตารางที่รองรับก่อนเพิ่มตารางซ้อน',editor_table_nesting_limit:'รองรับตารางซ้อนสูงสุด 3 ชั้น',editor_table_limit:'เอกสารนี้ถึงขอบเขต 100 ตารางแล้ว',editor_rich_text_protected:'ข้อความนี้มีฟิลด์ ลิงก์ หรือประวัติการแก้ไข ใช้แผง Track Changes สำหรับรายการที่รองรับ หรือโปรแกรม Office ต้นฉบับ',editor_page_text_unsupported:'หัว/ท้ายกระดาษมีหลายส่วนหรือโครงสร้างซับซ้อน จึงเก็บไว้โดยไม่แก้ไข',editor_chart_existing_drawing:'ชีตนี้มีภาพหรือกราฟอยู่แล้ว กรุณาสร้างกราฟในชีตที่ยังไม่มีภาพหรือกราฟ',editor_chart_numeric_values_required:'ช่วงกราฟต้องมีคอลัมน์ชื่อและคอลัมน์ตัวเลขทุกแถว ไม่รวมแถวหัวตาราง',editor_chart_formula_error:'สูตรในช่วงกราฟมีข้อผิดพลาด กรุณาแก้สูตรก่อน',invalid_editor_chart_range:'กราฟรองรับสองคอลัมน์ติดกัน ไม่เกิน 100 แถว ใน A1–AN1000',editor_formula_unsupported:'สูตรนี้ยังไม่อยู่ในชุดที่รองรับ กรุณาดูรายการสูตรในหน้าตาราง',editor_formula_shared_readonly:'สูตรแบบ shared/array ต้องแก้ในโปรแกรมที่รองรับสูตรชนิดนี้',invalid_office_style:'รูปแบบไม่ถูกต้อง',editor_cell_empty:'เพิ่มข้อมูลในเซลล์ก่อนจัดรูปแบบ',editor_geometry_unsupported:'กล่องข้อความนี้ยังปรับตำแหน่งไม่ได้',editor_source_changed:'ต้นฉบับเปลี่ยนแล้ว กรุณาเปิดไฟล์ใหม่ก่อนบันทึก',editor_formula_cell_readonly:'เซลล์สูตรคำนวณถูกเก็บไว้และยังแก้ไขจากหน้านี้ไม่ได้',editor_office_unsupported:'โครงสร้างไฟล์นี้ยังเปิดแก้ไขไม่ได้ ใช้โปรแกรม Office สำหรับไฟล์นี้',editor_file_too_complex:'ไฟล์มีขนาดหรือโครงสร้างเกินขอบเขตตัวแก้ไข',editor_crop_out_of_bounds:'พื้นที่ครอปต้องอยู่ภายในภาพ',editor_changes_too_large:'มีการแก้ไขมากเกินไป กรุณาแบ่งบันทึกเป็นช่วง',editor_cell_out_of_range:'รองรับเซลล์ A1 ถึง AN1000',studio_plugin_disabled:'ปลั๊กอินนี้ตั้งเป็น Never ให้เปลี่ยนเป็น Auto ก่อนบันทึก',account_changed:'บัญชีเปลี่ยนแล้ว',file_not_found:'ไม่พบไฟล์ในบัญชีนี้'};
-  function report(v,text,error=false){if(current(v)){v.status.textContent=messages[text]||text;v.status.style.color=error?'#ffadad':'#ffca9b';}}
+  function report(v,text,error=false){if(current(v)){v.status.textContent=messages[text]||text;v.status.dataset.error=String(error);v.status.style.color=error?'#ffadad':'#ffca9b';}}
   async function api(v,url,options={},raw=false){
     if(!current(v))throw Error('account_changed');
     const send=()=>fetch(String(os()?.config?.backendUrl||'').replace(/\/$/,'')+url,{...options,signal:v.abort.signal,credentials:'include',cache:'no-store',headers:{...(options.body?{'Content-Type':'application/json'}:{}),Authorization:'Bearer '+(os()?.config?.accessToken||''),...options.headers}});
@@ -118,11 +118,22 @@
   }
   async function voice(v){
     if(!current(v)||!v.data)return;
-    if(v.finished)return report(v,'เปิดฉบับแก้ไขต่อก่อนสั่งงานด้วยเสียง',true);
-    if(v.ops.length)return report(v,'บันทึกการแก้ไขด้วยมือก่อน เพื่อให้คำสั่งเสียงใช้ไฟล์ฉบับเดียวกัน',true);
-    const live=window.PanthoriumLiveVoice;if(!live)return report(v,'ระบบเสียงยังไม่พร้อม กรุณาเปิด Sentinel AI',true);
-    if(!live.isActive())await live.toggle('studio-editor');
-    if(current(v))live.sendText?.('บริบทที่ผู้ใช้เลือก: กำลังแก้ไขไฟล์ '+JSON.stringify(v.data.file.name)+' fileId='+v.data.file.id+' ประเภท='+v.data.pluginId+' ให้ใช้ studio.editor อ่านไฟล์นี้ก่อนแก้ไข และรอฟังคำสั่งเสียงถัดไปจากผู้ใช้ การบันทึกต้องผ่านการยืนยันตามปกติ');
+    const result=await window.PanthoriumCreativeVoice?.start(v.data.pluginId);
+    if(current(v)&&result)report(v,result.text,!result.ok);
+  }
+  const voiceInstance=container=>[...instances].find(v=>v.container===container&&current(v));
+  function voiceSnapshot(container){const v=voiceInstance(container);return v?.data?JSON.stringify({file:v.data.file.id,revision:v.data.revision,ops:v.ops,name:v.name.value,finished:!!v.finished}):null;}
+  async function command(container,c){
+    const v=voiceInstance(container),ui=window.PanthoriumCreativeVoice;
+    if(!v?.data||v.busy||v.finished||v.body.inert)return ui.fail('เปิดไฟล์ที่แก้ไขได้ และกู้คืนหรือทิ้งฉบับร่างที่ค้างก่อนสั่งงาน');
+    if(v.root.contains(document.activeElement))document.activeElement.blur();
+    v.status.dataset.error='false';
+    try{
+      if(c.action==='rename'){if(c.text.length>130)return ui.fail('ชื่อยาวได้ไม่เกิน 130 ตัวอักษร');v.name.value=c.text;v.retry=null;scheduleDraft(v);return ui.ok('ตั้งชื่อฉบับแก้ไขแล้ว');}
+      if(c.action==='save'){if(!v.ops.length)return ui.fail('ไม่มีการแก้ไขที่ต้องบันทึก');await save(v);return v.status.dataset.error==='true'?ui.fail(v.status.textContent):ui.ok(v.status.textContent);}
+      if(c.action==='undo'||c.action==='redo'){await ui.click(c.action==='undo'?v.undo:v.redoButton);return ui.ok(c.action==='undo'?'ย้อนกลับการแก้ไขแล้ว':'ทำซ้ำการแก้ไขแล้ว');}
+      return await window.PanthoriumOfficeSuite.command({v,changeBatch,rerender:render},c);
+    }catch(e){return ui.fail(e.message);}
   }
   async function open(fileId,options={}){
     if(!UUID.test(fileId||'')||!allowed())return false;
@@ -217,7 +228,7 @@
       if(['document','spreadsheet','presentation'].includes(data.pluginId))await loadDraft(v);
     }catch(e){if(current(v))report(v,e.message,true);}return root;
   }
-  window.PanthoriumStudioEditor=Object.freeze({open:(fileId,options={})=>!options.container&&!options.standalone&&window.PanthoriumCreativeStudio?.editFile?window.PanthoriumCreativeStudio.editFile(fileId):open(fileId,options),close,dispose,isDirty:container=>[...instances].some(v=>v.container===container&&v.ops.length>0)});
+  window.PanthoriumStudioEditor=Object.freeze({command,voiceSnapshot,open:(fileId,options={})=>!options.container&&!options.standalone&&window.PanthoriumCreativeStudio?.editFile?window.PanthoriumCreativeStudio.editFile(fileId):open(fileId,options),close,dispose,isDirty:container=>[...instances].some(v=>v.container===container&&v.ops.length>0)});
   window.addEventListener('panthorium:auth-changed',()=>{for(const v of [...instances])if(!allowed()||v.owner!==identity())close(v);});
   window.addEventListener('pagehide',()=>{for(const v of [...instances])cleanup(v);});
 })();

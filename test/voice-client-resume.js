@@ -37,6 +37,17 @@ async function main() {
     btoa: value => Buffer.from(value, 'binary').toString('base64'), atob: value => Buffer.from(value, 'base64').toString('binary') });
   await window.PanthoriumLiveVoice.toggle();
   assert.equal(sockets[0].sent[0].context.packId, 'learning');
+  const creativeCommands=[];let creativePending=true;
+  window.PanthoriumCreativeVoiceCatalog=require('../creative-voice-catalog');
+  window.PanthoriumCreativeStudio={hasVoicePending:()=>creativePending,command:async text=>{creativeCommands.push(text);creativePending=false;return {ok:true,text:'กำลังบันทึก'};}};
+  sockets[0].frame({serverContent:{outputTranscription:{text:'ยืนยัน'},turnComplete:true}});await tick();assert.equal(creativeCommands.length,0,'model speech cannot confirm a workspace save');
+  sockets[0].frame({serverContent:{inputTranscription:{text:'ยืน'}}});await tick();assert.equal(creativeCommands.length,0,'partial input cannot approve');
+  sockets[0].frame({serverContent:{inputTranscription:{text:'ยัน',finished:true}}});await tick();assert.deepEqual(creativeCommands,['ยืนยัน']);
+  sockets[0].frame({serverContent:{turnComplete:true}});await tick();assert.equal(creativeCommands.length,1,'the turn-complete frame cannot repeat confirmation');
+  creativePending=true;sockets[0].frame({serverContent:{inputTranscription:{text:'ไม่ต้องบันทึก',finished:true},turnComplete:true}});await tick();assert.equal(creativeCommands.length,1);
+  sockets[0].frame({serverContent:{inputTranscription:{text:'ยกเลิก'},turnComplete:true}});await tick();assert.deepEqual(creativeCommands,['ยืนยัน','ยกเลิก']);
+  delete window.PanthoriumCreativeStudio;
+
   sockets[0].bufferedAmount = 65537;
   processor.onaudioprocess({ inputBuffer: { getChannelData: () => new Float32Array(1024).fill(.1) } });
   assert.equal(sockets[0].sent.length, 1, 'congested input is dropped, never buffered for replay');

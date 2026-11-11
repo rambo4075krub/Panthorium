@@ -43,7 +43,7 @@
     bar.append(name); footer.append(message); root.append(bar, main, footer);
     let dead = false; const urls = new Set(),timers=new Set();
     const valid = () => !dead && ctx.valid() && root.isConnected;
-    const report = (text, error = false) => { if (valid()) { message.textContent = text; message.style.color = error ? '#ffb3b3' : ''; } };
+    const report = (text, error = false) => { if (valid()) { message.textContent = text; message.dataset.error=String(error); message.style.color = error ? '#ffb3b3' : ''; } };
     const url = blob => { const u = URL.createObjectURL(blob); urls.add(u); return u; };
     const revoke = u => { URL.revokeObjectURL(u); urls.delete(u); };
     const download = (blob, filename) => { if (!valid()) return; const u = url(blob), a = node('a', null, { href: u, download: filename }); a.click(); const timer=setTimeout(() => {revoke(u);timers.delete(timer);}, 30000);timers.add(timer); };
@@ -160,7 +160,7 @@
     ui.root.onkeydown = e => { const input=e.target.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);if((e.ctrlKey||e.metaKey)&&['s','z'].includes(e.key.toLowerCase())){if(e.key.toLowerCase()==='s'){e.preventDefault();exportImage(true);}else if(!input){e.preventDefault();e.shiftKey?redo():undo();}}else if(!input){const map={v:'move',t:'text',u:'rect',o:'ellipse',b:'paint',e:'erase',c:'crop'};if(map[e.key.toLowerCase()])tools.querySelector('[data-tool="'+map[e.key.toLowerCase()]+'"]').click();if(e.key==='Delete')mutate(()=>{state.layers=state.layers.filter(l=>l.id!==selected);selected=state.layers.at(-1)?.id;});} };
     const observer = new ResizeObserver(() => { if (ui.valid() && !host.hidden) { toggle.setAttribute('aria-expanded',String(getComputedStyle(inspector).display!=='none'));fit(); } }); observer.observe(work);
     draw();properties();
-    return { async openFile(id) { try { const r = await ctx.request('/api/files/'+encodeURIComponent(id)+'/preview',{},true); if(ui.valid())await addImage(await r.blob(),ctx.files().find(f=>f.id===id)?.name); } catch(e){ui.report(e.message,true);} }, isDirty:()=>dirty, destroy(){loading++;observer.disconnect();assets.clear();history=[];future=[];canvas.width=canvas.height=scratch.width=scratch.height=1;ui.destroy();} };
+    return { async openFile(id) { try { const r = await ctx.request('/api/files/'+encodeURIComponent(id)+'/preview',{},true); if(ui.valid())await addImage(await r.blob(),ctx.files().find(f=>f.id===id)?.name); } catch(e){ui.report(e.message,true);} }, voiceSnapshot:()=>JSON.stringify({state,name:ui.name.value}), command:c=>window.PanthoriumCreativeVoice.media(ui.root,c,{busy:()=>busy,text:text=>{if(text.length>2000)throw Error('ข้อความยาวเกิน 2,000 ตัวอักษร');add('text',{text});}}), isDirty:()=>dirty, destroy(){loading++;observer.disconnect();assets.clear();history=[];future=[];canvas.width=canvas.height=scratch.width=scratch.height=1;ui.destroy();} };
   }
   // The timeline editor is registered below. No external editor or popup is used.
   window.PanthoriumCreativeEditors = Object.freeze({ mount(kind,host,ctx){return kind==='image'?imageEditor(host,ctx):videoEditor(host,ctx);} });
@@ -217,6 +217,12 @@
     ui.footer.append(button('เก็บโปรเจกต์',saveProject),button('เปิดโปรเจกต์',loadProject),button('โปรเจกต์ใหม่',()=>{if(busy)return ui.report('กำลังส่งออก กรุณารอให้เสร็จก่อนเริ่มโปรเจกต์ใหม่');if(dirty&&!window.confirm('เริ่มโปรเจกต์ใหม่โดยไม่เก็บไทม์ไลน์เดิมหรือไม่?'))return;loading++;pause();video.removeAttribute('src');video.load();delete video.dataset.fileId;for(const item of media.values())ui.revoke(item.url);media.clear();totalBytes=0;state={clips:[],aspect:'widescreen',captions:''};history=[];future=[];selected=0;playhead=0;activeIndex=-1;dirty=false;exportRetry=null;render();}));
     const observer=new ResizeObserver(()=>{if(ui.valid()&&!host.hidden)toggle.setAttribute('aria-expanded',String(getComputedStyle(inspector).display!=='none'));});observer.observe(ui.main);
     ui.root.onkeydown=e=>{if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;if(e.code==='Space'){e.preventDefault();play.click();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?redo():undo();}};
-    render();return {openFile,pause,isDirty:()=>dirty,destroy(){dead=true;loading++;pause();observer.disconnect();video.removeAttribute('src');video.load();media.clear();history=[];future=[];ui.destroy();}};
+    render();return {openFile,pause,voiceSnapshot:()=>JSON.stringify({state,name:ui.name.value}),command:c=>window.PanthoriumCreativeVoice.media(ui.root,c,{busy:()=>busy||pending.size>0,pause,text:text=>{
+      if(!state.clips.length)throw Error('เพิ่มคลิปก่อนใส่คำบรรยาย');if(text.length>300)throw Error('คำบรรยายแต่ละช่วงยาวได้ไม่เกิน 300 ตัวอักษร');
+      const stamp=t=>{const ms=Math.round(t*1000);return [Math.floor(ms/3600000),Math.floor(ms/60000)%60,Math.floor(ms/1000)%60].map(n=>String(n).padStart(2,'0')).join(':')+','+String(ms%1000).padStart(3,'0');};
+      const start=Math.min(playhead,Math.max(0,total()-.5)),end=Math.min(total(),start+3);
+      if(captions().length>=200)throw Error('คำบรรยายครบ 200 ช่วงแล้ว');
+      commit(()=>{state.captions+=(state.captions?'\n\n':'')+(captions().length+1)+'\n'+stamp(start)+' --> '+stamp(end)+'\n'+text;});
+    }}),isDirty:()=>dirty,destroy(){dead=true;loading++;pause();observer.disconnect();video.removeAttribute('src');video.load();media.clear();history=[];future=[];ui.destroy();}};
   }
 })();
