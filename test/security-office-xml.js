@@ -2,13 +2,12 @@
 
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
-const { randomUUID, createHash } = require("node:crypto");
+const { randomUUID } = require("node:crypto");
 const { extractOfficeText, LIMITS, _internals: core } = require("../services/officeArtifactService");
-const { StudioEditorService, officeModel, patchOffice } = require("../services/studioEditorService");
+const { StudioEditorService, officeModel, patchOffice, editorRevision } = require("../services/studioEditorService");
 const suite = require("../services/officeSuiteService");
 const { CloudFilesService } = require("../services/cloudFilesService");
 const { SocialService } = require("../services/socialService");
-const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const rejected = error => ["invalid_office_source", "office_source_too_large"].includes(error.code);
 
 async function nestedTextBoxes() {
@@ -90,7 +89,7 @@ async function boundedCases() {
     await assert.rejects(() => social.media({ user, recordId: "authorized-fixture", fileId: file.id }), { code: "file_preview_invalid_office" });
     const editor = new StudioEditorService({ files });
     await assert.rejects(() => editor.read(user, file.id), rejected, `${tag}: editor read`);
-    await assert.rejects(() => editor.apply({ user, pluginId: kind, input: { edit: { fileId: file.id, revision: hash(body), operations: [{ type: "format_text", index: 0, style: { bold: true } }] } } }), rejected, `${tag}: editor apply`);
+    await assert.rejects(() => editor.apply({ user, pluginId: kind, input: { edit: { fileId: file.id, revision: editorRevision(body,kind), operations: [{ type: "format_text", index: 0, style: { bold: true } }] } } }), rejected, `${tag}: editor apply`);
     assert.throws(() => suite.enrich(entries, kind, { blocks: [], sheets: [], slideFiles: [] }), rejected, `${tag}: suite enrichment`);
   }
 

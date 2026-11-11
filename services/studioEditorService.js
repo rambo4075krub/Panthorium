@@ -26,7 +26,8 @@ const decode = value => String(value).replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[0
   return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '';
 });
 const attr = (xml, key) => decode(xml.split('>')[0].match(new RegExp('(?:^|\\s)' + key + '=["\x27]([^"\x27]*)["\x27]'))?.[1] || '');
-const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+// Bind text-block indexes to the model version as well as immutable source bytes.
+const editorRevision = (bytes,pluginId) => crypto.createHash('sha256').update(['document','presentation'].includes(pluginId)?'panthorium-office-text-v2\0':'').update(bytes).digest('hex');
 const textOf = (xml, tag) => xmlMatches(xml,tag,true).map(m=>decode(m[1])).join('');
 function typeOf(file) {
   return ({docx:'document',xlsx:'spreadsheet',pptx:'presentation',png:'image',jpg:'image',jpeg:'image',webp:'image',mp4:'video',webm:'video'})[String(file.name).split('.').pop().toLowerCase()] || null;
@@ -212,12 +213,12 @@ class StudioEditorService {
     if(model.blocks) model.blocks=model.blocks.map(({file,ordinal,...block})=>block);
     if(model.sheets) model.sheets=formulaCore.calculate(model.sheets.map(({file,...sheet})=>sheet));
     if(model.slideFiles){model.pageCount=model.slideFiles.length;delete model.slideFiles;}
-    return {file:{id:file.id,name:file.name,contentType:file.contentType},pluginId,revision:hash(file.body),...model,...(capabilities(pluginId,model)?{capabilities:capabilities(pluginId,model)}:{})};
+    return {file:{id:file.id,name:file.name,contentType:file.contentType},pluginId,revision:editorRevision(file.body,pluginId),...model,...(capabilities(pluginId,model)?{capabilities:capabilities(pluginId,model)}:{})};
   }
   async apply({user,pluginId,input,signal}) {
     const edit=validateEdit(input.edit), file=await this.files.readOwned(user.sub,edit.fileId);
     if(typeOf(file)!==pluginId)fail('editor_operation_type_mismatch');
-    if(hash(file.body)!==edit.revision)fail('editor_source_changed',409);
+    if(editorRevision(file.body,pluginId)!==edit.revision)fail('editor_source_changed',409);
     let body,contentType=file.contentType,extension=String(file.name).split('.').pop().toLowerCase();
     if(['document','spreadsheet','presentation'].includes(pluginId)){const images=new Map();let bytes=0;for(const op of edit.operations.filter(o=>o.type==='insert_image')){if(!['document','presentation'].includes(pluginId))fail('editor_operation_type_mismatch');if(!images.has(op.fileId)){const source=await this.files.readOwned(user.sub,op.fileId);if(!Buffer.isBuffer(source.body)||source.body.length>2*1024*1024)fail('editor_image_budget',413);const image=_internals.imageInfo(source);if(image.width*image.height>16777216)fail('editor_image_budget',413);images.set(op.fileId,image);}bytes+=images.get(op.fileId).body.length;if(bytes>4*1024*1024||images.size>16)fail('editor_image_budget',413);}body=_internals.zip(patchOffice(_internals.unzip(file.body),pluginId,edit.operations,images));}
     else if(pluginId==='image') {
@@ -249,4 +250,4 @@ class StudioEditorService {
     return {files:[saved],summary:'บันทึกฉบับแก้ไขแล้ว โดยเก็บต้นฉบับไว้'};
   }
 }
-module.exports={StudioEditorService,validateEdit,typeOf,officeModel,patchOffice};
+module.exports={editorRevision,StudioEditorService,validateEdit,typeOf,officeModel,patchOffice};

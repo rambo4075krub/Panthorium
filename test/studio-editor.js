@@ -25,6 +25,7 @@ const {registerCreativeStudioTools}=require('../services/creativeStudioTools');
     await assert.rejects(editor.read(other,file.id),/file_not_found/);
     const operations=pluginId==='spreadsheet'?[{type:'set_cell',sheet:0,cell:'B2',value:500},{type:'set_cell',sheet:0,cell:'D10',value:'=HYPERLINK("unsafe")'}]:[{type:'set_text',index:0,value:'ชื่อใหม่ <script>alert(1)</script>'},...(pluginId==='document'?[{type:'append_paragraph',value:'ย่อหน้าใหม่'}]:[])];
     const request={user,pluginId,sourceFileIds:[file.id],input:{prompt:'แก้ไข',edit:{fileId:file.id,revision:data.revision,operations}},confirmed:true,idempotencyKey:'manual:'+randomUUID()};
+    if(['document','presentation'].includes(pluginId)){const legacy=require('node:crypto').createHash('sha256').update(bytes).digest('hex'),count=store.size;await assert.rejects(editor.apply({user,pluginId,input:{edit:{...request.input.edit,revision:legacy}}}),/editor_source_changed/);assert.equal(store.size,count,'legacy block indexes cannot create a mis-targeted copy');}
     const saved=await studio.start(request);assert.equal(saved.job.status,'completed',saved.job.error);assert.equal(saved.job.files.length,1);assert.deepEqual((await studio.start(request)).job.files,saved.job.files,'retry creates no duplicate');
     const copy=await editor.read(user,saved.job.files[0].id);assert(store.get(file.id).body.equals(bytes),'original bytes preserved');
     const before=_internals.unzip(bytes),after=_internals.unzip(store.get(copy.file.id).body);

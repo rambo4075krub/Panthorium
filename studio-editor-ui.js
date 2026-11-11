@@ -45,7 +45,11 @@
     try{const draft=await api(v,'/api/studio/editor/'+v.data.file.id+'/draft');if(!current(v))return;v.draftVersion=draft.version;v.draftReady=true;
       if(draft.data&&draft.data.revision===v.data.revision){
         v.recoveryPending=true;v.body.inert=true;v.save.disabled=true;const banner=el('div',null,{class:'se-toolbar'});v.saved.append(banner);banner.append(el('span','พบฉบับร่างที่ยังไม่ได้บันทึกเป็นไฟล์'),button('กู้คืนฉบับร่าง',()=>{v.ops=draft.data.operations;v.groups=v.ops.map(()=>1);v.redoGroups=[];v.name.value=draft.data.name;v.recoveryPending=false;v.body.inert=false;banner.remove();render(v);v.draftStatus.textContent='กู้คืนแล้ว · บันทึกเมื่อพร้อม';}),button('เริ่มจากต้นฉบับ',()=>{v.recoveryPending=false;v.body.inert=false;banner.remove();persistDraft(v).catch(()=>{});controls(v);}));
-      }else v.draftStatus.textContent=draft.data?'ต้นฉบับเปลี่ยน จึงไม่กู้ฉบับร่างเก่าอัตโนมัติ':'ฉบับร่างจะเก็บอัตโนมัติหลังหยุดแก้ไข';
+      }else if(draft.data){
+        v.draftConflict=true;v.draftStatus.textContent='ต้นฉบับหรือรุ่นตัวแก้ไขเปลี่ยน · เก็บฉบับร่างเก่าไว้โดยไม่เขียนทับ';
+        const banner=el('div',null,{class:'se-toolbar','data-legacy-draft':''});v.saved.append(banner);
+        banner.append(button('ดาวน์โหลดฉบับร่างเก่า',()=>downloadBlob(v,new Blob([JSON.stringify({format:'panthorium-office-draft',version:1,file:v.data.file,...draft.data},null,2)],{type:'application/json'}),(draft.data.name||'ฉบับร่าง')+'.draft.json')),button('ทิ้งฉบับร่างเก่า',()=>{v.draftConflict=false;banner.remove();persistDraft(v).catch(()=>{});}));
+      }else v.draftStatus.textContent='ฉบับร่างจะเก็บอัตโนมัติหลังหยุดแก้ไข';
     }catch(e){if(current(v))v.draftStatus.textContent='ฉบับร่างอัตโนมัติยังไม่พร้อม · ใช้ปุ่มบันทึกฉบับแก้ไข';}
   }
   function model(v){const d=JSON.parse(JSON.stringify(v.data));for(const op of v.ops){if(op.type==='set_cell'){const s=d.sheets[op.sheet],c=s.cells.find(c=>c.cell===op.cell);if(c)c.value=op.value;else s.cells.push({cell:op.cell,value:op.value});}if(op.type==='set_text')d.blocks.find(b=>b.index===op.index).text=op.value;}return d;}
@@ -125,13 +129,16 @@
       else report(v,'รับงานแล้ว ติดตามผลในรายการงานก่อนส่งซ้ำ');
     }catch(e){if(current(v))report(v,e.message,true);}finally{if(current(v)){v.busy=false;if(!v.finished&&!v.recoveryPending)v.body.inert=false;v.name.disabled=!!v.finished;controls(v);}}
   }
+  function downloadBlob(v,blob,name){
+    if(!current(v))return;const url=URL.createObjectURL(blob);(v.downloadUrls||=new Set()).add(url);const link=el('a',null,{href:url,download:name});document.body.append(link);link.click();link.remove();
+    const timer=setTimeout(()=>{URL.revokeObjectURL(url);v.downloadUrls.delete(url);v.downloadTimers.delete(timer);},30000);(v.downloadTimers||=new Set()).add(timer);
+  }
   async function download(v){
     if(!current(v)||v.busy||!flushEdits(v))return;
     if(v.ops.length){await save(v);if(!current(v)||v.ops.length||v.busy)return;}
     if(!v.data)return;if(v.finished)return report(v,'บันทึกแล้ว กรุณาเปิดฉบับแก้ไขต่อก่อนดาวน์โหลด',true);v.download.disabled=true;
     try{const file=v.data.file,response=await api(v,'/api/files/'+encodeURIComponent(file.id),{},true),blob=await response.blob();if(!current(v))return;
-      const url=URL.createObjectURL(blob);(v.downloadUrls||=new Set()).add(url);const link=el('a',null,{href:url,download:file.name});document.body.append(link);link.click();link.remove();
-      const timer=setTimeout(()=>{URL.revokeObjectURL(url);v.downloadUrls.delete(url);v.downloadTimers.delete(timer);},30000);(v.downloadTimers||=new Set()).add(timer);
+      downloadBlob(v,blob,file.name);
       report(v,'ดาวน์โหลด '+file.name+' แล้ว');
     }catch(e){report(v,e.message,true);}finally{if(current(v))v.download.disabled=false;}
   }
