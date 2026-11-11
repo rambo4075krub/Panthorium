@@ -249,5 +249,65 @@
     tools.append(button('นำเสนอ',()=>{const overlay=el('div',null,{class:'po-present',tabindex:0,role:'dialog','aria-label':'นำเสนอสไลด์'}),frame=el('div',null,{class:'po-show-frame'}),controls=el('div',null,{class:'po-tools'});let index=d.slideOrder.indexOf(v.slide);const draw=()=>{const page=d.slideOrder[index];frame.replaceChildren();const slide=el('div',null,{class:'po-slide'});slide.style.backgroundColor='#'+(d.backgrounds[page-1]||'FFFFFF');for(const b of d.blocks.filter(b=>b.page===page)){const text=el('div',b.text,{class:'po-shape'}),g=b.geometry||{x:8,y:15,width:84,height:30};for(const k of ['x','y','width','height'])text.style[({x:'left',y:'top'})[k]||k]=g[k]+'%';text.style.zIndex=String(b.order||0);decorate(text,b.style,true);slide.append(text);}for(const m of (d.media||[]).filter(m=>m.page===page&&m.geometry)){const image=el('img',null,{src:m.dataUrl,alt:'ภาพในสไลด์'});image.style.position='absolute';for(const k of ['x','y','width','height'])image.style[({x:'left',y:'top'})[k]||k]=m.geometry[k]+'%';image.style.zIndex=String(m.order||0);image.style.objectFit='contain';slide.prepend(image);}frame.append(slide);};const next=delta=>{index=Math.max(0,Math.min(d.slideOrder.length-1,index+delta));draw();};controls.append(button('← ก่อนหน้า',()=>next(-1)),button('ถัดไป →',()=>next(1)),button('จบนำเสนอ',()=>overlay.remove()));overlay.append(frame,controls);v.root.append(overlay);overlay.focus();overlay.onkeydown=e=>{if(e.key==='Escape')overlay.remove();if(['ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();next(1);}if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();next(-1);}};draw();},{'data-ribbon-group':'view'}));
     work.append(el('p','จัดข้อความ สีพื้นหลัง และดูภาพ PNG/JPEG ในสไลด์ · การครอปภาพ ลำดับซ้อน กราฟ เอฟเฟกต์ และแม่แบบขั้นสูงอาจแสดงต่างจากต้นฉบับ',{class:'po-note'}));return finish();
   }
-  window.PanthoriumOfficeSuite=Object.freeze({render,applyDraft});
+  async function command(ctx,c){
+    const {v,changeBatch,rerender}=ctx,ui=window.PanthoriumCreativeVoice,d=applyDraft(v.data,v.ops,v.imagePreviews),kind=d.pluginId;
+    const fail=ui.fail,done=()=>ui.ok('แก้ร่างบนหน้าจอแล้ว ยังไม่ได้บันทึกเป็นไฟล์'),ops=[];
+    if(!['document','spreadsheet','presentation'].includes(kind))return fail('เปิดเอกสาร ตาราง หรืองานนำเสนอก่อน');
+    if(c.text?.length>2000)return fail('ข้อความแต่ละคำสั่งยาวได้ไม่เกิน 2,000 ตัวอักษร');
+    const overlay=v.root.querySelector('.po-present');
+    if(overlay){
+      if(!['next_slide','previous_slide','stop_present'].includes(c.action))return fail('จบนำเสนอก่อนแก้ไขสไลด์');
+      await ui.click(ui.button(overlay,({next_slide:'ถัดไป →',previous_slide:'← ก่อนหน้า',stop_present:'จบนำเสนอ'})[c.action]));return ui.ok('เปลี่ยนมุมมองนำเสนอแล้ว');
+    }
+    if(c.action==='select_cell'){
+      if(kind!=='spreadsheet')return fail('เปิดตารางก่อนเลือกเซลล์');v.cell=c.cell;v.page=Math.floor((Number(c.cell.match(/\d+/)[0])-1)/50);rerender(v);return ui.ok('เลือกเซลล์ '+c.cell+' แล้ว');
+    }
+    if(c.action==='select'){
+      if(!Number.isInteger(c.value))return fail('ระบุลำดับเป็นจำนวนเต็ม');
+      if(c.target==='sheet'&&kind==='spreadsheet'&&d.sheets[c.value-1]){v.sheet=c.value-1;v.page=0;v.cell='A1';}
+      else if(c.target==='paragraph'&&kind==='document'&&d.blocks[c.value-1])v.selected=d.blocks[c.value-1].index;
+      else if(c.target==='slide'&&kind==='presentation'&&d.slideOrder[c.value-1]){v.slide=d.slideOrder[c.value-1];v.selected=d.blocks.find(b=>b.page===v.slide)?.index;}
+      else return fail('ไม่พบลำดับที่ระบุในงานนี้');
+      rerender(v);return ui.ok('เลือกรายการที่ '+c.value+' แล้ว');
+    }
+    if(['next_slide','previous_slide'].includes(c.action)){
+      if(kind!=='presentation')return fail('เปิดงานนำเสนอก่อน');const at=d.slideOrder.indexOf(v.slide||1)+(c.action==='next_slide'?1:-1);
+      if(!d.slideOrder[at])return fail('ถึงสไลด์'+(c.action==='next_slide'?'สุดท้าย':'แรก')+'แล้ว');v.slide=d.slideOrder[at];v.selected=d.blocks.find(b=>b.page===v.slide)?.index;rerender(v);return ui.ok('เปิดสไลด์ที่ '+(at+1)+' แล้ว');
+    }
+    if(c.action==='text'){
+      if(kind==='document')ops.push({type:'append_paragraph',value:c.text});
+      else if(kind==='presentation')ops.push({type:'add_slide_text',page:v.slide||1,value:c.text});
+      else return fail('ระบุเซลล์และค่า เช่น เปลี่ยน A1 เป็น รายรับ');
+    }else if(c.action==='replace_text'){
+      const b=d.blocks?.find(b=>b.index===v.selected);if(!b||b.textEditProtection)return fail('เลือกย่อหน้าหรือกล่องข้อความที่แก้ไขได้ก่อน');ops.push({type:'set_text',index:b.index,value:c.text});
+    }else if(c.action==='add_slide'){
+      if(kind!=='presentation')return fail('เปิดงานนำเสนอก่อนเพิ่มสไลด์');if(d.pageCount>=100)return fail('รองรับสูงสุด 100 สไลด์');ops.push({type:'add_slide',value:c.text});
+    }else if(c.action==='add_sheet'){
+      if(kind!=='spreadsheet')return fail('เปิดตารางก่อนเพิ่มชีต');
+      if(d.pivotState?.importedPivotCount||d.sheets.length>=32||!c.text.trim()||c.text.length>31||/[\\/?*\[\]:\x00-\x1f]/.test(c.text)||c.text.startsWith("'")||c.text.endsWith("'")||d.sheets.some(s=>s.name.toLocaleLowerCase()===c.text.toLocaleLowerCase()))return fail('ชื่อชีตซ้ำ ไม่ถูกต้อง หรือไฟล์นี้เพิ่มชีตไม่ได้');
+      ops.push({type:'add_sheet',name:c.text});
+    }else if(['set_cell','set_formula'].includes(c.action)){
+      if(kind!=='spreadsheet')return fail('เปิดตารางก่อนใส่ค่า');const sheet=d.sheets[v.sheet],old=sheet.cells.find(x=>x.cell===c.cell);if(sheet.readonly)return fail('ชีตนี้ถูกป้องกันไว้ ให้แก้ข้อมูลต้นทาง');
+      const formula=c.action==='set_formula'||c.text.startsWith('=');
+      if(formula){const value=c.text.startsWith('=')?c.text:'='+c.text;try{core().parse(value);}catch(e){return fail('สูตรนี้ยังไม่รองรับ: '+e.message);}ops.push({type:'set_formula',sheet:v.sheet,cell:c.cell,value});}
+      else {if(old?.formula)return fail('เซลล์นี้มีสูตร ให้ใช้คำสั่งใส่สูตร');const numeric=/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(c.text)&&Number.isFinite(Number(c.text));ops.push({type:'set_cell',sheet:v.sheet,cell:c.cell,value:numeric?Number(c.text):c.text});}
+    }else{
+      if(['font_size','bold','italic','underline','align'].includes(c.action)){
+        const selected=kind==='spreadsheet'?d.sheets[v.sheet].cells.find(x=>x.cell===v.cell):d.blocks.find(x=>x.index===v.selected);
+        if(!selected)return fail('เลือกข้อความหรือเซลล์ที่มีข้อมูลก่อนจัดรูปแบบ');
+      }
+      const labels={bold:'ตัวหนา',italic:'ตัวเอียง',underline:'ขีดเส้นใต้',present:'นำเสนอ'},fields={font_size:'ขนาดตัวอักษร',align:'จัดแนวข้อความ',zoom:'ซูมพื้นที่งาน'};
+      if(labels[c.action])await ui.click(ui.button(v.root,labels[c.action]));
+      else if(fields[c.action]){if(c.action==='zoom'&&![50,75,100,125,150].includes(c.value))return fail('ซูมเอกสารได้ 50, 75, 100, 125 หรือ 150 เปอร์เซ็นต์');await ui.set(ui.control(v.root,fields[c.action]),c.value);}
+      else return fail('คำสั่งนี้ยังใช้ไม่ได้ในหมวดที่เปิดอยู่');
+      return v.status.dataset.error==='true'?fail(v.status.textContent):done();
+    }
+    if(!changeBatch(v,ops))return fail(v.status.textContent||'ยังแก้ไขไม่ได้');
+    if(c.action==='text'||c.action==='add_slide')v.selected=d.blocks.length;
+    if(c.action==='add_slide')v.slide=d.pageCount+1;
+    if(c.action==='add_sheet'){v.sheet=d.sheets.length;v.page=0;v.cell='A1';}
+    if(['set_cell','set_formula'].includes(c.action)){v.cell=c.cell;v.page=Math.floor((Number(c.cell.match(/\d+/)[0])-1)/50);}
+    rerender(v);return done();
+  }
+  window.PanthoriumOfficeSuite=Object.freeze({render,applyDraft,command});
 })();

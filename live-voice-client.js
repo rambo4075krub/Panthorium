@@ -300,15 +300,25 @@
       const audio = part.inlineData?.data || part.inline_data?.data;
       if (audio) { setStatus("Sentinel AI กำลังตอบ", "listening"); playPcm24k(audio); }
     }
+    if ((input?.finished===true||content.turnComplete||content.turn_complete)&&!creativeConfirmationHandled&&window.PanthoriumCreativeStudio?.hasVoicePending?.()) {
+      const intent=window.PanthoriumCreativeVoiceCatalog?.parse(inputTranscript);
+      if(intent&&['confirm','cancel'].includes(intent.action)){
+        creativeConfirmationHandled=true;
+        Promise.resolve(window.PanthoriumCreativeStudio.command(inputTranscript)).then(result=>{if(result?.text)window.PanthoriumOrb?.setTranscript?.(result.text,0);}).catch(()=>{});
+      }
+    }
     if (content.turnComplete || content.turn_complete) {
+      creativeConfirmationHandled=false;
       inputTranscript = ""; outputTranscript = ""; chatUserRow = null; chatAssistantRow = null;
       outputSuppressed = false;
       setStatus("Sentinel AI พร้อมฟัง", "listening");
     }
   }
 
+  let creativeConfirmationHandled=false;
   async function openLiveSession(generation) {
     const ensureCurrent = () => { if (generation !== sessionGeneration || activeAccountKey !== null && activeAccountKey !== accountKey()) throw cancelled(); };
+    creativeConfirmationHandled=false;
     inputTranscript = ""; outputTranscript = ""; chatUserRow = null; chatAssistantRow = null;
     outputSuppressed = false;
     setStatus("กำลังเปิดไมโครโฟน", "processing");

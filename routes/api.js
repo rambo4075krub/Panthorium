@@ -20,6 +20,7 @@ function validChatBody(body = {}) {
   return null;
 }
 const windowCatalog = require("../voice-window-catalog");
+const creativeVoice = require("../creative-voice-catalog");
 function hasVoicePermission(user, permission) { return (user?.permissions || []).includes(permission); }
 
 function createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler, biometrics, functionCalling = null) {
@@ -307,6 +308,12 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
       const { command, provider } = req.body || {};
       if (!validText(command, 8000)) return res.status(400).json({ ok: false, error: "invalid_command" });
       if (provider != null && !validText(provider, 40)) return res.status(400).json({ ok: false, error: "invalid_provider" });
+      const creative = creativeVoice.parse(command);
+      if (creative && !['confirm','cancel'].includes(creative.action) && !(creative.action==='open' && windowCatalog.parse(command))) {
+        if (req.user.roles?.includes('guest') || String(req.user.sub || '').startsWith('guest:') || !hasVoicePermission(req.user,'chat')) return res.status(403).json({ok:false,error:'voice_action_permission_denied'});
+        if (creative.error) return res.status(422).json({ok:false,error:creative.error,text:creative.text});
+        return res.json({ok:true,completed:false,uiPending:true,voiceAction:true,results:[{toolId:'studio.command',ok:true,output:{uiAction:creativeVoice.toAction(command,randomUUID())}}]});
+      }
       const functionCommand = windowCatalog.parseFunction(command);
       if (functionCommand) {
         if (!windowCatalog.allowed(windowCatalog.apps.find(app => app.id === functionCommand.appId), req.user)) return res.status(403).json({ ok: false, error: 'voice_action_permission_denied', action: functionCommand.action });

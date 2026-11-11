@@ -24,12 +24,36 @@ Existing formulas, charts, pivots, tables, revisions, header/footer editing and 
 
 Limits remain 200 operations / 42 KB per edit, editable sheet range A1:AN1000 (50 rows rendered per page), 32 sheets, 100 slides and 2,000 text blocks. New embedded images are PNG/JPEG, up to 2 MB each / 16 MP, with a 4 MB total media budget and 16 pictures. Media project drafts currently use explicit project downloads; automatic account drafts are for Office files.
 
+## Voice control in the current workspace
+
+Signed-in users with the ordinary `chat` permission can control the five editors. No administrator, owner, local-model access, or `sentinel:command` permission is needed. Microphone access and the existing speech-provider/credit rules still apply. The compact **เสียง** button shows examples and starts the shared microphone; Office voice commands now preserve unsaved manual edits instead of redirecting them to the saved source file.
+
+| Workspace | Example spoken commands |
+| --- | --- |
+| Image | `เพิ่มข้อความ สวัสดีครับ`, `เลือกเลเยอร์ที่ 1`, `หมุนรูปภาพ 90 องศา`, `ความทึบ 50 เปอร์เซ็นต์`, `สว่างขึ้น` |
+| Video | `เลื่อนไป 1 วินาที`, `แบ่งคลิป`, `เลือกคลิปที่สอง`, `ความเร็ว 2 เท่า`, `ระดับเสียง 50 เปอร์เซ็นต์`, `เพิ่มคำบรรยาย สวัสดี`, `สัดส่วนวิดีโอ แนวตั้ง` |
+| Document | `เพิ่มย่อหน้า รายละเอียดงาน`, `เลือกย่อหน้าที่ 2`, `เปลี่ยนข้อความที่เลือกเป็น ข้อความใหม่`, `ตัวหนา`, `ขนาดตัวอักษร 18` |
+| Spreadsheet | `เลือกเซลล์ เอหนึ่ง`, `เปลี่ยน B2 เป็น 500`, `ใส่สูตร B3 เป็น =SUM(B1:B2)`, `เพิ่มชีต สรุป` |
+| Presentation | `เพิ่มสไลด์ สรุปงาน`, `เพิ่มกล่องข้อความ ขั้นตอนถัดไป`, `สไลด์ถัดไป`, `เริ่มนำเสนอ`, `จบนำเสนอ` |
+
+Shared commands include `เปิดเอกสาร`, `เปิดไฟล์ ชื่อเต็ม.docx`, `ตั้งชื่อ งานใหม่`, `ย้อนกลับ`, `ทำซ้ำ`, and `บันทึก`. File names must match a single owned file; duplicate names require selection in the existing file picker. New Office files can be requested with `สร้างเอกสารใหม่`, `สร้างตารางใหม่`, or `สร้างงานนำเสนอใหม่`. Existing unsaved work must be saved before starting a new workspace in that category.
+
+Saving, exporting, downloading a project, and creating a blank file first show a workspace confirmation. Say **ยืนยัน** or **ยกเลิก**, or use its buttons. Approval is tied to the account, active category, exact editor instance, file/revision, draft state and name for two minutes. Switching accounts/tabs, replacing the editor or changing the draft invalidates it. Heavy exports run asynchronously and report that they have started until their actual result arrives. Repeated commands while busy cannot start another export.
+
+The shared bounded parser accepts common Thai politeness variants, Thai digits and common spoken number/cell names; dictated content retains its punctuation, case and polite words. It does not split a transcript into arbitrary commands or execute code/selectors from text. Unknown operations and absent/protected selections report errors. In image crop/paint/move modes, voice selects the tool; drawing and precise drag coordinates still require the canvas. Formula dictation must resolve to a formula supported by the existing engine.
+
+`studio.command` returns a pending browser action through chat and Live voice, and the browser acknowledgement reports the actual UI result. A model cannot confirm its own proposed save: confirmation/cancellation are rejected as tool arguments. Live voice accepts only a final **input** transcript for a pending workspace confirmation, never assistant speech or a partial transcript. The action's Live receipt does not execute it again. Hybrid voice routes recognized commands after its existing authorized transcription step without invoking local chat inference.
+
 ## Validation
 
 - `npm run check` and `npm test`
 - `node test/office-suite-browser.js`
 - `node test/creative-workspace-browser.js`
 - `node test/creative-inline-browser.js`
+- `node test/creative-voice.js`
+- `node test/creative-voice-browser.js`
+
+Voice tests cover ordinary-account API and function dispatch, negation, numeric/cell parsing, final speech-frame confirmation, account/draft changes, and all five real browser editors through native saves and an actual captioned MP4 export. Speech-provider frames and transcribed requests are fixtures; these checks do not claim live human microphone recognition accuracy.
 
 The native suite (`test/creative-inline-native.js`, included in `test:studio`) reads saved native packages, checks new content, fonts, fills, images and source ownership, and runs real FFmpeg exports. It probes output dimensions/duration/audio and samples frames to verify order and speed. Browser tests use the real shared window shell and APIs, cover all five editors in one window, retained edits, save/reopen, mobile layout and account cleanup. Test media is generated synthetically; no customer files are used.
 
