@@ -46,6 +46,7 @@ function createGeminiLiveWebSocketGateway({
   functionCalling = null,
   entitlements = null,
   sessionStore = null,
+  capacityGate = null,
   contextProvider = null,
   onUsage = null,
   resumeEnabled = process.env.GEMINI_LIVE_RESUMPTION === '1',
@@ -61,6 +62,8 @@ function createGeminiLiveWebSocketGateway({
   const sessions = new Map();
 
   const onConnection = client => {
+    const capacityAbort = new AbortController();
+    let capacityRelease = null;
     let accountTimer = null;
     let leaseTimer = null;
     let setupTimer = null;
@@ -110,6 +113,8 @@ function createGeminiLiveWebSocketGateway({
     const release = () => {
       if (released) return;
       released = true;
+      capacityAbort.abort();
+      if (capacityRelease) { const permit=capacityRelease; capacityRelease=null; Promise.resolve(permit()).catch(()=>{}); }
       // An approval or running effect is never replayed through session resume.
       persistSession(pendingApprovals.size > 0 || pendingEffects > 0);
       clearInterval(accountTimer);
@@ -181,6 +186,13 @@ function createGeminiLiveWebSocketGateway({
       settled = true;
       clearTimeout(authTimer);
       try {
+        if (capacityGate) {
+          capacityRelease = await capacityGate.acquire({ userId, signal:capacityAbort.signal });
+          if (released || client.readyState !== 1) { await capacityRelease(); capacityRelease=null; return; }
+          const stop = () => { if(client.readyState<2)client.close(4429,'live_capacity_unavailable'); release(); };
+          capacityRelease.signal?.addEventListener('abort',stop,{once:true});
+          if(capacityRelease.signal?.aborted){stop();return;}
+        }
         if(entitlements){
           const state=await entitlements.state(userId);
           if(!hasQuota(state,'voiceInputSeconds') || !hasQuota(state,'voiceOutputSeconds') || !hasQuota(state,'textInputTokens') || !hasQuota(state,'textOutputTokens'))throw new Error('quota_exceeded');
@@ -204,7 +216,7 @@ function createGeminiLiveWebSocketGateway({
         const publicWebInstruction = tools.some(tool => tool.name === 'panthorium_web_search') ? PUBLIC_WEB_GUIDANCE : '';
         const notificationInstruction = tools.some(tool => tool.name === 'panthorium_notifications_read') ? NOTIFICATION_GUIDANCE : '';
         const sessionInstruction = systemInstruction + '\nIdentify the assistant as Sentinel AI. Do not use internal model names as the service name or advertise free local inference to general users. Answer data-processor questions truthfully using the privacy policy.' + (tools.some(tool => tool.name === 'panthorium_mailbox_read') ? MAILBOX_GUIDANCE : '\nMailbox tools are unavailable in this session. You cannot inspect, read, search, send, or determine whether the user has emails. Never claim the inbox is empty or an email action succeeded. Explain that email access is not available, and offer to open user-mailbox to check connection status; opening that window does not read emails.') + studioInstruction + publicWebInstruction + notificationInstruction + (typeof contextInstruction === 'string' ? '\n' + contextInstruction.slice(0, 16000) : '');
-        upstream = await connectLive({ projectId, location, systemInstruction: sessionInstruction, tools, transcription: process.env.PANTHORIUM_AI_MODE === "gemini-live-only" || voiceApprovalEnabled,
+        upstream = await connectLive({ projectId, location, signal:capacityAbort.signal, systemInstruction: sessionInstruction, tools, transcription: process.env.PANTHORIUM_AI_MODE === "gemini-live-only" || voiceApprovalEnabled,
           sessionResumption: resumeAllowed ? { handle: resumeHandle } : null, contextCompression });
       } catch (error) {
         console.warn("[Gemini Live] upstream connection failed", String(error?.message || error).slice(0, 160));
@@ -212,7 +224,7 @@ function createGeminiLiveWebSocketGateway({
         release();
         return;
       }
-      if (client.readyState !== 1) return release();
+      if (client.readyState !== 1 || released) { if(upstream?.readyState<2)upstream.close(1000,'client_closed'); return release(); }
       let readySent = false;
       const setupStartedAt = Date.now();
       setupTimer = setTimeout(() => {

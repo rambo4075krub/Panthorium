@@ -206,7 +206,7 @@ class StudioEditorService {
     if(model.slideFiles){model.pageCount=model.slideFiles.length;delete model.slideFiles;}
     return {file:{id:file.id,name:file.name,contentType:file.contentType},pluginId,revision:hash(file.body),...model,...(capabilities(pluginId,model)?{capabilities:capabilities(pluginId,model)}:{})};
   }
-  async apply({user,pluginId,input}) {
+  async apply({user,pluginId,input,signal}) {
     const edit=validateEdit(input.edit), file=await this.files.readOwned(user.sub,edit.fileId);
     if(typeOf(file)!==pluginId)fail('editor_operation_type_mismatch');
     if(hash(file.body)!==edit.revision)fail('editor_source_changed',409);
@@ -224,18 +224,19 @@ class StudioEditorService {
       try {
         const source=path.join(dir,'source.'+extension), target=path.join(dir,'edited.png');await fs.writeFile(source,file.body,{mode:0o600,flag:'wx'});
         const decoded=path.join(dir,'decoded.png'),decoder=({png:'png',jpg:'mjpeg',jpeg:'mjpeg',webp:'webp'})[extension];
-        await runProcess(process.env.FFMPEG_PATH || 'ffmpeg',['-hide_banner','-v','error','-xerror','-protocol_whitelist','file,pipe','-f','image2','-pattern_type','none','-c:v',decoder,'-max_pixels','16777216','-i',source,'-frames:v','1','-threads','1',decoded],{timeoutMs:20000,maxOutputBytes:1024});
+        await runProcess(process.env.FFMPEG_PATH || 'ffmpeg',['-hide_banner','-v','error','-xerror','-protocol_whitelist','file,pipe','-f','image2','-pattern_type','none','-c:v',decoder,'-max_pixels','16777216','-i',source,'-frames:v','1','-threads','1',decoded],{timeoutMs:20000,maxOutputBytes:1024,signal});
         const info=_internals.imageInfo({name:'decoded.png',body:await fs.readFile(decoded)});let width=info.width,height=info.height;
         for(const op of edit.operations){
           if(op.type==='crop'){if(op.x+op.width>width||op.y+op.height>height)fail('editor_crop_out_of_bounds');width=op.width;height=op.height;}
           if(op.type==='rotate'&&op.degrees!==180)[width,height]=[height,width];
         }
 
-        await runProcess(process.env.FFMPEG_PATH || 'ffmpeg',['-hide_banner','-v','error','-xerror','-protocol_whitelist','file,pipe','-f','image2','-pattern_type','none','-c:v',({png:'png',jpg:'mjpeg',jpeg:'mjpeg',webp:'webp'})[extension],'-max_pixels','16777216','-i',source,'-vf',filters.join(','),'-frames:v','1','-threads','1',target],{timeoutMs:20000,maxOutputBytes:1024});
+        await runProcess(process.env.FFMPEG_PATH || 'ffmpeg',['-hide_banner','-v','error','-xerror','-protocol_whitelist','file,pipe','-f','image2','-pattern_type','none','-c:v',({png:'png',jpg:'mjpeg',jpeg:'mjpeg',webp:'webp'})[extension],'-max_pixels','16777216','-i',source,'-vf',filters.join(','),'-frames:v','1','-threads','1',target],{timeoutMs:20000,maxOutputBytes:1024,signal});
         body=await fs.readFile(target); contentType='image/png';extension='png';
       } finally {await fs.rm(dir,{recursive:true,force:true});}
     } else fail('editor_use_media_studio');
     const name=sanitizeFilename(input.name || file.name.replace(/\.[^.]+$/,'')+'-edited').replace(/\.[^.]+$/,'').slice(0,130)+'.'+extension;
+    signal?.throwIfAborted();
     const saved=await this.files.upload(user.sub,name,contentType,body);
     return {files:[saved],summary:'บันทึกฉบับแก้ไขแล้ว โดยเก็บต้นฉบับไว้'};
   }

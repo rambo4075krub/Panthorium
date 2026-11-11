@@ -147,7 +147,7 @@ class WorkAssistantService {
         'For tasks identify proposed tasks only. Return JSON {"draft":"readable summary","tasks":[{"title":"...","assignee":"...","dueAt":null,"timeZone":"Asia/Bangkok","sourceKeys":["INPUT"]}]}. Set dueAt only when an unambiguous full date and time are stated, in ISO with explicit offset. Otherwise null. Do not choose deadlines for the user.',
         'For other modes return readable text, no JSON. Keep the entire output below 12000 characters.' + (mode === 'draft' ? ' ' + template.instruction : '')
       ].join('\n');
-      const result = await this.gateway.complete({ userId: user.sub, sessionId: 'work:' + randomUUID(), systemPrompt, tools: [], preserveInput: true, signal: combined,
+      const result = await this.gateway.complete({ workload:'background', userId: user.sub, sessionId: 'work:' + randomUUID(), systemPrompt, tools: [], preserveInput: true, signal: combined,
         history: [{ role: 'user', content: JSON.stringify({ mode, instruction, draft: ['rewrite', 'translate'].includes(mode) ? project.data.draft : '', sources }) }] });
       if (!result?.ok || !result.text?.trim()) throw error('work_ai_unavailable', 503);
       let draft = result.text.trim(), proposedTasks = [], warnings = [];

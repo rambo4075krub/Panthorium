@@ -75,7 +75,8 @@ class CreativeStudioService {
     Object.assign(this, { repository, files, providers, gateway, mediaStudio, office, resolveUser, audit });
     this.editor = new StudioEditorService({ files });
     this.vertexFetch = vertexFetch || ((...args) => fetch(...args));
-    this.imageGate = gateway?.concurrencyGate || new ConcurrencyGate({limit:2,maxQueue:4,name:'studio-images',audit});
+    this.imageGate = gateway?.capacity?.gate('image') || new ConcurrencyGate({limit:2,maxQueue:4,name:'studio-images',audit});
+    this.editGate = gateway?.capacity?.gate('media') || this.imageGate;
   }
   async init() { await this.repository?.init?.(); }
   requireAccount(user) { if (!isAccountUser(user)) throw new CreativeStudioError(403, 'account_required'); return String(user.sub || user.id); }
@@ -166,6 +167,7 @@ class CreativeStudioService {
   }
   async executeClaim(job) {
     const step = job.steps[job.currentStep];
+    let admitted = false;
     try {
       const user = await this.principal(job.principal);
       await this.assertAllowed(user, step.pluginId);
@@ -201,8 +203,8 @@ class CreativeStudioService {
           step.providerJobToken = result.jobToken; step.status = 'running';
           return this.repository.save(job, { release: true, delayMs: 15000 });
         }
-        if (step.input.edit) result = await this.imageGate.run(()=>this.editor.apply({user,pluginId:step.pluginId,input:step.input}));
-        else if (step.pluginId === 'image') result = await this.imageGate.run(()=>this.generateImage({ user, input: step.input, sourceFileIds: ids }));
+        if (step.input.edit) result = await this.editGate.run(signal=>{admitted=true;return this.editor.apply({user,pluginId:step.pluginId,input:step.input,signal});},{userId:job.ownerId});
+        else if (step.pluginId === 'image') result = await this.imageGate.run(signal=>{admitted=true;return this.generateImage({ user, input: step.input, sourceFileIds: ids, signal });},{userId:job.ownerId});
         else {
           const officeInput = Object.fromEntries(Object.entries(step.input).filter(([key]) => ['prompt','title','content'].includes(key)));
           result = await this.office.create({ user, pluginId: step.pluginId, input: officeInput, sourceFileIds: ids, name: step.input.name || '' });
@@ -219,6 +221,10 @@ class CreativeStudioService {
       return await this.repository.save(job, { release: true });
     } catch (error) {
       if (error.code === 'studio_lease_lost') throw error;
+      if (!admitted && (step.input.edit || step.pluginId==='image') && (error.code==='system_busy' || String(error.code||'').startsWith('capacity_'))) {
+        step.status='queued';job.status='queued';
+        return this.repository.save(job,{release:true,delayMs:5000});
+      }
       const code = String(error.code || error.message || 'studio_operation_failed').replace(/[^a-zA-Z0-9_:.-]/g,'_').slice(0,100);
       const knownOfficeFailure = ['document','spreadsheet','presentation'].includes(step.pluginId) && error.name === 'OfficeArtifactError' && error.artifactNotCreated === true;
       const uncertain = !knownOfficeFailure && (error.uncertain === true || (step.status === 'submitting' && !(error instanceof CreativeStudioError && error.uncertain === false)));
@@ -234,7 +240,7 @@ class CreativeStudioService {
     for (const item of jobs) { const job = await this.repository.claim(item.ownerId,item.id); if (job) { await this.executeClaim(job); processed += 1; } }
     return { processed };
   }
-  async generateImage({ user, input, sourceFileIds }) {
+  async generateImage({ user, input, sourceFileIds, signal }) {
     const ownerId = this.requireAccount(user), config = this.imageConfig();
     if (sourceFileIds.length > 3) throw new CreativeStudioError(400, 'too_many_image_sources');
     const parts = [{ text: 'Create one image following the user request. Return the image with a short description.\n' + input.prompt }];
@@ -253,7 +259,7 @@ class CreativeStudioService {
     try {
       // Official Vertex Gemini image API; never trust a model/user-provided URL.
       // https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/image-generation
-      response = await this.vertexFetch(url, { method: 'POST', headers: { Authorization: 'Bearer '+token, 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseModalities: ['TEXT','IMAGE'], imageConfig: { aspectRatio: input.aspectRatio || '1:1' }, candidateCount: 1, maxOutputTokens: 8192 } }), signal: AbortSignal.timeout(90000) });
+      response = await this.vertexFetch(url, { method: 'POST', headers: { Authorization: 'Bearer '+token, 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseModalities: ['TEXT','IMAGE'], imageConfig: { aspectRatio: input.aspectRatio || '1:1' }, candidateCount: 1, maxOutputTokens: 8192 } }), signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(90000)]) : AbortSignal.timeout(90000) });
     } catch (_) { throw new CreativeStudioError(503, 'image_submission_uncertain', true); }
     if (!response.ok) throw new CreativeStudioError(503, response.status === 429 ? 'image_generation_capacity' : 'image_generation_unavailable', response.status >= 500);
     let data; try { data = await response.json(); } catch (_) { throw new CreativeStudioError(502, 'image_response_invalid', true); }
@@ -271,6 +277,7 @@ class CreativeStudioService {
       const extension = { 'image/png':'png', 'image/jpeg':'jpg', 'image/webp':'webp' }[type];
       await this.validateGeneratedImage(bytes,type,extension);
       const name = sanitizeFilename(input.name || 'sentinel-image').replace(/\.[^.]*$/,'').slice(0,140) + '.' + extension;
+      signal?.throwIfAborted();
       try { files.push(await this.files.upload(ownerId,name,type,bytes)); }
       catch (_) { throw new CreativeStudioError(503, 'image_output_save_uncertain', true); }
     }
