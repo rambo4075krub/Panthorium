@@ -18,7 +18,7 @@
   const plugin = id => PLUGINS.find(item => item.id === id);
   const sourceLimit = id => id === 'video' ? 1 : id === 'image' ? 3 : 6;
   const promptLimit = id => id === 'video' ? 1600 : id === 'image' ? 12000 : 8000;
-  function editable(file) { return /\.(docx|xlsx|pptx|png|jpe?g|webp|mp4|webm)$/i.test(file.name || ''); }
+  function editable(file) { return /\.(docx|xlsx|pptx|png|jpe?g|webp|mp4|webm|mov|mkv)$/i.test(file.name || ''); }
   function sourceCompatible(file, id) {
     const type = String(file.contentType || '').toLowerCase(), name = String(file.name || '');
     if (id === 'image') return ['image/png', 'image/jpeg', 'image/webp'].includes(type);
@@ -178,7 +178,7 @@
     v.selectedFiles[kind]=fileId;if(file&&!v.files.some(f=>f.id===fileId))v.files.unshift(file);selectPlugin(v,kind);showWorkspace(v,kind);const item=v.workspaces.get(kind);if(!item)return false;
     v.root.querySelector('.cs-layout').hidden=true;for(const n of v.root.querySelectorAll('[data-toggle-create],[data-toggle-history]'))n.setAttribute('aria-expanded','false');
     if(item.editor)return item.editor.openFile(fileId);
-    return window.PanthoriumStudioEditor?.open(fileId,{container:item.host,onClose:()=>{v.workspaces.delete(kind);item.host.remove();showWorkspace(v,v.active);},onSaved:job=>{if(current(v)){putJob(v,job);renderJobs(v);for(const f of job.files||[])if(!v.files.some(x=>x.id===f.id))v.files.unshift(f);renderFiles(v);}}});
+    return window.PanthoriumStudioEditor?.open(fileId,{container:item.host,onAdopt:file=>{if(current(v)){v.selectedFiles[kind]=file.id;renderFiles(v);}},onClose:()=>{v.workspaces.delete(kind);item.host.remove();showWorkspace(v,v.active);},onSaved:job=>{if(current(v)){putJob(v,job);renderJobs(v);for(const f of job.files||[])if(!v.files.some(x=>x.id===f.id))v.files.unshift(f);renderFiles(v);}}});
   }
   async function editFile(fileId){
     if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fileId||'')||!open(view?.active||'document'))return false;
@@ -251,7 +251,7 @@
   function renderFiles(v) {
     if (!current(v)) return;
     const select = v.root.querySelector('[data-editor-files]'), selected = v.selectedFiles[v.active] || select.value; select.replaceChildren(el('option','เลือกไฟล์…',{value:''}));
-    const pattern = {image:/\.(png|jpe?g|webp)$/i,video:/\.(mp4|webm)$/i,document:/\.docx$/i,spreadsheet:/\.xlsx$/i,presentation:/\.pptx$/i}[v.active];
+    const pattern = {image:/\.(png|jpe?g|webp)$/i,video:/\.(mp4|webm|mov|mkv)$/i,document:/\.docx$/i,spreadsheet:/\.xlsx$/i,presentation:/\.pptx$/i}[v.active];
     for(const file of v.files) if(pattern.test(file.name || '')) select.append(el('option',file.name,{value:file.id})); select.value=selected;
     v.root.querySelector('[data-editor-open]').disabled = !select.value;
     select.onchange = () => {v.selectedFiles[v.active]=select.value; v.root.querySelector('[data-editor-open]').disabled = !select.value; };
@@ -522,7 +522,7 @@
     voiceHelp.style.cssText='position:absolute;right:12px;top:90px;z-index:15;width:min(430px,90%);max-height:65%;overflow:auto;padding:14px;background:#102332;border:1px solid #548598;border-radius:10px;box-shadow:0 12px 35px #0009';
     voiceHelp.append(el('strong','สั่งงานในพื้นที่ที่เปิดอยู่'),el('p','รูปภาพ: เพิ่มข้อความ สวัสดี · หมุนภาพ 90 องศา'),el('p','วิดีโอ: เลื่อนไป 1 วินาที · แบ่งคลิป · เพิ่มคำบรรยาย สวัสดี'),el('p','เอกสาร: เพิ่มย่อหน้า รายละเอียดงาน · เลือกย่อหน้าที่ 2 · ตัวหนา'),el('p','ตาราง: เปลี่ยน B2 เป็น 500 · ใส่สูตร B3 เป็น =SUM(B1:B2)'),el('p','นำเสนอ: เพิ่มสไลด์ สรุปงาน · สไลด์ถัดไป · เริ่มนำเสนอ'),el('p','ทุกหมวด: ย้อนกลับ · ทำซ้ำ · บันทึก · ยืนยัน / ยกเลิก'),button('เริ่มสั่งด้วยเสียง',async()=>{const r=await window.PanthoriumCreativeVoice.start(v.active);if(current(v)){status(v,r.text,!r.ok);if(r.ok)voiceHelp.hidden=true;}}),button('ปิดตัวอย่าง',()=>{voiceHelp.hidden=true;}));
     root.append(voiceHelp);filebar.append(button('🎙 เสียง',()=>{voiceHelp.hidden=!voiceHelp.hidden;},{'aria-label':'สั่งด้วยเสียงและดูตัวอย่างคำสั่ง'}));
-    const importInput=el('input',null,{type:'file',accept:'.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.mp4,.webm',hidden:''});
+    const importInput=el('input',null,{type:'file',accept:'.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.mp4,.webm,.mov,.mkv',hidden:''});
     filebar.append(button('นำเข้าไฟล์',()=>importInput.click()),importInput);
     importInput.onchange=async()=>{const file=importInput.files?.[0];if(!file)return;if(file.size>20*1024*1024)return status(v,'รองรับไฟล์ไม่เกิน 20 MB',true);try{const data=await api(v,'/api/files',{method:'POST',body:file,headers:{'Content-Type':'application/octet-stream','x-file-name':encodeURIComponent(file.name),'x-file-content-type':file.type||'application/octet-stream'}});if(!current(v))return;v.files.unshift(data.file);renderFiles(v);await openFile(v,data.file.id);}catch(e){status(v,friendly(e),true);}finally{importInput.value='';}};
     const drawer=which=>{const layout=root.querySelector('.cs-layout'),panel=root.querySelector('[data-'+which+'-panel]'),same=!layout.hidden&&!panel.hidden;layout.hidden=same;for(const key of ['create','history']){root.querySelector('[data-'+key+'-panel]').hidden=key!==which;root.querySelector('[data-toggle-'+key+']').setAttribute('aria-expanded',String(!same&&key===which));}};
@@ -540,7 +540,7 @@
     root.querySelector('[data-editor-open]').onclick=()=>{const id=root.querySelector('[data-editor-files]').value;if(id)openFile(v,id);else status(v,'เลือกไฟล์ที่ต้องการแก้ไขก่อน',true);};
     root.querySelector('[data-editor-blank]').onclick=async event=>{
       const contents={document:{title:'เอกสารใหม่',sections:[{paragraphs:['เริ่มเขียนที่นี่']}]},spreadsheet:{title:'ตารางใหม่',sheets:[{name:'ข้อมูล',rows:[['หัวข้อ','ค่า'],['', '']]}]},presentation:{title:'งานนำเสนอใหม่',slides:[{title:'หัวข้อสไลด์',bullets:['เริ่มเขียนที่นี่']}]}};
-      if(!contents[v.active])return;const pluginId=v.active;event.currentTarget.disabled=true;
+      if(!contents[v.active])return;const active=v.workspaces.get(v.active);if(window.PanthoriumStudioEditor?.isDirty(active?.host)){status(v,'บันทึกการแก้ไขในไฟล์ปัจจุบันก่อนสร้างไฟล์ใหม่',true);return;}const pluginId=v.active;event.currentTarget.disabled=true;
       try {const data=await post(v,'/api/studio/jobs',{pluginId,input:{prompt:'สร้างไฟล์เปล่าเพื่อแก้ไขด้วยมือ',content:contents[pluginId]},idempotencyKey:'blank:'+crypto.randomUUID(),confirmed:true});if(!current(v))return;putJob(v,data.job);renderJobs(v);if(data.job.status==='completed')await openFile(v,data.job.files.find(f=>/\.(docx|xlsx|pptx)$/i.test(f.name))?.id,pluginId);else schedule(v,1000);}
       catch(error){status(v,friendly(error),true);}finally{if(current(v))root.querySelector('[data-editor-blank]').disabled=false;}
     };

@@ -12,10 +12,17 @@ const decode = value => String(value).replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[0
   return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '';
 });
 // These have semantics the plain paragraph surface cannot faithfully display.
-const protectedTags = ['w:ins','w:del','w:moveFrom','w:moveTo','w:fldChar','w:fldSimple','w:instrText','w:sdt','w:hyperlink','w:tab','w:br','w:cr','w:sym','w:noBreakHyphen','w:softHyphen'];
+const protectedTags = ['w:ins','w:del','w:moveFrom','w:moveTo','w:fldChar','w:fldSimple','w:instrText','w:sdt','w:hyperlink','w:sym','w:noBreakHyphen','w:softHyphen'];
+function textTokens(paragraph,prefix='w') {
+  return ['t','br',...(prefix==='w'?['cr','tab']:[])].flatMap(tag=>xmlParagraphMatches(paragraph,prefix+':'+tag,prefix,false)).sort((a,b)=>a.index-b.index);
+}
+function tokenText(token) {const name=token.node.name;return name.endsWith(':t')?decode(token[1]):name.endsWith(':tab')?'\t':'\n';}
+function paragraphText(paragraph,prefix='w') {return textTokens(paragraph,prefix).map(tokenText).join('');}
+function documentTextXml(value) {return String(value).replace(/\r\n?/g,'\n').split(/([\n\t])/).map(part=>part==='\n'?'<w:br/>':part==='\t'?'<w:tab/>':'<w:t xml:space="preserve">'+escape(part)+'</w:t>').join('');}
 function protectionReason(paragraph) {
   const root = xmlMatches(paragraph,'w:p',true)[0]?.node;
   if (!root) return 'editor_rich_text_unsupported';
+  if(xmlParagraphMatches(paragraph,'w:br','w',false).some(m=>m.node.attributes['w:type']&&!['textWrapping'].includes(m.node.attributes['w:type'])))return 'editor_rich_text_protected';
   for (const name of protectedTags) if (xmlMatches(paragraph,name).some(m => {
     let p = m.node.parent;
     while (p && p.name !== 'w:p') p = p.parent;
@@ -24,13 +31,14 @@ function protectionReason(paragraph) {
   return null;
 }
 function replaceDocumentText(paragraph, value) {
-  const matches = xmlParagraphMatches(paragraph,'w:t','w');
-  const parts = matches.map(m => Array.from(decode(m[1])));
+  value=String(value).replace(/\r\n?/g,'\n');
+  const matches = textTokens(paragraph);
+  const parts = matches.map(m => Array.from(tokenText(m)));
   const original = parts.flat(), next = Array.from(value);
   if (original.join('') === value) return paragraph;
   const reason = protectionReason(paragraph);
   if (reason) throw new OfficeArtifactError(409,reason);
-  if (!matches.length) throw new OfficeArtifactError(400,'editor_text_not_found');
+  if (!matches.length) {const content='<w:r>'+documentTextXml(value)+'</w:r>';return _internals.xmlInsertChild(paragraph,content);}
   let start = 0, suffix = 0;
   while (start < original.length && start < next.length && original[start] === next[start]) start++;
   while (suffix < original.length-start && suffix < next.length-start && original[original.length-1-suffix] === next[next.length-1-suffix]) suffix++;
@@ -54,12 +62,12 @@ function replaceDocumentText(paragraph, value) {
   let i=0;
   return xmlReplaceSelected(paragraph,matches,old=>{
     const value=values[i], unchanged=value===parts[i++].join('');
-    return unchanged?old:'<w:t xml:space="preserve">'+escape(value)+'</w:t>';
+    return unchanged?old:documentTextXml(value);
   });
 }
 function documentRuns(paragraph) {
   return xmlParagraphMatches(paragraph,'w:r','w').map(run=>{
-    const text=xmlParagraphMatches('<w:p>'+run[0]+'</w:p>','w:t','w').map(m=>decode(m[1])).join('');
+    const text=paragraphText('<w:p>'+run[0]+'</w:p>');
     const props=xmlMatches(run[0],'w:rPr')[0]?.[0]||'';
     const style={};
     const val=name=>xmlMatches(props,name)[0]?.node.attributes['w:val'];
@@ -72,4 +80,4 @@ function documentRuns(paragraph) {
     return {text,style};
   }).filter(run=>run.text);
 }
-module.exports={replaceDocumentText,protectionReason,documentRuns};
+module.exports={replaceDocumentText,protectionReason,documentRuns,paragraphText,documentTextXml};

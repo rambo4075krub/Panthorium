@@ -24,7 +24,7 @@ assert.deepEqual(texts(replaceDocumentText(unicode,'สวัสดี 😃🌏!
 const entity='<w:p><w:r><w:t>A &amp; B </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>&#x1f600;</w:t></w:r></w:p>';
 assert.equal(replaceDocumentText(entity,'A & B 😀'),entity);
 assert.deepEqual(texts(replaceDocumentText(entity,'A & C 😀')),['A &amp; C ','&#x1f600;']);
-for(const markup of ['<w:fldChar w:fldCharType="begin"/>','<w:tab/>','<w:br/>','<w:ins><w:r><w:t>revision</w:t></w:r></w:ins>','<w:hyperlink r:id="rId1"><w:r><w:t>link</w:t></w:r></w:hyperlink>']){
+for(const markup of ['<w:fldChar w:fldCharType="begin"/>','<w:br w:type="page"/>','<w:ins><w:r><w:t>revision</w:t></w:r></w:ins>','<w:hyperlink r:id="rId1"><w:r><w:t>link</w:t></w:r></w:hyperlink>']){
  const p=base.replace('</w:p>',markup+'</w:p>');
  assert.equal(protectionReason(p),'editor_rich_text_protected');
  assert.throws(()=>replaceDocumentText(p,'edit'),/editor_rich_text_protected/);

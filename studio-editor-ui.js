@@ -20,11 +20,13 @@
     if(!current(v))throw Error('account_changed');if(raw && r.ok)return r;
     const data=await r.json();if(!current(v))throw Error('account_changed');if(!r.ok||data.ok===false)throw Error(data.error||'HTTP '+r.status);return data;
   }
-  function cleanup(v){if(!v)return;clearTimeout(v.draftTimer);v.panelObserver?.disconnect();v.abort.abort();if(v.url)URL.revokeObjectURL(v.url);v.ops=[];v.redo=[];v.imagePreviews?.clear();v.imageLoading?.clear();v.data=null;instances.delete(v);if(view===v)view=null;}
+  function cleanup(v){if(!v)return;clearTimeout(v.draftTimer);v.panelObserver?.disconnect();v.abort.abort();if(v.url)URL.revokeObjectURL(v.url);for(const u of v.downloadUrls||[])URL.revokeObjectURL(u);for(const timer of v.downloadTimers||[])clearTimeout(timer);v.ops=[];v.redo=[];v.imagePreviews?.clear();v.imageLoading?.clear();v.data=null;instances.delete(v);if(view===v)view=null;}
   function close(target=view){const v=target;if(!v)return;cleanup(v);if(v.container){v.container.replaceChildren();v.options.onClose?.();}else if(typeof closeWindow==='function')closeWindow(ID);else document.querySelector('.window[data-id="studio-editor"]')?.remove();}
   function dispose(container){for(const v of [...instances])if(v.container===container)close(v);}
-  function controls(v){if(!current(v))return;v.save.disabled=v.busy||!v.ops.length;v.undo.disabled=v.busy||!v.ops.length;v.redoButton.disabled=v.busy||!v.redo.length;v.count.textContent=v.ops.length+' การแก้ไขที่ยังไม่บันทึก';}
-  function change(v,op){if(!current(v)||v.busy||v.finished)return;if(v.ops.length>=200)return report(v,'บันทึกฉบับนี้ก่อน แล้วแก้ไขต่อได้สูงสุดครั้งละ 200 รายการ',true);v.ops.push(op);(v.groups||=[]).push(1);v.redo=[];v.redoGroups=[];v.retry=null;controls(v);scheduleDraft(v);}
+  function pendingEdits(v){return [...v.root.querySelectorAll('[data-pending-edit]')];}
+  function flushEdits(v){for(const input of pendingEdits(v)){if(input.commitDraft?.()===false)return false;}if(v.root.contains(document.activeElement))document.activeElement.blur();return !pendingEdits(v).length;}
+  function controls(v){if(!current(v))return;v.save.disabled=v.busy||(!v.ops.length&&!pendingEdits(v).length);if(v.download)v.download.disabled=v.busy||!v.data;v.undo.disabled=v.busy||!v.ops.length;v.redoButton.disabled=v.busy||!v.redo.length;v.count.textContent=v.ops.length+' การแก้ไขที่ยังไม่บันทึก';}
+  function change(v,op){if(!current(v)||v.busy||v.finished)return false;if(v.ops.length>=200){report(v,'บันทึกฉบับนี้ก่อน แล้วแก้ไขต่อได้สูงสุดครั้งละ 200 รายการ',true);return false;}v.ops.push(op);(v.groups||=[]).push(1);v.redo=[];v.redoGroups=[];v.retry=null;controls(v);scheduleDraft(v);return true;}
   function changeBatch(v,operations){if(!current(v)||v.busy||v.finished)return false;if(new TextEncoder().encode(JSON.stringify({fileId:v.data.file.id,revision:v.data.revision,operations:[...v.ops,...operations]})).length>42000){report(v,'ข้อมูลที่วางใหญ่เกินขอบเขต กรุณาแบ่งเป็นช่วง',true);return false;}if(v.ops.length+operations.length>200){report(v,'แบ่งบันทึกครั้งละไม่เกิน 200 การแก้ไข',true);return false;}for(const op of operations)change(v,op);if(operations.length)v.groups.splice(-operations.length,operations.length,operations.length);return true;}
   function scheduleDraft(v){
     clearTimeout(v.draftTimer);if(!current(v)||!v.draftReady||v.finished||v.draftConflict)return;
@@ -42,7 +44,7 @@
   async function loadDraft(v){
     try{const draft=await api(v,'/api/studio/editor/'+v.data.file.id+'/draft');if(!current(v))return;v.draftVersion=draft.version;v.draftReady=true;
       if(draft.data&&draft.data.revision===v.data.revision){
-        v.body.inert=true;v.save.disabled=true;const banner=el('div',null,{class:'se-toolbar'});v.saved.append(banner);banner.append(el('span','พบฉบับร่างที่ยังไม่ได้บันทึกเป็นไฟล์'),button('กู้คืนฉบับร่าง',()=>{v.ops=draft.data.operations;v.groups=v.ops.map(()=>1);v.redoGroups=[];v.name.value=draft.data.name;v.body.inert=false;banner.remove();render(v);v.draftStatus.textContent='กู้คืนแล้ว · บันทึกเมื่อพร้อม';}),button('เริ่มจากต้นฉบับ',()=>{v.body.inert=false;banner.remove();persistDraft(v).catch(()=>{});controls(v);}));
+        v.recoveryPending=true;v.body.inert=true;v.save.disabled=true;const banner=el('div',null,{class:'se-toolbar'});v.saved.append(banner);banner.append(el('span','พบฉบับร่างที่ยังไม่ได้บันทึกเป็นไฟล์'),button('กู้คืนฉบับร่าง',()=>{v.ops=draft.data.operations;v.groups=v.ops.map(()=>1);v.redoGroups=[];v.name.value=draft.data.name;v.recoveryPending=false;v.body.inert=false;banner.remove();render(v);v.draftStatus.textContent='กู้คืนแล้ว · บันทึกเมื่อพร้อม';}),button('เริ่มจากต้นฉบับ',()=>{v.recoveryPending=false;v.body.inert=false;banner.remove();persistDraft(v).catch(()=>{});controls(v);}));
       }else v.draftStatus.textContent=draft.data?'ต้นฉบับเปลี่ยน จึงไม่กู้ฉบับร่างเก่าอัตโนมัติ':'ฉบับร่างจะเก็บอัตโนมัติหลังหยุดแก้ไข';
     }catch(e){if(current(v))v.draftStatus.textContent='ฉบับร่างอัตโนมัติยังไม่พร้อม · ใช้ปุ่มบันทึกฉบับแก้ไข';}
   }
@@ -99,9 +101,9 @@
     draw(v);
   }
   function loadImagePreviews(v){v.imagePreviews||=new Map();v.imageLoading||=new Set();for(const op of v.ops.filter(o=>o.type==='insert_image')){if(v.imagePreviews.has(op.fileId)||v.imageLoading.has(op.fileId))continue;v.imageLoading.add(op.fileId);(async()=>{try{const r=await api(v,'/api/files/'+op.fileId+'/preview',{},true),blob=await r.blob();if(blob.size>2*1024*1024||!/^image\/(png|jpeg)$/.test(blob.type))throw Error('editor_image_budget');const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(blob);});if(current(v)){v.imagePreviews.set(op.fileId,{dataUrl});if(v.ops.some(o=>o.type==='insert_image'&&o.fileId===op.fileId))render(v);}}catch(e){if(current(v))report(v,'เปิดภาพประกอบไม่สำเร็จ: '+e.message,true);}finally{v.imageLoading.delete(op.fileId);}})();}}
-  function render(v){if(!current(v)||!v.data)return;loadImagePreviews(v);v.body.replaceChildren();if(window.PanthoriumOfficeSuite?.render({v,change,changeBatch,api:(...args)=>api(v,...args),rerender:render,el,button,report,scheduleDraft})){controls(v);return;}const d=model(v);if(d.sheets)renderSheet(v,d);else if(d.blocks)renderText(v,d);else if(d.pluginId==='image')renderImage(v);controls(v);}
+  function render(v){if(!current(v)||!v.data)return;loadImagePreviews(v);v.body.replaceChildren();if(window.PanthoriumOfficeSuite?.render({v,change,changeBatch,api:(...args)=>api(v,...args),rerender:render,el,button,report,scheduleDraft,controls})){controls(v);return;}const d=model(v);if(d.sheets)renderSheet(v,d);else if(d.blocks)renderText(v,d);else if(d.pluginId==='image')renderImage(v);controls(v);}
   async function save(v){
-    if(!current(v)||v.busy||!v.ops.length)return;clearTimeout(v.draftTimer);v.busy=true;controls(v);v.body.inert=true;v.name.disabled=true;
+    if(!current(v)||v.busy||!flushEdits(v)||!v.ops.length)return;clearTimeout(v.draftTimer);v.busy=true;controls(v);v.body.inert=true;v.name.disabled=true;
     try{
       if(v.draftPromise)await v.draftPromise.catch(()=>{});
       const body=v.retry||(v.retry={pluginId:v.data.pluginId,sourceFileIds:[v.data.file.id],input:{prompt:'แก้ไขไฟล์และบันทึกฉบับใหม่',name:v.name.value,edit:{fileId:v.data.file.id,revision:v.data.revision,operations:JSON.parse(JSON.stringify(v.ops))}},idempotencyKey:'editor:'+crypto.randomUUID(),confirmed:true});
@@ -109,12 +111,29 @@
       if(v.options.onSaved)v.options.onSaved(data.job);else window.PanthoriumCreativeStudio?.showJob(data.job);
       if(data.job.status==='completed'){
         v.ops=[];v.redo=[];v.retry=null;const file=data.job.files.find(f=>f.pluginId===v.data.pluginId)||data.job.files[0];
-        report(v,'บันทึกแล้ว: '+file.name+' · ต้นฉบับยังอยู่');v.saved.replaceChildren(button('เปิดฉบับแก้ไขต่อ',()=>open(file.id,v.options)),button('ดูผลงานทั้งหมด',()=>window.PanthoriumCreativeStudio?.showJob(data.job)));
-        // Freeze the completed editor until the saved copy is opened explicitly.
+        report(v,'บันทึกไฟล์แล้ว กำลังเปิดฉบับแก้ไขต่อ: '+file.name);v.saved.replaceChildren(button('เปิดฉบับแก้ไขต่อ',()=>open(file.id,v.options)),button('ดูผลงานทั้งหมด',()=>window.PanthoriumCreativeStudio?.showJob(data.job)));
+        // Clear the old draft, then adopt the saved native file in the same workspace.
         v.body.inert=true;v.finished=true;await persistDraft(v).catch(()=>{});
+        try{
+          const next=await api(v,'/api/studio/editor/'+encodeURIComponent(file.id));if(!current(v))return;
+          v.data=next;v.finished=false;v.groups=[];v.redoGroups=[];v.draftReady=false;v.draftConflict=false;v.draftVersion=undefined;v.imagePreviews?.clear();v.imageLoading?.clear();
+          v.name.value=file.name.replace(/\.[^.]+$/,'');v.root.querySelector('[data-file]').textContent=file.name;
+          v.options.onAdopt?.(file);render(v);await loadDraft(v);report(v,'บันทึกแล้ว: '+file.name+' · แก้ไขต่อได้ทันที ต้นฉบับยังอยู่');
+        }catch(e){if(current(v))report(v,'บันทึกแล้ว: '+file.name+' · กดเปิดฉบับแก้ไขต่อเพื่อโหลดงานอีกครั้ง',false);}
+
       } else if(['failed','blocked','needs_review'].includes(data.job.status)) {v.retry=null;report(v,data.job.error||'บันทึกไม่สำเร็จ กรุณาตรวจรายการงาน',true);}
       else report(v,'รับงานแล้ว ติดตามผลในรายการงานก่อนส่งซ้ำ');
-    }catch(e){if(current(v))report(v,e.message,true);}finally{if(current(v)){v.busy=false;if(!v.finished)v.body.inert=false;v.name.disabled=!!v.finished;controls(v);}}
+    }catch(e){if(current(v))report(v,e.message,true);}finally{if(current(v)){v.busy=false;if(!v.finished&&!v.recoveryPending)v.body.inert=false;v.name.disabled=!!v.finished;controls(v);}}
+  }
+  async function download(v){
+    if(!current(v)||v.busy||!flushEdits(v))return;
+    if(v.ops.length){await save(v);if(!current(v)||v.ops.length||v.busy)return;}
+    if(!v.data)return;if(v.finished)return report(v,'บันทึกแล้ว กรุณาเปิดฉบับแก้ไขต่อก่อนดาวน์โหลด',true);v.download.disabled=true;
+    try{const file=v.data.file,response=await api(v,'/api/files/'+encodeURIComponent(file.id),{},true),blob=await response.blob();if(!current(v))return;
+      const url=URL.createObjectURL(blob);(v.downloadUrls||=new Set()).add(url);const link=el('a',null,{href:url,download:file.name});document.body.append(link);link.click();link.remove();
+      const timer=setTimeout(()=>{URL.revokeObjectURL(url);v.downloadUrls.delete(url);v.downloadTimers.delete(timer);},30000);(v.downloadTimers||=new Set()).add(timer);
+      report(v,'ดาวน์โหลด '+file.name+' แล้ว');
+    }catch(e){report(v,e.message,true);}finally{if(current(v))v.download.disabled=false;}
   }
   async function voice(v){
     if(!current(v)||!v.data)return;
@@ -126,7 +145,7 @@
   async function command(container,c){
     const v=voiceInstance(container),ui=window.PanthoriumCreativeVoice;
     if(!v?.data||v.busy||v.finished||v.body.inert)return ui.fail('เปิดไฟล์ที่แก้ไขได้ และกู้คืนหรือทิ้งฉบับร่างที่ค้างก่อนสั่งงาน');
-    if(v.root.contains(document.activeElement))document.activeElement.blur();
+    if(!flushEdits(v))return ui.fail('ตรวจค่าที่กำลังแก้ไขก่อนสั่งงาน');
     v.status.dataset.error='false';
     try{
       if(c.action==='rename'){if(c.text.length>130)return ui.fail('ชื่อยาวได้ไม่เกิน 130 ตัวอักษร');v.name.value=c.text;v.retry=null;scheduleDraft(v);return ui.ok('ตั้งชื่อฉบับแก้ไขแล้ว');}
@@ -140,10 +159,10 @@
     const previous=[...instances].find(v=>v.container===(options.container||null));
     if(previous&&current(previous)&&previous.data?.file.id===fileId){if(!options.container)window.PanthoriumWindowManager?.restore?.(ID);return previous.root;}
     if(previous?.busy)return false;
-    if(previous?.ops.length&&!window.confirm('มีการแก้ไขที่ยังไม่บันทึก ต้องการปิดแล้วเปิดไฟล์อื่นหรือไม่?'))return false;
+    if(previous&&(previous.ops.length||pendingEdits(previous).length)&&!window.confirm('มีการแก้ไขที่ยังไม่บันทึก ต้องการปิดแล้วเปิดไฟล์อื่นหรือไม่?'))return false;
     if(previous){cleanup(previous);previous.root.remove();}if(!options.container&&typeof createWindow!=='function')return false;
     const html=`<section data-studio-editor data-focus="false" data-menu-open="false"><style>
-      [data-studio-editor]{box-sizing:border-box;height:100%;min-height:0;overflow:hidden;display:flex;flex-direction:column;background:var(--bg,#0c1420);color:var(--text,#eef1f5);font:13px/1.5 system-ui;container:editor / inline-size}
+      [data-studio-editor]{position:relative;isolation:isolate;box-sizing:border-box;height:100%;min-height:0;overflow:hidden;display:flex;flex-direction:column;background:var(--bg,#0c1420);color:var(--text,#eef1f5);font:13px/1.5 system-ui;container:editor / inline-size}
       [data-studio-editor] *{box-sizing:border-box;min-width:0}
       [data-studio-editor] button,[data-studio-editor] input,[data-studio-editor] select,[data-studio-editor] textarea{font:inherit;color:inherit;background:#142437;border:1px solid #3a536a;border-radius:7px;padding:7px 10px;max-width:100%}
       [data-studio-editor] button{cursor:pointer;min-height:36px;white-space:nowrap}
@@ -208,7 +227,7 @@
     const q=s=>root.querySelector('[data-'+s+']'),v=view={root,container:options.container||null,options,owner:identity(),abort:new AbortController(),ops:[],redo:[],groups:[],redoGroups:[],sheet:0,page:0,body:q('body'),status:q('status'),draftStatus:q('draft-status'),name:q('name'),save:q('save'),undo:q('undo'),redoButton:q('redo'),count:q('count'),saved:q('saved')};instances.add(v);
     q('menu').onclick=()=>{root.dataset.menuOpen=String(root.dataset.menuOpen!=='true');q('menu').setAttribute('aria-expanded',root.dataset.menuOpen);};root.querySelector('.se-actionbar').addEventListener('click',e=>{if(e.target.closest('button')){root.dataset.menuOpen='false';q('menu').setAttribute('aria-expanded','false');}});
     q('help-text').id='studio-help-'+fileId;q('help').setAttribute('aria-controls',q('help-text').id);
-    v.save.onclick=()=>save(v);v.undo.onclick=()=>{if(v.ops.length){const n=v.groups.pop()||1;v.redo.push(...v.ops.splice(-n).reverse());v.redoGroups.push(n);}v.retry=null;render(v);scheduleDraft(v);};v.redoButton.onclick=()=>{if(v.redo.length){const n=v.redoGroups.pop()||1;for(let i=0;i<n;i++)v.ops.push(v.redo.pop());v.groups.push(n);}v.retry=null;render(v);scheduleDraft(v);};v.name.onchange=()=>{v.retry=null;scheduleDraft(v);};q('voice').onclick=()=>voice(v);q('ai').onclick=()=>{if(typeof openSentinel==='function')openSentinel();};controls(v);
+    v.download=button('ดาวน์โหลดไฟล์',()=>download(v),{'data-download':'',title:'บันทึกการแก้ไขแล้วดาวน์โหลดไฟล์ต้นฉบับรูปแบบ Office'});v.save.after(v.download);v.download.disabled=true;v.save.onclick=()=>save(v);v.undo.onclick=()=>{if(v.ops.length){const n=v.groups.pop()||1;v.redo.push(...v.ops.splice(-n).reverse());v.redoGroups.push(n);}v.retry=null;render(v);scheduleDraft(v);};v.redoButton.onclick=()=>{if(v.redo.length){const n=v.redoGroups.pop()||1;for(let i=0;i<n;i++)v.ops.push(v.redo.pop());v.groups.push(n);}v.retry=null;render(v);scheduleDraft(v);};v.name.onchange=()=>{v.retry=null;scheduleDraft(v);};q('voice').onclick=()=>voice(v);q('ai').onclick=()=>{if(typeof openSentinel==='function')openSentinel();};controls(v);
     const panels = open => { root.dataset.panels=String(open);q('panels').setAttribute('aria-expanded',String(open)); };
     panels(!root.clientWidth || root.clientWidth > 760);
     v.panelsPreference=null;
@@ -216,7 +235,7 @@
     const focus = on => { root.dataset.focus=String(on);q('focus').setAttribute('aria-pressed',String(on));q('focus').textContent=on?'คืนมุมมองปกติ':'ขยายพื้นที่ทำงาน'; };
     q('focus').onclick=()=>focus(root.dataset.focus!=='true');
     q('panels').onclick=()=>{if(root.dataset.focus==='true')focus(false);v.panelsPreference=root.dataset.panels!=='true';panels(v.panelsPreference);};
-    q('editor-close').onclick=()=>{if(!v.ops.length||window.confirm('ปิดโดยไม่บันทึกการแก้ไขหรือไม่?'))close(v);};
+    q('editor-close').onclick=()=>{if(!(v.ops.length||pendingEdits(v).length)||window.confirm('ปิดโดยไม่บันทึกการแก้ไขหรือไม่?'))close(v);};
     q('help').onclick=()=>{q('help-text').hidden=!q('help-text').hidden;q('help').setAttribute('aria-expanded',String(!q('help-text').hidden));};
     root.addEventListener('keydown',e=>{if(e.key==='Escape'&&root.dataset.focus==='true'){focus(false);q('focus').focus();}});
     root.addEventListener('keydown',e=>{if(!(e.ctrlKey||e.metaKey)||e.altKey)return;const key=e.key.toLowerCase();if(key==='s'){e.preventDefault();document.activeElement?.blur();save(v);}else if(key==='z'&&!e.target.isContentEditable&&!['INPUT','TEXTAREA'].includes(e.target.tagName)){e.preventDefault();(e.shiftKey?v.redoButton:v.undo).click();}});
@@ -228,7 +247,7 @@
       if(['document','spreadsheet','presentation'].includes(data.pluginId))await loadDraft(v);
     }catch(e){if(current(v))report(v,e.message,true);}return root;
   }
-  window.PanthoriumStudioEditor=Object.freeze({command,voiceSnapshot,open:(fileId,options={})=>!options.container&&!options.standalone&&window.PanthoriumCreativeStudio?.editFile?window.PanthoriumCreativeStudio.editFile(fileId):open(fileId,options),close,dispose,isDirty:container=>[...instances].some(v=>v.container===container&&v.ops.length>0)});
+  window.PanthoriumStudioEditor=Object.freeze({command,voiceSnapshot,open:(fileId,options={})=>!options.container&&!options.standalone&&window.PanthoriumCreativeStudio?.editFile?window.PanthoriumCreativeStudio.editFile(fileId):open(fileId,options),close,dispose,isDirty:container=>[...instances].some(v=>v.container===container&&(v.ops.length>0||pendingEdits(v).length>0))});
   window.addEventListener('panthorium:auth-changed',()=>{for(const v of [...instances])if(!allowed()||v.owner!==identity())close(v);});
   window.addEventListener('pagehide',()=>{for(const v of [...instances])cleanup(v);});
 })();

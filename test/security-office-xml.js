@@ -55,8 +55,10 @@ async function nestedTextBoxes() {
     { type: 'set_text', index: 2, value: 'Edited After' }
   ] } } });
   const final = officeModel(core.unzip(saved), 'document');
-  assert.deepEqual(final.blocks.map(block => block.text), ['Edited Inner', 'Edited After']);
-  assert.deepEqual(final.blocks.map(block => block.style.bold), [true, false]);
+  assert.deepEqual(final.blocks.map(block => block.text), ['', 'Edited Inner', 'Edited After'], 'an emptied paragraph stays editable without stealing nested text');
+  assert.deepEqual(final.blocks.map(block => block.style.bold), [false, true, false]);
+  const restored=patchOffice(core.unzip(saved),'document',[{type:'set_text',index:0,value:'Restored Outer'}]);
+  assert.deepEqual(officeModel(restored,'document').blocks.map(block=>block.text),['Restored Outer','Edited Inner','Edited After']);
   assert.equal(extractOfficeText(saved), '\nEdited Inner\nEdited After\n');
 }
 

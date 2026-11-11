@@ -7,7 +7,7 @@ const charts = require('./officeChartService');
 const pivots = require('./officePivotService');
 const {capabilities}=require('./officeCapabilities');
 const revisions=require('./officeRevisionService');
-const {replaceDocumentText,protectionReason,documentRuns} = require('./officeRichText');
+const {replaceDocumentText,protectionReason,documentRuns,paragraphText,documentTextXml} = require('./officeRichText');
 const formulaCore = require('../office-suite-core');
 const path = require('node:path');
 const fs = require('node:fs/promises');
@@ -100,8 +100,8 @@ function officeModel(entries, pluginId) {
     if(!entries[file]) fail('editor_office_unsupported',422);
     let ordinal=0;
     for(const match of xmlMatches(entries[file].toString(),prefix+':p',true)) {
-      const text=xmlParagraphMatches(match[0],prefix+':t',prefix).map(m=>decode(m[1])).join('');
-      if(text||pluginId==='document'&&revisions.paragraphRevisions(match[0]).length) {
+      const text=paragraphText(match[0],prefix);
+      if(text||xmlParagraphMatches(match[0],prefix+':t',prefix).length||pluginId==='document'&&!xmlMatches(match[0],'w:drawing').length||pluginId==='presentation'&&!xmlMatches(match[0],'a:fld').length) {
         const protection=pluginId==='document'?protectionReason(match[0]):null;
         blocks.push({index:blocks.length,page:page+1,file,ordinal,text,...(pluginId==='document'?{runs:documentRuns(match[0])}:{}),...(protection?{textEditProtection:protection}:{})});
       }
@@ -175,14 +175,22 @@ function patchOffice(entries, pluginId, operations, newImages=new Map()) {
       const paragraph=xmlMatches(source,prefix+':p',true)[block.ordinal];if(!paragraph)fail('editor_text_not_found');
       const xml=xmlReplaceSelected(source,[paragraph],p=>{
         if(pluginId==='document')return replaceDocumentText(p,op.value);
+        const text=String(op.value).replace(/\r\n?/g,'\n'),runs=xmlParagraphMatches(p,'a:r','a'),breaks=xmlParagraphMatches(p,'a:br','a',false);
+        if(text.includes('\n')||breaks.length||!xmlParagraphMatches(p,'a:t','a').length){
+          if(xmlParagraphMatches(p,'a:fld','a').length)fail('editor_rich_text_protected',409);
+          const style=runs[0]?xmlMatches(runs[0][0],'a:rPr')[0]?.[0]||'':'',content=text.split('\n').map(line=>'<a:r>'+style+'<a:t xml:space="preserve">'+escape(line)+'</a:t></a:r>').join('<a:br/>');
+          const replace=[...runs,...breaks].sort((a,b)=>a.index-b.index);let first=true;
+          if(replace.length)return xmlReplaceSelected(p,replace,()=>{const value=first?content:'';first=false;return value;});
+          const end=xmlMatches(p,'a:endParaRPr')[0];return end?p.slice(0,end.index)+content+p.slice(end.index):xmlInsertChild(p,content);
+        }
         let first=true;
-        return xmlReplaceSelected(p,xmlParagraphMatches(p,prefix+':t',prefix),()=>{const v=first?escape(op.value):'';first=false;return `<${prefix}:t xml:space="preserve">${v}</${prefix}:t>`;});
+        return xmlReplaceSelected(p,xmlParagraphMatches(p,prefix+':t',prefix),()=>{const value=first?escape(text):'';first=false;return `<${prefix}:t xml:space="preserve">${value}</${prefix}:t>`;});
       }); entries[block.file]=Buffer.from(xml);
     } else if(op.type==='append_paragraph' && pluginId==='document') {
       let xml=entries['word/document.xml'].toString();
       if(model.blocks.length>=2000)fail('editor_file_too_complex',413);
       model.blocks.push({index:model.blocks.length,page:1,file:'word/document.xml',ordinal:xmlMatches(xml,'w:p',true).length,text:op.value});
-      const p='<w:p><w:r><w:t xml:space="preserve">'+escape(op.value)+'</w:t></w:r></w:p>';
+      const p='<w:p><w:r>'+documentTextXml(op.value)+'</w:r></w:p>';
       const section=xmlMatches(xml,'w:sectPr').at(-1);
       if(section && /^\s*<\/w:body>/.test(xml.slice(section.index+section[0].length)))xml=xml.slice(0,section.index)+p+xml.slice(section.index);
       else xml=xml.replace('</w:body>',()=>p+'</w:body>');entries['word/document.xml']=Buffer.from(xml);

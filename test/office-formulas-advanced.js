@@ -25,3 +25,6 @@ const cross=core.calculate([{name:'Thai Data',cells},{name:'Report',cells:[{cell
 assert.equal(cross[1].cells[0].calculated,40);
 for(const source of ['=WEBSERVICE("x")','=XLOOKUP(1,A1:A2,B1:B2)','=SUMIF(A1:A6,"x");process.exit()'])assert.throws(()=>core.parse(source));
 console.log('PASS advanced Office formulas: conditional aggregates, bounded wildcard criteria, SUMPRODUCT, exact lookup, INDEX, lazy IFERROR, shape/error/cycle/limit checks');
+
+// Literal input distinguishes identifiers from numbers across keyboard/paste/voice.
+for(const [value,expected]of [['00123','00123'],['-001','-001'],['123',123],[' 12.5 ',12.5],['12%',.12],["'123",'123'],['9007199254740993','9007199254740993'],['1e3',1000],['0x12','0x12'],['','']])assert.equal(require('../office-suite-core').literal(value),expected);

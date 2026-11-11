@@ -111,6 +111,7 @@ jobs:
           node test/office-suite-browser.js
           node test/creative-workspace-browser.js
           node test/creative-inline-browser.js
+          node test/creative-editing-workflows-browser.js
           node test/creative-voice-browser.js
           node test/work-assistant-browser.js
       - name: Speaker service contract tests

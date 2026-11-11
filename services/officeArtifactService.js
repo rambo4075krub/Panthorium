@@ -254,10 +254,10 @@ function xmlReplaceSelected(source, matches, replacement, first = false) {
 function xmlDirectMatches(source, name) {
   return xmlMatches(source, name).filter(match => match.node.parent && !match.node.parent.parent);
 }
-function xmlParagraphMatches(source, name, prefix) {
+function xmlParagraphMatches(source, name, prefix, pairedOnly = true) {
   const paragraph = xmlMatches(source, prefix + ':p', true)[0]?.node;
   if (!paragraph) return [];
-  return xmlMatches(source, name, true).filter(match => {
+  return xmlMatches(source, name, pairedOnly).filter(match => {
     let parent = match.node.parent;
     while (parent && parent.name !== prefix + ':p') parent = parent.parent;
     return parent === paragraph;
