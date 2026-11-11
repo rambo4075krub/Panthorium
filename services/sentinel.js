@@ -19,11 +19,11 @@ function currentTimeContext(date = new Date()) {
 }
 
 class Sentinel {
-  constructor({ sessions, prompts, providers, gateway, conversations, training, memory, audit } = {}) {
+  constructor({ sessions, prompts, providers, gateway, conversations, training, memory, audit, capacity } = {}) {
     this.sessions = sessions || new SessionManager();
     this.prompts = prompts || new PromptManager();
     this.providers = providers || new ProviderManager();
-    this.gateway = gateway || new AiGateway({ providers: this.providers, audit });
+    this.gateway = gateway || new AiGateway({ providers: this.providers, audit, capacity });
     this.conversations = conversations || null;
     this.training = training || null;
     this.memory = memory || null;

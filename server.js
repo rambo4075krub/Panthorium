@@ -150,7 +150,8 @@ const multiAgentRuns = new MultiAgentRunRepository({ databaseUrl: config.databas
 const integrationRepository = new IntegrationRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const integrationExecutions = new IntegrationExecutionRepository({ databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const integrations = new IntegrationService({ repository: integrationRepository, executions: integrationExecutions, audit, allowedHosts: config.integrationAllowedHosts });
-const sentinel = new Sentinel({ conversations, audit });
+const workloadCapacity = new (require('./services/workloadCapacity').WorkloadCapacity)({ databaseUrl:config.databaseUrl, databaseSslMode:config.databaseSslMode, required:config.isProduction, audit });
+const sentinel = new Sentinel({ conversations, audit, capacity:workloadCapacity });
 const billingService = new (require('./services/omiseBillingService').OmiseBillingService)();
 const accountAdminService = new (require("./services/accountAdminService").AccountAdminService)(authService,billingService.pool);
 if (billingService.pool) { authService.validateAccountPrincipal = principal => accountAdminService.validate(principal); authService.accountPolicy = id => accountAdminService.policy(id); authService.invalidateAccountSessions = (id,actor,options) => accountAdminService.invalidate(id,actor,options); }
@@ -171,7 +172,7 @@ billingService.notifications = notifications;
 const voiceSessions = new VoiceSessionRepository({ ...cloudStoreOptions, secret: process.env.VOICE_SESSION_ENCRYPTION_KEY || config.jwtSecret });
 const usageLedger = new UsageLedgerRepository(cloudStoreOptions);
 const cloudApps = new CloudAppRuntime({ ...cloudStoreOptions,
-  complete: process.env.GEMINI_LIVE_ENABLED === '1' ? createCloudAppCompletion({ entitlements: liveEntitlements, usageLedger, gate: sentinel.gateway.concurrencyGate }) : null,
+  complete: process.env.GEMINI_LIVE_ENABLED === '1' ? createCloudAppCompletion({ entitlements: liveEntitlements, usageLedger, gate: workloadCapacity.gate('background') }) : null,
   allowMinorProfiles: process.env.PANTHORIUM_CHILD_FEATURES_ENABLED === '1',
   minorPolicyVerified: process.env.PANTHORIUM_CHILD_PROVIDER_POLICY_VERIFIED === '1' });
 const organizationRepository = new OrganizationRepository({ ...cloudStoreOptions, allowMemory: !config.isProduction && !config.databaseUrl });
@@ -182,7 +183,7 @@ const organizations = new OrganizationService({ repository: organizationReposito
 // A contract inquiry does not create an organization billing entitlement.
 const organizationResources = new OrganizationResourceService({ organizations,
   complete: process.env.GEMINI_LIVE_ENABLED === '1' && liveEntitlements
-    ? createCloudAppCompletion({ entitlements: liveEntitlements, usageLedger, gate: sentinel.gateway.concurrencyGate }) : null });
+    ? createCloudAppCompletion({ entitlements: liveEntitlements, usageLedger, gate: workloadCapacity.gate('background') }) : null });
 const organizationGovernance = new OrganizationGovernanceService({ organizations });
 const cloudFiles = new CloudFilesService({ ...objectOptions, entitlements:liveEntitlements, notifications });
 const social = new (require('./services/socialService').SocialService)({ repository: new (require('./services/socialRepository').SocialRepository)({...cloudStoreOptions,allowMemory:!config.isProduction&&!config.databaseUrl}), files:cloudFiles, accounts:authRepository, supportAdminUsername:config.adminUsername, systemNotifications:notifications });
@@ -537,6 +538,7 @@ let localPushTimer = null;
 let mailboxMaintenanceTimer = null;
 
 async function start() {
+  await workloadCapacity.init();
   await actionLedger.init();
   await notifications.init();
   await notificationPush.init();
@@ -576,6 +578,7 @@ async function start() {
 
   const liveGateway = process.env.GEMINI_LIVE_ENABLED === "1"
     ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "us-central1", functionCalling: agentFunctionCalling, entitlements:liveEntitlements,
+      capacityGate: workloadCapacity.gate('voice'),
       sessionStore: voiceSessions.available() ? voiceSessions : null,
       contextProvider: args => cloudApps.voiceContext(args),
       onUsage: event => usageLedger.record({ ...event, outcome: 'usage_snapshot' }) })
@@ -652,5 +655,5 @@ if (require.main === module) {
   }).catch((error) => { console.error("[BOOT]", error); process.exit(1); });
 }
 
-module.exports = { app, localInsights, notifications, notificationRepository, social, creativeStudio, organizationRepository, organizations, organizationResources, organizationGovernance, privacyRequests, actionLedger, voiceSessions, usageLedger, cloudApps, liveEntitlements, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
+module.exports = { app, workloadCapacity, localInsights, notifications, notificationRepository, social, creativeStudio, organizationRepository, organizations, organizationResources, organizationGovernance, privacyRequests, actionLedger, voiceSessions, usageLedger, cloudApps, liveEntitlements, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
 

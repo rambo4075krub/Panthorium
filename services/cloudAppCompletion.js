@@ -16,7 +16,8 @@ function createCloudAppCompletion({ complete = completeLive, entitlements, usage
     const providerPrompt = textOutputEnabled ? systemPrompt : systemPrompt.split('\n')
       .filter(line => !line.startsWith('Return ONLY valid JSON'))
       .concat('Return a concise natural-language draft for spoken delivery. Include missing information and proposed next steps in the draft itself. Do not output JSON or claim that citations have been automatically verified. Stay within the requested output limit.').join('\n');
-    const run = async () => {
+    const run = async (capacitySignal = signal) => {
+      signal = capacitySignal;
       if (signal?.aborted) throw new Error('cloud_apps_execution_cancelled');
       const result = await complete({ systemPrompt: providerPrompt, history: messages, tools: [], userId,
         entitlements, maxOutputTokens, timeoutMs, signal, textOutputEnabled,
@@ -29,7 +30,7 @@ function createCloudAppCompletion({ complete = completeLive, entitlements, usage
       return { ...result, text: JSON.stringify({ draft: result.text, sourceIds: [],
         unknowns: ['ร่างจากคำตอบเสียง แหล่งอ้างอิงและข้อสรุปยังต้องตรวจสอบโดยผู้ใช้'], nextActions: [] }) };
     };
-    try { return gate ? await gate.run(run) : await run(); }
+    try { return gate ? await gate.run(run, {userId, signal}) : await run(); }
     catch (error) {
       // A failed/aborted request is still an attempted provider call. Usage is
       // unknown unless the provider delivered metadata; never invent a cost.
