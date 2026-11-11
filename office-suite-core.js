@@ -1,6 +1,13 @@
 /* Panthorium formula interpreter. Original implementation; no eval or remote code. */
 (function(root,factory){'use strict';const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.PanthoriumOfficeCore=api;})(typeof window==='object'?window:globalThis,function(){
   'use strict';
+  function literal(input){
+    const text=String(input);if(text.startsWith("'"))return text.slice(1);
+    const value=text.trim();if(!value||/^[-+]?0\d/.test(value))return text;
+    if(!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?%?$/i.test(value))return text;
+    const percent=value.endsWith('%'),number=Number(percent?value.slice(0,-1):value);
+    return Number.isFinite(number)&&(!Number.isInteger(number)||Number.isSafeInteger(number))?(percent?number/100:number):text;
+  }
   const supported=['SUM','AVERAGE','MIN','MAX','COUNT','COUNTA','IF','AND','OR','NOT','ROUND','ABS','SUMIF','COUNTIF','AVERAGEIF','SUMIFS','COUNTIFS','AVERAGEIFS','SUMPRODUCT','IFERROR','INDEX','MATCH','VLOOKUP'];
   const error=code=>{throw Error(code);};
   function parse(source){
@@ -151,5 +158,5 @@
     }
     return sheets.map((s,si)=>({...s,cells:s.cells.map(c=>{if(!c.formula)return {...c};try{return {...c,calculated:cell(si,c.cell)};}catch(e){return {...c,calculated:e.message,calculationError:true};}})}));
   }
-  return Object.freeze({parse,calculate,column,supported});
+  return Object.freeze({parse,calculate,column,supported,literal});
 });

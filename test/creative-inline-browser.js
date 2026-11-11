@@ -33,6 +33,7 @@ const { OfficeArtifactService, _internals } = require('../services/officeArtifac
   app.use('/api/media',createMediaStudioRouter({verifyAccessToken:()=>user,validateAccountPrincipal:async u=>u},new MediaStudioService({files})));
   app.get('/api/files', (req, res) => res.json({ ok: true, files: [...store.values()].map(({ body, owner, ...file }) => file) }));
   app.get('/api/files/:id/preview', (req, res) => { const file = store.get(req.params.id); res.type(file.contentType).send(file.body); });
+  app.get('/api/files/:id', (req,res)=>{const file=store.get(req.params.id);if(!file)return res.sendStatus(404);res.type(file.contentType).send(file.body);});
   app.use('/api/studio', createCreativeStudioRouter({ verifyAccessToken: () => user, validateAccountPrincipal: async u => u }, studio));
   const scripts = ['voice-window-catalog.js', 'panthorium-window-base.js', 'window-theme-ui.js', 'workspace-ui.js', 'start-menu-ui.js', 'office-suite-core.js', 'office-suite-ui.js', 'studio-editor-ui.js', 'creative-editors-ui.js', 'creative-studio-ui.js'];
   for (const name of [...scripts, 'panthorium-window-base.css', 'workspace-ui.css', 'panthorium-logo.svg']) app.get('/' + name, (req, res) => res.sendFile(path.join(__dirname, '..', name)));
