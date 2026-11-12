@@ -45,6 +45,11 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       if (!localAiAllowed(req.user)) return res.status(403).json({ok:false,error:'local_access_denied'});
       const message = req.body?.message;
       if (typeof message !== "string" || !message.trim() || message.length > 2000) return res.status(400).json({ok:false,error:"invalid_message"});
+      let media;
+      try { media = require('../services/localMedia').validateMedia(req.body.media); }
+      catch { return res.status(400).json({ok:false,error:'invalid_local_media'}); }
+      if (req.body.thinking !== undefined && typeof req.body.thinking !== 'boolean') return res.status(400).json({ok:false,error:'invalid_thinking'});
+      if (media.length && !sentinel.providers.hybrid) return res.status(503).json({ok:false,error:'local_vision_unavailable'});
       try {
         if (!require('../services/hybridAiPolicy').localEnabled() && hybridQwen) return res.status(503).json({ok:false,error:'local_disabled'});
         const userId = req.user.sub || req.user.id;
@@ -53,7 +58,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
           const cancel = () => { if (!res.writableEnded) controller.abort(); };
           res.once('close',cancel);
           let result;
-          try { result = await sentinel.chat({message:message.trim(),sessionId:req.body.sessionId,userId,provider:'local',voiceMode:req.body.voice===true,user:req.user,functionCalling,requestId:stableActionRequestId(req)||req.requestId||randomUUID(),signal:controller.signal}); }
+          try { result = await sentinel.chat({message:message.trim(),media,thinking:req.body.thinking,sessionId:req.body.sessionId,userId,provider:'local',voiceMode:req.body.voice===true,user:req.user,functionCalling,requestId:stableActionRequestId(req)||req.requestId||randomUUID(),signal:controller.signal}); }
           finally { res.off('close',cancel); }
           if (res.destroyed) return;
           return res.status(result.ok?200:503).json({...result,creditsCharged:0,billable:false});

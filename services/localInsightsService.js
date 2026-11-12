@@ -145,7 +145,7 @@ class LocalInsightsService {
       if(choice?.finish_reason!=='stop' || choice.message?.tool_calls || typeof choice.message?.content!=='string' || !choice.message.content.trim()) throw failure('insights_incomplete_analysis',503);
       await this.operator(control.actor_id);
       const text=choice.message.content.trim().slice(0,2000);
-      const saved=await this.repository.finishAnalysis(control,{text,windowDays:7,featureCount:counters.length,incidentCount:input.security.length,model:'Qwen3.5-9B',advisory:true},'ready');
+      const saved=await this.repository.finishAnalysis(control,{text,windowDays:7,featureCount:counters.length,incidentCount:input.security.length,model:'Qwen3.5-4B',advisory:true},'ready');
       if(!saved)return {ok:false,error:'insights_data_changed'};
       const recipients=await this.recipients();
       for(const incident of incidents.filter(i=>i.state==='observed' && Date.now()-new Date(i.last_seen)<15*60000).slice(0,10)) {

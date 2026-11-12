@@ -1,4 +1,4 @@
-# Sentinel AI + Qwen3.5-9B on the notebook
+# Sentinel AI + Qwen3.5-4B on the notebook
 
 Gemini Live is the primary voice provider and the only AI provider that debits
 Panthorium credits. Qwen is restricted to server-authorized administrators and the verified owner account. It has no quota preflight or credit debit. Explicit local
@@ -21,22 +21,24 @@ outbound MCP connector and does not grant credentials/scopes to external clients
   `LOCAL_QWEN_DISABLE_FILE=D:\PanthoriumAI\qwen.disabled`.
 - Application requests go through the broker to port 8088. One operation at a time across
   production and staging; excess requests receive a retryable busy response.
-- Qwen3.5-9B Q3_K_S uses 22 GPU layers, 8192 context tokens, four CPU threads,
-  below-normal priority and `--load-mode none`. F16 caches and fixed batches match
-  the notebook trial. Reasoning is bounded to 512 tokens; voice skips thinking.
-  Arithmetic uses the registered bounded calculator. This compressed model can
-  still make mistakes or fail to choose tools; successful loading is not a quality guarantee.
-- The separate RAM watchdog samples every 50 ms, independently of GPU queries.
-  Global thresholds are 82% RAM and 80% VRAM, with at least 2.5 GiB available RAM;
-  recovery thresholds are 77% and 75%. GPU temperatures stop work at 82 C and
-  recover below 77 C. Cold admission forecasts 2.15 GiB additional RAM and 3.18 GiB
-  VRAM. These are sampled stop thresholds with forecasts, not OS hard caps.
-  Startup rejects a missing watchdog, and unknown GPU metrics fail closed.
-  Only the identity-checked model is stopped; databases and other apps are untouched.
-  The 2026-11-08 22-layer trial completed seven synthetic prompts with peak system
-  RAM 80.22% (67.02% before loading) and VRAM 75.56%. Moving two layers from RAM
-  to GPU reduces cold-start contention; the stop thresholds remain unchanged.
-  This short trial is resource evidence, not a concurrency or sustained-load guarantee.
+- The selected Qwen3.5-4B Q4_K_M profile uses 24 GPU layers, 8192 context
+  tokens, four CPU threads and a separate F16 projector on CPU. Images are bounded
+  to 512 tokens each; reasoning to 512 tokens. Local text thinking defaults on,
+  can be disabled per `/api/local/chat` request, and remains off for voice/idle insights.
+- `/qwen` accepts up to four JPG/PNG/WebP images or one video up to ten minutes.
+  The browser resizes to 768 pixels; video is four timestamped samples without audio.
+  The broker validates and re-encodes inline images, rejects remote URLs/paths,
+  animated images and pixel bombs. Media survives tool rounds but is not stored
+  in conversation history or captured as training examples.
+- The independent 50 ms RAM watchdog and queue remain in effect. Limits remain
+  82% RAM, 80% VRAM, 2.5 GiB free RAM and 82 C GPU temperature, with recovery at
+  77% RAM, 75% VRAM and 77 C. Proposed cold budgets are 2.4 GiB RAM and 2.8 GiB
+  VRAM including the CPU projector; they require actual notebook verification.
+  `productionApproved:false` explicitly records that these new settings have not
+  been benchmarked on the target device. The installer must pass live inference
+  and resource checks before committing or removing the previous model.
+  Resource forecasts are admission/stop thresholds, not OS hard caps. Missing
+  metrics fail closed; only the identity-checked model may be stopped.
 - Idle voice memory is unloaded after three minutes. Model idle unloading is
   enabled only after production has migrated to the broker; until then its
   legacy port-8088 route keeps the model resident. Cold starts take
@@ -102,33 +104,52 @@ sources. Their installed locations are `D:\PanthoriumAI\Start-LLM.ps1` and
 automatically. Model weights, Python/runtime dependencies, encrypted settings,
 receipts, logs and user data remain on the notebook and are not published.
 
-## Qwen3.5-9B activation and Qwen3-8B removal
+## Qwen3.5-4B activation and Qwen3.5-9B removal
 
-`model-profile.json` pins the Unsloth Q3_K_S conversion, revision, size, checksum,
-launch options and resource policy. The selected model can process text, reasoning
-and tools. This installation does not enable images; ASR/TTS remain separate.
-Administrator/verified-owner authorization, tool permissions, confirmation gates,
-zero local billing and explicit-local requests never using paid fallback remain unchanged.
+The repository profile pins the Q4_K_M model and F16 projector by revision,
+exact bytes and SHA-256. Existing text, tools/MCP, local voice, mailbox and idle
+insight routes use the `panthorium-local` alias. ASR/TTS and media generation stay
+separate services; Qwen's vision understanding does not generate images or audio.
 
-After main CI and normal notebook deployment succeed, run the active release's
-`deploy/hybrid/update_host_broker.py --expected-sha <active-sha>` using the voice venv.
-It verifies weights before moving them from the candidate directory, backs up host
-scripts, stops only verified owned processes, installs matching launchers, and
-requires the new broker's RAM guard to be alive. Startup hooks remain in place;
-the model loads on demand and unloads when idle or under pressure.
+After main CI and the normal notebook deployment succeed, use the **active release**:
 
-Verify real authenticated application inference before removing the old weights.
-`remove_previous_weights(ROOT, get('health'))` refuses removal unless the running
-9B broker has successfully served inference and its guard remains alive. It removes
-only Qwen3-8B weights and source receipts in the model/candidate directories.
-Other models and user data are preserved. The optional `--remove-8b` installer flag
-performs a small inference probe before this same gate. Failed inference retains 8B.
-Code rollback copies are kept, but after removal restoring 8B requires downloading
-and checksum-verifying its weights again.
+```powershell
+& D:\PanthoriumAI\voice\.venv\Scripts\python.exe <active-release>\deploy\hybrid\prepare_qwen4.py
+& D:\PanthoriumAI\voice\.venv\Scripts\python.exe <active-release>\deploy\hybrid\update_host_broker.py --expected-sha <active-sha> --remove-9b
+```
 
-`verify-qwen8b.cjs` retains its historical filename and now reads the selected
-profile. Set `TEST_BASE`, `TEST_RELEASE`, `TEST_EXPECTED_SHA` and optionally
-`TEST_INFERENCE=1` for real administrator chat/calculator and ordinary-user denial
-checks. It uses temporary synthetic accounts, checks zero billing and removes its
-fixtures. No messages are sent to third parties. Keep actual results separate from
-mocked protocol tests. The 2026-11-08 trial notes document the known quality limits.
+Ensure Pillow is available in the broker/voice environment before installing.
+`prepare_qwen4.py` downloads public weights into `models/candidates`; it does not
+activate anything or delete 9B. Existing files must match pinned checksums. A
+partial download cannot overwrite a previous candidate.
+
+The installer closes admission, backs up scripts, stops only owned processes and
+installs both assets. It tests text, a typed tool call and an actual image through
+the broker. Failure restores the previous scripts/profile and retains 9B weights.
+Only after passing all probes and the live resource guard does `--remove-9b` delete
+the exact former 9B Q3_K_S/Q4_K_M files and their receipts in models/candidates,
+plus verified 9B launchers. It preserves the 4B projector, speech assets, other
+models and user data. Restoring 9B after deletion requires downloading it again.
+
+Run authenticated application smoke checks after activation, including Thai answers,
+calculator/tool execution, sampled video and ASR/TTS. CI tests exercise protocols,
+authorization and resource logic using fixtures; they are not GPU benchmarks.
+Do not run a burst of denied logins on production as a model test.
+
+## Actual LoRA training
+
+Training Lab → Training → ฝึกโมเดล Qwen 4B prepares a downloadable training bundle.
+It uses the current approved global-safe export with the existing consent and
+anonymization gate, removes synthetic acceptance fixtures, deduplicates prompts,
+and separates held-out validation examples. At least 20 qualifying examples are
+required. It does not automatically train on private conversations.
+
+`training/train_qwen4.py` implements real BF16 LoRA on a dedicated Linux CUDA
+runner, with preflight, pinned base revision, dataset checksums, baseline/held-out
+loss, adapter saving and optional GGUF export. The notebook's 4 GiB GPU is below
+the 10 GiB **free** VRAM floor; training does not run alongside production inference.
+No cloud GPU is provisioned and no data is uploaded automatically. The UI prepares
+and downloads the bundle; it does not mislabel preparation as a running training job.
+Text tuning freezes vision layers and does not add new vision/speech abilities.
+Candidates require Thai/reasoning/tools/vision/resource review and a separately
+reviewed hash-pinned profile before promotion. See `training/README.md`.

@@ -5,7 +5,8 @@ from pathlib import Path
 import asyncio, contextlib, gc, io, json, os, subprocess, sys, time
 import httpx, psutil, threading, re
 from work_queue import WorkQueue, QueueError, resource_reason, admission_ready, memory_budget, ram_pressure
-from model_profile import PROFILE, model_path, owns_model
+from model_profile import PROFILE, model_path, projector_path, owns_model
+from media_input import normalize_messages, MAX_BODY_BYTES
 queue=WorkQueue()
 metrics_lock=threading.Lock()
 pressure_latched=False
@@ -20,6 +21,7 @@ guard_stop=threading.Event()
 guard_failed=threading.Event()
 ram_guard=None
 inference_verified=False
+vision_verified=False
 DISABLED=ROOT/'qwen.disabled'
 FLAGS=0x08000000 if os.name=='nt' else 0
 app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
@@ -94,6 +96,7 @@ def _snapshot(kind="chat"):
     reason='disabled' if DISABLED.exists() else resource_reason(ram_used=ram_used,total=mem.total,available=mem.available,local_ram=local,vram=cached_gpu,cpu=cpu,model_loaded=p is not None,voice_loaded=engine is not None,kind=kind,latched=pressure_latched,cold_budget=PROFILE['coldRamBudgetGiB'],limits=PROFILE,vram_total=cached_gpu_total,gpu_temperature=cached_temperature)
     if guard_failed.is_set() or not ram_guard or not ram_guard.is_alive():reason='resource_monitor_unavailable'
     if kind=='chat' and (not model_path(ROOT).is_file() or model_path(ROOT).stat().st_size!=PROFILE['bytes']):reason='model_not_installed'
+    if kind=='chat' and (not projector_path(ROOT).is_file() or projector_path(ROOT).stat().st_size!=PROFILE['projector']['bytes']):reason='model_not_installed'
     budget=memory_budget(ram_used=ram_used,total=mem.total,model_loaded=p is not None,voice_loaded=engine is not None,kind=kind,cold_budget=PROFILE['coldRamBudgetGiB'],limits=PROFILE)
     return {'ready':reason is None,'reason':reason,'pressure':hard,'busy':busy,'ramAvailableBytes':mem.available,'ramUsedFraction':ram_used,'ramLimit':PROFILE['ramLimit'],'cpuPercent':cpu,'localRamBytes':local,'localRamLimitBytes':int(mem.total*LIMIT),'vramUsedFraction':cached_gpu,'vramLimit':PROFILE['vramLimit'],'gpuTemperature':cached_temperature,'modelLoaded':p is not None,'queue':queue.status(),**budget}
 
@@ -214,21 +217,28 @@ async def end():
     await asyncio.to_thread(stop_model)
     if ram_guard:await asyncio.to_thread(ram_guard.join,2)
 @app.get('/status')
-async def status(request:Request):return {**latest,'model':PROFILE['name'],'capabilities':PROFILE['capabilities'],'vision':False,'voice':'external-asr-tts','busy':busy,'phase':phase,'ready':latest.get('ready',False) and not DISABLED.exists(),'queue':queue.status(owner(request))}
+async def status(request:Request):return {**latest,'model':PROFILE['name'],'capabilities':PROFILE['capabilities'],'vision':PROFILE['vision'],'visionVerified':vision_verified,'voice':'external-asr-tts','training':{'method':'bf16-lora','minimumFreeVramGiB':10,'totalVramGiB':round(cached_gpu_total/1024**3,2) if cached_gpu_total else None,'execution':'dedicated-runner','canTrainOnThisHost':False},'busy':busy,'phase':phase,'ready':latest.get('ready',False) and not DISABLED.exists(),'queue':queue.status(owner(request))}
 @app.get('/health')
-async def health():return {'ok':True,'service':'panthorium-free-ai-broker','version':PROFILE['brokerVersion'],'backgroundPreemption':True,'model':PROFILE['name'],'capabilities':PROFILE['capabilities'],'vision':False,'voice':'external-asr-tts','ramGuardAlive':bool(ram_guard and ram_guard.is_alive() and not guard_failed.is_set()),'inferenceVerified':inference_verified}
+async def health():return {'ok':True,'service':'panthorium-free-ai-broker','version':PROFILE['brokerVersion'],'backgroundPreemption':True,'model':PROFILE['name'],'capabilities':PROFILE['capabilities'],'vision':PROFILE['vision'],'visionVerified':vision_verified,'voice':'external-asr-tts','ramGuardAlive':bool(ram_guard and ram_guard.is_alive() and not guard_failed.is_set()),'inferenceVerified':inference_verified}
 
 @app.post('/v1/chat/completions')
 async def chat(request:Request):
-    global phase,inference_verified
-    if int(request.headers.get('content-length','0'))>60000:raise HTTPException(413,'too_large')
-    raw=await request.body()
-    if len(raw)>60000:raise HTTPException(413,'too_large')
-    data=json.loads(raw)
+    global phase,inference_verified,vision_verified
+    raw=bytearray()
+    async for chunk in request.stream():
+        raw.extend(chunk)
+        if len(raw)>MAX_BODY_BYTES:raise HTTPException(413,'too_large')
+    try:
+        data=json.loads(raw)
+        if not isinstance(data,dict):raise ValueError('invalid_request')
+        data['messages'], image_count = await asyncio.to_thread(normalize_messages,data.get('messages'))
+        data['max_tokens']=min(3072,max(1,int(data.get('max_tokens',768))))
+    except (ValueError,TypeError) as exc:raise HTTPException(400,'invalid_request') from exc
     if data.get('model')!='panthorium-local' or data.get('stream') is not False:raise HTTPException(400,'invalid_request')
     background=request.headers.get('x-panthorium-background')=='1'
     data['max_tokens']=min(256 if background else 3072,max(1,int(data.get('max_tokens',768))))
     if background:
+        if image_count:raise HTTPException(400,'background_media_forbidden')
         if data.get('tools') or data.get('tool_choice'):raise HTTPException(400,'background_tools_forbidden')
         data['chat_template_kwargs']={'enable_thinking':False}
     async with admission(request,background=background) as cancel:
@@ -257,6 +267,7 @@ async def chat(request:Request):
                         choice=r.json()['choices'][0]
                         if choice.get('finish_reason')!='length' and (choice['message'].get('content') or choice['message'].get('tool_calls')):
                             inference_verified=True
+                            if image_count:vision_verified=True
                 return Response(r.content,status_code=r.status_code,media_type='application/json')
             except asyncio.CancelledError:
                 if background:await asyncio.to_thread(stop_model)

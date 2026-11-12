@@ -56,7 +56,7 @@ jobs:
       - name: Notebook storage, proxy and deployment recovery
         run: |
           node test/local-provider.js
-          python3 -m pip install --user fastapi==0.141.1 httpx==0.28.1 psutil==7.2.2 python-multipart==0.0.32
+          python3 -m pip install --user fastapi==0.141.1 httpx==0.28.1 psutil==7.2.2 python-multipart==0.0.32 Pillow==13.0.0
           node test/local-queue-workflow.js
           python3 -m unittest discover -s deploy/hybrid -p 'test_*.py'
           node test/hybrid-ai.js

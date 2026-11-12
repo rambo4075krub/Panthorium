@@ -19,6 +19,18 @@ function activeUnavailable(res){return res.status(503).json({ok:false,error:'act
 
 function createTrainingRouter(authService,training,benchmark,activeLearning,shadowEvaluator=null){
  const router=express.Router(),auth=requireAuth(authService),readLimiter=rateLimit({windowMs:60000,limit:60,standardHeaders:true,legacyHeaders:false}),teacherLimiter=rateLimit({windowMs:60000,limit:6,standardHeaders:true,legacyHeaders:false}),benchmarkLimiter=rateLimit({windowMs:60000,limit:Math.max(1,Number(process.env.SENTINEL_BENCHMARK_RATE_LIMIT)||12),standardHeaders:true,legacyHeaders:false}),activeLimiter=rateLimit({windowMs:60000,limit:12,standardHeaders:true,legacyHeaders:false}),admin=[auth,requirePermission('settings')];
+ router.get('/qwen4/status',...admin,readLimiter,(req,res)=>res.json(require('../services/qwenTrainingBundle').trainingStatus()));
+ router.post('/qwen4/bundle',...admin,teacherLimiter,async(req,res,next)=>{
+  try {
+   const {buffer,manifest}=await require('../services/qwenTrainingBundle').trainingBundle(training);
+   training.audit?.record('sentinel.qwen4_training_bundle',{userId:req.user?.sub,trainCount:manifest.train.count,validationCount:manifest.validation.count,trainSha256:manifest.train.sha256});
+   res.set('Cache-Control','no-store').type('application/zip').attachment('panthorium-qwen4-training.zip').send(buffer);
+  } catch(error) {
+   if(error.message==='training_needs_20_approved_examples')return res.status(409).json({ok:false,error:error.message,count:error.count,minimum:20});
+   if(error.message==='training_dataset_too_large')return res.status(413).json({ok:false,error:error.message});
+   next(error);
+  }
+ });
  router.get('/status',...admin,readLimiter,async(req,res,next)=>{try{res.json(await training.list({limit:1}));}catch(e){next(e);}});
  router.get('/auto/status',...admin,readLimiter,async(req,res,next)=>{try{res.json({ok:true,automation:training.settings()});}catch(e){next(e);}});
  router.post('/auto/start',...admin,teacherLimiter,async(req,res,next)=>{try{res.json({ok:true,automation:training.setAutoEnabled(true,{userId:req.user?.sub,requestId:req.requestId})});}catch(e){next(e);}});

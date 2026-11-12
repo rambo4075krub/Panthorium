@@ -24,7 +24,8 @@ chat.onsubmit = async event => {
   event.preventDefault(); chat.querySelector('button').disabled = true; output.textContent = 'Qwen ฟรี · กำลังตรวจคิวและทรัพยากร…';
   pending=new AbortController();cancelButton.hidden=false;let polling=false,finished=false;const timer=setInterval(async()=>{if(polling)return;polling=true;try{const r=await fetch('/api/hybrid/status',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(1500)});const s=await r.json(),q=s.local?.queue;if(finished)return;if(q?.yourPosition)output.textContent=`Qwen ฟรี · คิวที่ ${q.yourPosition} · รอได้ไม่เกิน ${q.maxWaitSeconds} วินาที${s.local.reason?' · รอทรัพยากร':''}`;else if(q?.yourRunning)output.textContent='Qwen ฟรี · กำลังตอบ…';}catch{}finally{polling=false;}},2000);
   try {
-    const response = await fetch('/api/local/chat',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},signal:AbortSignal.any([pending.signal,AbortSignal.timeout(210000)]),body:JSON.stringify({message:chat.elements.message.value})});
+    const media=await window.PanthoriumLocalMedia.prepare(chat.elements.media.files,pending.signal);
+    const response = await fetch('/api/local/chat',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},signal:AbortSignal.any([pending.signal,AbortSignal.timeout(210000)]),body:JSON.stringify({message:chat.elements.message.value,media,thinking:chat.elements.thinking.checked})});
     const result = await response.json();
     if (response.status === 401) { token=''; chat.hidden=true; login.hidden=false;showAvailability(null); throw Error('กรุณาเข้าสู่ระบบอีกครั้ง'); }
     if(response.status===403){token='';chat.hidden=true;login.hidden=false;showAvailability(null);throw Error('บัญชีนี้ไม่มีสิทธิ์ใช้บริการ AI ภายใน');}
