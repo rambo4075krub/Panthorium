@@ -1677,6 +1677,7 @@
     }
 
     function transcribeWithBrowserSpeechRecognition(SpeechRecognitionCtor, { timeoutMs = 12000, onListening = null } = {}) {
+        if (document.body.dataset.aiMode === 'local-only') return Promise.reject(new Error('local_transcription_required'));
         if (typeof SpeechRecognitionCtor !== "function") {
             return Promise.reject(new Error("transcription_provider_unavailable"));
         }
@@ -1918,11 +1919,11 @@
 
     // Global voice path: accepts commands without opening Sentinel chat.
     function initGlobalVoice() {
-        if (document.body.dataset.aiMode === "gemini-live-only") return;
+        if (["gemini-live-only", "local-only"].includes(document.body.dataset.aiMode)) return;
         const button = $("global-voice");
         if (!button || button.dataset.ready) return;
         button.dataset.ready = "1";
-        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const SR = document.body.dataset.aiMode === 'local-only' ? null : window.SpeechRecognition || window.webkitSpeechRecognition;
         const electronVoice = Boolean(window.panthoriumDesktop?.isElectron);
         const recorderSupported = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
         let recognition = null;
@@ -2138,7 +2139,7 @@
                 try { current.abort?.(); } catch (_) { try { current.stop?.(); } catch (_) {} }
             };
             const startSpeechEndpoint = () => {
-                const EndpointRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                const EndpointRecognition = document.body.dataset.aiMode === 'local-only' ? null : window.SpeechRecognition || window.webkitSpeechRecognition;
                 if (!isMobileDevice() || !EndpointRecognition || endpointDisabled || endpointRecognition || voiceState !== "listening" || !autoResume) return;
                 let endpoint;
                 try { endpoint = new EndpointRecognition(); } catch (_) { endpointDisabled = true; return; }
@@ -3479,7 +3480,7 @@
         let chatRecorderData = null;
         const chatElectron = Boolean(window.panthoriumDesktop?.isElectron);
         const chatRecorderOk = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
-        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const SR = document.body.dataset.aiMode === 'local-only' ? null : window.SpeechRecognition || window.webkitSpeechRecognition;
 
         const cleanupChatRecorder = () => {
             clearTimeout(chatRecorderMonitor);
@@ -3695,6 +3696,11 @@
         }
 
         micBtn.onclick = async () => {
+            if (document.body.dataset.aiMode === 'local-only') {
+                if (!window.PanthoriumHybridVoice) { toast('ระบบเสียงในเครื่องกำลังโหลด'); return; }
+                await window.PanthoriumHybridVoice.start();
+                return;
+            }
             if (document.body.dataset.aiMode === "gemini-live-only") {
                 if (!window.PanthoriumLiveVoice) { toast("ระบบเสียงกำลังโหลด กรุณาลองอีกครั้ง"); return; }
                 await window.PanthoriumLiveVoice.toggle();
@@ -4740,4 +4746,3 @@
 <script src="/social-ui.js?v=social-experience-20261027"></script>
 </body>
 </html>
-

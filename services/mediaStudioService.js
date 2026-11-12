@@ -375,6 +375,7 @@ class MediaStudioService {
   }
 
   async vertexJson(url, token, payload) {
+    require('./aiModePolicy').assertCloudAiAllowed();
     let response;
     try {
       response = await this.vertexFetch(url, {

@@ -78,6 +78,8 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
   router.get("/ai/providers", auth, requirePermission("chat"), (req, res) => res.json({ ok: true, providers: sentinel.providerCatalog().filter(p => p.provider !== "local" || localAiAllowed(req.user)) }));
   router.get("/ai/operations", auth, requirePermission("chat"), async (req, res, next) => { try { res.json({ ok: true, metrics: await aiOperations.overview(req.user.sub, req.query.hours) }); } catch (error) { next(error); } });
   router.post("/speech", auth, requirePermission("chat"), speechLimiter, async (req, res) => {
+    const localMode = require('../services/aiModePolicy').localOnly();
+    if (localMode && !localAiAllowed(req.user)) return res.status(403).json({ok:false,error:'local_access_denied'});
     const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
     const lang = typeof req.body?.lang === "string" ? req.body.lang : "";
     const allowedLanguages = new Set(["th-TH", "en-US", "ja-JP", "ko-KR", "ar-SA", "ru-RU", "zh-CN"]);
@@ -85,11 +87,14 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     try {
       let audio;
       let voiceProfile;
+      let contentType = 'audio/mpeg';
       try {
-        const neural = await synthesizeSentinelMaleVoice(text, lang);
+        const neural = await synthesizeSentinelMaleVoice(text, lang, {userId:req.user.sub});
         audio = neural.audio;
         voiceProfile = neural.voice;
+        contentType = neural.contentType || contentType;
       } catch (neuralError) {
+        if (localMode) throw neuralError;
         audit.record("sentinel.neural_speech_failed", { userId: req.user.sub, lang, error: String(neuralError?.message || neuralError) });
         // The generic source voice is not guaranteed to be male. For Thai and
         // English fail closed so the client can use only a confirmed male
@@ -102,7 +107,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
         if (!audio.length || audio.length > 1024 * 1024) throw new Error("speech_upstream_invalid_size");
         voiceProfile = "standard-source-fallback";
       }
-      res.set({ "Content-Type": "audio/mpeg", "Cache-Control": "private, no-store", "Content-Length": String(audio.length), "X-Sentinel-Voice-Profile": voiceProfile }).send(audio);
+      res.set({ "Content-Type": contentType, "Cache-Control": "private, no-store", "Content-Length": String(audio.length), "X-Sentinel-Voice-Profile": voiceProfile }).send(audio);
     } catch (error) {
       audit.record("sentinel.speech_failed", { userId: req.user.sub, lang, error: error.message });
       res.status(502).json({ ok: false, error: "speech_unavailable" });
@@ -119,7 +124,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       if (!audio.length || audio.length > 512 * 1024) return res.status(413).json({ ok: false, error: "audio_too_large" });
       const profiles = await biometrics.list(req.user.sub);
       if (profiles.length) return res.status(403).json({ ok: false, error: "voice_profile_exists" });
-      const transcription = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language || "th-TH");
+      const transcription = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language || "th-TH", {userId:req.user.sub});
       const phrase = String(transcription?.text || "").normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
       const registerPhrases = new Set(["ลงทะเบียน", "ลงทะเบียนเสียง", "เปิดลงทะเบียน", "เปิดลงทะเบียนเสียง"]);
       const loginPhrases = new Set(["เข้าสู่ระบบ", "เปิดเข้าสู่ระบบ"]);
@@ -187,7 +192,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
         }
       }
       const transcriptionStartedAt = performance.now();
-      const result = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language);
+      const result = await sentinel.providers.transcribeAudio(audio, match[1], req.body?.language, {userId:req.user.sub});
       transcriptionMs = Math.max(0, Math.round(performance.now() - transcriptionStartedAt));
       const timing = emitVoiceTiming("success");
       const payload = { ok: true, text: result.text, provider: result.provider, model: result.model, confidence: result.confidence, crossCheckedBy: result.crossCheckedBy || null };
@@ -358,5 +363,3 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
   return router;
 }
 module.exports = { createApiRouter };
-
-

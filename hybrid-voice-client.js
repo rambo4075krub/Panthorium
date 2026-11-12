@@ -41,12 +41,12 @@
   async function start(){
     if(active){if(recorder?.state==='recording')recorder.stop();else stop();return;}
     // Restricted Cloud App sessions never fall back into unrestricted tools.
-    if(window.PanthoriumCloudApps?.voiceContext?.()){status('โหมดงานนี้ต้องใช้ Sentinel AI กรุณาเติมเครดิตหรือออกจากบริบทงานก่อน','error');return;}
+    if(window.PanthoriumCloudApps?.voiceContext?.()){status(document.body?.dataset.aiMode==='local-only'?'กรุณาพิมพ์คำสั่งในโหมดงานนี้ หรือออกจากบริบทงานเพื่อใช้เสียง Qwen':'โหมดงานนี้ต้องใช้ Sentinel AI กรุณาเติมเครดิตหรือออกจากบริบทงานก่อน','error');return;}
     stop();active=true;const id=generation;identity=account();controller=new AbortController();
     try{
       const access=await policy();
       if(id!==generation||identity!==account())return;
-      if(!access?.local?.enabled)throw new Error('บัญชีนี้ไม่สามารถใช้บริการ AI ภายในได้ กรุณาใช้ Sentinel AI ตามแพ็กเกจ');
+      if(!access?.local?.enabled)throw new Error(document.body?.dataset.aiMode==='local-only'?'บัญชีนี้ยังไม่มีสิทธิ์ใช้ AI ในเครื่อง หรือบริการกำลังปิดอยู่':'บัญชีนี้ไม่สามารถใช้บริการ AI ภายในได้ กรุณาใช้ Sentinel AI ตามแพ็กเกจ');
       if(!window.MediaRecorder)throw new Error('เบราว์เซอร์ไม่รองรับเสียง Qwen กรุณาพิมพ์ข้อความแทน');
       context=new(window.AudioContext||window.webkitAudioContext)();await context.resume();
       const opened=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}});
@@ -60,6 +60,29 @@
     }catch(error){if(id===generation){stop();status(error.name==='NotAllowedError'?'กรุณาอนุญาตไมโครโฟน':error.message,'error');}}
   }
   window.PanthoriumHybridVoice={start,stop,isActive:()=>active,policy};
+  // The notebook mode uses MediaRecorder + the local ASR/TTS broker exclusively.
+  // Retain the public voice controls used by windows and notification playback.
+  let readerContext=null,reader=null,readerGeneration=0;
+  function stopReader(){readerGeneration++;reader?.stop();reader=null;if(readerContext){readerContext.close().catch(()=>{});readerContext=null;}}
+  async function readAloud(text){
+    stopReader();const id=readerGeneration,owner=account();
+    const audioContext=new(window.AudioContext||window.webkitAudioContext)();readerContext=audioContext;
+    try{
+      await audioContext.resume();
+      const player=new window.PanthoriumSpeechBuffer.BufferedSpeech(audioContext,async(chunk,signal)=>{
+        if(id!==readerGeneration||owner!==account())throw new DOMException('Cancelled','AbortError');
+        return(await api('/api/hybrid/speech',{text:chunk},signal)).arrayBuffer();
+      });reader=player;await player.speak(String(text));
+    }finally{if(id===readerGeneration)stopReader();}
+  }
+  window.PanthoriumLocalSpeech={speak:readAloud,stop:stopReader,pause:()=>readerContext?.suspend(),resume:()=>readerContext?.resume(),isActive:()=>!!reader};
+  if(document.body?.dataset.aiMode==='local-only'){
+    window.PanthoriumLiveVoice={toggle:start,stop:()=>{stop();stopReader();},stopPlayback:()=>{stop();stopReader();},
+      isActive:()=>active,isBusy:()=>active||!!reader,state:()=>({active,busy:active||!!reader,mode:active?'processing':'idle'}),stopChatSession:stop};
+    document.getElementById('desktop-voice')?.addEventListener('click',()=>start());
+  }
+  window.addEventListener('panthorium:auth-changed',stopReader);
+  window.addEventListener('pagehide',stopReader);
   window.addEventListener('panthorium:auth-changed',()=>{if(identity!==account()||!window.PanthoriumAuth?.getAccessToken?.()){stop();sessionId=null;}});
   window.addEventListener('panthorium:cloud-app-context',()=>{stop();sessionId=null;});
   window.addEventListener('pagehide',stop);

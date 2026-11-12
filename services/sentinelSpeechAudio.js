@@ -41,7 +41,8 @@ function splitSentinelSpeechText(text, maxBytes = MAX_PROVIDER_SEGMENT_BYTES) {
   return result;
 }
 
-async function synthesizeSentinelMaleVoice(text, lang) {
+async function synthesizeSentinelMaleVoice(text, lang, options = {}) {
+  if (require('./aiModePolicy').localOnly()) return require('./localVoiceProvider').speech(text, options);
   const voice = SENTINEL_MALE_VOICES[lang];
   if (!voice || typeof text !== "string" || !text.trim() || text.length > MAX_SPEECH_CHARACTERS) {
     throw new Error("invalid_speech_request");

@@ -4,6 +4,7 @@ const { connectGeminiLive, MODEL_ID } = require('./geminiLiveVertex');
 
 // HTTP chat is a short Live session, never a fallback to another model.
 async function completeLive({ systemPrompt, history = [], tools = [], onDelta = () => {}, connect = connectGeminiLive, timeoutMs = 60000, entitlements = null, userId, textOutputEnabled = process.env.GEMINI_LIVE_TEXT_OUTPUT_VERIFIED === '1', signal = null, maxOutputTokens = null, onUsage = null } = {}) {
+  require('./aiModePolicy').assertCloudAiAllowed();
   // Vertex's model table lists text, but Live/native-audio guidance differs.
   // Enable only after a real TEXT-only smoke test for this exact model/project.
   // Never silently retry an unsupported session through another model/modality.

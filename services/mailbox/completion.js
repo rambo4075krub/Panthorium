@@ -18,6 +18,7 @@ function localInput(question, sources) {
 
 function createMailboxCompletion(gateway) {
   return async ({ user, provider, question, sources }) => {
+    if (require('../aiModePolicy').localOnly()) provider = 'local';
     const localAllowed = require('../localAiAccess').localAiAllowed(user);
     if (provider === 'local' && !localAllowed) return {ok:false,error:'local_access_denied'};
     let result;
