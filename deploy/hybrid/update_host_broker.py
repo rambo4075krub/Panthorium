@@ -70,7 +70,10 @@ def verify_inference():
         response=httpx.post('http://127.0.0.1:8765/v1/chat/completions',timeout=195,json={
             'model':'panthorium-local','stream':False,'max_tokens':128,
             'chat_template_kwargs':{'enable_thinking':False},'messages':messages,**extra})
-        response.raise_for_status()
+        if response.is_error:
+            try: detail=response.json().get('detail','verification_failed')
+            except (ValueError,AttributeError): detail='verification_failed'
+            raise RuntimeError('4B verification HTTP '+str(response.status_code)+': '+str(detail)[:160])
         choice=response.json()['choices'][0]
         if choice.get('finish_reason')=='length':raise RuntimeError('4B verification response truncated')
         return choice['message']
@@ -157,6 +160,9 @@ def main():
             receipt_source=candidate.with_suffix('.gguf.source.json')
             if receipt_source.exists():receipt_source.replace(final_model.with_suffix('.gguf.source.json'))
         if not final_projector.exists():candidate_projector.replace(final_projector)
+        projector_receipt=candidate_projector.with_suffix('.gguf.source.json')
+        if projector_receipt.exists() and not final_projector.with_suffix('.gguf.source.json').exists():
+            projector_receipt.replace(final_projector.with_suffix('.gguf.source.json'))
         for name in FILES:shutil.copy2(source/name,BASE/name)
         for name in HOST_FILES:shutil.copy2(source/'host'/name,ROOT/name)
         start_broker()
