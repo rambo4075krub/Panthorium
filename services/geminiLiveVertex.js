@@ -80,62 +80,86 @@ async function connectGeminiLive({
   signal = null,
   authClient,
   WebSocketImpl,
-  handshakeTimeoutMs = 10000
+  handshakeTimeoutMs = 10000,
+  connectionTimeoutMs = 15000
 } = {}) {
   require('./aiModePolicy').assertCloudAiAllowed();
   if (signal?.aborted) throw new Error('gemini_live_connection_aborted');
-  let client = authClient;
-  let resolvedProjectId = projectId || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
-  if (!client) {
-    const { GoogleAuth } = require("google-auth-library");
-    const auth = new GoogleAuth({ scopes: [CLOUD_PLATFORM_SCOPE] });
-    client = await auth.getClient();
-    if (!resolvedProjectId) resolvedProjectId = await auth.getProjectId();
-  } else if (!resolvedProjectId && typeof client.getProjectId === "function") {
-    resolvedProjectId = await client.getProjectId();
-  }
-  const target = resolveLiveTarget({ projectId: resolvedProjectId, location });
-  const token = await getVertexAccessToken(client);
-  if (signal?.aborted) throw new Error('gemini_live_connection_aborted');
-  const Socket = WebSocketImpl || require("ws");
-  const socket = new Socket(target.url, {
-    headers: { Authorization: `Bearer ${token}` },
-    handshakeTimeout: handshakeTimeoutMs,
-    maxPayload: 8 * 1024 * 1024,
-    perMessageDeflate: false
-  });
-
+  if (!Number.isFinite(connectionTimeoutMs) || connectionTimeoutMs <= 0) throw new Error('invalid_live_connection_timeout');
+  // The WebSocket handshake timeout does not cover ADC/token acquisition.
+  // Bound the whole connection and discard late credentials after cancellation.
   return new Promise((resolve, reject) => {
     let settled = false;
+    let socket = null;
+    let setup;
     const cleanup = () => {
-      socket.removeListener("open", onOpen);
-      socket.removeListener("error", onError);
+      clearTimeout(deadline);
+      socket?.removeListener("open", onOpen);
+      socket?.removeListener("error", onError);
+      socket?.removeListener("close", onClose);
       signal?.removeEventListener('abort', onAbort);
+    };
+    const fail = error => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (socket) {
+        socket.on('error', () => {});
+        if (socket.readyState == null || socket.readyState < 2) {
+          try { if (socket.terminate) socket.terminate(); else socket.close(1000, 'connection_abandoned'); } catch (_) {}
+        }
+      }
+      reject(error);
     };
     const onOpen = () => {
       if (settled) return;
-      settled = true;
       // Keep an error listener after the handshake so a network error cannot
       // become an unhandled EventEmitter error if the caller has not attached
       // its relay handler yet.
       socket.on("error", () => {});
-      cleanup();
-      socket.send(JSON.stringify(createSetupMessage({ model: target.model, systemInstruction, tools, transcription, responseModality, sessionResumption, contextCompression, maxOutputTokens })), error => {
-        if (error) socket.close(1011, "setup_failed");
-      });
-      resolve(socket);
-    };
-    const onError = error => {
+      try {
+        socket.send(JSON.stringify(setup), error => {
+          if (!error) return;
+          if (!settled) fail(error);
+          else if (socket.readyState < 2) socket.close(1011, 'setup_failed');
+        });
+      } catch (error) { fail(error); return; }
       if (settled) return;
       settled = true;
       cleanup();
-      reject(error);
+      resolve(socket);
     };
-    const onAbort = () => { if (!settled) { settled = true; cleanup(); socket.on('error', () => {}); socket.close(1000, 'connection_aborted'); reject(new Error('gemini_live_connection_aborted')); } };
+    const onError = error => fail(error);
+    const onClose = () => fail(new Error('gemini_live_closed_before_open'));
+    const onAbort = () => fail(new Error('gemini_live_connection_aborted'));
+    const deadline = setTimeout(() => fail(new Error('gemini_live_connection_timeout')), connectionTimeoutMs);
     signal?.addEventListener('abort', onAbort, { once: true });
-    socket.once("open", onOpen);
-    socket.once("error", onError);
-    if (signal?.aborted) onAbort();
+    if (signal?.aborted) { onAbort(); return; }
+    const connect = async () => {
+      let client = authClient;
+      let resolvedProjectId = projectId || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
+      if (!client) {
+        const { GoogleAuth } = require("google-auth-library");
+        const auth = new GoogleAuth({ scopes: [CLOUD_PLATFORM_SCOPE] });
+        client = await auth.getClient();
+        if (settled) return;
+        if (!resolvedProjectId) resolvedProjectId = await auth.getProjectId();
+      } else if (!resolvedProjectId && typeof client.getProjectId === 'function') {
+        resolvedProjectId = await client.getProjectId();
+      }
+      if (settled) return;
+      const target = resolveLiveTarget({ projectId: resolvedProjectId, location });
+      setup = createSetupMessage({ model: target.model, systemInstruction, tools, transcription, responseModality, sessionResumption, contextCompression, maxOutputTokens });
+      const token = await getVertexAccessToken(client);
+      if (settled) return;
+      const Socket = WebSocketImpl || require('ws');
+      socket = new Socket(target.url, { headers: { Authorization: `Bearer ${token}` }, handshakeTimeout: handshakeTimeoutMs,
+        maxPayload: 8 * 1024 * 1024, perMessageDeflate: false });
+      socket.once('open', onOpen);
+      socket.once('error', onError);
+      socket.once('close', onClose);
+    };
+    connect().catch(fail);
   });
 }
 

@@ -43,6 +43,8 @@ function createGeminiLiveWebSocketGateway({
   projectId,
   location = process.env.GEMINI_LIVE_LOCATION || DEFAULT_LOCATION,
   maxSessions = MAX_SESSIONS_PER_INSTANCE,
+  startupTimeoutMs = 40000,
+  heartbeatIntervalMs = 30000,
   functionCalling = null,
   entitlements = null,
   sessionStore = null,
@@ -67,6 +69,10 @@ function createGeminiLiveWebSocketGateway({
     let accountTimer = null;
     let leaseTimer = null;
     let setupTimer = null;
+    let startupTimer = null;
+    let heartbeatTimer = null;
+    let awaitingPong = false;
+    const onPong = () => { awaitingPong = false; };
     const leaseOwnerId = randomUUID();
     let leaseHeld = false;
     let accountCheckRunning = false;
@@ -122,6 +128,9 @@ function createGeminiLiveWebSocketGateway({
       if (leaseHeld) { leaseHeld = false; Promise.resolve(sessionStore?.release?.({ userId, ownerId: leaseOwnerId })).catch(() => {}); }
       clearTimeout(authTimer);
       clearTimeout(setupTimer);
+      clearTimeout(startupTimer);
+      clearInterval(heartbeatTimer);
+      client.removeListener('pong', onPong);
       if (userId && sessions.get(userId) === client) sessions.delete(userId);
       for (const pending of pendingUiActions.values()) {
         clearTimeout(pending.timer);
@@ -138,6 +147,18 @@ function createGeminiLiveWebSocketGateway({
     };
     client.once("close", release);
     client.once("error", release);
+    // A dropped network may never send a close frame. Release its model,
+    // account lease and capacity instead of keeping a ghost session alive.
+    client.on('pong', onPong);
+    heartbeatTimer = setInterval(() => {
+      if (released || typeof client.ping !== 'function') return;
+      if (awaitingPong || client.readyState !== 1) {
+        client.terminate?.(); release(); return;
+      }
+      awaitingPong = true;
+      try { client.ping(); } catch (_) { client.terminate?.(); release(); }
+    }, heartbeatIntervalMs);
+    heartbeatTimer.unref?.();
 
     const rejectAuth = (code, reason) => {
       if (settled) return;
@@ -185,6 +206,12 @@ function createGeminiLiveWebSocketGateway({
       }
       settled = true;
       clearTimeout(authTimer);
+      startupTimer = setTimeout(() => {
+        if (released) return;
+        if (client.readyState < 2) client.close(1011, 'live_startup_timeout');
+        release();
+      }, startupTimeoutMs);
+      startupTimer.unref?.();
       try {
         if (capacityGate) {
           capacityRelease = await capacityGate.acquire({ userId, signal:capacityAbort.signal });
@@ -198,10 +225,12 @@ function createGeminiLiveWebSocketGateway({
           if(!hasQuota(state,'voiceInputSeconds') || !hasQuota(state,'voiceOutputSeconds') || !hasQuota(state,'textInputTokens') || !hasQuota(state,'textOutputTokens'))throw new Error('quota_exceeded');
           const {LiveQuotaMeter}=require('./liveQuotaMeter');quotaMeter=new LiveQuotaMeter({entitlements,userId});
         }
+        if (released || client.readyState !== 1) return;
         // App context is a restrictive capability boundary, not merely a prompt.
         // Supplying an unverifiable context must never silently enter general mode.
         const contextSupplied = frame.context !== undefined && frame.context !== null;
         const verifiedContext = contextProvider ? await contextProvider({ user, context: contextSupplied ? frame.context : null }) : null;
+        if (released || client.readyState !== 1) return;
         if (contextSupplied && (!verifiedContext || typeof verifiedContext !== 'object' ||
             verifiedContext.capabilities?.assistedDraft !== true ||
             verifiedContext.capabilities?.externalActions !== false ||
@@ -558,6 +587,7 @@ function createGeminiLiveWebSocketGateway({
           if (!readySent && (frame?.setupComplete || frame?.setup_complete)) {
             readySent = true;
             clearTimeout(setupTimer);
+            clearTimeout(startupTimer);
             console.info("[Gemini Live] setup complete", JSON.stringify({ elapsedMs: Date.now() - setupStartedAt, binary: binary === true }));
             sendClient({ type: "ready", protocolVersion: 1, sessionId: eventStream.sessionId, resumable: resumeAllowed, resumed: !!resumeHandle });
             emitEvent(resumeHandle ? 'session.resumed' : 'session.ready', { resumable: resumeAllowed });
@@ -629,10 +659,12 @@ function createGeminiLiveWebSocketGateway({
         const closeReason = Buffer.isBuffer(reason) ? reason.toString("utf8") : String(reason || "");
         console.warn("[Gemini Live] upstream closed", JSON.stringify({ code, reason: closeReason.slice(0, 240) }));
         if (client.readyState < 2) client.close(1011, `live_upstream_closed:${Number(code) || 0}:${safeCloseDetail(closeReason)}`.slice(0, 123));
+        release();
       });
       upstream.once("error", error => {
         console.warn("[Gemini Live] upstream socket error", String(error?.message || error).slice(0, 240));
         if (client.readyState < 2) client.close(1011, `live_upstream_error:${safeCloseDetail(error?.message)}`.slice(0, 123));
+        release();
       });
     });
 

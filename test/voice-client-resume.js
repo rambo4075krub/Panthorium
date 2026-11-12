@@ -92,7 +92,26 @@ async function main() {
   OS.state.user = { id: 'third-account' };
   assert.equal(window.PanthoriumLiveVoice.sendText('read my notifications'), false, 'identity guard also protects sends before an auth event');
   assert.equal(sockets[4].readyState, 3);
-  window.PanthoriumLiveVoice.stop(); dom.window.close();
+  window.PanthoriumLiveVoice.stop();
+  let localStarts=0;
+  window.PanthoriumHybridVoice={isActive:()=>false,stop(){},start:async()=>{localStarts++;},policy:async()=>({geminiAllowed:true,local:{enabled:false,ready:true}})};
+  await window.PanthoriumLiveVoice.toggle();
+  sockets.at(-1).onclose({code:4402,reason:'quota_exceeded'});await tick();
+  assert.equal(localStarts,0,'quota exhaustion cannot send an ordinary account to Qwen');
+  assert(!window.PanthoriumLiveVoice.isBusy());
+  window.PanthoriumHybridVoice.policy=async()=>({geminiAllowed:true,local:{enabled:true,ready:true}});
+  await window.PanthoriumLiveVoice.toggle();
+  sockets.at(-1).onclose({code:4402,reason:'quota_exceeded'});await tick();assert.equal(localStarts,1,'an authorized administrator may use a ready local service');
+  await window.PanthoriumLiveVoice.toggle();
+  const oldClose=sockets.at(-1).onclose,oldError=sockets.at(-1).onerror;
+  let resolvePolicy;window.PanthoriumHybridVoice.policy=()=>new Promise(resolve=>{resolvePolicy=resolve;});
+  oldClose({code:4402,reason:'quota_exceeded'});window.PanthoriumLiveVoice.stop();
+  resolvePolicy({local:{enabled:true,ready:true}});await tick();assert.equal(localStarts,1,'stopping while policy loads cancels fallback');
+  window.PanthoriumHybridVoice.policy=async()=>({geminiAllowed:true,local:{enabled:false,ready:false}});
+  await window.PanthoriumLiveVoice.toggle();
+  oldClose({code:1006,reason:''});oldError();await tick();
+  assert(window.PanthoriumLiveVoice.isActive(),'late callbacks cannot close a newer live session');
+  window.PanthoriumLiveVoice.stop();dom.window.close();
   console.log('Browser voice: bounded capture/playback, immediate stop, context/account changes, late-frame privacy and safe reconnect passed');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

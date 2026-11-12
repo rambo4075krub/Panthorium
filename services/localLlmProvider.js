@@ -31,7 +31,9 @@ class LocalLlmProvider {
   constructor(env = process.env) {
     this.url = localEndpoint(env.LOCAL_LLM_URL);
     this.model = env.LOCAL_LLM_MODEL || 'panthorium-local';
-    this.reasoning = env.LOCAL_LLM_REASONING === '1' || (env.LOCAL_LLM_REASONING !== '0' && env.PANTHORIUM_AI_MODE !== 'local-only');
+    // Restoring Gemini must not silently switch the administrator's local
+    // default back to a slower reasoning mode. Thinking remains opt-in.
+    this.reasoning = env.LOCAL_LLM_REASONING === '1';
     this.busy = false;
   }
   async complete(systemPrompt, history, {model, tools = [], hybrid = false, voiceMode = false, signal, userId, preserveInput = false, media = [], thinking: requestedThinking} = {}, onDelta) {
@@ -63,7 +65,7 @@ class LocalLlmProvider {
     const multimodalMessages = require('./localMedia').attachMedia(messages, media);
     if(!hybrid)this.busy = true;
     try {
-      const response = await fetch(this.url, {method:'POST',redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(hybrid?195000:150000)]):AbortSignal.timeout(hybrid?195000:150000),headers:{'Content-Type':'application/json',...(hybrid?{'X-Panthorium-Account':accountKey(userId)}:{})},body:JSON.stringify({model:this.model,messages:[{role:'system',content:prompt},...multimodalMessages],temperature:thinking?0.6:0.7,top_p:thinking?0.95:0.8,top_k:20,min_p:0,presence_penalty:1.5,max_tokens:thinking?3072:hybrid?768:160,stream:false,chat_template_kwargs:{enable_thinking:thinking},...(selected.length?{tools:selected,tool_choice:toolChoice,parallel_tool_calls:false}:{})})});
+      const response = await fetch(this.url, {method:'POST',redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(hybrid?195000:150000)]):AbortSignal.timeout(hybrid?195000:150000),headers:{'Content-Type':'application/json',...(hybrid?{'X-Panthorium-Account':accountKey(userId)}:{})},body:JSON.stringify({model:this.model,messages:[{role:'system',content:prompt},...multimodalMessages],temperature:thinking?0.6:0.7,top_p:thinking?0.95:0.8,top_k:20,min_p:0,presence_penalty:1.5,max_tokens:thinking?3072:hybrid?768:160,stream:false,chat_template_kwargs:{enable_thinking:thinking},...(!thinking?{reasoning_effort:'none'}:{}),...(selected.length?{tools:selected,tool_choice:toolChoice,parallel_tool_calls:false}:{})})});
       if (!response.ok) {
         if(response.status===429) throw new Error('local_llm_busy');
         if(response.status===503) {
