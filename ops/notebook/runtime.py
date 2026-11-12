@@ -132,7 +132,7 @@ def runtime_env(stage,state,probe=None):
   DATABASE_SSL_MODE='disable',PGOPTIONS='-c default_transaction_read_only=off',
   PANTHORIUM_OBJECT_ROOT=str(data/'uploads' if probe else UPLOADS/stage),
   PANTHORIUM_RELEASE='notebook-'+stage+'-'+state['sha'][:12],PANTHORIUM_DEPLOY_SHA=state['sha'],PANTHORIUM_DEPLOY_STAGE=stage,
-  PANTHORIUM_AI_MODE='local-only',GEMINI_LIVE_ENABLED='0',AI_PRIORITY='local',
+  PANTHORIUM_AI_MODE='gemini-live-only',GEMINI_LIVE_ENABLED='1',AI_PRIORITY='gemini-live',
   PANTHORIUM_HYBRID_AI='1',PANTHORIUM_LOCAL_QWEN='1',LOCAL_LLM_MODEL='panthorium-local',
   LOCAL_LLM_URL='http://127.0.0.1:8765/v1/chat/completions',LOCAL_VOICE_URL='http://127.0.0.1:8765',
   PANTHORIUM_DEPLOY_CONTROL_TOKEN=control,ALLOWED_ORIGINS=','.join(sorted(origins)),
