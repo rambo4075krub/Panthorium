@@ -350,12 +350,14 @@
       activeContextKey = JSON.stringify(context);
       socket.onopen = () => { if (generation !== sessionGeneration || !socket) return; socket.send(JSON.stringify({ type: "auth", token, protocolVersion: 1,
         ...(resumeSessionId && resumeEnabled ? { sessionId: resumeSessionId } : {}), context })); };
-      socket.onerror = () => { clearTimeout(timeout); reject(new Error("เชื่อม Sentinel AI ไม่สำเร็จ")); };
+      socket.onerror = () => { if (generation !== sessionGeneration) return; clearTimeout(timeout); reject(new Error("เชื่อม Sentinel AI ไม่สำเร็จ")); };
       socket.onclose = event => {
+        if (generation !== sessionGeneration) return;
+        if (activeAccountKey !== accountKey()) { cleanup(); return; }
         clearTimeout(timeout);
         if (event.code === 4402 && window.PanthoriumHybridVoice) {
           if (!serverReady) reject(Object.assign(new Error('quota_exceeded'),{code:'quota_exceeded'}));
-          else { cleanup(); window.PanthoriumHybridVoice.start(); }
+          else { useLocalAfterQuota(); }
           return;
         }
         if (!serverReady) reject(new Error(event.reason || "Sentinel AI ปฏิเสธการเชื่อมต่อ"));
@@ -371,7 +373,7 @@
               if (retryGeneration !== sessionGeneration) return;
               starting = true;
               try { await openLiveSession(retryGeneration); }
-              catch (error) { cleanup(); setStatus('กลับเข้าบทสนทนาไม่ได้ กรุณาเริ่มใหม่และตรวจสถานะงานเดิม', 'error'); }
+              catch (error) { if (retryGeneration !== sessionGeneration || error.code === 'voice_session_cancelled') return; cleanup(); setStatus('กลับเข้าบทสนทนาไม่ได้ กรุณาเริ่มใหม่และตรวจสถานะงานเดิม', 'error'); }
               finally { starting = false; }
             }, reconnectAttempts * 500);
           } else { cleanup(false); setStatus(event.reason || "Sentinel AI จบการเชื่อมต่อ · แตะไมค์เพื่อเริ่มใหม่"); }
@@ -420,6 +422,25 @@
     mutedOutput.connect(audioContext.destination);
   }
 
+  async function useLocalAfterQuota() {
+    const identity = accountKey();
+    cleanup();
+    const generation = sessionGeneration;
+    try {
+      const fallback = await window.PanthoriumHybridVoice?.policy();
+      if (generation !== sessionGeneration || identity !== accountKey()) return;
+      // Quota expiry during an established Live call must respect the same
+      // current server authorization as starting a new call.
+      if (fallback?.local?.enabled && fallback.local.ready) {
+        await window.PanthoriumHybridVoice.start();
+        return;
+      }
+      setStatus('เครดิต Sentinel AI ไม่เพียงพอ กรุณาตรวจแพ็กเกจหรือเพิ่มเครดิต', 'error');
+    } catch (_) {
+      if (generation === sessionGeneration && identity === accountKey()) setStatus('ตรวจสถานะบริการไม่สำเร็จ กรุณาลองใหม่', 'error');
+    }
+  }
+
   function cleanup(closeSocket = true, preserveResume = false) {
     sessionGeneration++;
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -461,7 +482,7 @@
       }
       await openLiveSession(sessionGeneration);
     }
-    catch (error) { if (error.code === 'quota_exceeded' && window.PanthoriumHybridVoice) { const fallback = await window.PanthoriumHybridVoice.policy(); cleanup(); if (fallback?.local?.enabled) { await window.PanthoriumHybridVoice.start(); return; } error.message = 'เครดิต Sentinel AI ไม่เพียงพอ กรุณาตรวจแพ็กเกจหรือเพิ่มเครดิต'; } if (error.code === "voice_session_cancelled") return; console.warn("Sentinel AI voice session failed", error); cleanup(); setStatus(error.name === "NotAllowedError" || error.name === "SecurityError"
+    catch (error) { if (error.code === 'quota_exceeded' && window.PanthoriumHybridVoice) { await useLocalAfterQuota(); return; } if (error.code === "voice_session_cancelled") return; console.warn("Sentinel AI voice session failed", error); cleanup(); setStatus(error.name === "NotAllowedError" || error.name === "SecurityError"
       ? "กรุณาอนุญาตไมโครโฟนให้ Panthorium Browser แล้วลองใหม่"
       : error.message || "เชื่อมเสียงสดไม่สำเร็จ", "error"); }
     finally { starting = false; }

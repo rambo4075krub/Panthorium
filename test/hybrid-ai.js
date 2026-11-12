@@ -31,6 +31,20 @@ const {chunks,BufferedSpeech}=require('../speech-buffer');
  global.fetch=async(url,options)=>{payload=JSON.parse(options.body);return {ok:true,json:async()=>({choices:[{message:{content:'unverified number'}}]})};};
  await assert.rejects(local.complete('s',[{role:'user',content:'ราคา 546.02 บาท ลด 10 บาท'}],{hybrid:true,tools:arithmeticTools}),/local_required_calculation_missing/);
  assert.equal(payload.tool_choice,'required');assert.equal(payload.tools.length,1);
+ // A required arithmetic turn gets a focused prompt and only the calculator.
+ // The result turn restores the application instructions and tool-call pairing.
+ const applicationPrompt='Keep the application context. '+('Unrelated mailbox guidance. '.repeat(120));
+ global.fetch=async(url,options)=>{payload=JSON.parse(options.body);return {ok:true,json:async()=>({choices:[{message:{tool_calls:[{id:'calc1',function:{name:'panthorium_calculate',arguments:'{"expression":"2+3"}'}}]},finish_reason:'tool_calls'}]})};};
+ const arithmeticHistory=[{role:'user',content:'What is 2 + 3?'}];
+ const calculated=await local.complete(applicationPrompt,arithmeticHistory,{hybrid:true,tools:[...tools,...arithmeticTools],thinking:false});
+ assert.equal(payload.tool_choice,'required');assert.deepEqual(payload.tools.map(t=>t.function.name),['panthorium_calculate']);
+ assert(payload.messages[0].content.length<700);assert(!payload.messages[0].content.includes('Unrelated mailbox'));
+ assert.match(payload.messages[0].content,/current-account permissions/);assert.equal(payload.parallel_tool_calls,false);
+ assert.deepEqual(calculated.functionCalls,[{id:'calc1',name:'panthorium_calculate',args:{expression:'2+3'}}]);
+ global.fetch=async(url,options)=>{payload=JSON.parse(options.body);return {ok:true,json:async()=>({choices:[{message:{content:'5'},finish_reason:'stop'}]})};};
+ const final=await local.complete(applicationPrompt,[...arithmeticHistory,{role:'model',parts:calculated.modelParts},{role:'user',parts:[{functionResponse:{name:'panthorium_calculate',id:'calc1',response:{ok:true,result:5}}}]}],{hybrid:true,tools:arithmeticTools,thinking:false});
+ assert.equal(final.text,'5');assert.equal(payload.tool_choice,'auto');assert.match(payload.messages[0].content,/Keep the application context/);
+ assert.equal(payload.messages.at(-1).role,'tool');assert.equal(payload.messages.at(-1).tool_call_id,'calc1');
  // Preserve an allowlisted resource failure through the real local provider and
  // gateway, including streaming, without billing or silently switching to cloud.
  global.fetch=async()=>new Response(JSON.stringify({detail:'local_resource_ram_headroom'}),{status:503,headers:{'content-type':'application/json'}});
