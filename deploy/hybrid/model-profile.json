@@ -1,21 +1,23 @@
 {
-  "name": "Qwen3.5-9B-Q3_K_S",
-  "repository": "unsloth/Qwen3.5-9B-GGUF",
-  "revision": "3885219b6810b007914f3a7950a8d1b469d598a5",
-  "filename": "Qwen3.5-9B-Q3_K_S.gguf",
-  "bytes": 4316865760,
-  "sha256": "162050d39ebae6b8a87435f282bcb7a0e3fab7b2444db730966b3fef1ed0179e",
+  "name": "Qwen3.5-4B-Q4_K_M",
+  "repository": "unsloth/Qwen3.5-4B-GGUF",
+  "revision": "e87f176479d0855a907a41277aca2f8ee7a09523",
+  "filename": "Qwen3.5-4B-Q4_K_M.gguf",
+  "bytes": 2740937888,
+  "sha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
   "license": "Apache-2.0",
   "capabilities": [
     "text",
     "thinking",
-    "tool-calling"
+    "tool-calling",
+    "image",
+    "video-frames"
   ],
-  "vision": false,
-  "brokerVersion": "qwen35-9b-v3",
-  "coldRamBudgetGiB": 2.15,
-  "warmRamBudgetGiB": 0.25,
-  "coldVramBudgetGiB": 3.18,
+  "vision": true,
+  "brokerVersion": "qwen35-4b-vision-v1",
+  "coldRamBudgetGiB": 2.4,
+  "warmRamBudgetGiB": 0.5,
+  "coldVramBudgetGiB": 2.8,
   "minimumAvailableGiB": 2.5,
   "ramLimit": 0.82,
   "ramRecovery": 0.77,
@@ -27,7 +29,21 @@
   "cacheType": "f16",
   "reasoningBudget": 512,
   "context": 8192,
-  "gpuLayers": 22,
+  "gpuLayers": 24,
   "threads": 4,
-  "productionApproved": true
+  "productionApproved": false,
+  "projector": {
+    "filename": "Qwen3.5-4B-mmproj-F16.gguf",
+    "remoteFilename": "mmproj-F16.gguf",
+    "bytes": 672423616,
+    "sha256": "cd88edcf8d031894960bb0c9c5b9b7e1fea6ebee02b9f7ce925a00d12891f864"
+  },
+  "imageMaxTokens": 512,
+  "training": {
+    "base": "Qwen/Qwen3.5-4B",
+    "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "method": "bf16-lora",
+    "minimumFreeVramGiB": 10,
+    "productionAutoPromotion": false
+  }
 }

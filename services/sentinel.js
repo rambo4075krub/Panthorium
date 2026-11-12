@@ -122,10 +122,10 @@ class Sentinel {
     const systemPrompt=this.prompts.build('default')+currentTimeContext()+(this.prompts.productContext?.()||'')+context+candidate+reflection+this.voiceLanguageGuard();
     return this.normalizeVoiceAnswer(await this.gateway.complete({systemPrompt,history:[{role:'user',content:message}],userId,sessionId}));
   }
-  async completeWithFunctionCalls({ systemPrompt, history, preferredProvider, preferredModel, userId, sessionId, user, functionCalling, requestId, voiceMode = false, signal }) {
+  async completeWithFunctionCalls({ systemPrompt, history, preferredProvider, preferredModel, userId, sessionId, user, functionCalling, requestId, voiceMode = false, signal, media, thinking }) {
     const selectedProvider = preferredProvider || this.gateway.orderedProviders?.()[0];
     const declarations = ['vertex','gemini-live','local'].includes(selectedProvider) ? functionCalling?.declarationsFor(user) || [] : [];
-    if (!declarations.length) return this.gateway.complete({ systemPrompt, history, preferredProvider, preferredModel, userId, sessionId, voiceMode, signal });
+    if (!declarations.length) return this.gateway.complete({ systemPrompt, history, preferredProvider, preferredModel, userId, sessionId, voiceMode, signal, media, thinking });
     let currentHistory = history.slice();
     let toolResults = [];
     let totalUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
@@ -133,7 +133,7 @@ class Sentinel {
     let result = null;
     let lockedProvider;
     await require('./toolWorkflow').runToolWorkflow({signal,modelStep:async round=>{
-      result = await this.gateway.complete({ systemPrompt, history: currentHistory, preferredProvider: lockedProvider || preferredProvider, preferredModel, userId, sessionId, tools: declarations, voiceMode, lockedProvider, signal });
+      result = await this.gateway.complete({ systemPrompt, history: currentHistory, preferredProvider: lockedProvider || preferredProvider, preferredModel, userId, sessionId, tools: declarations, voiceMode, lockedProvider, signal, media, thinking });
       if (result.usage) {
         totalUsage.inputTokens += Number(result.usage.inputTokens ?? result.usage.prompt_tokens) || 0;
         totalUsage.outputTokens += Number(result.usage.outputTokens ?? result.usage.completion_tokens) || 0;
@@ -181,7 +181,7 @@ class Sentinel {
     }
     return result || { ok: false, error: 'function_call_failed', text: '' };
   }
-  async chat({ sessionId, userId = "system", message, mode = "default", provider, model, voiceMode = false, user, functionCalling, requestId, signal }) {
+  async chat({ sessionId, userId = "system", message, mode = "default", provider, model, voiceMode = false, user, functionCalling, requestId, signal, media, thinking }) {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message, historyLimit: voiceMode ? 12 : 40 });
     const [trainingContext, memoryContext] = await Promise.all([
@@ -189,9 +189,9 @@ class Sentinel {
       this.memoryContextFor(userId, message, prepared.sid)
     ]);
     const functionGuidance = this.functionGuidance(user, functionCalling);
-    const result = this.normalizeVoiceAnswer(await this.completeWithFunctionCalls({ systemPrompt: this.prompts.build(mode)+currentTimeContext()+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard() + functionGuidance, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, user, functionCalling, requestId, voiceMode, signal }));
+    const result = this.normalizeVoiceAnswer(await this.completeWithFunctionCalls({ systemPrompt: this.prompts.build(mode)+currentTimeContext()+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard() + functionGuidance, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, user, functionCalling, requestId, voiceMode, signal, media, thinking }));
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });
-    this.captureTraining({message,result,userId,sessionId:prepared.sid});
+    if (!media?.length) this.captureTraining({message,result,userId,sessionId:prepared.sid});
     return result.ok ? { ...result, sessionId: prepared.sid, sentinel: "Sentinel" } : result;
   }
   functionGuidance(user, functionCalling) {

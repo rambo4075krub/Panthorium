@@ -13,6 +13,30 @@ except ImportError:
 
 @unittest.skipUnless(AVAILABLE,'Broker dependencies are installed on the notebook')
 class BrokerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_real_http_media_validation_and_forwarding(self):
+        from work_queue import WorkQueue
+        from test_media_training import picture
+        transport=httpx.ASGITransport(app=broker.app)
+        payload={'model':'panthorium-local','stream':False,'messages':[{'role':'user','content':[{'type':'text','text':'Color?'},{'type':'image_url','image_url':{'url':picture()}}]}]}
+        forwarded=[]
+        class Upstream:
+            async def __aenter__(self):return self
+            async def __aexit__(self,*args):pass
+            async def post(self,url,json):
+                forwarded.append(json)
+                return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'content':'red'}}]})
+        async with httpx.AsyncClient(transport=transport,base_url='http://test') as client:
+            with patch.object(broker,'queue',WorkQueue()),patch.object(broker,'snapshot',return_value={'ready':True}),patch.object(broker,'drop_voice'),patch.object(broker,'ensure_model'),patch.object(broker,'vision_verified',False),patch.object(broker.httpx,'AsyncClient',return_value=Upstream()):
+                response=await client.post('/v1/chat/completions',json=payload)
+                self.assertEqual(response.status_code,200)
+                self.assertTrue(broker.vision_verified)
+                self.assertTrue(forwarded[0]['messages'][0]['content'][1]['image_url']['url'].startswith('data:image/jpeg;base64,'))
+                payload['messages'][0]['content'][1]['image_url']['url']='http://169.254.169.254/'
+                response=await client.post('/v1/chat/completions',json=payload)
+                self.assertEqual(response.status_code,400);self.assertEqual(len(forwarded),1)
+                response=await client.post('/v1/chat/completions',content=b'x'*(1500*1024+1))
+                self.assertEqual(response.status_code,413)
+
     async def test_background_never_cold_loads_or_queues_behind_users(self):
         from work_queue import WorkQueue
         request=unittest.mock.Mock(headers={'x-panthorium-account':'b'*64})
@@ -34,7 +58,8 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
             async def __aexit__(self,*args):pass
             async def post(self,*args,**kwargs):entered.set();await asyncio.Event().wait()
         bg=unittest.mock.Mock(headers={'x-panthorium-account':'b'*64,'x-panthorium-background':'1'})
-        bg.body=unittest.mock.AsyncMock(return_value=b'{"model":"panthorium-local","stream":false}')
+        async def stream():yield b'{"model":"panthorium-local","stream":false,"messages":[{"role":"user","content":"test"}]}'
+        bg.stream=stream
         bg.is_disconnected=unittest.mock.AsyncMock(return_value=False)
         async def receive():await asyncio.Event().wait()
         bg.receive=receive
@@ -96,7 +121,7 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(maximum,1);self.assertFalse(broker.queue.status()['running'])
                 self.assertEqual(broker.queue.status()['waiting'],0)
             with patch.object(broker,'queue',WorkQueue(wait_seconds=45)),patch.object(broker,'snapshot',return_value={'ready':False,'reason':'ram_headroom'}),patch.object(broker,'ensure_model') as ensure:
-                response=await asyncio.wait_for(client.post('/v1/chat/completions',json={'model':'panthorium-local','stream':False},headers=headers('blocked')),timeout=1)
+                response=await asyncio.wait_for(client.post('/v1/chat/completions',json={'model':'panthorium-local','stream':False,'messages':[{'role':'user','content':'test'}]},headers=headers('blocked')),timeout=1)
                 self.assertEqual(response.status_code,503);self.assertEqual(response.json()['detail'],'local_resource_ram_headroom');ensure.assert_not_called()
                 self.assertEqual(response.headers['retry-after'],'10')
                 self.assertEqual(broker.queue.status()['waiting'],0)

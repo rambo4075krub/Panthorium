@@ -5,21 +5,29 @@ from pathlib import Path
 PROFILE = json.loads((Path(__file__).with_name('model-profile.json')).read_text(encoding='utf-8'))
 ROOT = Path(os.environ.get('PANTHORIUM_AI_ROOT', r'D:\PanthoriumAI'))
 
-def model_path(root=ROOT):
-    name = PROFILE['filename']
+def asset_path(asset, root=ROOT):
+    name = asset['filename']
     if Path(name).name != name or '/' in name or '\\' in name:
         raise ValueError('Model filename must not contain a path')
     return root / 'models' / name
 
-def verify_model(path):
-    if path.stat().st_size != PROFILE['bytes']:
+def model_path(root=ROOT):
+    return asset_path(PROFILE, root)
+
+def projector_path(root=ROOT):
+    return asset_path(PROFILE['projector'], root)
+
+def verify_model(path, asset=None):
+    asset = PROFILE if asset is None else asset
+    if path.is_symlink(): raise ValueError('Refusing linked model asset')
+    if path.stat().st_size != asset['bytes']:
         raise ValueError('Model size mismatch')
     digest = hashlib.sha256()
     with path.open('rb') as stream:
         if stream.read(4) != b'GGUF': raise ValueError('Invalid GGUF file')
         stream.seek(0)
         for chunk in iter(lambda: stream.read(8 * 1024**2), b''): digest.update(chunk)
-    if digest.hexdigest() != PROFILE['sha256']: raise ValueError('Model checksum mismatch')
+    if digest.hexdigest() != asset['sha256']: raise ValueError('Model checksum mismatch')
     return digest.hexdigest()
 
 def same_path(a, b):
@@ -37,6 +45,8 @@ def owns_model(exe, args, root=ROOT, filename=None):
 
 def startup_args(root=ROOT):
     return ['-m', str(model_path(root)), '--host', '127.0.0.1', '--port', '8088',
+            '--mmproj', str(projector_path(root)), '--no-mmproj-offload',
+            '--image-max-tokens', str(PROFILE['imageMaxTokens']),
             '-c', str(PROFILE['context']), '-np', '1', '-ngl', str(PROFILE['gpuLayers']),
             '-t', str(PROFILE['threads']), '-b', '128', '-ub', '64', '-fa', 'on',
             '--cache-type-k', PROFILE['cacheType'], '--cache-type-v', PROFILE['cacheType'], '--cache-ram', '0',
@@ -76,6 +86,7 @@ if __name__ == '__main__':
     result = preflight()
     if result['ready']:
         verify_model(model_path())
+        verify_model(projector_path(), PROFILE['projector'])
         result = preflight()
         if result['ready']: result['args'] = startup_args()
     print(json.dumps(result))

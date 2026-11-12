@@ -1,0 +1,10 @@
+# Install inside a dedicated Linux CUDA virtual environment, never the host voice venv.
+# Resolve together; the runner records exact installed versions in status.json.
+unsloth
+unsloth_zoo
+transformers>=5,<6
+trl
+peft
+datasets
+accelerate
+bitsandbytes

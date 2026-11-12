@@ -117,6 +117,7 @@ const notebookControl = require("./services/notebookControl").installNotebookCon
 app.use(require("./middleware/localProfile").localProfileGuard);
 if (process.env.PANTHORIUM_LOCAL_QWEN === "1") {
   app.get("/qwen", (req, res) => res.sendFile(path.join(__dirname, "qwen-local.html")));
+  app.get("/local-media-client.js", (req, res) => res.sendFile(path.join(__dirname, "local-media-client.js")));
   app.get("/qwen-local.js", (req, res) => res.sendFile(path.join(__dirname, "qwen-local.js")));
 }
 if (process.env.PANTHORIUM_LOCAL_PROFILE === "1") app.get(["/local-ai", "/local-ai.html"], (req, res) => res.sendFile(path.join(__dirname, "local-ai.html")));
