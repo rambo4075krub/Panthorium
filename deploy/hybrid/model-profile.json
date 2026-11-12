@@ -17,7 +17,7 @@
   "brokerVersion": "qwen35-4b-vision-v1",
   "coldRamBudgetGiB": 2.4,
   "warmRamBudgetGiB": 0.5,
-  "coldVramBudgetGiB": 2.8,
+  "coldVramBudgetGiB": 3.15,
   "minimumAvailableGiB": 2.5,
   "ramLimit": 0.82,
   "ramRecovery": 0.77,
@@ -29,7 +29,7 @@
   "cacheType": "f16",
   "reasoningBudget": 512,
   "context": 8192,
-  "gpuLayers": 24,
+  "gpuLayers": 31,
   "threads": 4,
   "productionApproved": false,
   "projector": {

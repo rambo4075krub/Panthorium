@@ -21,7 +21,7 @@ outbound MCP connector and does not grant credentials/scopes to external clients
   `LOCAL_QWEN_DISABLE_FILE=D:\PanthoriumAI\qwen.disabled`.
 - Application requests go through the broker to port 8088. One operation at a time across
   production and staging; excess requests receive a retryable busy response.
-- The selected Qwen3.5-4B Q4_K_M profile uses 24 GPU layers, 8192 context
+- The selected Qwen3.5-4B Q4_K_M profile uses 31 GPU layers, 8192 context
   tokens, four CPU threads and a separate F16 projector on CPU. Images are bounded
   to 512 tokens each; reasoning to 512 tokens. Local text thinking defaults on,
   can be disabled per `/api/local/chat` request, and remains off for voice/idle insights.
@@ -32,7 +32,7 @@ outbound MCP connector and does not grant credentials/scopes to external clients
   in conversation history or captured as training examples.
 - The independent 50 ms RAM watchdog and queue remain in effect. Limits remain
   82% RAM, 80% VRAM, 2.5 GiB free RAM and 82 C GPU temperature, with recovery at
-  77% RAM, 75% VRAM and 77 C. Proposed cold budgets are 2.4 GiB RAM and 2.8 GiB
+  77% RAM, 75% VRAM and 77 C. Cold budgets are 2.4 GiB RAM and 3.15 GiB
   VRAM including the CPU projector; they require actual notebook verification.
   `productionApproved:false` explicitly records that these new settings have not
   been benchmarked on the target device. The installer must pass live inference
@@ -105,6 +105,17 @@ automatically. Model weights, Python/runtime dependencies, encrypted settings,
 receipts, logs and user data remain on the notebook and are not published.
 
 ## Qwen3.5-4B activation and Qwen3.5-9B removal
+
+The notebook trial on 2026-11-12 passed text, a typed tool selection, an image,
+four ordered synthetic video frames, thinking and Thai with 31 GPU layers.
+Measured peaks were 76.42% system RAM and 71.39% GPU memory; available RAM stayed
+above 3.63 GiB. These are bounded smoke results, not a general quality benchmark.
+The prior 24-layer setup failed warm RAM admission on this host. Offloading seven
+additional layers reduces host RAM use; the RAM forecast and hard guards remain
+unchanged, and the cold GPU forecast increases to account for the extra layers.
+`trial_qwen4.py` reproduces the isolated, API-key-protected loopback trial, verifies
+asset hashes, includes the CPU projector in admission, watches RAM independently
+of GPU probes, stops its own process, and checks the production profile is unchanged.
 
 The repository profile pins the Q4_K_M model and F16 projector by revision,
 exact bytes and SHA-256. Existing text, tools/MCP, local voice, mailbox and idle
