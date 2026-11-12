@@ -27,7 +27,7 @@ const { localAiAllowed, localAiOperatorAllowed, createLocalAiAuthorizer } = requ
     let regular={id:'regular',roles:['user'],permissions:['chat']};
     const owner={id:'owner',roles:['administrator'],permissions:['chat']};
     providers.authorizeLocal = createLocalAiAuthorizer({repository:{findUserById:async id=>id==='owner'?owner:id==='regular'?regular:null}});
-    assert.equal(localAiAllowed(regular),true);
+    assert.equal(localAiAllowed(regular),false);
     assert.equal(localAiOperatorAllowed(regular),false);
     assert.equal(localAiOperatorAllowed(owner),true);
     for (const denied of [null,{...regular,id:'guest:public'},{...regular,roles:['guest']},{...regular,permissions:[]}]) assert.equal(localAiAllowed(denied),false);
@@ -56,10 +56,10 @@ const { localAiAllowed, localAiOperatorAllowed, createLocalAiAuthorizer } = requ
     await assert.rejects(providers.vertexAccessToken(),/cloud_ai_disabled/);
     assert.equal(calls.length,1);
     const general=await gateway.complete({userId:'regular',systemPrompt:'brief',history:[{role:'user',content:'สวัสดี'}]});
-    assert.equal(general.ok,true);assert.equal(general.provider,'local');assert.equal(general.creditsCharged,0);
-    await gateway.stream({userId:'regular',systemPrompt:'brief',history:[{role:'user',content:'test'}],thinking:true});
+    assert.equal(general.ok,false);assert.equal(general.error,'no_provider');assert.equal(calls.length,1,'ordinary users cannot use Qwen even in local-only mode');
+    await gateway.stream({userId:'owner',systemPrompt:'brief',history:[{role:'user',content:'test'}],thinking:true});
     assert.equal(JSON.parse(calls.at(-1).options.body).chat_template_kwargs.enable_thinking,true,'Thinking selection survives streaming');
-    await gateway.stream({userId:'regular',systemPrompt:'brief',history:[{role:'user',content:'test'}],thinking:false});
+    await gateway.stream({userId:'owner',systemPrompt:'brief',history:[{role:'user',content:'test'}],thinking:false});
     assert.equal(JSON.parse(calls.at(-1).options.body).chat_template_kwargs.enable_thinking,false,'Instant can be selected explicitly');
     regular={...regular,permissions:[]};assert.equal(await providers.authorizeLocal('regular'),false,'chat revocation applies immediately');
     regular={...regular,permissions:['chat']};

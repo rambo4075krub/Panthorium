@@ -8,10 +8,7 @@ function localAiOperatorAllowed(user) {
     (typeof user.emailVerifiedAt === 'string' && Number.isFinite(Date.parse(user.emailVerifiedAt)) && String(user.email || '').trim().toLowerCase() === OWNER_EMAIL);
 }
 function localAiAllowed(user) {
-  const id = String(user?.sub || user?.id || '');
-  if (!id || id.startsWith('guest:') || user.roles?.includes('guest') || !user.permissions?.includes('chat')) return false;
-  return process.env.PANTHORIUM_AI_MODE === 'local-only' && process.env.PANTHORIUM_LOCAL_PROFILE !== '1'
-    || localAiOperatorAllowed(user);
+  return localAiOperatorAllowed(user);
 }
 function createLocalAiAuthorizer(auth, allowed = localAiAllowed) {
   return async userId => {
