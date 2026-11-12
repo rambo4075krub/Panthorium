@@ -2,7 +2,6 @@
 const express=require('express');
 const rateLimit=require('express-rate-limit');
 const {requireAuth,requirePermission}=require('../middleware/auth');
-const {canUseLocal}=require('../services/localAiAccess');
 const {UUID,FEATURES}=require('../services/localInsightsService');
 const {failure}=require('../services/notificationRepository');
 function createLocalInsightsRouter(auth,service) {
@@ -15,7 +14,7 @@ function createLocalInsightsRouter(auth,service) {
   });
   router.use(rateLimit({windowMs:60000,limit:40,standardHeaders:true,legacyHeaders:false}));
   const wrap=fn=>async(req,res,next)=>{try{res.json(await fn(req));}catch(e){if(e.status)res.status(e.status).json({ok:false,error:e.code||e.message});else next(e);}};
-  router.get('/me',wrap(async req=>({ok:true,...await service.repository.preferences(req.user.sub),features:FEATURES,operator:await canUseLocal(service.providers,req.user.sub)})));
+  router.get('/me',wrap(async req=>({ok:true,...await service.repository.preferences(req.user.sub),features:FEATURES,operator:await service.isOperator(req.user.sub)})));
   router.put('/preferences',wrap(async req=>{
     if(Object.keys(req.body||{}).length!==1 || typeof req.body.enabled!=='boolean') throw failure('invalid_insights_preferences');
     await service.repository.setConsent(req.user.sub,req.body.enabled);

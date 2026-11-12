@@ -82,6 +82,7 @@ async function connectGeminiLive({
   WebSocketImpl,
   handshakeTimeoutMs = 10000
 } = {}) {
+  require('./aiModePolicy').assertCloudAiAllowed();
   if (signal?.aborted) throw new Error('gemini_live_connection_aborted');
   let client = authClient;
   let resolvedProjectId = projectId || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
@@ -147,4 +148,3 @@ module.exports = {
   getVertexAccessToken,
   connectGeminiLive
 };
-

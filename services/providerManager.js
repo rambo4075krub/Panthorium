@@ -43,7 +43,9 @@ class ProviderManager {
   constructor() {
     this.localOnly = process.env.PANTHORIUM_AI_MODE === "local-only";
     if (this.localOnly) {
-      this.local = new (require("./localLlmProvider").LocalLlmProvider)();
+      this.hybrid = process.env.PANTHORIUM_LOCAL_QWEN === '1' && process.env.PANTHORIUM_LOCAL_PROFILE !== '1';
+      this.local = new (require("./localLlmProvider").LocalLlmProvider)({ ...process.env,
+        LOCAL_LLM_URL: process.env.LOCAL_LLM_URL || (this.hybrid ? 'http://127.0.0.1:8765/v1/chat/completions' : undefined) });
       this.liveOnly = false; this.keys = {}; this.priority = ["local"];
       this.models = { local: this.local.model }; this.vertex = {}; this.vertexEvaluatorModels = [];
       return;
@@ -111,7 +113,7 @@ class ProviderManager {
     }
     return this.vertexEndpointPromise;
   }
-  available() { if (this.localOnly) return ["local"]; if (this.liveOnly) return [...(process.env.GEMINI_LIVE_ENABLED === "1" ? ["gemini-live"] : []), ...(this.hybrid && require('./hybridAiPolicy').localEnabled() ? ['local'] : [])]; return this.priority.filter((p) => p === "vertex" ? this.vertexConfigured() : Boolean(this.keys[p])); }
+  available() { if (this.localOnly) return this.hybrid && !require('./hybridAiPolicy').localEnabled() ? [] : ["local"]; if (this.liveOnly) return [...(process.env.GEMINI_LIVE_ENABLED === "1" ? ["gemini-live"] : []), ...(this.hybrid && require('./hybridAiPolicy').localEnabled() ? ['local'] : [])]; return this.priority.filter((p) => p === "vertex" ? this.vertexConfigured() : Boolean(this.keys[p])); }
   evaluatorLocation() {
     const location = this.vertexEvaluatorLocation || this.vertex.location || this.vertex.tuningJobLocation;
     return /^(global|[a-z0-9]+(?:-[a-z0-9]+)*)$/.test(location || "") ? location : "";
@@ -128,7 +130,12 @@ class ProviderManager {
     const requested = provider === "groq" ? currentGroqModel(requestedModel) : String(requestedModel).trim();
     return requested === configured ? configured : null;
   }
-  async transcribeAudio(buffer, mimeType = "audio/webm", language = "") {
+  async transcribeAudio(buffer, mimeType = "audio/webm", language = "", options = {}) {
+    if (this.localOnly) {
+      if (!await require('./localAiAccess').canUseLocal(this, options.userId)) throw new Error('local_access_denied');
+      if (this.hybrid && !require('./hybridAiPolicy').localEnabled()) throw new Error('local_disabled');
+      return require('./localVoiceProvider').transcribe(buffer, mimeType, options);
+    }
     const unavailable = (code = "transcription_provider_unavailable") => {
       const error = new Error(code); error.code = code; return error;
     };
@@ -220,6 +227,7 @@ class ProviderManager {
     return null;
   }
   async vertexAccessToken() {
+    require('./aiModePolicy').assertCloudAiAllowed();
     // Direct access token override for local testing or CI outside Cloud Run
     if (process.env.VERTEX_ACCESS_TOKEN) return process.env.VERTEX_ACCESS_TOKEN;
     // Cloud Run's metadata server supplies short-lived Application Default
@@ -438,6 +446,7 @@ class ProviderManager {
     return { ...result, streaming: "buffered" };
   }
   async streamOpenAICompatible(url, key, model, systemPrompt, history, onDelta, includeUsage = false, options = {}) {
+    require('./aiModePolicy').assertCloudAiAllowed();
     const body = { model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, ...completionOptions(url, model), stream: true };
     if (includeUsage) body.stream_options = { include_usage: true };
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}`, Accept: "text/event-stream" }, body: JSON.stringify(body), signal: providerSignal(options.signal,45000) });
@@ -461,11 +470,13 @@ class ProviderManager {
     return { text: text.trim(), model: responseModel, usage, streaming: "native", truncated };
   }
   async callOpenAICompatible(url, key, model, systemPrompt, history, options = {}) {
+    require('./aiModePolicy').assertCloudAiAllowed();
     const request = () => fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, ...history], temperature: 0.65, ...completionOptions(url, model) }), signal: providerSignal(options.signal,30000) });
     const res = await fetchProvider(request); const data = await res.json();
     const choice=data.choices?.[0];return { text: choice?.message?.content?.trim() || null, model: data.model || model, truncated: choice?.finish_reason === 'length', usage: data.usage ? { inputTokens: data.usage.prompt_tokens || 0, outputTokens: data.usage.completion_tokens || 0, totalTokens: data.usage.total_tokens || 0 } : null };
   }
   async callGemini(key, model, systemPrompt, history, options = {}) {
+    require('./aiModePolicy').assertCloudAiAllowed();
     const contents = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
     if (contents.length && contents[0].role === "user") contents[0].parts[0].text = `${systemPrompt}\n\n${contents[0].parts[0].text}`;
     const candidates = [...new Set([model, "gemini-3.5-flash-lite"])]; let lastError;
@@ -473,11 +484,10 @@ class ProviderManager {
     throw lastError;
   }
   async callAnthropic(key, model, systemPrompt, history, options = {}) {
+    require('./aiModePolicy').assertCloudAiAllowed();
     const candidates=[...new Set([model,"claude-haiku-4-5-20251001"])];let lastError;
     for(const candidate of candidates){try{const configured=Number(process.env.SENTINEL_MAX_OUTPUT_TOKENS||1536);const max_tokens=Number.isFinite(configured)?Math.min(3072,Math.max(512,Math.floor(configured))):1536;const res=await fetchProvider(()=>fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model:candidate, max_tokens, temperature: 0.65, system: systemPrompt, messages: history.map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })) }), signal: providerSignal(options.signal,30000) }));const data=await res.json();return { text: data.content?.[0]?.text?.trim() || null, model: data.model || candidate,truncated:data.stop_reason==='max_tokens', usage: data.usage ? { inputTokens: data.usage.input_tokens || 0, outputTokens: data.usage.output_tokens || 0, totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0) } : null };}catch(error){lastError=error;if(![400,404].includes(error.status))throw error;}}
     throw lastError;
   }
 }
 module.exports = { ProviderManager };
-
-

@@ -1,4 +1,5 @@
 const path = require("path");
+require('../services/aiModePolicy').enforceAiMode();
 
 function list(value, fallback = []) {
   if (!value) return fallback;
@@ -63,6 +64,6 @@ module.exports = {
 
 
 // A Live-only deployment cannot start teachers or capture tuned-model training.
-if (process.env.PANTHORIUM_AI_MODE === "gemini-live-only") {
+if (["gemini-live-only", "local-only"].includes(process.env.PANTHORIUM_AI_MODE)) {
   Object.assign(module.exports, { sentinelAutoTraining:false, sentinelAutoCapture:false, sentinelTeacherProviders:[], sentinelEvaluatorProviders:[] });
 }

@@ -1,6 +1,6 @@
 (function () {
   "use strict";
-  if (document.body?.dataset.geminiLiveEnabled !== "true") return;
+  if (document.body?.dataset.aiMode === 'local-only' || document.body?.dataset.geminiLiveEnabled !== "true") return;
 
   let currentStatus = { label: "กดไมค์เพื่อเริ่มเสียงสด", mode: "idle" };
   function syncChatButton() {
@@ -490,5 +490,3 @@
   syncChatButton();
   window.addEventListener("pagehide", () => cleanup());
 })();
-
-

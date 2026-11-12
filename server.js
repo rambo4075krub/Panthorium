@@ -172,8 +172,10 @@ notifications.push=notificationPush;
 billingService.notifications = notifications;
 const voiceSessions = new VoiceSessionRepository({ ...cloudStoreOptions, secret: process.env.VOICE_SESSION_ENCRYPTION_KEY || config.jwtSecret });
 const usageLedger = new UsageLedgerRepository(cloudStoreOptions);
+const localAppCompletion = sentinel.providers.localOnly
+  ? require('./services/localAppCompletion').createLocalAppCompletion({gateway:sentinel.gateway}) : null;
 const cloudApps = new CloudAppRuntime({ ...cloudStoreOptions,
-  complete: process.env.GEMINI_LIVE_ENABLED === '1' ? createCloudAppCompletion({ entitlements: liveEntitlements, usageLedger, gate: workloadCapacity.gate('background') }) : null,
+  complete: localAppCompletion || (process.env.GEMINI_LIVE_ENABLED === '1' ? createCloudAppCompletion({ entitlements: liveEntitlements, usageLedger, gate: workloadCapacity.gate('background') }) : null),
   allowMinorProfiles: process.env.PANTHORIUM_CHILD_FEATURES_ENABLED === '1',
   minorPolicyVerified: process.env.PANTHORIUM_CHILD_PROVIDER_POLICY_VERIFIED === '1' });
 const organizationRepository = new OrganizationRepository({ ...cloudStoreOptions, allowMemory: !config.isProduction && !config.databaseUrl });
@@ -183,8 +185,8 @@ const organizations = new OrganizationService({ repository: organizationReposito
 // quota. No personal memory, conversation history or voice session is attached.
 // A contract inquiry does not create an organization billing entitlement.
 const organizationResources = new OrganizationResourceService({ organizations,
-  complete: process.env.GEMINI_LIVE_ENABLED === '1' && liveEntitlements
-    ? createCloudAppCompletion({ entitlements: liveEntitlements, usageLedger, gate: workloadCapacity.gate('background') }) : null });
+  complete: localAppCompletion || (process.env.GEMINI_LIVE_ENABLED === '1' && liveEntitlements
+    ? createCloudAppCompletion({ entitlements: liveEntitlements, usageLedger, gate: workloadCapacity.gate('background') }) : null) });
 const organizationGovernance = new OrganizationGovernanceService({ organizations });
 const cloudFiles = new CloudFilesService({ ...objectOptions, entitlements:liveEntitlements, notifications });
 const social = new (require('./services/socialService').SocialService)({ repository: new (require('./services/socialRepository').SocialRepository)({...cloudStoreOptions,allowMemory:!config.isProduction&&!config.databaseUrl}), files:cloudFiles, accounts:authRepository, supportAdminUsername:config.adminUsername, systemNotifications:notifications });
@@ -402,7 +404,7 @@ app.get("/app-release.json", (req, res) => {
 
 function renderShell() {
   let html = fs.readFileSync(path.join(frontendRoot, "sentinel.html"), "utf8");
-  html = html.replace('<body>', '<body data-panthorium-release="' + appRelease + '" data-gemini-live-enabled="' + (process.env.GEMINI_LIVE_ENABLED === "1" ? "true" : "false") + '" data-ai-mode="' + (process.env.PANTHORIUM_AI_MODE === "gemini-live-only" ? "gemini-live-only" : "legacy") + '" data-voice-identity-required="' + (config.biometricGateEnabled ? "true" : "false") + '">');
+  html = html.replace('<body>', '<body data-panthorium-release="' + appRelease + '" data-gemini-live-enabled="' + (process.env.GEMINI_LIVE_ENABLED === "1" ? "true" : "false") + '" data-ai-mode="' + (["gemini-live-only","local-only"].includes(process.env.PANTHORIUM_AI_MODE) ? process.env.PANTHORIUM_AI_MODE : "legacy") + '" data-voice-identity-required="' + (config.biometricGateEnabled ? "true" : "false") + '">');
   const version = `${require("./package.json").version}-workspace-ux-20261015`;
   for (const script of shellScripts) {
     if (!html.includes(`/${script}`)) html = html.replace(/<\/body>/i, `  <script src="/${script}?v=${version}"></script>\n</body>`);
@@ -657,4 +659,3 @@ if (require.main === module) {
 }
 
 module.exports = { app, workloadCapacity, localInsights, notifications, notificationRepository, social, creativeStudio, organizationRepository, organizations, organizationResources, organizationGovernance, privacyRequests, actionLedger, voiceSessions, usageLedger, cloudApps, liveEntitlements, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
-

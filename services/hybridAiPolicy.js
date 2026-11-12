@@ -3,6 +3,7 @@ const {hasQuota} = require('../billing-catalog');
 function localEnabled(env = process.env) { return env.PANTHORIUM_LOCAL_QWEN === '1' && env.PANTHORIUM_QWEN_DISABLED !== '1' && !(env.LOCAL_QWEN_DISABLE_FILE && require('fs').existsSync(env.LOCAL_QWEN_DISABLE_FILE)); }
 async function routeProviders(providers, candidates, {preferredProvider, history = [], voiceMode = false} = {}, userId) {
   if (candidates.includes('local') && !await require('./localAiAccess').canUseLocal(providers,userId)) candidates = candidates.filter(p => p !== 'local');
+  if (providers.localOnly || require('./aiModePolicy').localOnly()) return candidates.filter(p => p === 'local');
   if (preferredProvider === 'local') return candidates.filter(p => p === 'local');
   if (!providers.hybrid) return candidates;
   let liveAllowed = false;

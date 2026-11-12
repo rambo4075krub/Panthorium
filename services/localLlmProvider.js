@@ -31,7 +31,7 @@ class LocalLlmProvider {
   constructor(env = process.env) {
     this.url = localEndpoint(env.LOCAL_LLM_URL);
     this.model = env.LOCAL_LLM_MODEL || 'panthorium-local';
-    this.reasoning = env.LOCAL_LLM_REASONING !== '0';
+    this.reasoning = env.LOCAL_LLM_REASONING === '1' || (env.LOCAL_LLM_REASONING !== '0' && env.PANTHORIUM_AI_MODE !== 'local-only');
     this.busy = false;
   }
   async complete(systemPrompt, history, {model, tools = [], hybrid = false, voiceMode = false, signal, userId, preserveInput = false, media = [], thinking: requestedThinking} = {}, onDelta) {

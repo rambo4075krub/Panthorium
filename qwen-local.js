@@ -15,7 +15,7 @@ login.onsubmit = async event => {
     token = result.accessToken;
     const accessResponse=await fetch('/api/hybrid/status',{headers:{Authorization:'Bearer '+token}});
     const access=await accessResponse.json();
-    if(!accessResponse.ok||!access.local?.enabled){token='';throw Error('บริการนี้เปิดเฉพาะแอดมินและบัญชีเจ้าของระบบที่ได้รับสิทธิ์');}
+    if(!accessResponse.ok||!access.local?.enabled){token='';throw Error('บัญชีนี้ไม่มีสิทธิ์สนทนา หรือบริการ Qwen ในเครื่องกำลังปิดอยู่');}
     login.reset(); login.hidden = true; chat.hidden = false; output.textContent = '';showAvailability(access.local); chat.elements.message.focus();
   } catch (error) { output.textContent = error.message; }
   finally { login.querySelector('button').disabled = false; }

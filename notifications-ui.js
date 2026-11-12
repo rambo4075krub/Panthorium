@@ -99,12 +99,22 @@
   }
   function stopSpeaking() {
     if (!ownSpeech) return;
+    if (ownSpeech.local) window.PanthoriumLocalSpeech?.stop();
     ownSpeech.onend = ownSpeech.onerror = null; ownSpeech = null;
     try { window.speechSynthesis?.cancel(); } catch (_) {}
     window.dispatchEvent(new CustomEvent('panthorium:notification-speech-end'));
   }
   function speak(s, text) {
     if (!current(s) || busy()) return { ok: false, error: 'notification_voice_busy' };
+    if (document.body?.dataset.aiMode === 'local-only') {
+      if (!window.PanthoriumLocalSpeech) return {ok:false,error:'notification_voice_unavailable'};
+      const marker={local:true};ownSpeech=marker;
+      window.dispatchEvent(new CustomEvent('panthorium:notification-speech-start'));
+      window.PanthoriumLocalSpeech.speak(text.slice(0,1400)).catch(()=>{}).finally(()=>{
+        if(ownSpeech===marker){ownSpeech=null;window.dispatchEvent(new CustomEvent('panthorium:notification-speech-end'));}
+      });
+      return {ok:true,text};
+    }
     if (!window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== 'function') return { ok: false, error: 'notification_voice_unavailable' };
     const utterance = new SpeechSynthesisUtterance(text.slice(0, 1400));
     utterance.lang = 'th-TH'; utterance.rate = 1;
