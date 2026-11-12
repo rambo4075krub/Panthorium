@@ -17,6 +17,7 @@ function validChatBody(body = {}) {
   if (body.provider != null && (typeof body.provider !== "string" || body.provider.length > 40)) return "invalid_provider";
   if (body.model != null && (typeof body.model !== "string" || body.model.length > 120)) return "invalid_model";
   if (body.voice != null && typeof body.voice !== "boolean") return "invalid_voice_mode";
+  if (body.thinking != null && typeof body.thinking !== 'boolean') return 'invalid_thinking';
   return null;
 }
 const windowCatalog = require("../voice-window-catalog");
@@ -273,7 +274,7 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
   router.post("/chat/stream", auth, requirePermission("chat"), aiLimiter, async (req, res) => {
     const error = validChatBody(req.body || {});
     if (error) return res.status(400).json({ ok: false, error });
-    const { message, sessionId, provider, model, voice } = req.body || {};
+    const { message, sessionId, provider, model, voice, thinking } = req.body || {};
     const sid = sessionId || req.headers["x-session-id"] || randomUUID();
     res.status(200).set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders?.();
@@ -294,6 +295,7 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
         provider: provider?.toLowerCase(),
         model,
         voiceMode: voice === true,
+        thinking,
         user: req.user,
         functionCalling,
         requestId: stableActionRequestId(req) || req.requestId || randomUUID(),
@@ -312,7 +314,7 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
       if (!res.writableEnded) res.end();
     }
   });
-  router.post("/chat", auth, requirePermission("chat"), aiLimiter, async (req, res) => { const controller=new AbortController();const cancel=()=>{if(!res.writableEnded)controller.abort();};res.once('close',cancel);try { const error = validChatBody(req.body || {}); if (error) return res.status(400).json({ ok: false, error }); const { message, sessionId, provider, model, voice } = req.body || {}; const sid = sessionId || req.headers["x-session-id"] || randomUUID(); const result = await sentinel.chat({ signal:controller.signal,sessionId: sid, userId: req.user.sub, message, mode: "default", provider: provider?.toLowerCase(), model, voiceMode: voice === true, user: req.user, functionCalling, requestId: stableActionRequestId(req) || req.requestId || randomUUID() }); audit.record("sentinel.chat", { userId: req.user.sub, sessionId: sid, provider: result.provider || null, model: result.model || null, usage: result.usage || null, latencyMs: result.latencyMs || null, functionCallCount: result.functionCallCount || 0, ok: result.ok }); res.json({ ...result, sessionId: sid }); } catch (err) { if(!res.destroyed)res.status(500).json({ ok: false, error: "internal_error" }); } finally {res.off('close',cancel);} });
+  router.post("/chat", auth, requirePermission("chat"), aiLimiter, async (req, res) => { const controller=new AbortController();const cancel=()=>{if(!res.writableEnded)controller.abort();};res.once('close',cancel);try { const error = validChatBody(req.body || {}); if (error) return res.status(400).json({ ok: false, error }); const { message, sessionId, provider, model, voice, thinking } = req.body || {}; const sid = sessionId || req.headers["x-session-id"] || randomUUID(); const result = await sentinel.chat({ signal:controller.signal,sessionId: sid, userId: req.user.sub, message, mode: "default", provider: provider?.toLowerCase(), model, thinking, voiceMode: voice === true, user: req.user, functionCalling, requestId: stableActionRequestId(req) || req.requestId || randomUUID() }); audit.record("sentinel.chat", { userId: req.user.sub, sessionId: sid, provider: result.provider || null, model: result.model || null, usage: result.usage || null, latencyMs: result.latencyMs || null, functionCallCount: result.functionCallCount || 0, ok: result.ok }); res.json({ ...result, sessionId: sid }); } catch (err) { if(!res.destroyed)res.status(500).json({ ok: false, error: "internal_error" }); } finally {res.off('close',cancel);} });
   router.post("/sentinel/command", auth, aiLimiter, async (req, res, next) => {
     try {
       const { command, provider } = req.body || {};

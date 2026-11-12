@@ -1,6 +1,6 @@
 'use strict';
 const ipaddr = require('ipaddr.js');
-const { canUseLocal, OWNER_EMAIL } = require('./localAiAccess');
+const { canUseLocal, OWNER_EMAIL, createLocalAiAuthorizer, localAiOperatorAllowed } = require('./localAiAccess');
 const { accountKey } = require('./localWorkIdentity');
 const { failure } = require('./notificationRepository');
 const { hash } = require('./localInsightsRepository');
@@ -31,10 +31,12 @@ function summaryInput(counters, incidents) {
 class LocalInsightsService {
   constructor({ repository, auth, providers, audit, notifications, security, agent, brokerUrl = 'http://127.0.0.1:8765', fetchImpl = global.fetch } = {}) {
     Object.assign(this,{ repository,auth,providers,audit,notifications,security,agent,brokerUrl,fetchImpl });
+    this.authorizeOperator=createLocalAiAuthorizer(auth,localAiOperatorAllowed);
     this.enabled=false; this.monitoring=false; this.batch=new Map(); this.running=false; this.analyzing=false; this.lastCleanup=0; this.lastScan=0;
   }
   async init() { await this.repository.init(); }
-  async operator(userId) { if (!await canUseLocal(this.providers,userId)) throw failure('insights_operator_required',403); }
+  async isOperator(userId) { return await canUseLocal(this.providers,userId) && await this.authorizeOperator(userId); }
+  async operator(userId) { if (!await this.isOperator(userId)) throw failure('insights_operator_required',403); }
   async recipients() {
     const admin = await this.auth.repository.findUserByUsername('admin');
     const owner = await this.auth.repository.findUserByEmail(OWNER_EMAIL);
@@ -96,7 +98,7 @@ class LocalInsightsService {
       const recipients=await this.recipients();
       // Revoking the model operator cannot silence alerts to the remaining valid recipient.
       this.monitoring=recipients.length>0;
-      this.enabled=control.enabled===true && !!control.actor_id && await canUseLocal(this.providers,control.actor_id);
+      this.enabled=control.enabled===true && !!control.actor_id && await this.isOperator(control.actor_id);
       if(!this.enabled) { this.batch.clear(); this.abort?.abort(); }
       if(!this.monitoring)return;
       const batch=[...this.batch.values()]; this.batch.clear();

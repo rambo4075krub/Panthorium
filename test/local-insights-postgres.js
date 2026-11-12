@@ -36,7 +36,7 @@ const {ActionLedgerRepository}=require('../services/actionLedgerRepository');
     const eligible=new Set([admin,owner]),records=[];
     const audit={pool,record:(event,fields)=>records.push({event,...fields})};
     const notices=new Map();
-    const auth={repository:{findUserByUsername:async()=>({id:admin,roles:['administrator']}),findUserByEmail:async()=>({id:owner,email:'rambo4075krub@gmail.com',emailVerifiedAt:new Date().toISOString()})}};
+    const auth={repository:{findUserById:async id=>({id,permissions:['chat'],roles:id===admin?['administrator']:['user'],...(id===owner?{email:'rambo4075krub@gmail.com',emailVerifiedAt:new Date().toISOString()}:{})}),findUserByUsername:async()=>({id:admin,roles:['administrator']}),findUserByEmail:async()=>({id:owner,email:'rambo4075krub@gmail.com',emailVerifiedAt:new Date().toISOString()})}};
     const ledger=new ActionLedgerRepository({pool});await ledger.init();
     const tool={id:'security.incident_response',description:'Approve temporary block',permission:'chat',risk:'high',mutates:true,requiresConfirmation:true,validateArgs:()=>null};
     const agent=new AgentService({tools:{get:()=>tool},audit,ledger});

@@ -8,6 +8,7 @@ function enforceAiMode(env = process.env) {
   if (!localOnly(env)) return;
   env.GEMINI_LIVE_ENABLED = '0';
   env.AI_PRIORITY = 'local';
+  env.LOCAL_LLM_REASONING = '0';
   env.SENTINEL_AUTO_TRAINING = '0';
   env.SENTINEL_AUTO_CAPTURE = '0';
   env.SENTINEL_TEACHER_PROVIDERS = '';

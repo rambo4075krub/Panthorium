@@ -22,7 +22,7 @@
       await sleep(delay);
     }
   }
-  async function streamCall(prompt, { voiceMode = false, signal } = {}) {
+  async function streamCall(prompt, { voiceMode = false, signal, thinking } = {}) {
     const system = getOS();
     const requestAccountId = accountId();
     if (window.PanthoriumAuth?.hasPermission && !window.PanthoriumAuth.hasPermission('chat')) return { ok: false, text: 'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat', provider: 'RBAC', via: 'rbac' };
@@ -32,7 +32,7 @@
     const requestId = window.crypto?.randomUUID?.() || `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const requestSignal = signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeoutSignal]) : signal || timeoutSignal;
     if (document.body.dataset.aiMode === "gemini-live-only") voiceMode = false;
-    const request = async () => fetch(base + '/api/chat/stream', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-session-id': system.config.sessionId, Accept: 'text/event-stream' }, body: JSON.stringify({ message: prompt, sessionId: system.config.sessionId, mode: 'default', voice: voiceMode, requestId }), signal: requestSignal });
+    const request = async () => fetch(base + '/api/chat/stream', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-session-id': system.config.sessionId, Accept: 'text/event-stream' }, body: JSON.stringify({ message: prompt, sessionId: system.config.sessionId, mode: 'default', voice: voiceMode, thinking, requestId }), signal: requestSignal });
     let res = await request();
     if (res.status === 401 && window.PanthoriumAuth?.refreshSession) { const ok = await window.PanthoriumAuth.refreshSession().catch(() => false); if (ok) { token = getOS()?.config?.accessToken || ''; res = await request(); } }
     if (!res.ok || !res.body) throw new Error(`stream_http_${res.status}`);
@@ -123,7 +123,7 @@
         }
       }
       if (options?.voiceMode === true) return previous(prompt, options);
-      try { const result = await streamCall(prompt); if (result.text) return result; }
+      try { const result = await streamCall(prompt, options); if (result.text) return result; }
       catch (error) {
         console.warn('[Phase4 Stream]', error.message);
         const fallback = await previous(prompt, options);
@@ -257,4 +257,3 @@
   window.addEventListener('panthorium:auth-changed', () => setTimeout(installCallAI, 50));
   window.PanthoriumAIStream = { call: streamCall, install: installCallAI };
 })();
-

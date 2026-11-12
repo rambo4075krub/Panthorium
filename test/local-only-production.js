@@ -8,6 +8,7 @@ const { createMailboxCompletion } = require('../services/mailbox/completion');
 const { completeLive } = require('../services/geminiLiveCompletion');
 const { connectGeminiLive } = require('../services/geminiLiveVertex');
 const { synthesizeSentinelMaleVoice } = require('../services/sentinelSpeechAudio');
+const { localAiAllowed, localAiOperatorAllowed, createLocalAiAuthorizer } = require('../services/localAiAccess');
 
 (async () => {
   const saved = { ...process.env }, originalFetch = global.fetch;
@@ -23,7 +24,13 @@ const { synthesizeSentinelMaleVoice } = require('../services/sentinelSpeechAudio
     assert.equal(process.env.SENTINEL_TEACHER_PROVIDERS,'');
     assert.equal(process.env.GOOGLE_APPLICATION_CREDENTIALS,'shared-google-identity');
     const providers = new ProviderManager();
-    providers.authorizeLocal = async id => id === 'owner';
+    let regular={id:'regular',roles:['user'],permissions:['chat']};
+    const owner={id:'owner',roles:['administrator'],permissions:['chat']};
+    providers.authorizeLocal = createLocalAiAuthorizer({repository:{findUserById:async id=>id==='owner'?owner:id==='regular'?regular:null}});
+    assert.equal(localAiAllowed(regular),true);
+    assert.equal(localAiOperatorAllowed(regular),false);
+    assert.equal(localAiOperatorAllowed(owner),true);
+    for (const denied of [null,{...regular,id:'guest:public'},{...regular,roles:['guest']},{...regular,permissions:[]}]) assert.equal(localAiAllowed(denied),false);
     providers.entitlements = { state:async()=>{ throw Error('Local-only routing must not consult paid credit'); } };
     assert.equal(providers.hybrid,true);
     assert.deepEqual(providers.available(),['local']);
@@ -42,11 +49,20 @@ const { synthesizeSentinelMaleVoice } = require('../services/sentinelSpeechAudio
     const result=await gateway.complete({userId:'owner',systemPrompt:'brief',history:[{role:'user',content:'สวัสดี'}],preferredProvider:'gemini-live'});
     assert.equal(result.ok,true);assert.equal(result.provider,'local');assert.equal(result.billable,false);assert.equal(result.creditsCharged,0);
     assert.equal(calls.length,1);
+    assert.equal(JSON.parse(calls[0].options.body).chat_template_kwargs.enable_thinking,false,'Instant is the local-only default');
     for (const provider of ['gemini-live','gemini','vertex','openai','groq','anthropic']) await assert.rejects(providers.callDetailed(provider,'s',[],{userId:'owner'}),/provider_not_available/);
     await assert.rejects(completeLive({connect:()=>{throw Error('connection attempted');}}),/cloud_ai_disabled/);
     await assert.rejects(connectGeminiLive({authClient:{getAccessToken(){throw Error('token requested');}}}),/cloud_ai_disabled/);
     await assert.rejects(providers.vertexAccessToken(),/cloud_ai_disabled/);
     assert.equal(calls.length,1);
+    const general=await gateway.complete({userId:'regular',systemPrompt:'brief',history:[{role:'user',content:'สวัสดี'}]});
+    assert.equal(general.ok,true);assert.equal(general.provider,'local');assert.equal(general.creditsCharged,0);
+    await gateway.stream({userId:'regular',systemPrompt:'brief',history:[{role:'user',content:'test'}],thinking:true});
+    assert.equal(JSON.parse(calls.at(-1).options.body).chat_template_kwargs.enable_thinking,true,'Thinking selection survives streaming');
+    await gateway.stream({userId:'regular',systemPrompt:'brief',history:[{role:'user',content:'test'}],thinking:false});
+    assert.equal(JSON.parse(calls.at(-1).options.body).chat_template_kwargs.enable_thinking,false,'Instant can be selected explicitly');
+    regular={...regular,permissions:[]};assert.equal(await providers.authorizeLocal('regular'),false,'chat revocation applies immediately');
+    regular={...regular,permissions:['chat']};
     const speech=await synthesizeSentinelMaleVoice('ทดสอบ','th-TH',{userId:'owner'});
     assert.equal(speech.contentType,'audio/wav');assert.equal(speech.voice,'local-th_m_1');
     assert.equal((await providers.transcribeAudio(Buffer.from('fixture'),'audio/wav','th-TH',{userId:'owner'})).provider,'local');

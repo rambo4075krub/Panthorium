@@ -33,11 +33,15 @@ async function checkOrder(streamFirst) {
     const streamedRequests = fetches.filter(request => request.url.endsWith('/api/chat/stream'));
     assert.equal(streamedRequests.length, 1, 'spoken conversation uses the streaming chat route');
     assert.equal(JSON.parse(streamedRequests[0].init.body).voice, true, 'conversation flag reaches the streamed server request');
+    await w.callAI('ตอบเร็ว', {thinking:false});
+    assert.equal(JSON.parse(fetches.at(-1).init.body).thinking,false,'Instant survives either wrapper order');
+    await w.callAI('คิดละเอียด', {thinking:true});
+    assert.equal(JSON.parse(fetches.at(-1).init.body).thinking,true,'Thinking survives either wrapper order');
     w.OS.state.user.permissions = [];
     assert.equal((await w.callAI('เปิด Learning Lab', { voiceMode: true })).ok, false);
     assert.equal((await w.callAI('การเรียนรู้คืออะไร', { conversationalVoice: true })).ok, false);
     assert.equal(requests.length, 1, 'RBAC denial must stop the command request');
-    assert.equal(fetches.filter(request => request.url.endsWith('/api/chat/stream')).length, 1, 'RBAC denial must stop spoken conversation requests');
+    assert.equal(fetches.filter(request => request.url.endsWith('/api/chat/stream')).length, 3, 'RBAC denial must stop spoken conversation requests');
   } finally { w.close(); }
 }
 

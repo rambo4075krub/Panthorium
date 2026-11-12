@@ -129,7 +129,7 @@ function renderAgentConsent(content,active){
  }else{
   section.append(el('p','เชื่อมต่อ AI และเสียงแล้ว ลองพูด “สรุปอีเมลล่าสุดของฉัน” หรือ “ค้นหาอีเมลจาก…”'));
   const label=el('label','ผู้ประมวลผลสรุปอีเมล'),select=el('select');select.dataset.aiProvider='';
-  for(const [value,text]of [['','Sentinel AI · อัตโนมัติ'],['gemini-live','Sentinel AI · ใช้เครดิตของบัญชี'],...(status.localAiAllowed ? [['local','Qwen3.5-4B · สิทธิ์บริการภายใน']] : [])]){const o=el('option',text);o.value=value;select.append(o);}label.append(select);section.append(label);
+  for(const [value,text]of (document.body?.dataset.aiMode==='local-only'?[['local','Qwen 4B · ในเครื่อง']]:[['','Sentinel AI · อัตโนมัติ'],['gemini-live','Sentinel AI · ใช้เครดิตของบัญชี'],...(status.localAiAllowed ? [['local','Qwen3.5-4B · สิทธิ์บริการภายใน']] : [])])){const o=el('option',text);o.value=value;select.append(o);}label.append(select);section.append(label);
   section.append(button('ถอนเฉพาะการเชื่อมต่อ AI และเสียง',()=>{section.replaceChildren(el('p','หยุดการเข้าถึงอีเมลผ่าน AI และเสียง? กล่องอีเมลปกติยังใช้ได้'));section.append(button('ยืนยันถอนการเชื่อมต่อ AI',async()=>{await api('connection?purpose=agent','DELETE');stop();await render();}),button('ยกเลิก',render));}));
  }
  content.append(section);

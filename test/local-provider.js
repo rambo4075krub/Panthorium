@@ -20,7 +20,7 @@ const {localProfileGuard} = require('../middleware/localProfile');
   const body=JSON.parse(calls[0].options.body);assert.equal(body.model,'panthorium-local');assert.equal(body.tools,undefined);
   for(const provider of ['gemini-live','gemini','openai','vertex']) await assert.rejects(providers.callDetailed(provider,'brief',[]),/provider_not_available/);
   assert.equal(calls.length,1);
-  assert.equal(body.chat_template_kwargs.enable_thinking,true);assert.equal(body.max_tokens,3072);
+  assert.equal(body.chat_template_kwargs.enable_thinking,false);assert.equal(body.max_tokens,160);
   await new LocalLlmProvider({LOCAL_LLM_REASONING:'0'}).complete('brief',[{role:'user',content:'hello'}]);
   const direct=JSON.parse(calls.at(-1).options.body);
   assert.equal(direct.chat_template_kwargs.enable_thinking,false);assert.equal(direct.max_tokens,160);

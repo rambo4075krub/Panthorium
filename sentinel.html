@@ -2804,7 +2804,7 @@
         }
     }
 
-    async function callAI(prompt, { voiceMode = false, conversationalVoice = false } = {}) {
+    async function callAI(prompt, { voiceMode = false, conversationalVoice = false, thinking } = {}) {
         if (voiceMode) {
             if (!window.PanthoriumVoiceCommands) return { ok: false, text: "โมดูลคำสั่งเสียงยังโหลดไม่สำเร็จ กรุณาโหลดหน้าใหม่" };
             return window.PanthoriumVoiceCommands.execute(prompt);
@@ -2823,7 +2823,8 @@
                         message: `ตอบด้วยภาษาของผู้ใช้และตอบกลับด้วยเสียงได้ ระบบนี้ไม่ใช่ระบบข้อความเท่านั้น ห้ามบอกว่าไม่มีเสียงพูด หากข้อความมีหลายภาษา ให้รักษาภาษาของแต่ละส่วนตามบริบท ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ\n${prompt}`,
                         sessionId: OS.config.sessionId,
                         mode: "default",
-                        voice: conversationalVoice
+                        voice: conversationalVoice,
+                        thinking
                     }),
                     signal: AbortSignal.timeout(75000)
                 });
@@ -3335,6 +3336,8 @@
     }
 
     window.addEventListener("panthorium:auth-changed", () => {
+        const localMode = document.getElementById('chat-ai-mode');
+        if (localMode) localMode.value = 'instant';
         try { renderAppLaunchers(); }
         catch (error) { console.error("Launcher refresh failed", error); }
     });
@@ -3401,6 +3404,17 @@
         const sendBtn = $("chat-send");
         const micBtn = $("chat-mic");
         const messages = $("chat-messages");
+        let localMode;
+        if (document.body.dataset.aiMode === 'local-only') {
+            localMode = document.createElement('select');
+            localMode.id = 'chat-ai-mode';
+            localMode.setAttribute('aria-label', 'โหมด Qwen 4B');
+            localMode.innerHTML = '<option value="instant">Instant · ตอบเร็ว</option><option value="thinking">Thinking · คิดละเอียด</option>';
+            localMode.style.cssText = 'max-width:180px;font:inherit;color:var(--text-primary,#e7f3ff);background:var(--bg-panel,#14202e);border:1px solid var(--accent,#00ffcc);border-radius:8px;padding:5px;';
+            const modeHost = document.querySelector('.pt-left-tools') || input.parentElement;
+            modeHost.querySelector('.pt-mode')?.remove();
+            modeHost.appendChild(localMode);
+        }
 
         let sendBusy = false;
         async function send({ resumeGlobalVoice = false } = {}) {
@@ -3419,7 +3433,7 @@
             appendMsg("กำลังคิด...", "ai", true);
             try {
                 const { intent, response: res } = resumeGlobalVoice
-                    ? await requestVoiceInput(text) : { intent: "conversation", response: await callAI(text) };
+                    ? await requestVoiceInput(text) : { intent: "conversation", response: await callAI(text, localMode ? {thinking:localMode.value === 'thinking'} : {}) };
                 // remove loading
                 const last = messages.querySelector('.msg.loading, .msg[data-streaming="1"]');
                 if (last) last.remove();
