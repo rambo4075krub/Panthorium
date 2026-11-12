@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 import model_profile as model
 from work_queue import resource_reason, ram_pressure
-from update_host_broker import remove_previous_weights, PREVIOUS_WEIGHTS
+from update_host_broker import remove_previous_weights, PREVIOUS_WEIGHTS, PREVIOUS_PROJECTOR
 
 class ProfileTests(unittest.TestCase):
     def test_identity_requires_binary_model_and_loopback_port(self):
@@ -70,5 +70,20 @@ class ProfileTests(unittest.TestCase):
             self.assertEqual(len(remove_previous_weights(root,health,verified)),4)
             self.assertTrue(all((root/'models'/name).exists() for name in retained))
             self.assertEqual(remove_previous_weights(root,health,verified),[])
+
+    def test_generic_projector_requires_exact_9b_identity(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'models'/'candidates').mkdir(parents=True)
+            old=root/'models'/'candidates'/'mmproj-F16.gguf';data=b'GGUF9b-projector-fixture'
+            old.write_bytes(data);old.with_suffix('.gguf.source.json').write_text('9b receipt')
+            other=root/'models'/'mmproj-F16.gguf';other.write_bytes(b'GGUFanother-projector')
+            active=root/'models'/model.PROFILE['projector']['filename'];active.write_bytes(b'GGUF4b-projector')
+            health={'version':model.PROFILE['brokerVersion'],'model':model.PROFILE['name'],
+                    'ramGuardAlive':True,'inferenceVerified':True,'visionVerified':True}
+            verified={'text':True,'tools':True,'vision':True}
+            with patch.dict(PREVIOUS_PROJECTOR,bytes=len(data),sha256=hashlib.sha256(data).hexdigest()):
+                removed=remove_previous_weights(root,health,verified)
+            self.assertEqual(len(removed),2)
+            self.assertFalse(old.exists());self.assertTrue(other.exists());self.assertTrue(active.exists())
 
 if __name__=='__main__':unittest.main()

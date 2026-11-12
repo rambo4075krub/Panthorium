@@ -13,15 +13,16 @@ async function api(path,token,body){
 }
 (async()=>{
  const health=await api('/api/health');assert.equal(health.status,200);assert.equal(health.data.deployment.sha,process.env.TEST_EXPECTED_SHA);
- for(const admin of [false,true]){
+ const positiveOnly=process.env.TEST_POSITIVE_ONLY==='1';
+ for(const admin of positiveOnly?[true]:[false,true]){
   const f={id:randomUUID(),order:randomUUID(),username:'qwen8b_test_'+randomBytes(8).toString('hex'),password:randomBytes(24).toString('hex')};fixtures.push(f);
   await pool.query('insert into panthorium_users(id,username,password_hash,roles,permissions) values($1,$2,$3,$4,$5)',[f.id,f.username,await bcrypt.hash(f.password,10),JSON.stringify(admin?['administrator']:[]),JSON.stringify(['chat','system:read'])]);
   await pool.query("insert into panthorium_entitlement_grants(order_id,user_id,product_id,snapshot,starts_at,ends_at) values($1,$2,'8b-test',$3,now(),now()+interval '10 minutes')",[f.order,f.id,JSON.stringify({category:'membership',quotas:{aiCredits:0}})]);
   const login=await api('/api/auth/login',null,{username:f.username,password:f.password});assert.equal(login.status,200);const token=login.data.accessToken;assert(token);
   const policy=await api('/api/hybrid/status',token);assert.equal(policy.status,200);assert.equal(policy.data.local.enabled,admin);
   if(admin){
-   assert.equal(policy.data.local.model,profile.name);assert.equal(policy.data.local.vision,false);
-   assert.deepEqual(policy.data.local.capabilities,['text','thinking','tool-calling']);assert.equal(policy.data.primary,'local');
+   assert.equal(policy.data.local.model,profile.name);assert.equal(policy.data.local.vision,profile.vision);
+   assert.deepEqual(policy.data.local.capabilities,profile.capabilities);assert.equal(policy.data.primary,'local');
    results.push({test:'authorized model wiring',ready:policy.data.local.ready,reason:policy.data.local.reason,model:policy.data.local.model});
    if(process.env.TEST_INFERENCE==='1'){
     for(const message of ['ตอบสั้น ๆ ว่า ทดสอบสำเร็จ','ของราคา 546.02 บาท ลด 10 บาท เหลือเท่าไร ตอบสั้น ๆ']){
@@ -49,7 +50,7 @@ async function api(path,token,body){
   }
   const used=(await pool.query('select used from panthorium_entitlement_grants where order_id=$1',[f.order])).rows[0].used;assert.deepEqual(used,{});
  }
- assert.equal((await api('/api/local/chat',null,{message:'test'})).status,401);
+ if(!positiveOnly)assert.equal((await api('/api/local/chat',null,{message:'test'})).status,401);
  console.log(JSON.stringify({passed:true,sha:process.env.TEST_EXPECTED_SHA,inferenceTested:process.env.TEST_INFERENCE==='1',results}));
 })().catch(e=>{console.error(e.message);process.exitCode=1;}).finally(async()=>{
  for(const f of fixtures){

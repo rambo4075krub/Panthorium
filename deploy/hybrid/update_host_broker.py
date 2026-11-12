@@ -6,7 +6,7 @@ or scheduled tasks. Old Qwen weights are removed only with explicit options.
 import argparse, datetime, hashlib, json, os, shutil, subprocess, time
 from pathlib import Path
 import httpx, psutil
-from model_profile import PROFILE, model_path, projector_path, verify_model, owns_model
+from model_profile import PROFILE, model_path, projector_path, verify_model, owns_model, preflight
 
 ROOT=Path(r'D:\PanthoriumAI')
 BASE=ROOT/'hybrid'
@@ -14,6 +14,8 @@ ACTIVE=Path(r'D:\Panthorium\Host\production\active.json')
 FILES=('hybrid_server.py','work_queue.py','model_profile.py','model-profile.json','media_input.py')
 HOST_FILES=('Start-LLM.ps1','Stop-LLM.ps1')
 PREVIOUS_WEIGHTS=('Qwen3.5-9B-Q3_K_S.gguf','Qwen3.5-9B-Q4_K_M.gguf')
+PREVIOUS_PROJECTOR={'filename':'mmproj-F16.gguf','bytes':918166080,
+                    'sha256':'f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f'}
 OWNED_WEIGHTS=(PROFILE['filename'],*PREVIOUS_WEIGHTS,'Qwen3-8B-Q4_K_M.gguf')
 
 def stop_owned_models():
@@ -44,6 +46,16 @@ def remove_previous_weights(root, health, verified):
         raise RuntimeError('4B text, tools, vision and live resource guard must pass before removing 9B')
     paths=[root/'models'/sub/name for sub in ('','candidates') for weight in PREVIOUS_WEIGHTS
            for name in (weight,weight+'.source.json')]
+    # The old trial used a generic projector filename. Its name alone does not
+    # prove that it belongs to 9B: verify its exact bytes before selecting it.
+    for sub in ('','candidates'):
+        projector=root/'models'/sub/PREVIOUS_PROJECTOR['filename']
+        if projector.is_symlink() or projector.parent.is_symlink():
+            raise RuntimeError('Refusing linked previous projector')
+        if projector.is_file():
+            try:verify_model(projector,PREVIOUS_PROJECTOR)
+            except ValueError:continue  # another model's projector is retained
+            paths.extend((projector,projector.with_suffix('.gguf.source.json')))
     if any(path.is_symlink() or path.parent.is_symlink() for path in paths):
         raise RuntimeError('Refusing linked previous weights')
     removed=[]
@@ -118,6 +130,10 @@ def main():
     verify_model(final_projector if final_projector.exists() else candidate_projector,PROFILE['projector'])
     status=get('status')
     if status.get('busy') or status.get('queue',{}).get('waiting'):raise SystemExit('Broker has active work; retry when idle')
+    __import__('PIL.Image')
+    readiness=preflight(ROOT)
+    if not readiness['ready']:
+        raise SystemExit('4B preflight blocked before changing the installed broker: '+str(readiness['reason']))
     # Close admission briefly so no new work arrives between the idle check and stop.
     disabled=ROOT/'qwen.disabled';already_disabled=disabled.exists()
     if already_disabled:raise SystemExit('Qwen is disabled; keep the existing installation')
