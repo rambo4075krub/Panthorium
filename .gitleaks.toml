@@ -1,0 +1,12 @@
+title = "Panthorium secret detection"
+[extend]
+useDefault = true
+
+# Provider-key rules alone miss ordinary passwords saved in agent commands.
+[[rules]]
+id = "agent-command-credential"
+description = "Credential literal persisted in an agent permission/configuration file"
+path = '''(?i)(^|/)(\.claude|\.codex)/.*\.(json|jsonl|toml)$'''
+regex = '''(?i)(?:[a-z0-9_]*(?:password|passwd|secret|token|api[_-]?key)[a-z0-9_]*[\s\\"']*[:=][\s\\"']*|sshpass\s+-p[\s\\"']+|--password[\s=\\"']+|(?:authorization|x-api-key)[\s:\\"']+(?:bearer\s+)?)([a-z0-9_./+!@%=:~-]{6,})'''
+secretGroup = 1
+keywords = ["password", "passwd", "secret", "token", "api", "sshpass", "authorization"]

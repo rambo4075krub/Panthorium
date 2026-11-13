@@ -1,14 +1,9 @@
 'use strict';
-const fs = require('node:fs');
 const path = require('node:path');
-const crypto = require('node:crypto');
+const {loadLocalProfile} = require('./local-secret-store.cjs');
 const root = path.resolve(__dirname, '..');
 const state = path.resolve(root, '..', 'panthorium-state');
-fs.mkdirSync(state, {recursive:true});
-const profileFile = path.join(state, 'local-profile.json');
-if (!fs.existsSync(profileFile)) fs.writeFileSync(profileFile, JSON.stringify({ username:'localadmin', password:crypto.randomBytes(24).toString('base64url'), jwtSecret:crypto.randomBytes(48).toString('base64url') }, null, 2), {flag:'wx',mode:0o600});
-const profile = JSON.parse(fs.readFileSync(profileFile,'utf8'));
-fs.writeFileSync(path.join(state, 'LOCAL_LOGIN.txt'), 'Panthorium local pilot only\nUsername: ' + profile.username + '\nPassword: ' + profile.password + '\n', {mode:0o600});
+const profile = loadLocalProfile({statePath:state});
 const keep = /^(Path|SystemRoot|windir|TEMP|TMP|USERPROFILE|HOMEDRIVE|HOMEPATH|APPDATA|LOCALAPPDATA|COMSPEC|PATHEXT|ProgramFiles.*|CommonProgramFiles.*|OS|NUMBER_OF_PROCESSORS|PROCESSOR_.*)$/i;
 for (const key of Object.keys(process.env)) if (!keep.test(key)) delete process.env[key];
 Object.assign(process.env, {
