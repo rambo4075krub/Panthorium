@@ -14,6 +14,9 @@ const POWERSHELL = String.raw`
 $ErrorActionPreference = 'Stop'
 $phase = 'input'
 try {
+  # A PowerShell 7 parent can pass incompatible modules through Node. Only
+  # load the native Windows PowerShell modules, never user-added modules.
+  $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
   Add-Type -AssemblyName System.Security
   $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
   $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
