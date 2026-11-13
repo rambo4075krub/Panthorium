@@ -18,6 +18,7 @@ try {
   # load the native Windows PowerShell modules, never user-added modules.
   $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
   Add-Type -AssemblyName System.Security
+  [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
   $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
   $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
   if ($request.action -eq 'restrict') {

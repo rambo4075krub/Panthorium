@@ -86,7 +86,7 @@ try {
   assert.equal(show.status,1);assert.equal(show.stdout,'');assert.match(show.stderr,/require_interactive_terminal/);
 
   if(process.platform==='win32') {
-    const native=createProfileStore(windowsProtector()),state=fresh('windows-dpapi'),original=profile();legacy(state,original);
+    const native=createProfileStore(windowsProtector()),state=fresh('windows-dpapi-\u0e44\u0e17\u0e22'),original=profile();legacy(state,original);
     assert.deepEqual(native({statePath:state}),original);assertProtected(state,original);
     assert.deepEqual(native({statePath:state,create:false}),original);
     const target=path.join(state,'local-profile.dpapi'),data=fs.readFileSync(target,'utf8').split('\n');
