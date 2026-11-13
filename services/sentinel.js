@@ -181,17 +181,18 @@ class Sentinel {
     }
     return result || { ok: false, error: 'function_call_failed', text: '' };
   }
-  async chat({ sessionId, userId = "system", message, mode = "default", provider, model, voiceMode = false, user, functionCalling, requestId, signal, media, thinking }) {
+  async chat({ sessionId, userId = "system", message, mode = "default", provider, model, voiceMode = false, user, functionCalling, requestId, signal, media, thinking, screen }) {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message, historyLimit: voiceMode ? 12 : 40 });
     const [trainingContext, memoryContext] = await Promise.all([
       this.training ? this.training.contextFor(message) : Promise.resolve(''),
       this.memoryContextFor(userId, message, prepared.sid)
     ]);
+    if(screen) functionCalling=null;
     const functionGuidance = this.functionGuidance(user, functionCalling);
-    const result = this.normalizeVoiceAnswer(await this.completeWithFunctionCalls({ systemPrompt: this.prompts.build(mode)+currentTimeContext()+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard() + functionGuidance, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, user, functionCalling, requestId, voiceMode, signal, media, thinking }));
+    const result = this.normalizeVoiceAnswer(await this.completeWithFunctionCalls({ systemPrompt: this.prompts.build(mode)+currentTimeContext()+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard() + functionGuidance + require('./screenVoiceTools').screenInstruction(screen), history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, user, functionCalling, requestId, voiceMode, signal, media, thinking }));
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });
-    if (!media?.length) this.captureTraining({message,result,userId,sessionId:prepared.sid});
+    if (!media?.length && !screen) this.captureTraining({message,result,userId,sessionId:prepared.sid});
     return result.ok ? { ...result, sessionId: prepared.sid, sentinel: "Sentinel" } : result;
   }
   functionGuidance(user, functionCalling) {

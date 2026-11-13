@@ -9,6 +9,7 @@ const { STUDIO_TOOL_DEFINITIONS } = require('./creativeStudioTools');
 const { WORK_TOOL_DEFINITIONS } = require('./workAssistantTools');
 
 const TOOL_DEFINITIONS = [
+  ...require('./screenVoiceTools').SCREEN_TOOL_DEFINITIONS,
   {name:'panthorium_calculate',toolId:'calculator.evaluate',description:'Calculate arithmetic accurately. Always use for addition/subtraction/percentages, including Thai money questions. Pass the exact numbers and operations in the question, e.g. 546.02-10. Do not do arithmetic from memory.',properties:{expression:{type:'STRING',description:'Arithmetic expression using numbers + - * / parentheses, maximum 200 characters.'}},required:['expression']},
   ...PUBLIC_WEB_TOOL_DEFINITIONS,
   ...NOTIFICATION_TOOL_DEFINITIONS,
@@ -51,6 +52,7 @@ const TOOL_DEFINITIONS = [
 
 const CHAT_APPROVAL_TOOL_IDS = new Set(['studio.create', 'studio.edit', 'notifications.write', 'mailbox.write', 'work.save', 'work.draft', 'work.export', 'work.task']);
 const ACCOUNT_ONLY_TOOL_IDS = new Set([
+  'screen.command',
   ...WORK_TOOL_DEFINITIONS.map(tool => tool.toolId),
   ...MAILBOX_TOOL_DEFINITIONS.map(tool => tool.toolId),
   ...NOTIFICATION_TOOL_DEFINITIONS.map(tool => tool.toolId),
@@ -84,6 +86,7 @@ class AgentFunctionCallingService {
     const catalog = new Map(this.agentService.catalogFor(user).map(tool => [tool.id, tool]));
     const allowedWindows = windowCatalog.apps.filter(app => windowCatalog.allowed(app, user)).map(app => app.id);
     return TOOL_DEFINITIONS.flatMap(definition => {
+      if (definition.liveOnly && surface !== 'gemini-live') return [];
       if (ACCOUNT_ONLY_TOOL_IDS.has(definition.toolId) && (!user?.sub || String(user.sub).startsWith('guest:') || user.roles?.includes('guest'))) return [];
       const tool = catalog.get(definition.toolId);
       if (!tool) return [];

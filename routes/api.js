@@ -21,6 +21,7 @@ function validChatBody(body = {}) {
   return null;
 }
 const windowCatalog = require("../voice-window-catalog");
+const {screenContext} = require('../services/screenVoiceTools');
 const creativeVoice = require("../creative-voice-catalog");
 function hasVoicePermission(user, permission) { return (user?.permissions || []).includes(permission); }
 
@@ -46,6 +47,9 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       if (!localAiAllowed(req.user)) return res.status(403).json({ok:false,error:'local_access_denied'});
       const message = req.body?.message;
       if (typeof message !== "string" || !message.trim() || message.length > 2000) return res.status(400).json({ok:false,error:"invalid_message"});
+      let screen;
+      try { screen = screenContext(req.body.screen,req.user); }
+      catch { return res.status(400).json({ok:false,error:"invalid_screen_context"}); }
       let media;
       try { media = require('../services/localMedia').validateMedia(req.body.media); }
       catch { return res.status(400).json({ok:false,error:'invalid_local_media'}); }
@@ -59,13 +63,13 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
           const cancel = () => { if (!res.writableEnded) controller.abort(); };
           res.once('close',cancel);
           let result;
-          try { result = await sentinel.chat({message:message.trim(),media,thinking:req.body.thinking,sessionId:req.body.sessionId,userId,provider:'local',voiceMode:req.body.voice===true,user:req.user,functionCalling,requestId:stableActionRequestId(req)||req.requestId||randomUUID(),signal:controller.signal}); }
+          try { result = await sentinel.chat({message:message.trim(),screen,media,thinking:req.body.thinking,sessionId:req.body.sessionId,userId,provider:'local',voiceMode:req.body.voice===true,user:req.user,functionCalling,requestId:stableActionRequestId(req)||req.requestId||randomUUID(),signal:controller.signal}); }
           finally { res.off('close',cancel); }
           if (res.destroyed) return;
           return res.status(result.ok?200:503).json({...result,creditsCharged:0,billable:false});
         }
         const complete = hybridQwen ? hybridQwen.complete.bind(hybridQwen) : sentinel.providers.callDetailed.bind(sentinel.providers, "local");
-        const result = await complete("คุณคือผู้ช่วย Panthorium ตอบภาษาไทยสั้น ชัดเจน และซื่อสัตย์ ไม่มีเครื่องมือสั่งงานระบบจริง",[{role:'user',content:message.trim()}], {userId});
+        const result = await complete("คุณคือผู้ช่วย Panthorium ตอบภาษาไทยสั้น ชัดเจน และซื่อสัตย์ ไม่มีเครื่องมือสั่งงานระบบจริง"+require('../services/screenVoiceTools').screenInstruction(screen),[{role:'user',content:message.trim()}], {userId});
         res.json({ok:true,...result,creditsCharged:0,billable:false,actionsEnabled:false});
       } catch (error) {
         if (String(error.message).startsWith('quota_exceeded')) return res.status(402).json({ok:false,error:'quota_exceeded'});

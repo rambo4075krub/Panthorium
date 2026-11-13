@@ -269,7 +269,7 @@
       const action = String(frame.action || "");
       Promise.resolve(window.PanthoriumVoiceCommands?.windowAction?.(action))
         .then(result => {
-          if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "uiActionResult", requestId, result: { ok: result?.ok === true, error: result?.error || null, text: result?.text || "" } }));
+          if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "uiActionResult", requestId, result: { ok: result?.ok === true, error: result?.error || null, text: result?.text || "", confirmationRequired:result?.confirmationRequired===true } }));
         })
         .catch(() => {
           if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "uiActionResult", requestId, result: { ok: false, error: "ui_action_failed" } }));
@@ -295,10 +295,21 @@
     const output = content.outputTranscription || content.output_transcription;
     if (input?.text) { outputSuppressed = false; inputTranscript += input.text; updateChatTranscript("user", inputTranscript); window.PanthoriumOrb?.setTranscript?.(inputTranscript, 0); }
     if (output?.text) { outputTranscript += output.text; updateChatTranscript("ai", outputTranscript); window.PanthoriumOrb?.setTranscript?.(outputTranscript, 0); }
+    if (input?.finished===true||content.turnComplete||content.turn_complete) {
+      const phrase=inputTranscript.normalize('NFC').replace(/[\s\p{P}\p{S}]+/gu,'').toLowerCase();
+      if(/^(หยุดฟัง|ปิดไมค์|ปิดไมโครโฟน|หยุดรับคำสั่ง|stoplistening|stopmicrophone)$/.test(phrase)){cleanup();return;}
+    }
     const parts = content.modelTurn?.parts || content.model_turn?.parts || [];
     for (const part of parts) {
       const audio = part.inlineData?.data || part.inline_data?.data;
       if (audio) { setStatus("Sentinel AI กำลังตอบ", "listening"); playPcm24k(audio); }
+    }
+    if ((input?.finished===true||content.turnComplete||content.turn_complete)&&!screenConfirmationHandled&&window.PanthoriumScreenVoice?.hasPending?.()) {
+      const phrase=inputTranscript.normalize('NFC').replace(/[\s\p{P}\p{S}]+/gu,'').toLowerCase();
+      if(['ยืนยัน','ยืนยันคำสั่ง','ยกเลิก','confirm','cancel'].includes(phrase)){
+        screenConfirmationHandled=true;
+        Promise.resolve(window.PanthoriumScreenVoice.execute(inputTranscript,{userInitiated:true})).then(result=>{if(result?.text)window.PanthoriumOrb?.setTranscript?.(result.text,0);}).catch(()=>{});
+      }
     }
     if ((input?.finished===true||content.turnComplete||content.turn_complete)&&!creativeConfirmationHandled&&window.PanthoriumCreativeStudio?.hasVoicePending?.()) {
       const intent=window.PanthoriumCreativeVoiceCatalog?.parse(inputTranscript);
@@ -308,17 +319,17 @@
       }
     }
     if (content.turnComplete || content.turn_complete) {
-      creativeConfirmationHandled=false;
+      creativeConfirmationHandled=false;screenConfirmationHandled=false;
       inputTranscript = ""; outputTranscript = ""; chatUserRow = null; chatAssistantRow = null;
       outputSuppressed = false;
       setStatus("Sentinel AI พร้อมฟัง", "listening");
     }
   }
 
-  let creativeConfirmationHandled=false;
+  let creativeConfirmationHandled=false,screenConfirmationHandled=false;
   async function openLiveSession(generation) {
     const ensureCurrent = () => { if (generation !== sessionGeneration || activeAccountKey !== null && activeAccountKey !== accountKey()) throw cancelled(); };
-    creativeConfirmationHandled=false;
+    creativeConfirmationHandled=false;screenConfirmationHandled=false;
     inputTranscript = ""; outputTranscript = ""; chatUserRow = null; chatAssistantRow = null;
     outputSuppressed = false;
     setStatus("กำลังเปิดไมโครโฟน", "processing");

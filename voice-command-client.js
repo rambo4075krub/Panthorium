@@ -79,6 +79,15 @@
     else root.querySelector(app.closeButton)?.click();
   }
   async function windowAction(action) {
+    if (typeof action === 'string' && action.startsWith('screen_command:')) {
+      try {
+        const [encoded,id]=action.slice(15).split('#'),key=id?identity()+':screen:'+id:null;
+        if(key&&studioActions.has(key)) return await studioActions.get(key);
+        const run=Promise.resolve(window.PanthoriumScreenVoice?.execute(decodeURIComponent(encoded)) || failure('module_unavailable'));
+        if(key){studioActions.set(key,run);if(studioActions.size>200)studioActions.delete(studioActions.keys().next().value);}
+        return await run;
+      } catch (_) { return failure('function_not_available'); }
+    }
     if (typeof action === 'string' && action.startsWith('studio_command:')) {
       try {
         const [encoded,id]=action.slice(15).split('#'),key=id?identity()+':'+id:null;
@@ -259,6 +268,10 @@
       if (window.PanthoriumAuth?.ensureSession && !(await window.PanthoriumAuth.ensureSession())) return failure('authentication_required');
       const userId = system()?.state?.user?.id || system()?.state?.user?.sub;
       if (!userId) return failure('authentication_required');
+      if (window.PanthoriumScreenVoice?.hasPending?.() || window.PanthoriumScreenVoiceCatalog?.parse(command)) {
+        const result = await window.PanthoriumScreenVoice.execute(command, {userInitiated:true});
+        if (result) { showResult(result.text,result,result.confirmationRequired); return result; }
+      }
       if (/^(ปิด|ปิดหน้าต่าง|ปิดหน้าต่างนี้|ปิดอันนี้|closethiswindow)$/.test(normalized)) {
         const active = catalog.apps.filter(app => visible(rootFor(app)) && catalog.allowed(app, system()?.state?.user))
           .sort((a, b) => (Number.parseInt(getComputedStyle(document.querySelector(b.selector)).zIndex, 10) || 0) - (Number.parseInt(getComputedStyle(document.querySelector(a.selector)).zIndex, 10) || 0))[0];
@@ -310,5 +323,5 @@
     catalog.apps.forEach(dismiss);
     pending = null; applied.clear(); studioActions.clear(); document.getElementById('sentinel-command-result')?.remove();
   });
-  window.PanthoriumVoiceCommands = { execute, windowAction, functionAction };
+  window.PanthoriumVoiceCommands = { execute, windowAction, functionAction, hasPending:()=>!!pending || !!window.PanthoriumScreenVoice?.hasPending?.() };
 })();
