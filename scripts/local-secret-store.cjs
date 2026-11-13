@@ -12,6 +12,7 @@ const MAX_BYTES = 64 * 1024;
 // PowerShell interpolation, a temporary plaintext file, or diagnostic output.
 const POWERSHELL = String.raw`
 $ErrorActionPreference = 'Stop'
+$phase = 'input'
 try {
   Add-Type -AssemblyName System.Security
   $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
@@ -20,11 +21,16 @@ try {
     $item = Get-Item -LiteralPath $request.path -Force
     if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'reparse point' }
     $acl = Get-Acl -LiteralPath $request.path
-    if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { throw 'unexpected owner' }
+    $phase = 'owner_check'
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    # Elevated Windows processes can create files owned by Administrators.
+    if ($owner -ne $sid.Value -and !($isAdmin -and $owner -eq 'S-1-5-32-544')) { throw 'unexpected owner' }
     $allowed = @($sid.Value, 'S-1-5-18', 'S-1-5-32-544')
     $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
     $rights = if ($item.PSIsContainer) { ':(OI)(CI)F' } else { ':F' }
     $arguments = @($request.path, '/inheritance:r', '/grant:r') + @($allowed | ForEach-Object { '*' + $_ + $rights })
+    $phase = 'acl_update'
     & $icacls @arguments 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'acl update failed' }
     foreach ($rule in (Get-Acl -LiteralPath $request.path).Access) {
@@ -34,6 +40,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'acl removal failed' }
       }
     }
+    $phase = 'acl_verify'
     $actual = Get-Acl -LiteralPath $request.path
     if (!$actual.AreAccessRulesProtected) { throw 'inherited access' }
     foreach ($rule in $actual.Access) {
@@ -45,14 +52,14 @@ try {
     $bytes = [Convert]::FromBase64String($request.data)
     $entropy = [Text.Encoding]::UTF8.GetBytes('Panthorium.local-profile.v1')
     $scope = [Security.Cryptography.DataProtectionScope]::CurrentUser
-    if ($request.action -eq 'protect') { $result = [Security.Cryptography.ProtectedData]::Protect($bytes, $entropy, $scope) }
-    elseif ($request.action -eq 'unprotect') { $result = [Security.Cryptography.ProtectedData]::Unprotect($bytes, $entropy, $scope) }
+    if ($request.action -eq 'protect') { $phase = 'protect'; $result = [Security.Cryptography.ProtectedData]::Protect($bytes, $entropy, $scope) }
+    elseif ($request.action -eq 'unprotect') { $phase = 'unprotect'; $result = [Security.Cryptography.ProtectedData]::Unprotect($bytes, $entropy, $scope) }
     else { throw 'unknown action' }
     [Console]::Out.Write([Convert]::ToBase64String($result))
     [Array]::Clear($bytes, 0, $bytes.Length)
     [Array]::Clear($result, 0, $result.Length)
   }
-} catch { [Console]::Error.Write('local_secret_operation_failed'); exit 1 }
+} catch { [Console]::Error.Write('local_secret_' + $phase + '_failed'); exit 1 }
 `;
 
 function windowsProtector() {
@@ -62,7 +69,10 @@ function windowsProtector() {
     const result = spawnSync(executable, ['-NoProfile', '-NonInteractive', '-Command', POWERSHELL], {
       input: JSON.stringify(request), encoding: 'utf8', windowsHide: true, timeout: 15000, maxBuffer: MAX_BYTES * 4
     });
-    if (result.error || result.status !== 0) throw new Error('local_secret_operation_failed');
+    if (result.error || result.status !== 0) {
+      const code = String(result.stderr || '').trim();
+      throw new Error(/^local_secret_(input|owner_check|acl_update|acl_verify|protect|unprotect)_failed$/.test(code) ? code : 'local_secret_operation_failed');
+    }
     return result.stdout.trim();
   }
   return {

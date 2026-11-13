@@ -92,7 +92,7 @@ try {
     const target=path.join(state,'local-profile.dpapi'),data=fs.readFileSync(target,'utf8').split('\n');
     const bytes=Buffer.from(data[1],'base64');bytes[bytes.length-1]^=1;
     fs.writeFileSync(target,data[0]+'\n'+bytes.toString('base64'));
-    assert.throws(()=>native({statePath:state}),/local_secret_operation_failed/);
+    assert.throws(()=>native({statePath:state}),/local_secret_unprotect_failed/);
     console.log('PASS native Windows DPAPI migration, restart, restricted ACLs and tamper rejection');
   }
   console.log('PASS local secret storage migration, no plaintext fallback, atomic failure, conflict, path and output protections');
