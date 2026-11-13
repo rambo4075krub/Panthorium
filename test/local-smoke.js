@@ -7,7 +7,7 @@ const base='http://127.0.0.1:18787';
  for(const path of ['/','/local-ai']){const r=await fetch(base+path);assert.equal(r.status,200);assert.match(await r.text(),/Panthorium/);}
  const unauth=await fetch(base+'/api/local/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'hello'})});assert.equal(unauth.status,401);
  for(const path of ['/api/chat','/api/agent/run','/api/speech','/internal/jobs']){const r=await fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});assert.equal(r.status,503);}
- const profile=JSON.parse(require('node:fs').readFileSync(require('node:path').resolve(__dirname,'../../panthorium-state/local-profile.json'),'utf8')); const session=await fetch(base+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:profile.username,password:profile.password})});assert.equal(session.status,200);const auth=await session.json();assert.ok(auth.accessToken);
+ const profile=require('../scripts/local-secret-store.cjs').loadLocalProfile({create:false}); const session=await fetch(base+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:profile.username,password:profile.password})});assert.equal(session.status,200);const auth=await session.json();assert.ok(auth.accessToken);
  const headers={'Content-Type':'application/json',Authorization:'Bearer '+auth.accessToken};
  const providers=await fetch(base+'/api/ai/providers',{headers});assert.equal(providers.status,200);assert.deepEqual((await providers.json()).providers.map(p=>p.provider),['local']);
  if(process.argv.includes('--inference')){

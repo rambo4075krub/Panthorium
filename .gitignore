@@ -1,5 +1,25 @@
 node_modules
 .env
+.env.*
+!.env.example
+# Machine-local credentials must never travel with a checkout.
+**/.claude/settings.local.json
+**/.codex/auth.json
+local-profile.json
+local-profile.dpapi
+local-profile.lock
+LOCAL_LOGIN.txt
+panthorium-state/
+*.dpapi
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*-private.pem
+id_rsa
+id_ed25519
+trial-api-key.txt
 *.log
 data/*
 logs/
