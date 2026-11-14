@@ -30,7 +30,7 @@ jobs:
           ref: ${{ github.sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24.22.1
+          node-version: 24.22.3
       - name: Authenticate using the existing production deployment identity
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:

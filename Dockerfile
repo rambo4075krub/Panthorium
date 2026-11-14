@@ -1,14 +1,14 @@
-FROM node:24.22.1-alpine AS native-security-build
+FROM node:24.22.3-alpine AS native-security-build
 RUN apk add --no-cache alpine-sdk meson python3-dev py3-packaging libffi-dev pcre2-dev 'zlib-dev>=1.4-r0' gettext-dev bash
 COPY build/alpine-security/ /build/alpine-security/
 RUN sh /build/alpine-security/build.sh
 
-FROM node:24.22.1-alpine AS media-build
+FROM node:24.22.3-alpine AS media-build
 RUN apk add --no-cache build-base pkgconf nasm patch x264-dev opus-dev libass-dev 'zlib-dev>=1.4-r0'
 COPY build/media/ /build/media/
 RUN node /build/media/build-ffmpeg.mjs
 
-FROM node:24.22.1-alpine AS runtime
+FROM node:24.22.3-alpine AS runtime
 # Only the libraries used by the reviewed CPU/local-file build, plus captions.
 COPY --from=native-security-build /out/keys/ /etc/apk/keys/
 COPY --from=native-security-build /out/packages/ /tmp/panthorium-security-packages/
