@@ -26,11 +26,11 @@ Limits remain 200 operations / 42 KB per edit, editable sheet range A1:AN1000 (5
 
 ## Voice control in the current workspace
 
-Signed-in users with the ordinary `chat` permission can control the five editors. No administrator, owner, local-model access, or `sentinel:command` permission is needed. Microphone access and the existing speech-provider/credit rules still apply. The compact **เสียง** button shows examples and starts the shared microphone; Office voice commands now preserve unsaved manual edits instead of redirecting them to the saved source file.
+Signed-in users with the ordinary `chat` permission can control the five editors. No administrator, owner, local-model access, or `sentinel:command` permission is needed. Microphone access and the existing speech-provider/credit rules still apply. The **เริ่มสั่งด้วยเสียง** button starts the shared microphone on the first tap and shows **หยุดฟัง** while active. The separate **คำสั่งเสียง** button opens examples; Office voice commands now preserve unsaved manual edits instead of redirecting them to the saved source file.
 
 | Workspace | Example spoken commands |
 | --- | --- |
-| Image | `เพิ่มข้อความ สวัสดีครับ`, `เลือกเลเยอร์ที่ 1`, `หมุนรูปภาพ 90 องศา`, `ความทึบ 50 เปอร์เซ็นต์`, `สว่างขึ้น` |
+| Image | `เปิดเลเยอร์`, `ปิดเลเยอร์`, `ซูมพอดี`, `บันทึกภาพ`, `เพิ่มข้อความ สวัสดีครับ`, `เลือกเลเยอร์ที่ 1`, `หมุนรูปภาพ 90 องศา`, `ความทึบ 50 เปอร์เซ็นต์`, `สว่างขึ้น` |
 | Video | `เลื่อนไป 1 วินาที`, `แบ่งคลิป`, `เลือกคลิปที่สอง`, `ความเร็ว 2 เท่า`, `ระดับเสียง 50 เปอร์เซ็นต์`, `เพิ่มคำบรรยาย สวัสดี`, `สัดส่วนวิดีโอ แนวตั้ง` |
 | Document | `เพิ่มย่อหน้า รายละเอียดงาน`, `เลือกย่อหน้าที่ 2`, `เปลี่ยนข้อความที่เลือกเป็น ข้อความใหม่`, `ตัวหนา`, `ขนาดตัวอักษร 18` |
 | Spreadsheet | `เลือกเซลล์ เอหนึ่ง`, `เปลี่ยน B2 เป็น 500`, `ใส่สูตร B3 เป็น =SUM(B1:B2)`, `เพิ่มชีต สรุป` |
@@ -40,7 +40,7 @@ Shared commands include `เปิดเอกสาร`, `เปิดไฟล
 
 Saving, exporting, downloading a project, and creating a blank file first show a workspace confirmation. Say **ยืนยัน** or **ยกเลิก**, or use its buttons. Approval is tied to the account, active category, exact editor instance, file/revision, draft state and name for two minutes. Switching accounts/tabs, replacing the editor or changing the draft invalidates it. Heavy exports run asynchronously and report that they have started until their actual result arrives. Repeated commands while busy cannot start another export.
 
-The shared bounded parser accepts common Thai politeness variants, Thai digits and common spoken number/cell names; dictated content retains its punctuation, case and polite words. It does not split a transcript into arbitrary commands or execute code/selectors from text. Unknown operations and absent/protected selections report errors. In image crop/paint/move modes, voice selects the tool; drawing and precise drag coordinates still require the canvas. Formula dictation must resolve to a formula supported by the existing engine.
+The shared bounded parser accepts common Thai politeness variants, Thai digits and common spoken number/cell names; dictated content retains its punctuation, case and polite words. It does not split a transcript into arbitrary commands or execute code/selectors from text. Unknown operations and absent/protected selections report errors. Image commands also support `เพิ่มสี่เหลี่ยม`, `เพิ่มวงรี`, `เปลี่ยนสีเป็น แดง` (common Thai colors or #RRGGBB), `ย้ายเลเยอร์ไปทางขวา 50 พิกเซล`, `ปรับความกว้าง 300 พิกเซล`, `เลื่อนเลเยอร์ขึ้น`, `ซ่อนเลเยอร์ที่เลือก`, and `ครอปภาพ ซ้าย 10 บน 20 กว้าง 300 สูง 200`. These edit the current draft with undo, validate tool bounds, and preserve the existing save confirmation. Panel and visibility commands are idempotent. Freehand brush/eraser paths still require the canvas. `เปิดไฟล์ที่เลือก` opens the selected owned file. File and media toolbars wrap to fit narrow windows; the save button stays in normal flow so it cannot cover nearby controls. Formula dictation must resolve to a formula supported by the existing engine.
 
 `studio.command` returns a pending browser action through chat and Live voice, and the browser acknowledgement reports the actual UI result. A model cannot confirm its own proposed save: confirmation/cancellation are rejected as tool arguments. Live voice accepts only a final **input** transcript for a pending workspace confirmation, never assistant speech or a partial transcript. The action's Live receipt does not execute it again. Hybrid voice routes recognized commands after its existing authorized transcription step without invoking local chat inference.
 
@@ -53,6 +53,7 @@ The shared bounded parser accepts common Thai politeness variants, Thai digits a
 - `node test/creative-editing-workflows-browser.js`
 - `node test/creative-voice.js`
 - `node test/creative-voice-browser.js`
+- `node test/creative-mobile-voice-browser.js` (320–1500px layouts, hit-testing, microphone button state, image edits and confirmation; optional `PANTHORIUM_TEST_BROWSER_PATH` and `PANTHORIUM_QA_DIR` for local QA)
 
 Voice tests cover ordinary-account API and function dispatch, negation, numeric/cell parsing, final speech-frame confirmation, account/draft changes, and all five real browser editors through native saves and an actual captioned MP4 export. Speech-provider frames and transcribed requests are fixtures; these checks do not claim live human microphone recognition accuracy.
 

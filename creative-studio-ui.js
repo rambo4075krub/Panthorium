@@ -129,10 +129,11 @@
       [data-studio] .cs-commandbar{position:relative;top:auto;padding:3px 10px;margin:0;flex:none;gap:8px;min-height:46px}
       [data-studio] .cs-commandbar button{min-height:34px}
       [data-studio] .cs-head-actions [data-open-sentinel],[data-studio] .cs-head-actions [data-open-files]{display:none}
-      [data-studio] .cs-open-file{padding:5px 12px;margin:0;flex:none;align-items:center;gap:6px;flex-wrap:nowrap;background:#101d2b;min-height:43px}
-      [data-studio] .cs-open-file label{font-size:0;flex:1;min-width:80px;max-width:360px}
+      [data-studio] .cs-open-file{padding:5px 12px;margin:0;flex:none;align-items:center;gap:6px;flex-wrap:wrap;background:#101d2b;min-height:43px}
+      [data-studio] .cs-open-file label{font-size:0;flex:1 1 220px;min-width:0;max-width:360px}
       [data-studio] .cs-open-file select{margin:0;padding:5px 8px;font-size:12px;height:32px}
-      [data-studio] .cs-open-file button{font-size:12px;min-height:32px;padding:5px 9px;white-space:nowrap}
+      [data-studio] .cs-open-file button{flex:0 0 auto;font-size:12px;min-height:32px;padding:5px 9px;white-space:nowrap}
+      [data-studio] [data-studio-voice][aria-pressed=true]{border-color:#72ddd6;color:#b9ffff;background:#153f49}
       [data-studio] .cs-file-label{font-size:12px;color:#9fb2c4}
       [data-studio] [data-inline-workspace]{flex:1;min-height:0;position:relative;overflow:hidden}
       [data-studio] .cs-workspace{height:100%;min-height:0;overflow:hidden}
@@ -144,7 +145,7 @@
       [data-studio] [data-studio-editor] input:not([type=checkbox]),[data-studio] [data-studio-editor] select{width:auto}
       [data-studio] [data-studio-editor] .se-file input{width:100%}
       [data-studio] [data-studio-editor] label{margin:0}
-      @container creative (max-width:680px){[data-studio] .cs-commandbar{flex-wrap:nowrap;gap:4px;padding:4px}[data-studio] .cs-head-actions button{font-size:11px;padding:4px 7px;min-height:36px}[data-studio] .cs-tabs button{padding:6px 9px;min-height:36px}[data-studio] .cs-open-file{padding:4px;flex-wrap:wrap}[data-studio] .cs-open-file label{max-width:none;flex-basis:60%}[data-studio] .cs-file-label{display:none}[data-studio] .cs-open-file button{flex:1}[data-studio] .cs-layout{top:45px}}
+      @container creative (max-width:680px){[data-studio] .cs-commandbar{flex-wrap:nowrap;gap:4px;padding:4px}[data-studio] .cs-head-actions button{font-size:11px;padding:4px 7px;min-height:36px}[data-studio] .cs-tabs button{padding:6px 9px;min-height:36px}[data-studio] .cs-open-file{padding:6px}[data-studio] .cs-open-file label{max-width:none;flex:1 0 100%}[data-studio] .cs-file-label{display:none}[data-studio] .cs-open-file button{flex:1 0 auto;min-height:40px}[data-studio] .cs-layout{top:45px}}
     </style>
     <div class="cs-commandbar" aria-label="สร้างสรรค์และเอกสาร">
       <nav class="cs-tabs" role="tablist" aria-label="เครื่องมือสร้างสรรค์" data-studio-tabs></nav>
@@ -460,6 +461,7 @@
     if(c.action==='open') {if(v.voicePending)return ui.fail('มีคำสั่งรอยืนยัน พูด ยืนยัน หรือ ยกเลิก ก่อน');open(c.kind);return v.active===c.kind?ui.ok('เปิด'+plugin(c.kind).title+'แล้ว'):ui.fail('รอคำขอปัจจุบันให้เสร็จก่อนเปลี่ยนหมวด');}
     if(shell&&(shell.hidden||getComputedStyle(shell).display==='none'))return ui.fail('เปิดหน้าต่างสร้างสรรค์ที่ย่อไว้ก่อนสั่งแก้ไข');
     if(c.action==='help'){v.root.querySelector('[data-creative-voice-help]').hidden=false;return ui.ok('แสดงตัวอย่างคำสั่งเสียงแล้ว เลือกเปิดไฟล์และชิ้นงานก่อนสั่งแก้ไข');}
+    if(c.action==='help_close'){v.root.querySelector('[data-creative-voice-help]').hidden=true;return ui.ok('ปิดตัวอย่างคำสั่งเสียงแล้ว');}
     if(c.action==='cancel'){if(!v.voicePending)return ui.fail('ไม่มีคำสั่งสร้างสรรค์รอยืนยัน');clearVoicePending(v);return ui.ok('ยกเลิกคำสั่งแล้ว');}
     if(v.voiceBusy||v.busy||v.modeBusy)return ui.fail('กำลังดำเนินงานก่อนหน้า รอให้เสร็จก่อนสั่งอีกครั้ง');
     if(c.action==='confirm'){
@@ -472,6 +474,11 @@
     if(c.action==='new') {open(c.kind);if(v.active!==c.kind)return ui.fail('ยังเปลี่ยนหมวดไม่ได้');}
     const item=v.workspaces.get(v.active);if(!item)return ui.fail('พื้นที่งานยังไม่พร้อม');
     if(item.host.contains(document.activeElement))document.activeElement.blur();
+    if(c.action==='open_selected'){
+      const selected=v.root.querySelector('[data-editor-files]').value;
+      if(!selected)return ui.fail('เลือกไฟล์ก่อน หรือพูด เปิดไฟล์ ตามด้วยชื่อและนามสกุล');
+      return voiceBackground(v,async()=>{const opened=await openFile(v,selected),message=v.workspaces.get(v.active)?.host.querySelector('.ce-message');return opened===false||message?.dataset.error==='true'?ui.fail(message?.textContent||'ยังเปิดไฟล์ไม่ได้'):ui.ok('เปิดไฟล์ที่เลือกแล้ว');},'กำลังเปิดไฟล์ที่เลือก');
+    }
     if(c.action==='open_file')return voiceBackground(v,async()=>{
       await loadFiles(v);if(!current(v))return;
       const name=c.text.normalize('NFC').toLocaleLowerCase(),matches=v.files.filter(f=>String(f.name).normalize('NFC').toLocaleLowerCase()===name);
@@ -520,8 +527,19 @@
     filebar.prepend(el('span','ไฟล์',{class:'cs-file-label'}));
     const voiceHelp=el('section',null,{'data-creative-voice-help':'',hidden:'','aria-label':'คำสั่งเสียงสร้างสรรค์'});
     voiceHelp.style.cssText='position:absolute;right:12px;top:90px;z-index:15;width:min(430px,90%);max-height:65%;overflow:auto;padding:14px;background:#102332;border:1px solid #548598;border-radius:10px;box-shadow:0 12px 35px #0009';
-    voiceHelp.append(el('strong','สั่งงานในพื้นที่ที่เปิดอยู่'),el('p','รูปภาพ: เพิ่มข้อความ สวัสดี · หมุนภาพ 90 องศา'),el('p','วิดีโอ: เลื่อนไป 1 วินาที · แบ่งคลิป · เพิ่มคำบรรยาย สวัสดี'),el('p','เอกสาร: เพิ่มย่อหน้า รายละเอียดงาน · เลือกย่อหน้าที่ 2 · ตัวหนา'),el('p','ตาราง: เปลี่ยน B2 เป็น 500 · ใส่สูตร B3 เป็น =SUM(B1:B2)'),el('p','นำเสนอ: เพิ่มสไลด์ สรุปงาน · สไลด์ถัดไป · เริ่มนำเสนอ'),el('p','ทุกหมวด: ย้อนกลับ · ทำซ้ำ · บันทึก · ยืนยัน / ยกเลิก'),button('เริ่มสั่งด้วยเสียง',async()=>{const r=await window.PanthoriumCreativeVoice.start(v.active);if(current(v)){status(v,r.text,!r.ok);if(r.ok)voiceHelp.hidden=true;}}),button('ปิดตัวอย่าง',()=>{voiceHelp.hidden=true;}));
-    root.append(voiceHelp);filebar.append(button('🎙 เสียง',()=>{voiceHelp.hidden=!voiceHelp.hidden;},{'aria-label':'สั่งด้วยเสียงและดูตัวอย่างคำสั่ง'}));
+    voiceHelp.append(el('strong','สั่งงานในพื้นที่ที่เปิดอยู่'),el('p','รูปภาพ: เพิ่มข้อความ สวัสดี · เพิ่มสี่เหลี่ยม · เปลี่ยนสีเป็น แดง · หมุนภาพ 90 องศา'),el('p','ปรับภาพ: เปิดเลเยอร์ · เลือกเลเยอร์ที่ 1 · ย้ายเลเยอร์ไปทางขวา 50 พิกเซล · ซูมพอดี · บันทึกภาพ'),el('p','วิดีโอ: เลื่อนไป 1 วินาที · แบ่งคลิป · เพิ่มคำบรรยาย สวัสดี'),el('p','เอกสาร: เพิ่มย่อหน้า รายละเอียดงาน · เลือกย่อหน้าที่ 2 · ตัวหนา'),el('p','ตาราง: เปลี่ยน B2 เป็น 500 · ใส่สูตร B3 เป็น =SUM(B1:B2)'),el('p','นำเสนอ: เพิ่มสไลด์ สรุปงาน · สไลด์ถัดไป · เริ่มนำเสนอ'),el('p','ทุกหมวด: ย้อนกลับ · ทำซ้ำ · บันทึก · ยืนยัน / ยกเลิก · ปิดไมค์'),button('เริ่มสั่งด้วยเสียง',async()=>{const r=await window.PanthoriumCreativeVoice.start(v.active);if(current(v)){status(v,r.text,!r.ok);if(r.ok)voiceHelp.hidden=true;}}),button('ปิดตัวอย่าง',()=>{voiceHelp.hidden=true;}));
+    root.append(voiceHelp);
+    const voiceButton=button('🎙 เริ่มสั่งด้วยเสียง',async()=>{
+      if(v.voiceStarting)return;v.voiceStarting=true;voiceButton.disabled=true;
+      try{
+        if(window.PanthoriumLiveVoice?.isActive()){window.PanthoriumLiveVoice.stop();status(v,'หยุดรับคำสั่งเสียงแล้ว');}
+        else{const r=await window.PanthoriumCreativeVoice.start(v.active);if(current(v)){status(v,r.text,!r.ok);if(r.ok)voiceHelp.hidden=true;}}
+      }catch(error){if(current(v))status(v,error.message||'เปิดไมโครโฟนไม่สำเร็จ',true);}
+      finally{v.voiceStarting=false;if(current(v)){voiceButton.disabled=false;syncVoiceButton();}}
+    },{'data-studio-voice':'','aria-pressed':'false','aria-label':'เริ่มสั่งด้วยเสียง'});
+    const syncVoiceButton=()=>{if(!current(v))return;const active=!!window.PanthoriumLiveVoice?.isActive(),label=active?'หยุดฟัง':'เริ่มสั่งด้วยเสียง';voiceButton.textContent=(active?'■ ':'🎙 ')+label;voiceButton.setAttribute('aria-label',label);voiceButton.setAttribute('aria-pressed',String(active));};
+    window.addEventListener('panthorium:live-state',syncVoiceButton,{signal:v.controller.signal});
+    filebar.append(voiceButton,button('คำสั่งเสียง',()=>{voiceHelp.hidden=!voiceHelp.hidden;},{'aria-label':'ดูตัวอย่างคำสั่งเสียง'}));syncVoiceButton();
     const importInput=el('input',null,{type:'file',accept:'.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.mp4,.webm,.mov,.mkv',hidden:''});
     filebar.append(button('นำเข้าไฟล์',()=>importInput.click()),importInput);
     importInput.onchange=async()=>{const file=importInput.files?.[0];if(!file)return;if(file.size>20*1024*1024)return status(v,'รองรับไฟล์ไม่เกิน 20 MB',true);try{const data=await api(v,'/api/files',{method:'POST',body:file,headers:{'Content-Type':'application/octet-stream','x-file-name':encodeURIComponent(file.name),'x-file-content-type':file.type||'application/octet-stream'}});if(!current(v))return;v.files.unshift(data.file);renderFiles(v);await openFile(v,data.file.id);}catch(e){status(v,friendly(e),true);}finally{importInput.value='';}};

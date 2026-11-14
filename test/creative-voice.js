@@ -12,6 +12,19 @@ const {createApiRouter}=require('../routes/api');
 (async()=>{
  const examples=[['ช่วยเปิดตารางหน่อยครับ',{action:'open',kind:'spreadsheet'}],['เพิ่มข้อความ สวัสดีครับ',{action:'text',text:'สวัสดีครับ'}],['ใส่สูตร B3 เป็น =SUM(B1:B2)',{action:'set_formula',cell:'B3',text:'=SUM(B1:B2)'}],['เปลี่ยน เอหนึ่ง เป็น 500',{action:'set_cell',cell:'A1',text:'500'}],['เลือกเซลล์ เอ ๑',{action:'select_cell',cell:'A1'}],['ระดับเสียง ห้าสิบ เปอร์เซ็นต์',{action:'volume',value:50}],['เลื่อนไป สอง วินาที',{action:'seek',value:2}],['เพิ่มสไลด์ สรุปงาน',{action:'add_slide',text:'สรุปงาน'}],['สร้างเอกสารใหม่',{action:'new',kind:'document'}]];
  for(const [text,expected] of examples){assert.deepEqual(catalog.parse(text),expected,text);assert.deepEqual(catalog.fromAction(catalog.toAction(text)),expected);}
+ for(const [text,expected] of [
+  ['บันทึกภาพ',{action:'save'}],['เปิดไฟล์ที่เลือก',{action:'open_selected'}],['เปิดในพื้นที่ทำงาน',{action:'open_selected'}],
+  ['เปิดเลเยอร์',{action:'panel',value:true}],['ปิดเลเยอร์',{action:'panel',value:false}],['ซูมพอดี',{action:'fit'}],
+  ['ย้ายเลเยอร์ไปทางขวา ห้าสิบ พิกเซล',{action:'move_layer',direction:'ขวา',value:50}],
+  ['ปรับความกว้าง 300 พิกเซล',{action:'layer_size',dimension:'width',value:300}],
+  ['เปลี่ยนสีเป็น แดง',{action:'layer_color',value:'#ff0000'}],['สีข้อความ #Ab12CD',{action:'layer_color',value:'#ab12cd'}],
+  ['เลื่อนเลเยอร์ลง',{action:'layer_order',value:'down'}],['ซ่อนเลเยอร์ที่เลือก',{action:'layer_visibility',value:false}],
+  ['ครอปภาพ ซ้าย 10 บน 20 กว้าง 300 สูง 200',{action:'crop_image',x:10,y:20,width:300,height:200}],
+  ['เพิ่มรูปร่าง',{action:'image_tool',value:'rect'}],['เลือกเครื่องมือข้อความ',{action:'image_tool',value:'text'}],['ปิดตัวอย่างคำสั่งเสียง',{action:'help_close'}]
+ ]){assert.deepEqual(catalog.parse(text),expected,text);assert.deepEqual(catalog.fromAction(catalog.toAction(text)),expected);}
+ for(const text of ['ครอปภาพ ซ้าย 0 บน 0 กว้าง 15 สูง 200','ครอปภาพ ซ้าย 0.5 บน 0 กว้าง 300 สูง 200','ปรับความกว้าง 5000 พิกเซล','ย้ายเลเยอร์ไปทางขวา 5000 พิกเซล','เปลี่ยนสีเป็น url(javascript:alert(1))','สี toString','สี constructor'])assert(catalog.parse(text)?.error,text);
+ for(const text of ['อย่าบันทึกภาพ','ไม่ต้องเปิดเลเยอร์','ห้ามเปลี่ยนสีเป็น แดง'])assert.equal(catalog.parse(text).error,'voice_command_negated');
+ assert.equal(catalog.needsConfirmation(catalog.parse('บันทึกภาพ')),true);
  for(const text of ['อย่าแบ่งคลิป','ห้ามลบเลเยอร์','ไม่ต้องบันทึก'])assert.equal(catalog.parse(text).error,'voice_command_negated');
  for(const text of ['ความเร็ว 99 เท่า','เปลี่ยน ZZ9999 เป็น 1','เลือกเซลล์ A0'])assert(catalog.parse(text).error);
  for(const text of ['เปิดเอกสารแล้วลบทุกไฟล์','บันทึกทำยังไง','สวัสดี','document.querySelector("button").click()'])assert.equal(catalog.parse(text),null,text);
