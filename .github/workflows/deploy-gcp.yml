@@ -41,7 +41,8 @@ jobs:
     name: Build & Deploy to Cloud Run
     if: github.ref == 'refs/heads/main'
     needs: [security, speaker]
-    runs-on: ubuntu-latest
+    # Match the security gate runner: Docker image IDs must remain config digests.
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
 
     steps:
