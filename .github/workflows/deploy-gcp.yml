@@ -41,7 +41,8 @@ jobs:
     name: Build & Deploy to Cloud Run
     if: github.ref == 'refs/heads/main'
     needs: [security, speaker]
-    runs-on: ubuntu-latest
+    # Match the security gate runner: Docker image IDs must remain config digests.
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
 
     steps:
@@ -70,7 +71,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24.22.1
+          node-version: 24.22.3
 
       - name: Install media test dependency
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
