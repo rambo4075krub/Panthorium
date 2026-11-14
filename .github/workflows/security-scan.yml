@@ -39,7 +39,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24.22.1
+          node-version: 24.22.3
       - name: Audit locked runtime and build dependencies
         working-directory: ${{ matrix.directory }}
         run: npm audit --audit-level=high --ignore-scripts
@@ -54,7 +54,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24.22.1
+          node-version: 24.22.3
       - name: Initialize scan evidence directory
         run: echo "EVIDENCE_DIR=$RUNNER_TEMP/panthorium-container-evidence" >> "$GITHUB_ENV"
       - name: Validate image context and cache scope

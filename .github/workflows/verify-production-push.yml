@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24.22.1
+          node-version: 24.22.3
       - run: node --check scripts/verify-production-push-scheduler.js && node test/production-push-scheduler.js
   activate-existing-job:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -44,7 +44,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24.22.1
+          node-version: 24.22.3
       # Reuses the existing production deployment identity. No API, IAM,
       # service-account, job creation, or runtime configuration writes.
       - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
