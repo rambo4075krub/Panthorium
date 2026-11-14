@@ -10,10 +10,10 @@
   .ce *{box-sizing:border-box;min-width:0}.ce [hidden]{display:none!important}
   [data-studio] .ce button,[data-studio] .ce input,[data-studio] .ce select,[data-studio] .ce textarea{font:inherit;padding:6px 9px;border-radius:5px;min-height:30px;background:#182737;border:1px solid #34495e;color:#e4edf6;width:auto}
   [data-studio] .ce button{white-space:nowrap;cursor:pointer}[data-studio] .ce button[aria-pressed=true],.ce button[aria-selected=true]{background:#153f49;border-color:#67d9d8;color:#bcffff}
-  .ce .ce-top{display:flex;flex:none;gap:6px;padding:6px 10px;align-items:center;border-bottom:1px solid #2b3d4e;overflow-x:auto;scrollbar-width:thin}
+  .ce .ce-top{display:flex;flex-wrap:wrap;flex:none;gap:6px;padding:6px 10px;align-items:center;border-bottom:1px solid #2b3d4e}
   [data-studio] .ce .ce-name{flex:1;min-width:100px;background:transparent;border-color:transparent;font-weight:600}
   [data-studio] .ce .ce-primary{background:#81e1df!important;color:#09292e!important;border-color:#81e1df!important;font-weight:700}
-  .ce-top>*{flex-shrink:0}.ce-top .ce-primary{position:sticky;right:0;z-index:2}.ce-inspector{background:#101c29!important}
+  .ce-top>*{flex-shrink:0}.ce-inspector{background:#101c29!important}
   .ce-main{flex:1;min-height:0;display:grid;grid-template-columns:56px minmax(0,1fr) 238px;position:relative}
   .ce-tools{border-right:1px solid #2b3d4e;display:flex;flex-direction:column;gap:6px;padding:8px 5px;overflow:auto}
   [data-studio] .ce-tools button{padding:5px 1px;font-size:10px;min-height:40px;white-space:normal!important;line-height:1.4}.ce-work{min-height:0;overflow:auto;display:grid;place-items:center;padding:32px;background:radial-gradient(#33404f 1px,transparent 1px);background-size:16px 16px;position:relative}
@@ -35,6 +35,7 @@
   [data-studio] .ce label input[type=checkbox]{width:18px;height:18px;min-height:18px;align-self:flex-start}
   .ce-footer{flex-wrap:wrap}.ce-footer .ce-message{flex:1;min-width:80px}.ce-footer>span:not(.ce-message){white-space:nowrap}
   @container media (max-width:850px){.ce-main,.ce-main[data-panel=closed]{grid-template-columns:48px minmax(0,1fr)}.ce-inspector{position:absolute;right:0;top:0;bottom:0;width:238px;z-index:4;box-shadow:-10px 0 35px #0008}.ce-main[data-panel=auto] .ce-inspector{display:none!important}.ce-video-main,.ce-video-main[data-panel=closed]{grid-template-columns:minmax(0,1fr)}.ce-bin{display:none}.ce-work{padding:15px}.ce-top{padding:5px}.ce-top .ce-name{max-width:100px;min-width:80px}.ce-timeline{height:175px}}
+  @container media (max-width:540px){[data-studio] .ce .ce-top button{min-height:36px}.ce .ce-top{gap:5px;padding:6px}.ce-footer>span:not(.ce-message){white-space:normal}}
   `;
   function base(host, ctx, kind) {
     const root = node('section', null, { class: 'ce', 'data-media-editor': kind });
@@ -103,7 +104,7 @@
         for (const [title, key] of [['ความสว่าง', 'brightness'], ['ความเปรียบต่าง', 'contrast'], ['ความอิ่มสี', 'saturation']]) inspector.append(field(title, key, 'range', 0, 200));
       } else inspector.append(node('p', 'เลือกเลเยอร์ หรือเพิ่มข้อความ รูปร่าง และรูปภาพ'));
       const paint = node('div', null, { class: 'ce-grid' }); paint.append(ui.label('สีพู่กัน', brushColor), ui.label('ขนาดพู่กัน', brushSize)); inspector.append(paint, node('hr', null, { class: 'ce-divider' }), node('h3', 'เลเยอร์'));
-      for (const item of [...state.layers].reverse()) { const row = node('div', null, { class: 'ce-layer' }); row.append(button(item.name, () => { selected = item.id; draw(); properties(); }, { 'aria-selected': String(item.id === selected), 'data-layer-id': item.id }), button(item.visible ? '◉' : '○', () => mutate(() => { item.visible = !item.visible; }), { 'aria-label': 'แสดงหรือซ่อน ' + item.name })); inspector.append(row); }
+      for (const item of [...state.layers].reverse()) { const row = node('div', null, { class: 'ce-layer' }); row.append(button(item.name, () => { selected = item.id; draw(); properties(); }, { 'aria-selected': String(item.id === selected), 'data-layer-id': item.id }), button(item.visible ? '◉' : '○', () => mutate(() => { item.visible = !item.visible; }), { 'aria-label': 'แสดงหรือซ่อน ' + item.name, 'aria-pressed': String(item.visible) })); inspector.append(row); }
       const layerActions = node('div', null, { class: 'ce-grid' });
       layerActions.append(button('เลื่อนขึ้น', () => mutate(() => { const i = state.layers.indexOf(active()); if (i >= 0 && i < state.layers.length - 1) [state.layers[i], state.layers[i + 1]] = [state.layers[i + 1], state.layers[i]]; })), button('เลื่อนลง', () => mutate(() => { const i = state.layers.indexOf(active()); if (i > 0) [state.layers[i], state.layers[i - 1]] = [state.layers[i - 1], state.layers[i]]; })), button('สำเนาเลเยอร์', () => { if (active()) add(active().type, { ...copy(active()), id: ++sequence, x: active().x + 20, y: active().y + 20, name: active().name + ' สำเนา' }); }), button('ลบเลเยอร์', () => mutate(() => { state.layers = state.layers.filter(x => x.id !== selected); selected = state.layers.at(-1)?.id; })));
       inspector.append(layerActions);
@@ -165,7 +166,10 @@
     ui.root.onkeydown = e => { const input=e.target.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);if((e.ctrlKey||e.metaKey)&&['s','z'].includes(e.key.toLowerCase())){if(e.key.toLowerCase()==='s'){e.preventDefault();if(!ui.flush())return;e.shiftKey?project():exportImage(true);}else if(!input){e.preventDefault();e.shiftKey?redo():undo();}}else if(!input){const map={v:'move',t:'text',u:'rect',o:'ellipse',b:'paint',e:'erase',c:'crop'};if(map[e.key.toLowerCase()])tools.querySelector('[data-tool="'+map[e.key.toLowerCase()]+'"]').click();if(e.key==='Delete')mutate(()=>{state.layers=state.layers.filter(l=>l.id!==selected);selected=state.layers.at(-1)?.id;});} };
     const observer = new ResizeObserver(() => { if (ui.valid() && !host.hidden) { toggle.setAttribute('aria-expanded',String(getComputedStyle(inspector).display!=='none'));fit(); } }); observer.observe(work);
     ui.name.oninput=()=>{dirty=true;};draw();properties();
-    return { async openFile(id) { try { const r = await ctx.request('/api/files/'+encodeURIComponent(id)+'/preview',{},true); if(ui.valid())await addImage(await r.blob(),ctx.files().find(f=>f.id===id)?.name); } catch(e){ui.report(e.message,true);} }, voiceSnapshot:()=>JSON.stringify({state,name:ui.name.value}), command:c=>window.PanthoriumCreativeVoice.media(ui.root,c,{busy:()=>busy,text:text=>{if(text.length>2000)throw Error('ข้อความยาวเกิน 2,000 ตัวอักษร');add('text',{text});}}), isDirty:()=>dirty||ui.pending(), destroy(){loading++;observer.disconnect();assets.clear();history=[];future=[];canvas.width=canvas.height=scratch.width=scratch.height=1;ui.destroy();} };
+    return { async openFile(id) { try { const r = await ctx.request('/api/files/'+encodeURIComponent(id)+'/preview',{},true); if(ui.valid())await addImage(await r.blob(),ctx.files().find(f=>f.id===id)?.name); } catch(e){ui.report(e.message,true);} }, voiceSnapshot:()=>JSON.stringify({state,name:ui.name.value}), command:c=>window.PanthoriumCreativeVoice.media(ui.root,c,{busy:()=>busy,text:text=>{if(text.length>2000)throw Error('ข้อความยาวเกิน 2,000 ตัวอักษร');add('text',{text});},crop:({x,y,width,height})=>{
+      if(![x,y,width,height].every(Number.isInteger)||x<0||y<0||width<16||height<16||x+width>state.width||y+height>state.height)throw Error('พื้นที่ครอปต้องอยู่ภายในภาพและมีขนาดอย่างน้อย 16 พิกเซล');
+      mutate(()=>{state.width=width;state.height=height;for(const item of state.layers){item.x-=x;item.y-=y;}});fit();
+    }}), isDirty:()=>dirty||ui.pending(), destroy(){loading++;observer.disconnect();assets.clear();history=[];future=[];canvas.width=canvas.height=scratch.width=scratch.height=1;ui.destroy();} };
   }
   // The timeline editor is registered below. No external editor or popup is used.
   window.PanthoriumCreativeEditors = Object.freeze({ mount(kind,host,ctx){return kind==='image'?imageEditor(host,ctx):videoEditor(host,ctx);} });

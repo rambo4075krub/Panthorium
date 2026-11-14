@@ -23,13 +23,35 @@
     const kind=root.dataset.mediaEditor, status=root.querySelector('.ce-message');
     status.dataset.error='false';
     try {
-      if(c.action==='rename') {if(c.text.length>100)throw Error('ชื่อโปรเจกต์ยาวได้ไม่เกิน 100 ตัวอักษร');control(root,'ชื่อโปรเจกต์').value=c.text;}
+      if(c.action==='rename') {if(c.text.length>100)throw Error('ชื่อโปรเจกต์ยาวได้ไม่เกิน 100 ตัวอักษร');await set(control(root,'ชื่อโปรเจกต์'),c.text);}
       else if(c.action==='text') await hooks.text(c.text);
       else if(c.action==='undo'||c.action==='redo')await click(button(root,(c.action==='undo'?'ย้อนกลับ':'ทำซ้ำ')+(kind==='image'?'ภาพ':'วิดีโอ')));
       else if(c.action==='save'||c.action==='export')await click(button(root,kind==='image'?'บันทึกภาพ':'ส่งออก MP4'));
       else if(c.action==='project')await click(button(root,'เก็บโปรเจกต์'));
+      else if(c.action==='panel'){
+        const panel=root.querySelector('.ce-inspector');
+        if((getComputedStyle(panel).display!=='none')!==c.value)await click(button(root,kind==='image'?'เลเยอร์ / ปรับแต่ง':'ปรับคลิป / คำบรรยาย'));
+        return ok(c.value?'เปิดแผงปรับแต่งแล้ว':'ปิดแผงปรับแต่งแล้ว');
+      }
       else if(kind==='image') {
         if(c.action==='download_png')await click(button(root,'PNG ↓'));
+        else if(c.action==='fit')await click(button(root,'พอดี'));
+        else if(c.action==='layer_color')await set(control(root,'สี'),c.value);
+        else if(c.action==='layer_size')await set(control(root,c.dimension==='width'?'กว้าง':'สูง'),c.value);
+        else if(c.action==='move_layer'){
+          const horizontal=['ซ้าย','ขวา'].includes(c.direction),input=control(root,horizontal?'ซ้าย':'บน');
+          await set(input,Number(input?.value)+(c.direction==='ซ้าย'||c.direction==='ขึ้น'?-1:1)*c.value);
+        }
+        else if(c.action==='layer_order'){
+          if(!root.querySelector('[data-layer-id][aria-selected=true]'))throw Error('เลือกเลเยอร์ก่อน');
+          await click(button(root,c.value==='up'?'เลื่อนขึ้น':'เลื่อนลง'));
+        }
+        else if(c.action==='layer_visibility'){
+          const toggle=root.querySelector('[data-layer-id][aria-selected=true]')?.parentElement.querySelector('button[aria-label]');
+          if(!toggle)throw Error('เลือกเลเยอร์ก่อน');
+          if((toggle.getAttribute('aria-pressed')==='true')!==c.value)await click(toggle);
+        }
+        else if(c.action==='crop_image')await hooks.crop(c);
         else if(c.action==='replace_text')await set(control(root,'ข้อความบนภาพ'),c.text);
         else if(c.action==='font_size')await set(control(root,'ขนาดอักษร'),c.value);
         else if(c.action==='bold')await click([...root.querySelectorAll('button')].find(n=>/^ตัวหนา(?: ✓)?$/.test(n.textContent)));
@@ -40,7 +62,7 @@
         else if(c.action==='flip')await click(button(root,c.value==='horizontal'?'พลิกแนวนอน':'พลิกแนวตั้ง'));
         else if(c.action==='delete_layer'||c.action==='duplicate_layer'){if(!root.querySelector('[data-layer-id][aria-selected=true]'))throw Error('เลือกเลเยอร์ก่อน');await click(button(root,c.action==='delete_layer'?'ลบเลเยอร์':'สำเนาเลเยอร์'));}
         else if(c.action==='select'&&c.target==='layer')await click([...root.querySelectorAll('[data-layer-id]')][c.value-1]);
-        else if(c.action==='image_tool') {await click([...root.querySelectorAll('[data-tool]')].find(n=>n.dataset.tool===c.value));return ok(['crop','paint','erase','move'].includes(c.value)?'เลือกเครื่องมือแล้ว ใช้พื้นที่ภาพเพื่อวาดหรือลากตำแหน่ง':'เพิ่มรูปร่างแล้ว');}
+        else if(c.action==='image_tool') {await click([...root.querySelectorAll('[data-tool]')].find(n=>n.dataset.tool===c.value));if(status.dataset.error==='true')return fail(status.textContent);return ok(['crop','paint','erase','move'].includes(c.value)?'เลือกเครื่องมือแล้ว ใช้พื้นที่ภาพเพื่อวาดหรือลากตำแหน่ง':c.value==='text'?'เพิ่มข้อความแล้ว':'เพิ่มรูปร่างแล้ว');}
         else return fail('คำสั่งนี้ไม่รองรับในรูปภาพ พูด “คำสั่งเสียงสร้างสรรค์” เพื่อดูตัวอย่าง');
       } else {
         const bindings={speed:'ความเร็ว',volume:'ระดับเสียง',clip_start:'เริ่ม (วินาที)',clip_end:'จบ (วินาที)',aspect:'สัดส่วนวิดีโอ',fade:'เฟดเข้าและออก',seek:'ตำแหน่งเล่นบนไทม์ไลน์'};
@@ -59,6 +81,7 @@
   async function start(kind) {
     const live=window.PanthoriumLiveVoice;
     if(!live)return fail('ระบบเสียงยังไม่พร้อม กรุณาลองปุ่มไมโครโฟนหลักอีกครั้ง');
+    if(!live.isActive()&&live.isBusy?.())return fail('กำลังเชื่อมต่อเสียง กรุณารอสักครู่');
     if(!live.isActive())await live.toggle('creative-editor');
     if(!live.isActive())return fail('ยังเปิดไมโครโฟนไม่สำเร็จ ตรวจสิทธิ์ไมโครโฟนแล้วลองใหม่');
     live.sendText?.('ผู้ใช้เปิดสั่งด้วยเสียงในพื้นที่สร้างสรรค์ ประเภท '+kind+' รอฟังคำสั่งต่อไป ใช้ panthorium_studio_command กับคำสั่งแก้ไขบนหน้าจอเพื่อเก็บการแก้ไขที่ยังไม่บันทึก ห้ามเปลี่ยนไปแก้ไฟล์ต้นฉบับแทนร่างบนหน้าจอ การบันทึกหรือส่งออกให้เสนอการยืนยันในพื้นที่งานก่อน อย่าเริ่มงานจากข้อความนี้');
