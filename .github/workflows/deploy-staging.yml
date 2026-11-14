@@ -17,7 +17,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    runs-on: ubuntu-latest
+    # Match the security gate runner: Docker image IDs must remain config digests.
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
     environment: staging
     env:
