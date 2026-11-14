@@ -132,7 +132,7 @@
       [data-studio] .cs-open-file{padding:5px 12px;margin:0;flex:none;align-items:center;gap:6px;flex-wrap:wrap;background:#101d2b;min-height:43px}
       [data-studio] .cs-open-file label{font-size:0;flex:1 1 220px;min-width:0;max-width:360px}
       [data-studio] .cs-open-file select{margin:0;padding:5px 8px;font-size:12px;height:32px}
-      [data-studio] .cs-open-file button{flex:0 0 auto;font-size:12px;min-height:36px;padding:5px 9px;white-space:nowrap}
+      [data-studio] .cs-open-file button{flex:0 0 auto;font-size:12px;min-height:32px;padding:5px 9px;white-space:nowrap}
       [data-studio] [data-studio-voice][aria-pressed=true]{border-color:#72ddd6;color:#b9ffff;background:#153f49}
       [data-studio] .cs-file-label{font-size:12px;color:#9fb2c4}
       [data-studio] [data-inline-workspace]{flex:1;min-height:0;position:relative;overflow:hidden}
