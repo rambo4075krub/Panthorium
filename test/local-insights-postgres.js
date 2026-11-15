@@ -20,7 +20,13 @@ const {ActionLedgerRepository}=require('../services/actionLedgerRepository');
     assert.equal((await repo.preferences(ordinary)).enabled,false);
     const item=id=>({userId:id,feature:'social',day:new Date().toISOString().slice(0,10),since:Date.now()+1,total:2,errors:1,denied:0,slow:1});
     await repo.addCounters([item(ordinary)]);assert.equal((await repo.preferences(ordinary)).counters.length,0);
-    for(const id of users.slice(2)){await repo.setConsent(id,true);await repo.addCounters([item(id)]);}
+    for(const id of users.slice(2)){
+      await repo.setConsent(id,true);
+      // Use the database clock after consent; Windows and PostgreSQL clocks can
+      // differ by a few milliseconds. No sleep or production privacy exception.
+      const since=Number((await pool.query('SELECT CEIL(EXTRACT(EPOCH FROM clock_timestamp())*1000)::bigint AS ms')).rows[0].ms);
+      await repo.addCounters([{...item(id),since}]);
+    }
     assert.equal((await repo.aggregate())[0].accounts,5);assert.equal((await repo.preferences(admin)).counters.length,0);
     await repo.setEnabled(owner,true);const control=await repo.control();
     await repo.setConsent(ordinary,false);assert.equal((await repo.aggregate()).length,0);
