@@ -26,6 +26,13 @@ function localTools(tools = [], history = []) {
   const selected = tools.filter(t=>groups.some(([query,name])=>query.test(text)&&name.test(t.name)));
   const prior = history.flatMap(m=>(m.parts||[]).map(p=>p.functionCall?.name).filter(Boolean));
   const requested = require('./localToolSelection').selectedTool(history);
+  // A mail request may contain numbers and words such as "search" or "delete".
+  // Keep its initial shortlist on mail; the selector can still explicitly load
+  // another authorized function for a genuine cross-tool follow-up.
+  if (/อีเมล|เมล|เมล์|กล่องจดหมาย|ไฟล์แนบ|mail|inbox|outlook|attachment/i.test(text)) {
+    return tools.filter(t=>t.name===requested || /mailbox_|system_status|ai_providers|mcp_list/.test(t.name))
+      .sort((a,b)=>Number(b.name===requested)-Number(a.name===requested));
+  }
   // Keywords rank the initial shortlist; they no longer determine access.
   // Public retrieval is available even for "ต้องพกร่มไหม" or a bare URL.
   return [...tools.filter(t=>t.name===requested),...selected,

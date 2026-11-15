@@ -4,6 +4,26 @@ const SELECT_TOOL = 'panthorium_tools_select';
 const CLARIFY_TOOL = 'panthorium_ask_user';
 const PUBLIC_TOOLS = ['panthorium_weather_get','panthorium_web_search','panthorium_web_read'];
 
+function requiredAccountTools(history, tools) {
+  const question=[...history].reverse().find(item=>item.role==='user'&&typeof item.content==='string')?.content || '';
+  if (/คืออะไร|หมายถึง|อธิบาย|วิธีใช้|how to|explain|what is/i.test(question)) return [];
+  const intents = [
+    [/อีเมล|เมล|เมล์|กล่องจดหมาย|ไฟล์แนบ|mail|inbox|attachment/i,/^panthorium_mailbox_/],
+    [/ปฏิทิน|นัดหมาย|มีนัด|ว่าง(?:ไหม|มั้ย|หรือ)|ตารางเวลา|calendar|schedule|availability|am i free/i,/^panthorium_calendar_read$/],
+    [/โน้ต|บันทึกของฉัน|my notes|\bnotes?\b/i,/^panthorium_notes_/],
+    [/จำไว้|ความจำ|จำฉัน|remember|memory/i,/^panthorium_memory_/],
+    [/แจ้งเตือน|notifications?/i,/^panthorium_notifications_/],
+    [/เตือน|reminders?/i,/^panthorium_reminders_/],
+    [/ไฟล์|files?/i,/^panthorium_files_/],
+    [/เป้าหมาย|goals?/i,/^panthorium_goals_/],
+    [/โครงการ|งานค้าง|projects?|tasks?/i,/^panthorium_work_/],
+    [/วาด|สร้าง.*(?:รูป|ภาพ|วีดีโอ|วิดีโอ|เอกสาร|สไลด์)|(?:create|generate|make).*(?:image|video|document|presentation)/i,/^panthorium_studio_/]
+  ];
+  const group=intents.find(([intent,names])=>intent.test(question)&&tools.some(tool=>names.test(tool.name)))?.[1];
+  if (!group || history.some(item=>item.parts?.some(part=>group.test(part.functionResponse?.name || '')))) return [];
+  return tools.filter(tool=>group.test(tool.name));
+}
+
 function publicEvidenceTool(history, tools) {
   const question = [...history].reverse().find(item=>item.role==='user'&&typeof item.content==='string')?.content || '';
   // This only enforces evidence for explicit retrieval intents. Every other
@@ -20,13 +40,13 @@ function publicEvidenceTool(history, tools) {
 }
 
 function clarificationDeclaration() {
-  return { name:CLARIFY_TOOL, description:'Ask one short question only when the requested public lookup is missing a place, query or URL. Do not invent that input or current facts.',
+  return { name:CLARIFY_TOOL, description:'Ask one short question only when a requested tool task is missing necessary input. Do not invent that input, account state, or current facts.',
     parameters:{type:'OBJECT',properties:{question:{type:'STRING',description:'Short clarification question in the user language, at most 400 characters.'}},required:['question']} };
 }
 
 function clarificationQuestion(call, tools) {
   const args=call.args;
-  if (!tools.some(tool=>PUBLIC_TOOLS.includes(tool.name)) || !args || typeof args!=='object' || Array.isArray(args) ||
+  if (!tools.length || !args || typeof args!=='object' || Array.isArray(args) ||
       Object.keys(args).length!==1 || typeof args.question!=='string' || !args.question.trim() ||
       args.question.length>400 || /[\x00-\x1f\x7f]/.test(args.question)) return null;
   return args.question.trim();
@@ -70,4 +90,4 @@ function selectTool(call, tools) {
 }
 
 module.exports = { SELECT_TOOL, CLARIFY_TOOL, PUBLIC_TOOLS, selectionDeclaration, selectedTool, selectTool,
-  publicEvidenceTool, clarificationDeclaration, clarificationQuestion };
+  publicEvidenceTool, requiredAccountTools, clarificationDeclaration, clarificationQuestion };

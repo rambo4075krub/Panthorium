@@ -19,6 +19,7 @@ async function main() {
       sources: [{ url: 'https://api.met.no/', retrievedAt: '2026-11-15T08:00:00Z' }] };
   } } });
   registry.register({ id: 'calendar.read', permission: 'chat', risk: 'low', mutates: false,
+    validateArgs: require('../services/calendarTools').validateRead,
     run: ({ userId }) => { executions.push({ toolId: 'calendar.read', userId }); return { events: [], complete: true }; } });
   const functions = new AgentFunctionCallingService({ agentService: new AgentService({ tools: registry }) });
   const user = { sub: 'tool-user', permissions: ['chat'] };
@@ -98,6 +99,8 @@ async function main() {
     };
     respond = body => {
       const last = body.messages.at(-1);
+      assert(!body.messages[0].content.includes('dedicated connection button'), 'calendar routing must not inherit unrelated mailbox onboarding');
+      if (last.role!=='tool' || JSON.parse(last.content).selectedTool) assert.equal(body.tool_choice,'required');
       if (last.role === 'tool' && JSON.parse(last.content).selectedTool === 'panthorium_calendar_read') {
         assert(body.tools.some(t => t.function.name === 'panthorium_calendar_read'));
         return { tool_calls: [{ id: 'events', type: 'function', function: { name: 'panthorium_calendar_read', arguments: '{}' } }] };
@@ -115,6 +118,9 @@ async function main() {
     assert.equal(discovered.functionCallCount, 2);
     assert.equal(executions.at(-1).toolId, 'calendar.read');
     assert(providerCalls.every(p => p === 'local'));
+    respond=()=>({content:'ไม่มีนัดหมาย โดยยังไม่ได้ตรวจสอบ'});
+    await assert.rejects(local.complete('s',[{role:'user',content:'วันพรุ่งนี้ฉันว่างไหม'}],
+      {hybrid:true,tools:calendarOnly.declarationsFor(user)}),/local_required_account_tool_missing/);
 
     const permitted = calendarOnly.declarationsFor(user);
     for (const args of [{ name: 'panthorium_files_write' }, { name: 'panthorium_calendar_read', confirmed: true }, null]) {
@@ -158,10 +164,11 @@ async function main() {
       assert.deepEqual(tool.function.parameters.properties.action.enum, definition.properties.action.enum);
       return { content: 'พร้อมเสนอรายละเอียดให้ตรวจสอบ' };
     };
-    await local.complete('s', [{ role: 'user', content: 'เตรียมการแจ้งเตือน' }], { hybrid: true, tools: [large] });
+    await local.complete('s', [{ role: 'user', content: 'ตัวเลือกสำหรับฉัน' },
+      {role:'user',parts:[{functionResponse:{id:'selected-large',name:SELECT_TOOL,response:{ok:true,selectedTool:large.name}}}]}], { hybrid: true, tools: [large] });
     const fullCatalogue=TOOL_DEFINITIONS.map(tool=>({name:tool.name,description:tool.description,
       parameters:{type:'OBJECT',properties:tool.properties,required:tool.required}}));
-    await local.complete('s', [{role:'user',content:'ปรับการแจ้งเตือน'},
+    await local.complete('s', [{role:'user',content:'ตัวเลือกสำหรับฉัน'},
       {role:'model',parts:[{functionCall:{id:'large',name:SELECT_TOOL,args:{name:large.name}}}]},
       {role:'user',parts:[{functionResponse:{id:'large',name:SELECT_TOOL,response:{ok:true,selectedTool:large.name}}}]}],
       {hybrid:true,tools:fullCatalogue});
