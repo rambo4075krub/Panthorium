@@ -152,6 +152,7 @@ class AuthService {
   signAccessToken(principal) {
     return jwt.sign({
       sub: principal.id,
+      ...(principal.sid ? { sid: principal.sid } : {}),
       systemOwner: founderAccount.isFounderAccount(principal.id),
       username: principal.username,
       roles: principal.roles || [],
@@ -166,11 +167,12 @@ class AuthService {
     });
   }
 
-  async issueRefreshToken(principal) {
+  async issueRefreshToken(principal, rotate = false) {
     const raw = crypto.randomBytes(48).toString("base64url");
     const expiresAt = Date.now() + this.config.refreshTokenDays * 86400000;
     await this.repository.storeRefreshToken({
-      id: crypto.randomUUID(),
+      id: principal.sid || crypto.randomUUID(),
+      rotate,
       userId: principal.id,
       tokenHash: sha256(raw),
       accountVersion: principal.accountVersion ?? null,
@@ -193,7 +195,7 @@ class AuthService {
       userAgent: context.userAgent || null
     };
     if (!user || !(await bcrypt.compare(password || "", user.passwordHash))) {
-      this.audit.record("auth.login_failed", { username, ...auditContext });
+      await this.audit.record("auth.login_failed", { username, ...auditContext });
       return null;
     }
     this.audit.record("auth.login_success", { userId: user.id, username: user.username, ...auditContext });
@@ -278,10 +280,11 @@ class AuthService {
     return { principal, accessToken: this.signAccessToken(principal), refreshToken: null, resumeToken, expiresAt };
   }
 
-  async issueSession(user, expectedVersion=null) {
+  async issueSession(user, expectedVersion=null, sessionId=null) {
     user=founderAccount.fullAccess(user);
     const principal = {
       id: user.id,
+      sid: sessionId || crypto.randomUUID(),
       systemOwner: founderAccount.isFounderAccount(user.id),
       founderProtected: founderAccount.isFounderAccount(user.id),
       username: user.email || user.username,
@@ -290,28 +293,39 @@ class AuthService {
     };
     if(this.accountPolicy){principal.accountVersion=(await this.accountPolicy(user.id)).credentialVersion||0;if(expectedVersion!=null&&principal.accountVersion!==expectedVersion)throw new Error("account_session_revoked");}
     if(this.validateAccountPrincipal) Object.assign(principal,await this.validateAccountPrincipal(principal));
-    return {
-      principal,
-      accessToken: this.signAccessToken(principal),
-      refreshToken: await this.issueRefreshToken(principal)
-    };
+    const refreshToken = await this.issueRefreshToken(principal, !!sessionId);
+    return { principal, accessToken: this.signAccessToken(principal), refreshToken };
   }
 
   async refresh(rawToken) {
     if (!rawToken) return null;
     const stored = await this.repository.consumeRefreshToken(sha256(rawToken));
     if (!stored) return null;
-    const user = await this.repository.findUserById(stored.userId);
-    if (!user) return null;
-    let expectedVersion=null;
-    if(this.accountPolicy){const policy=await this.accountPolicy(user.id);expectedVersion=policy.credentialVersion||0;if(stored.accountVersion!=null ? stored.accountVersion!==expectedVersion : policy.sessionsRevokedAt&&(!stored.createdAt||new Date(stored.createdAt).getTime()<=new Date(policy.sessionsRevokedAt).getTime()))throw new Error("account_session_revoked");}
-    this.audit.record("auth.refresh", { userId: user.id });
-    return this.issueSession(user,expectedVersion);
+    if (stored.sessionVersion !== 1) throw new Error("account_session_revoked");
+    try {
+      const user = await this.repository.findUserById(stored.userId);
+      if (!user) { await this.repository.revokeSession(stored.id); return null; }
+      let expectedVersion=null;
+      if(this.accountPolicy){const policy=await this.accountPolicy(user.id);expectedVersion=policy.credentialVersion||0;if(stored.accountVersion!=null ? stored.accountVersion!==expectedVersion : policy.sessionsRevokedAt&&(!stored.createdAt||new Date(stored.createdAt).getTime()<=new Date(policy.sessionsRevokedAt).getTime()))throw new Error("account_session_revoked");}
+      this.audit.record("auth.refresh", { userId: user.id });
+      return await this.issueSession(user,expectedVersion,stored.id);
+    } catch (error) {
+      await this.repository.revokeSession(stored.id);
+      throw error;
+    }
   }
 
   async revoke(rawToken) {
     if (!rawToken) return;
     await this.repository.revokeRefreshToken(sha256(rawToken));
+  }
+
+  async validateAccessSession(principal) {
+    if (String(principal.sub).startsWith('guest:')) return principal;
+    if (!principal.sid || !await this.repository.getActiveSession(principal.sid, principal.sub)) {
+      throw Object.assign(new Error('account_session_revoked'), { status: 401 });
+    }
+    return principal;
   }
 
   verifyAccessToken(token) {

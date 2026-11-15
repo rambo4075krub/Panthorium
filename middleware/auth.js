@@ -10,6 +10,10 @@ function requireAuth(authService) {
       const token = bearerToken(req);
       if (!token) return res.status(401).json({ ok: false, error: "authentication_required" });
       req.user = authService.verifyAccessToken(token);
+      if (authService.validateAccessSession) {
+        try { await authService.validateAccessSession(req.user); }
+        catch (e) { return res.status(e.message === 'account_session_revoked' ? 401 : 503).json({ok:false,error:e.message === 'account_session_revoked' ? e.message : 'session_validation_unavailable'}); }
+      }
       if (authService.validateAccountPrincipal) {
         try { req.user = await authService.validateAccountPrincipal(req.user); }
         catch (e) { const known=["account_suspended","account_access_expired","account_day_restricted","account_not_found","account_session_revoked"]; return res.status(known.includes(e.message)?e.status||403:503).json({ok:false,error:known.includes(e.message)?e.message:"account_validation_unavailable"}); }

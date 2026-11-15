@@ -9,7 +9,8 @@ const {AuthService}=require('../services/authService');
  let server,dom;
  try{
   const session=await auth.issueSession({id,username:'owner',roles:['administrator'],permissions:['settings']});assert.equal(session.principal.systemOwner,true,'login/refresh identity includes owner metadata even without database policy hook');assert.equal(session.principal.founderProtected,true);
-  auth.verifyAccessToken=token=>token==='owner'?{sub:id,username:'owner',roles:['administrator'],permissions:['settings']}:{sub:'ordinary-admin',username:'admin',roles:['administrator'],permissions:['settings'],systemOwner:true};
+  auth.repository={getActiveSession:async(sid,userId)=>sid===userId?{id:sid}:null};
+  auth.verifyAccessToken=token=>token==='owner'?{sub:id,sid:id,username:'owner',roles:['administrator'],permissions:['settings']}:{sub:'ordinary-admin',sid:'ordinary-admin',username:'admin',roles:['administrator'],permissions:['settings'],systemOwner:true};
   const app=express();app.use('/api/auth',createAuthRouter(auth,{}));server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));const url='http://127.0.0.1:'+server.address().port+'/api/auth/me';
   const me=(await (await fetch(url,{headers:{Authorization:'Bearer owner'}})).json()).user;assert.equal(me.systemOwner,true,'page-load /me restores owner flag for existing token');assert.equal(me.founderProtected,true);assert.equal(me.id,id);
   const other=(await (await fetch(url,{headers:{Authorization:'Bearer other'}})).json()).user;assert.equal(other.systemOwner,false,'claimed owner flag cannot grant owner metadata to ordinary administrator');

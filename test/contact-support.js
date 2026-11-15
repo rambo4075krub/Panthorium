@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const express = require('express');
-const { AuthService } = require('../services/authService');
+const { AuthService } = require('./auth-fixture');
 const { SocialRepository } = require('../services/socialRepository');
 const { SocialService } = require('../services/socialService');
 const { createSocialRouter } = require('../routes/social');

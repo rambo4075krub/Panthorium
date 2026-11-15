@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const express = require('express');
 const crypto = require('crypto');
-const { AuthService } = require('../services/authService');
+const { AuthService } = require('./auth-fixture');
 const { installGuestAccess, restrictedPaths } = require('../middleware/guestAccess');
 const { createApiRouter } = require('../routes/api');
 const { createBiometricsRouter } = require('../routes/biometrics');

@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const express = require('express');
-const { AuthService } = require('../services/authService');
+const { AuthService } = require('./auth-fixture');
 const { createApiRouter } = require('../routes/api');
 
 (async () => {

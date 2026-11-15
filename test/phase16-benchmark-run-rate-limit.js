@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const express = require('express');
-const { AuthService } = require('../services/authService');
+const { AuthService } = require('./auth-fixture');
 const { createTrainingRouter } = require('../routes/training');
 
 // Regression guard: POST /api/training/benchmark/run fans out to every paid

@@ -74,14 +74,8 @@ class LocalInsightsService {
   }
   async signals() {
     if (!this.audit.pool) return (await this.audit.securityAlerts()).alerts.filter(a=>RULES[a.code]);
-    // Aggregate the full detection window; do not rely on the dashboard's 500-row sample.
-    const rows=(await this.audit.pool.query(`SELECT ip,
-      COUNT(*) FILTER(WHERE event='auth.login_failed')::int AS login,
-      COUNT(*) FILTER(WHERE event='http.request' AND status IN (401,403) AND time>NOW()-INTERVAL '10 minutes')::int AS denied,
-      COUNT(*) FILTER(WHERE event='http.request' AND status=429 AND time>NOW()-INTERVAL '10 minutes')::int AS rate
-      FROM panthorium_audit_events WHERE time>NOW()-INTERVAL '15 minutes'
-      AND (event='auth.login_failed' OR (event='http.request' AND status IN (401,403,429)))
-      AND ip IS NOT NULL GROUP BY ip HAVING COUNT(*)>=5 ORDER BY COUNT(*) DESC LIMIT 200`)).rows;
+    // Share the dashboard's uncapped canonical-address aggregation.
+    const rows = await require('./auditService').AuditService.prototype.securityCounts.call(this.audit);
     const result=[];
     for (const r of rows) {
       if(r.login>=5) result.push({ip:r.ip,count:r.login,code:r.login>=10?'LOGIN_BRUTE_FORCE':'LOGIN_FAILURE_SPIKE',level:r.login>=10?'critical':'warning'});
