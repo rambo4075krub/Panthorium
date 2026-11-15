@@ -1,6 +1,6 @@
 "use strict";
 const assert=require("node:assert/strict"),path=require("node:path"),express=require("express"),{randomUUID}=require("node:crypto"),{execFileSync}=require("node:child_process"),{chromium}=require("playwright");
-const {AuthService}=require("../services/authService"),{SocialRepository}=require("../services/socialRepository"),{SocialService}=require("../services/socialService"),{createSocialRouter}=require("../routes/social");
+const {AuthService}=require("./auth-fixture"),{SocialRepository}=require("../services/socialRepository"),{SocialService}=require("../services/socialService"),{createSocialRouter}=require("../routes/social");
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 async function until(fn,label){const end=Date.now()+12000;while(Date.now()<end){if(await fn())return;await pause(80);}throw Error(label);}
 (async()=>{

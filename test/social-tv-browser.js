@@ -1,7 +1,7 @@
 "use strict";
 const assert = require("node:assert/strict"), path = require("node:path"), fs = require("node:fs"), os = require("node:os"), express = require("express");
 const { randomUUID } = require("node:crypto"), { execFileSync } = require("node:child_process"), { chromium } = require("playwright");
-const { AuthService } = require("../services/authService"), { SocialRepository } = require("../services/socialRepository");
+const { AuthService } = require("./auth-fixture"), { SocialRepository } = require("../services/socialRepository");
 const { SocialService } = require("../services/socialService"), { createSocialRouter } = require("../routes/social");
 const { OFFICIAL_CHANNELS } = require("../services/socialTv");
 async function until(fn, label) { const end = Date.now() + 15000; while (Date.now() < end) { if (await fn()) return; await new Promise(r => setTimeout(r, 80)); } throw Error(label); }

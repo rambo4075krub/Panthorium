@@ -1,3 +1,5 @@
+const { canonicalIp } = require('./securityIp');
+const { migrateSecurityIps } = require('./securityIpMigration');
 const fs = require("fs");
 const path = require("path");
 const { createHash } = require("crypto");
@@ -28,6 +30,7 @@ class AuditService {
       CREATE INDEX IF NOT EXISTS idx_panthorium_audit_time ON panthorium_audit_events(time DESC);
       CREATE INDEX IF NOT EXISTS idx_panthorium_audit_event ON panthorium_audit_events(event);
       CREATE INDEX IF NOT EXISTS idx_panthorium_audit_actor ON panthorium_audit_events(actor_user_id);
+      CREATE INDEX IF NOT EXISTS idx_panthorium_audit_ip_time ON panthorium_audit_events(ip,time DESC);
 
       CREATE TABLE IF NOT EXISTS panthorium_security_alert_acknowledgements (
         alert_id TEXT PRIMARY KEY,
@@ -37,6 +40,7 @@ class AuditService {
       );
       CREATE INDEX IF NOT EXISTS idx_panthorium_alert_ack_expiry ON panthorium_security_alert_acknowledgements(expires_at);
     `);
+    await migrateSecurityIps(this.pool, "audit");
   }
 
   subscribe(listener) {
@@ -46,13 +50,15 @@ class AuditService {
   }
 
   record(event, fields = {}) {
+    fields = { ...fields, ...(fields.ip ? { ip: canonicalIp(fields.ip) || null } : {}) };
+    const writes = [];
     const entry = { time: new Date().toISOString(), event, ...fields };
-    if (this.file) fs.appendFile(this.file, JSON.stringify(entry) + "\n", () => {});
+    if (this.file) writes.push(fs.promises.appendFile(this.file, JSON.stringify(entry) + "\n").catch(error => console.error("[Audit] File write failed:", error.message)));
     if (this.pool) {
       const known = new Set(["requestId", "actorUserId", "userId", "targetUserId", "ip", "method", "path", "status", "durationMs", "userAgent"]);
       const metadata = {};
       for (const [key, value] of Object.entries(fields)) if (!known.has(key)) metadata[key] = value;
-      this.pool.query(
+      writes.push(this.pool.query(
         `INSERT INTO panthorium_audit_events
          (time,event,request_id,actor_user_id,target_user_id,ip,method,path,status,duration_ms,user_agent,metadata)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)`,
@@ -61,12 +67,13 @@ class AuditService {
           Number.isFinite(Number(fields.status)) ? Number(fields.status) : null,
           Number.isFinite(Number(fields.durationMs)) ? Number(fields.durationMs) : null,
           fields.userAgent || null, JSON.stringify(metadata)]
-      ).catch((error) => console.error("[Audit] PostgreSQL write failed:", error.message));
+      ).catch((error) => console.error("[Audit] PostgreSQL write failed:", error.message)));
     }
     for (const listener of this.listeners) {
       try { Promise.resolve(listener({ ...entry })).catch(() => {}); }
       catch { /* Observers cannot break the audited operation. */ }
     }
+    return Promise.all(writes);
   }
 
   normalizeFilters(filters = {}) {
@@ -106,10 +113,52 @@ class AuditService {
     return entries.slice(0, f.limit);
   }
 
+  fileWindow(since) {
+    if (!this.file || !fs.existsSync(this.file)) return [];
+    return fs.readFileSync(this.file, 'utf8').split(/\r?\n/).flatMap(line => {
+      try { const e = JSON.parse(line); return new Date(e.time).getTime() >= since ? [{...e,ip:canonicalIp(e.ip) || 'unknown'}] : []; }
+      catch { return []; }
+    });
+  }
+
   async summary() {
-    const entries = await this.listRecent({ limit: 500, from: new Date(Date.now() - 86400000).toISOString() });
-    const count = (event) => entries.filter((entry) => entry.event === event).length;
-    return { total24h: entries.length, loginSuccess24h: count("auth.login_success"), loginFailed24h: count("auth.login_failed"), refresh24h: count("auth.refresh"), guestSessions24h: count("auth.guest_session"), userChanges24h: entries.filter((entry) => String(entry.event || "").startsWith("auth.user_")).length };
+    let counts;
+    if (this.pool) counts = (await this.pool.query("SELECT event,COUNT(*)::int AS count FROM panthorium_audit_events WHERE time>=NOW()-INTERVAL '24 hours' GROUP BY event")).rows;
+    else { const map = new Map(); for (const e of this.fileWindow(Date.now()-86400000)) map.set(e.event,(map.get(e.event)||0)+1); counts = [...map].map(([event,count])=>({event,count})); }
+    const count = event => counts.find(row=>row.event===event)?.count || 0;
+    return {total24h:counts.reduce((n,r)=>n+r.count,0),loginSuccess24h:count('auth.login_success'),loginFailed24h:count('auth.login_failed'),refresh24h:count('auth.refresh'),guestSessions24h:count('auth.guest_session'),userChanges24h:counts.filter(r=>r.event.startsWith('auth.user_')).reduce((n,r)=>n+r.count,0)};
+  }
+
+  async securityCounts() {
+    let rows;
+    if (this.pool) rows = (await this.pool.query(`SELECT ip,
+      COUNT(*) FILTER(WHERE event='auth.login_failed' AND time>=NOW()-INTERVAL '15 minutes')::int AS login,
+      COUNT(*) FILTER(WHERE event='http.request' AND status IN (401,403) AND time>=NOW()-INTERVAL '10 minutes')::int AS denied,
+      COUNT(*) FILTER(WHERE event='http.request' AND status=429 AND time>=NOW()-INTERVAL '10 minutes')::int AS rate,
+      COUNT(*) FILTER(WHERE event LIKE '%session%' AND event LIKE '%revoked%')::int AS revokes
+      FROM panthorium_audit_events WHERE time>=NOW()-INTERVAL '1 hour'
+      AND (event='auth.login_failed' OR (event='http.request' AND status IN (401,403,429)) OR (event LIKE '%session%' AND event LIKE '%revoked%')) GROUP BY ip`)).rows;
+    else {
+      const now = Date.now();
+      rows = this.fileWindow(now-3600000).map(e=>({ip:e.ip,
+        login:Number(e.event==='auth.login_failed' && new Date(e.time).getTime()>=now-900000),
+        denied:Number(e.event==='http.request' && [401,403].includes(Number(e.status)) && new Date(e.time).getTime()>=now-600000),
+        rate:Number(e.event==='http.request' && Number(e.status)===429 && new Date(e.time).getTime()>=now-600000),
+        revokes:Number(e.event.includes('session') && e.event.includes('revoked'))}));
+    }
+    const groups = new Map();
+    for (const row of rows) {
+      const ip = canonicalIp(row.ip) || 'unknown';
+      const group = groups.get(ip) || {ip,login:0,denied:0,rate:0,revokes:0};
+      for (const key of ['login','denied','rate','revokes']) group[key] += Number(row[key]) || 0;
+      groups.set(ip,group);
+    }
+    return [...groups.values()];
+  }
+
+  async countLoginFailures(ip) {
+    if (this.pool) return (await this.pool.query("SELECT COUNT(*)::int AS count FROM panthorium_audit_events WHERE ip=$1 AND event='auth.login_failed' AND time>=NOW()-INTERVAL '15 minutes'", [canonicalIp(ip)])).rows[0].count;
+    return (await this.securityCounts()).find(r=>r.ip===canonicalIp(ip))?.login || 0;
   }
 
   alertId(alert) {
@@ -159,28 +208,21 @@ class AuditService {
   }
 
   async securityAlerts() {
-    const now = Date.now();
-    const entries = await this.listRecent({ limit: 500, from: new Date(now - 3600000).toISOString() });
+    const rows = await this.securityCounts();
     const alerts = [];
-    const group = (items, keyFn) => items.reduce((m, item) => { const key = keyFn(item) || "unknown"; m[key] = (m[key] || 0) + 1; return m; }, {});
-    const recent = (ms) => entries.filter((e) => { const t = Date.parse(e.time); return Number.isFinite(t) && now - t <= ms; });
-    const failures = recent(15 * 60000).filter((e) => e.event === "auth.login_failed");
-    const denied = recent(10 * 60000).filter((e) => Number(e.status) === 401 || Number(e.status) === 403);
-    const rateLimited = recent(10 * 60000).filter((e) => Number(e.status) === 429);
-
-    for (const [ip, count] of Object.entries(group(failures, (e) => e.ip))) {
+    for (const [ip, count] of rows.map(r=>[r.ip,r.login])) {
       if (count >= 10) alerts.push({ level: "critical", code: "LOGIN_BRUTE_FORCE", title: "Login failures สูงผิดปกติ", detail: `${count} ครั้งใน 15 นาทีจาก IP ${ip}`, count, ip });
       else if (count >= 5) alerts.push({ level: "warning", code: "LOGIN_FAILURE_SPIKE", title: "Login failures เพิ่มสูง", detail: `${count} ครั้งใน 15 นาทีจาก IP ${ip}`, count, ip });
     }
-    for (const [ip, count] of Object.entries(group(denied, (e) => e.ip))) {
+    for (const [ip, count] of rows.map(r=>[r.ip,r.denied])) {
       if (count >= 20) alerts.push({ level: "critical", code: "AUTH_DENIED_FLOOD", title: "401/403 จำนวนมาก", detail: `${count} requests ใน 10 นาทีจาก IP ${ip}`, count, ip });
       else if (count >= 10) alerts.push({ level: "warning", code: "AUTH_DENIED_SPIKE", title: "Unauthorized/Forbidden สูง", detail: `${count} requests ใน 10 นาทีจาก IP ${ip}`, count, ip });
     }
-    for (const [ip, count] of Object.entries(group(rateLimited, (e) => e.ip))) {
+    for (const [ip, count] of rows.map(r=>[r.ip,r.rate])) {
       if (count >= 5) alerts.push({ level: "warning", code: "RATE_LIMIT_PRESSURE", title: "Rate limit ถูก trigger หลายครั้ง", detail: `${count} responses 429 ใน 10 นาทีจาก IP ${ip}`, count, ip });
     }
-    const revokes = recent(3600000).filter((e) => String(e.event || "").includes("session") && String(e.event || "").includes("revoked"));
-    if (revokes.length >= 3) alerts.push({ level: "info", code: "SESSION_REVOCATIONS", title: "มีการ revoke sessions", detail: `${revokes.length} sessions ถูก revoke ใน 1 ชั่วโมง`, count: revokes.length });
+    const revokes = rows.reduce((n,r)=>n+r.revokes,0);
+    if (revokes >= 3) alerts.push({ level: 'info', code: 'SESSION_REVOCATIONS', title: 'มีการ revoke sessions', detail: `${revokes} sessions ถูก revoke ใน 1 ชั่วโมง`, count: revokes });
 
     const acknowledgements = await this.activeAcknowledgements();
     for (const alert of alerts) {
