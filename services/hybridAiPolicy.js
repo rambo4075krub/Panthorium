@@ -21,12 +21,16 @@ async function routeProviders(providers, candidates, {preferredProvider, history
   return ordered;
 }
 function localTools(tools = [], history = []) {
-  const text = history.filter(m=>typeof m.content==='string').slice(-2).map(m=>m.content).join(' ');
+  const text = history.filter(m=>m.role==='user'&&typeof m.content==='string').slice(-2).map(m=>m.content).join(' ');
   const groups = [[/อีเมล|เมล|เมล์|กล่องจดหมาย|ไฟล์แนบ|mail|inbox|outlook|attachment/i,/mailbox_/], [/คำนวณ|เท่าไร|เท่าไหร่|บวก|ลบ|ลด|ราคา|calculate|\d\s*[+*/-]\s*\d/i,/calculate/], [/ค้น|เว็บ|ข่าว|search|web/i,/web_/], [/อากาศ|weather/i,/weather/], [/โน้ต|บันทึก|note/i,/notes_|knowledge/], [/ไฟล์|file/i,/files_/], [/ปฏิทิน|นัด|calendar/i,/calendar/], [/แจ้งเตือน|notification/i,/notifications/], [/เตือน|reminder/i,/reminders/], [/รูป|ภาพ|สร้าง|เอกสาร|video|image/i,/studio/], [/mcp/i,/mcp_/]];
-  const mailboxRequested = /อีเมล|เมล|เมล์|กล่องจดหมาย|ไฟล์แนบ|mail|inbox|outlook|attachment/i.test(text);
-  const selected = tools.filter(t=>mailboxRequested ? /mailbox_/.test(t.name) : groups.some(([query,name])=>query.test(text)&&name.test(t.name)));
+  const selected = tools.filter(t=>groups.some(([query,name])=>query.test(text)&&name.test(t.name)));
   const prior = history.flatMap(m=>(m.parts||[]).map(p=>p.functionCall?.name).filter(Boolean));
-  return [...tools.filter(t=>prior.includes(t.name)),...selected,...tools.filter(t=>/system_status|ai_providers|mcp_list/.test(t.name))]
-    .filter((t,i,a)=>a.findIndex(x=>x.name===t.name)===i).slice(0,6);
+  const requested = require('./localToolSelection').selectedTool(history);
+  // Keywords rank the initial shortlist; they no longer determine access.
+  // Public retrieval is available even for "ต้องพกร่มไหม" or a bare URL.
+  return [...tools.filter(t=>t.name===requested),...selected,
+    ...tools.filter(t=>['panthorium_weather_get','panthorium_web_search','panthorium_web_read','panthorium_calculate'].includes(t.name)),
+    ...tools.filter(t=>prior.includes(t.name)),...tools.filter(t=>/system_status|ai_providers|mcp_list/.test(t.name))]
+    .filter((t,i,a)=>a.findIndex(x=>x.name===t.name)===i);
 }
 module.exports = {localEnabled,routeProviders,localTools};

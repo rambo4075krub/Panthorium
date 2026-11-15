@@ -60,6 +60,7 @@ jobs:
           node test/local-queue-workflow.js
           python3 -m unittest discover -s deploy/hybrid -p 'test_*.py'
           node test/hybrid-ai.js
+          node test/assistant-tool-routing.js
           node test/hybrid-http.js
           node test/voice-style.js
           python3 -m py_compile deploy/hybrid/hybrid_server.py deploy/hybrid/host/voice/voice_engine.py
