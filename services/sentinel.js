@@ -9,14 +9,7 @@ const { safeOutput } = require('./agentFunctionCallingService');
 const { VOICE_STYLE_INSTRUCTION, removeThaiPoliteParticles } = require('./voiceStyle');
 
 
-function currentTimeContext(date = new Date()) {
-  const buddhistDate = new Intl.DateTimeFormat("th-TH-u-ca-buddhist", { timeZone: "Asia/Bangkok", weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(date);
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
-  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
-  const isoDate = `${values.year}-${values.month}-${values.day}`;
-  const localTime = new Intl.DateTimeFormat("th-TH", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date);
-  return `\n\n[เวลาปัจจุบันที่เชื่อถือได้] เขตเวลา Asia/Bangkok; วันที่ไทยตามปฏิทินพุทธศักราช (พ.ศ.): ${buddhistDate} (${isoDate}, ค.ศ.) เวลา ${localTime} น. ใช้ข้อมูลนี้เป็นหลักเมื่อผู้ใช้ถามวัน เดือน ปี หรือเวลาปัจจุบัน ห้ามเดาจากความจำหรือข้อมูลฝึก หากตอบวันที่ไทยให้ใช้ปีพุทธศักราชซึ่งเท่ากับ ค.ศ. + 543; หากมีข้อสงสัยเรื่องเขตเวลา ให้ระบุเขตเวลาแทนการคาดเดา`;
-}
+const { currentTimeContext } = require('./currentTimeContext');
 
 class Sentinel {
   constructor({ sessions, prompts, providers, gateway, conversations, training, memory, audit, capacity } = {}) {
@@ -123,11 +116,13 @@ class Sentinel {
     return this.normalizeVoiceAnswer(await this.gateway.complete({systemPrompt,history:[{role:'user',content:message}],userId,sessionId}));
   }
   async completeWithFunctionCalls({ systemPrompt, history, preferredProvider, preferredModel, userId, sessionId, user, functionCalling, requestId, voiceMode = false, signal, media, thinking }) {
-    const selectedProvider = preferredProvider || this.gateway.orderedProviders?.()[0];
-    const declarations = ['vertex','gemini-live','local'].includes(selectedProvider) ? functionCalling?.declarationsFor(user) || [] : [];
+    // The gateway applies capability, account/quota and fallback policy. A
+    // stale preferred provider must not silently turn this into tool-free chat.
+    const declarations = functionCalling?.declarationsFor(user) || [];
     if (!declarations.length) return this.gateway.complete({ systemPrompt, history, preferredProvider, preferredModel, userId, sessionId, voiceMode, signal, media, thinking });
     let currentHistory = history.slice();
     let toolResults = [];
+    const publicSources = new Map();
     let totalUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     let functionCallCount = 0;
     let result = null;
@@ -155,19 +150,35 @@ class Sentinel {
           functionResponses.push({ functionResponse: { name: String(call.name || 'unknown_function'), ...(call.id ? { id: call.id } : {}), response: { error: 'function_call_limit_reached' } } });
           continue;
         }
-        const execution = await functionCalling.execute({ user, call, requestId, source: 'sentinel-chat' });
+        const selection = require('./localToolSelection');
+        if (result.provider === 'local' && call.name === selection.CLARIFY_TOOL) {
+          const question = selection.clarificationQuestion(call, functionCalling.declarationsFor(user));
+          if (question) {
+            result = { ...result, ok:true, text:question, functionCalls:[] };
+            toolResults.push({toolId:'tools.clarify',ok:true});
+            return true;
+          }
+        }
+        const execution = result.provider === 'local' && call.name === selection.SELECT_TOOL
+          ? selection.selectTool(call, functionCalling.declarationsFor(user))
+          : await functionCalling.execute({ user, call, requestId, source: 'sentinel-chat' });
+        if (['web.search','web.read','weather.get'].includes(execution.toolId) && execution.ok && execution.output?.available) {
+          for (const source of (execution.output.sources || []).slice(0,3)) {
+            if (typeof source.url==='string' && source.url.startsWith('https://')) publicSources.set(source.url, source);
+          }
+        }
         functionResponses.push({ functionResponse: execution.functionResponse });
         toolResults.push({ toolId: execution.toolId, ok: execution.ok, ...(execution.error ? { error: execution.error } : {}), ...(execution.output?.uiAction ? { output: { uiAction: execution.output.uiAction } } : {}),
-          ...((execution.toolId?.startsWith('studio.') || execution.toolId?.startsWith('notifications.') || execution.toolId?.startsWith('mailbox.')) ? {
+          ...((execution.toolId?.startsWith('studio.') || execution.toolId?.startsWith('notifications.') || execution.toolId?.startsWith('mailbox.') || execution.toolId?.startsWith('work.')) ? {
             ...(execution.actionId ? { actionId: execution.actionId, actionState: execution.actionState } : {}),
-            ...(execution.output ? { output: safeOutput(execution.output) } : {}),
-            ...(execution.requiresConfirmation ? { requiresConfirmation: true, confirmation: execution.confirmation } : {})
-          } : {}) });
+            ...(execution.output ? { output: safeOutput(execution.output) } : {})
+          } : {}),
+          ...(execution.requiresConfirmation ? { requiresConfirmation: true, confirmation: execution.confirmation } : {}) });
       }
       // The browser receives the exact frozen approval payload. A follow-up
       // model completion cannot approve it or claim the requested file exists.
       if (toolResults.some(item => item.requiresConfirmation)) {
-        result = { ...result, ok: true, text: toolResults.some(item => item.toolId === 'mailbox.write' && item.requiresConfirmation) ? 'เตรียมอีเมลแล้ว โปรดตรวจบัญชี ผู้รับ เนื้อหา และไฟล์แนบก่อนยืนยัน' : toolResults.some(item => item.toolId === 'notifications.write' && item.requiresConfirmation) ? 'เตรียมรายละเอียดการแจ้งเตือนแล้ว โปรดตรวจสอบและกดยืนยันในบัตรคำขอ' : 'เตรียมรายละเอียดงานสร้างสรรค์แล้ว โปรดตรวจสอบขั้นตอนและกดยืนยันในบัตรงานเพื่อเริ่มสร้างไฟล์', functionCalls: [] };
+        result = { ...result, ok: true, text: toolResults.some(item => item.toolId === 'mailbox.write' && item.requiresConfirmation) ? 'เตรียมอีเมลแล้ว โปรดตรวจบัญชี ผู้รับ เนื้อหา และไฟล์แนบก่อนยืนยัน' : toolResults.some(item => item.toolId === 'notifications.write' && item.requiresConfirmation) ? 'เตรียมรายละเอียดการแจ้งเตือนแล้ว โปรดตรวจสอบและกดยืนยันในบัตรคำขอ' : 'เตรียมรายละเอียดแล้ว โปรดตรวจสอบและกดยืนยันในบัตรคำขอเพื่อเริ่มดำเนินการ', functionCalls: [] };
         return true;
       }
       currentHistory.push({ role: 'model', parts: result.modelParts || [] });
@@ -175,6 +186,12 @@ class Sentinel {
       return false;
     }});
     if (result) {
+      if (publicSources.size && result.ok && result.text && !toolResults.some(item=>item.requiresConfirmation)) {
+        result.sources = [...publicSources.values()].slice(0,3);
+        const missing = result.sources.filter(source=>voiceMode ? !result.text.includes(source.title||source.url) : !result.text.includes(source.url));
+        if (missing.length) result.text += '\n\nอ้างอิง: '+missing.map(source=>voiceMode ? source.title||new URL(source.url).hostname
+          : `${source.title || 'แหล่งข้อมูล'} ${source.url}${source.license ? ` (สัญญาอนุญาต ${source.license})` : ''}`).join('; ');
+      }
       result.usage = totalUsage;
       result.functionCallCount = functionCallCount;
       result.toolResults = toolResults;
@@ -206,10 +223,10 @@ class Sentinel {
     ]);
     const voiceHint = voiceMode ? "\n\nโหมดตอบด้วยเสียง: เริ่มตอบประเด็นสำคัญทันที ใช้ภาษาไทยธรรมชาติ กระชับเป็นวลีที่พูดได้ลื่น ไม่เกริ่นซ้ำ ไม่ใช้ตารางหรือ Markdown สำหรับคำถามทั่วไปให้จบใน 1–3 ประโยค หากเป็นงานซับซ้อนให้รักษารายละเอียดที่จำเป็น แต่แบ่งเป็นประโยคสั้นชัดเจน" : '';
     const systemPrompt = this.prompts.build(mode)+currentTimeContext()+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard() + voiceHint + this.functionGuidance(user, functionCalling);
-    const hasTools = functionCalling?.declarationsFor(user)?.some(tool => ['panthorium_studio_catalog', 'panthorium_web_search', 'panthorium_web_read', 'panthorium_weather_get', 'panthorium_notifications_read', 'panthorium_mailbox_read', 'panthorium_mailbox_analyze', 'panthorium_mailbox_write'].includes(tool.name));
+    const hasTools = functionCalling?.declarationsFor(user)?.length > 0;
     // Let the model understand natural requests and follow-ups; a keyword gate
     // would silently miss phrases such as “วาดรูป” or “make a poster”.
-    const useFunctions = hasTools && ['vertex', 'gemini-live', 'local'].includes(provider || this.gateway.orderedProviders?.()[0]);
+    const useFunctions = hasTools;
     let result;
     if (useFunctions) {
       result = this.normalizeVoiceAnswer(await this.completeWithFunctionCalls({ systemPrompt, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, user, functionCalling, requestId, voiceMode, signal, thinking }));

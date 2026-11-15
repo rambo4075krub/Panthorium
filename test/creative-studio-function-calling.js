@@ -102,7 +102,8 @@ async function main() {
   assert.equal(gatewayCalls.length, 2, 'all authenticated requests can select a creative tool without a keyword gate');
   const guest = await sentinel.streamChat({ sessionId: 'guest-stream', userId: 'guest:session', user: { ...user, sub: 'guest:session' }, message: 'สวัสดี', functionCalling: functions, requestId: 'guest-stream-request' });
   assert.equal(guest.text, 'สวัสดี');
-  assert.equal(gatewayCalls.length, 2, 'guest chat preserves native streaming without creative tools');
+  assert.equal(gatewayCalls.length, 3, 'guest chat may use its permitted public/system reads');
+  assert(!gatewayCalls.at(-1).tools.some(tool => tool.name.startsWith('panthorium_studio_')), 'guest streaming must still omit account-only creative tools');
 
   // Exercise the real SSE and trusted HTTP confirmation boundary together.
   const app = express();
