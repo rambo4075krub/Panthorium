@@ -38,6 +38,8 @@ function isAllowedOrigin(req, allowedOrigins = []) {
 function createGeminiLiveWebSocketGateway({
   authService,
   allowedOrigins = [],
+  securityResponse = null,
+  trustProxy = false,
   WebSocketServerImpl,
   connectLive = connectGeminiLive,
   projectId,
@@ -63,7 +65,14 @@ function createGeminiLiveWebSocketGateway({
   const wss = new Server({ noServer: true, maxPayload: 8 * 1024 * 1024, perMessageDeflate: false });
   const sessions = new Map();
 
-  const onConnection = client => {
+  const validateSession = async principal => {
+    if (authService.validateAccessSession) await authService.validateAccessSession(principal);
+    return authService.validateAccountPrincipal ? authService.validateAccountPrincipal(principal) : principal;
+  };
+  const onConnection = (client, request = {}) => {
+    const checkIp = async () => {
+      if (securityResponse && await securityResponse.getActiveBlock(require('./securityIp').clientIp(request, trustProxy))) throw new Error('ip_temporarily_blocked');
+    };
     const capacityAbort = new AbortController();
     let capacityRelease = null;
     let accountTimer = null;
@@ -173,14 +182,14 @@ function createGeminiLiveWebSocketGateway({
       const token = frame?.type === "auth" && typeof frame.token === "string" ? frame.token : "";
       if (!token || token.length > 4096) return rejectAuth(4401, "authentication_required");
       try { user = authService.verifyAccessToken(token); } catch { return rejectAuth(4401, "invalid_or_expired_token"); }
-      if(authService.validateAccountPrincipal){try{user=await authService.validateAccountPrincipal(user);}catch{return rejectAuth(4403,"account_access_denied");}}
+      if(authService.validateAccountPrincipal || authService.validateAccessSession || securityResponse){try{await checkIp();user=await validateSession(user);}catch{return rejectAuth(4403,"account_access_denied");}}
       if(client.readyState!==1 || settled)return;
       if (!(user?.permissions || []).includes("chat")) return rejectAuth(4403, "permission_denied");
       if (sessions.size >= maxSessions) return rejectAuth(4429, "live_capacity_reached");
       userId = String(user.sub || user.id || "");
       if (!userId || sessions.has(userId)) return rejectAuth(4429, "live_session_already_active");
       sessions.set(userId, client);
-      if(authService.validateAccountPrincipal){accountTimer=setInterval(async()=>{if(accountCheckRunning)return;accountCheckRunning=true;try{const fresh=await authService.validateAccountPrincipal(authService.verifyAccessToken(accessToken));if(!(fresh.permissions||[]).includes("chat")||JSON.stringify([...(fresh.roles||[])].sort())!==JSON.stringify([...(user.roles||[])].sort())||JSON.stringify([...(fresh.permissions||[])].sort())!==JSON.stringify([...(user.permissions||[])].sort()))throw new Error("permission_denied");user=fresh;}catch{if(client.readyState<2)client.close(4403,"account_access_denied");release();}finally{accountCheckRunning=false;}},30000);accountTimer.unref?.();}
+      if(authService.validateAccountPrincipal || authService.validateAccessSession || securityResponse){accountTimer=setInterval(async()=>{if(accountCheckRunning)return;accountCheckRunning=true;try{await checkIp();const fresh=await validateSession(authService.verifyAccessToken(accessToken));if(!(fresh.permissions||[]).includes("chat")||JSON.stringify([...(fresh.roles||[])].sort())!==JSON.stringify([...(user.roles||[])].sort())||JSON.stringify([...(fresh.permissions||[])].sort())!==JSON.stringify([...(user.permissions||[])].sort()))throw new Error("permission_denied");user=fresh;}catch{if(client.readyState<2)client.close(4403,"account_access_denied");release();}finally{accountCheckRunning=false;}},30000);accountTimer.unref?.();}
       accessToken = token;
       // App context has its own scoped cloud session. Until checkpoints include a
       // verified context fingerprint, never restore or save provider state for it.
@@ -283,7 +292,8 @@ function createGeminiLiveWebSocketGateway({
         // Revalidate at the effect boundary; the 30-second connection monitor is
         // not sufficient when permissions change while an approval is visible.
         let fresh = authService.verifyAccessToken(accessToken);
-        if (authService.validateAccountPrincipal) fresh = await authService.validateAccountPrincipal(fresh);
+        await checkIp();
+        fresh = await validateSession(fresh);
         if (String(fresh?.sub || fresh?.id || '') !== userId || !(fresh?.permissions || []).includes('chat')) throw new Error('live_auth_expired');
         return fresh;
       };
@@ -671,7 +681,7 @@ function createGeminiLiveWebSocketGateway({
   };
 
   wss.on("connection", onConnection);
-  const handleUpgrade = (req, socket, head) => {
+  const handleUpgrade = async (req, socket, head) => {
     let pathname;
     try { pathname = new URL(req.url, "https://panthorium.invalid").pathname; } catch { return; }
     if (pathname !== "/api/live") return;
@@ -679,6 +689,12 @@ function createGeminiLiveWebSocketGateway({
       socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return;
+    }
+    if (securityResponse) {
+      try {
+        const ip = require('./securityIp').clientIp(req, trustProxy);
+        if (await securityResponse.getActiveBlock(ip)) throw new Error('ip_temporarily_blocked');
+      } catch { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return; }
     }
     wss.handleUpgrade(req, socket, head, client => wss.emit("connection", client, req));
   };

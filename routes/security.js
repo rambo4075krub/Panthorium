@@ -71,11 +71,12 @@ function createSecurityRouter(authService, repository, audit, securityResponse) 
         durationMinutes: req.body?.durationMinutes,
         reason: req.body?.reason || "Administrator block",
         source: "manual",
+        requestIp: req.ip,
         actorUserId: req.user.sub
       });
       res.status(201).json({ ok: true, block });
     } catch (error) {
-      if (error.message === "invalid_ip") return res.status(400).json({ ok: false, error: error.message });
+      if (["invalid_ip","cannot_block_own_ip","recovery_ip_protected"].includes(error.message)) return res.status(400).json({ ok: false, error: error.message });
       next(error);
     }
   });

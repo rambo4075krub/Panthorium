@@ -1,7 +1,7 @@
 "use strict";
 const assert = require("node:assert/strict"), path = require("node:path"), express = require("express");
 const { randomUUID } = require("node:crypto"), { chromium } = require("playwright");
-const { AuthService } = require("../services/authService");
+const { AuthService } = require("./auth-fixture");
 const { SocialRepository } = require("../services/socialRepository");
 const { SocialService } = require("../services/socialService");
 const { createSocialRouter } = require("../routes/social");

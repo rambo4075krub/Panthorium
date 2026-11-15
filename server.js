@@ -121,7 +121,8 @@ if (process.env.PANTHORIUM_LOCAL_QWEN === "1") {
   app.get("/qwen-local.js", (req, res) => res.sendFile(path.join(__dirname, "qwen-local.js")));
 }
 if (process.env.PANTHORIUM_LOCAL_PROFILE === "1") app.get(["/local-ai", "/local-ai.html"], (req, res) => res.sendFile(path.join(__dirname, "local-ai.html")));
-if (config.trustProxy) app.set("trust proxy", 1);
+if (config.trustProxy) app.set("trust proxy", "loopback");
+app.use(require("./services/securityIp").requestIdentity(config.trustProxy));
 
 const authRepository = createAuthRepository(config);
 const biometricIdentityRepository = createBiometricIdentityRepository(config);
@@ -293,11 +294,13 @@ app.use((req, res, next) => {
   }
   return cors({ origin: origin || false, credentials: true, exposedHeaders: ['X-Panthorium-Preview'] })(req, res, next);
 });
+app.use(requestContext(audit));
+app.use(require("./middleware/securityBlock").securityBlock(securityResponse));
 const adminMailbox = new (require('./services/adminMailboxService').AdminMailboxService)({pool:billingService.pool,config});
 app.post('/api/webhooks/resend', express.raw({type:'application/json',limit:'2mb'}), require('./routes/adminMailbox').mailboxWebhook(adminMailbox));
 app.use(express.json({ limit: "2mb", type: "application/json" }));
 app.use(cookieParser());
-app.use(requestContext(audit));
+
 if (config.mcpEnabled) app.use(require('./routes/mcp').createMcpRouter({ oauth: mcpOAuth, toolService: mcpTools, authService, config, audit }));
 app.use('/internal/push', createInternalJobsRouter({ scheduler: {tick:()=>notificationPush.tick()},audience:process.env.PUSH_SCHEDULER_AUDIENCE,serviceAccounts:process.env.PUSH_SCHEDULER_SERVICE_ACCOUNTS }));
 app.use('/internal/jobs', createInternalJobsRouter({ scheduler: { tick: async () => {
@@ -580,7 +583,7 @@ async function start() {
   await sentinelOrchestrator.init();
 
   const liveGateway = process.env.GEMINI_LIVE_ENABLED === "1"
-    ? createGeminiLiveWebSocketGateway({ authService, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "us-central1", functionCalling: agentFunctionCalling, entitlements:liveEntitlements,
+    ? createGeminiLiveWebSocketGateway({ authService, securityResponse, trustProxy: config.trustProxy, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "us-central1", functionCalling: agentFunctionCalling, entitlements:liveEntitlements,
       capacityGate: workloadCapacity.gate('voice'),
       sessionStore: voiceSessions.available() ? voiceSessions : null,
       contextProvider: args => cloudApps.voiceContext(args),

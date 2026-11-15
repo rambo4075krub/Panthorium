@@ -139,6 +139,7 @@ class McpOAuthService {
   async approveAuthorization({ requestId, user, approved = true } = {}) {
     const row = await this.repository.get('request', text(requestId, 200));
     if (!row || row.consumedAt != null) fail('invalid_request');
+    if (this.authService.validateAccessSession) await this.authService.validateAccessSession(user);
     const principal = await this.currentUser(user);
     const request = row.data;
     const redirect = new URL(request.redirectUri);
