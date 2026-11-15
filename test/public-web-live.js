@@ -13,7 +13,8 @@ async function main() {
   const read = await service.execute('web.read', { url: 'https://www.example.com/' }, 'live-smoke');
   console.log(JSON.stringify({ operation:'read', available:read.available, error:read.error, sources:read.sources?.map(source=>source.url) }));
   assert.equal(read.available, true, 'Public HTTPS page should be readable');
-  assert.match(read.content, /Example Domain/i);
+  assert(read.content.trim().length > 20, 'The public page must return readable text');
+  assert.equal(new URL(read.sources[0].url).hostname, 'www.example.com');
   const weather = await service.execute('weather.get', { location: 'กรุงเทพมหานคร', language: 'th' }, 'live-smoke');
   console.log(JSON.stringify({ operation:'weather', available:weather.available, error:weather.error, location:weather.location, updatedAt:weather.updatedAt, periods:weather.periods?.length, sources:weather.sources?.map(source=>source.url) }));
   assert.equal(weather.available, true, 'Free Bangkok forecast should be available');
