@@ -84,9 +84,12 @@ class LocalLlmProvider {
     if (model && model !== this.model) throw new Error('model_not_allowed');
     if (this.busy && !hybrid) throw new Error('local_llm_busy');
     if (!Array.isArray(history)) throw new Error('local_context_too_large');
-    if (!hybrid && (history.length>8 || history.some(m=>!['user','assistant'].includes(m.role)||typeof m.content!=='string') || history.reduce((n,m)=>n+m.content.length,0)>4000 || String(systemPrompt).length>2000)) throw new Error('local_context_too_large');
-    let selected = packedTools(tools,history,hybrid);
-    const messages = hybrid ? messagesFor(history, {preserveInput}) : history;
+    // Tool-capable local-only requests need the same bounded discovery and
+    // result protocol as hybrid requests, without changing their transport.
+    const toolContext = hybrid || tools.length > 0;
+    if (!toolContext && (history.length>8 || history.some(m=>!['user','assistant'].includes(m.role)||typeof m.content!=='string') || history.reduce((n,m)=>n+m.content.length,0)>4000 || String(systemPrompt).length>2000)) throw new Error('local_context_too_large');
+    let selected = packedTools(tools,history,toolContext);
+    const messages = toolContext ? messagesFor(history, {preserveInput}) : history;
     if (preserveInput && JSON.stringify(messages).length > 6500) throw new Error('local_context_too_large');
     // Drop complete old turns only; never orphan a tool result from its call.
     while (messages.length>1 && JSON.stringify(messages).length>6500) {
@@ -100,17 +103,17 @@ class LocalLlmProvider {
     // The full chat guidance ends in mailbox onboarding. Taking its raw tail
     // made unrelated calendar/tasks queries incorrectly ask to connect mail.
     // Keep the account/conversation context and add only relevant tool guidance.
-    if (hybrid && tools.length && guidanceStart>=0) contextPrompt=contextPrompt.slice(0,guidanceStart);
-    let prompt = hybrid ? localInstruction+currentTimeContext()+'\n'+contextPrompt.slice(0,650)+'\n'+contextPrompt.slice(-1200)+'\n'+require('./voiceStyle').VOICE_STYLE_INSTRUCTION : String(systemPrompt);
-    if (hybrid && selected.some(t=>t.function.name.startsWith('panthorium_mailbox_'))) prompt += require('./mailbox/tools').MAILBOX_GUIDANCE;
-    if (hybrid && tools.length) prompt += '\nUse supplied functions to retrieve current information and perform requested tasks. If a needed function is missing, use panthorium_tools_select to load an authorized name before saying it is unavailable. Loading a tool is not executing it; call the loaded function and use its result. Never claim an action succeeded without a successful result. Truncated results cover only the returned text/periods; disclose that limit and never infer missing facts. For weather hours use localTime in the returned timeZone; raw time ending in Z is UTC.';
+    if (toolContext && tools.length && guidanceStart>=0) contextPrompt=contextPrompt.slice(0,guidanceStart);
+    let prompt = toolContext ? localInstruction+currentTimeContext()+'\n'+contextPrompt.slice(0,650)+'\n'+contextPrompt.slice(-1200)+'\n'+require('./voiceStyle').VOICE_STYLE_INSTRUCTION : String(systemPrompt);
+    if (toolContext && selected.some(t=>t.function.name.startsWith('panthorium_mailbox_'))) prompt += require('./mailbox/tools').MAILBOX_GUIDANCE;
+    if (toolContext && tools.length) prompt += '\nUse supplied functions to retrieve current information and perform requested tasks. If a needed function is missing, use panthorium_tools_select to load an authorized name before saying it is unavailable. Loading a tool is not executing it; call the loaded function and use its result. Never claim an action succeeded without a successful result. Truncated results cover only the returned text/periods; disclose that limit and never infer missing facts. For weather hours use localTime in the returned timeZone; raw time ending in Z is UTC.';
     // General prompt truncation must not remove the public-evidence contract.
-    if (hybrid && tools.some(t=>['panthorium_web_search','panthorium_web_read','panthorium_weather_get'].includes(t.name))) prompt += require('./publicWebTools').PUBLIC_WEB_GUIDANCE;
+    if (toolContext && tools.some(t=>['panthorium_web_search','panthorium_web_read','panthorium_weather_get'].includes(t.name))) prompt += require('./publicWebTools').PUBLIC_WEB_GUIDANCE;
     const question=[...history].reverse().find(m=>m.role==='user'&&typeof m.content==='string')?.content||'';
     const calculated=history.some(m=>m.parts?.some(p=>p.functionResponse?.name==='panthorium_calculate'));
     const needsCalculation=!calculated && selected.some(t=>t.function.name==='panthorium_calculate') && (question.match(/\d+(?:[.,]\d+)*/g)||[]).length>=2 && /ลด|บวก|ลบ|คูณ|หาร|คำนวณ|[+*/]/.test(question);
-    const evidenceTool = hybrid ? publicEvidenceTool(history,tools) : null;
-    const accountTools = hybrid && !evidenceTool && !needsCalculation ? requiredAccountTools(history,tools) : [];
+    const evidenceTool = toolContext ? publicEvidenceTool(history,tools) : null;
+    const accountTools = toolContext && !evidenceTool && !needsCalculation ? requiredAccountTools(history,tools) : [];
     if (accountTools.length) {
       const names=new Set(accountTools.map(tool=>tool.name));
       // An account task must retrieve/prepare a result or ask for missing
@@ -139,7 +142,7 @@ class LocalLlmProvider {
     const multimodalMessages = require('./localMedia').attachMedia(messages, media);
     if(!hybrid)this.busy = true;
     try {
-      const response = await fetch(this.url, {method:'POST',redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(hybrid?195000:150000)]):AbortSignal.timeout(hybrid?195000:150000),headers:{'Content-Type':'application/json',...(hybrid?{'X-Panthorium-Account':accountKey(userId)}:{})},body:JSON.stringify({model:this.model,messages:[{role:'system',content:prompt},...multimodalMessages],temperature:thinking?0.6:0.7,top_p:thinking?0.95:0.8,top_k:20,min_p:0,presence_penalty:1.5,max_tokens:thinking?3072:hybrid?768:160,stream:false,chat_template_kwargs:{enable_thinking:thinking},...(!thinking?{reasoning_effort:'none'}:{}),...(selected.length?{tools:selected,tool_choice:toolChoice,parallel_tool_calls:false}:{})})});
+      const response = await fetch(this.url, {method:'POST',redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(hybrid?195000:150000)]):AbortSignal.timeout(hybrid?195000:150000),headers:{'Content-Type':'application/json',...(hybrid?{'X-Panthorium-Account':accountKey(userId)}:{})},body:JSON.stringify({model:this.model,messages:[{role:'system',content:prompt},...multimodalMessages],temperature:thinking?0.6:0.7,top_p:thinking?0.95:0.8,top_k:20,min_p:0,presence_penalty:1.5,max_tokens:thinking?3072:toolContext?768:160,stream:false,chat_template_kwargs:{enable_thinking:thinking},...(!thinking?{reasoning_effort:'none'}:{}),...(selected.length?{tools:selected,tool_choice:toolChoice,parallel_tool_calls:false}:{})})});
       if (!response.ok) {
         if(response.status===429) throw new Error('local_llm_busy');
         if(response.status===503) {

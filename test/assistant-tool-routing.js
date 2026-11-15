@@ -9,7 +9,7 @@ const { AgentFunctionCallingService, TOOL_DEFINITIONS } = require('../services/a
 const { registerPublicWebTools } = require('../services/publicWebTools');
 const { selectTool, selectedTool, SELECT_TOOL, publicEvidenceTool } = require('../services/localToolSelection');
 
-async function main() {
+async function main(hybrid = true) {
   const nativeFetch = global.fetch;
   const registry = new ToolRegistry();
   const executions = [];
@@ -30,7 +30,7 @@ async function main() {
     callDetailed(provider, system, history, options) {
       providerCalls.push(provider);
       assert.equal(provider, 'local', 'incompatible text fallback must not silently drop tools');
-      return local.complete(system, history, { ...options, hybrid: true });
+      return local.complete(system, history, { ...options, hybrid });
     },
     streamDetailed() { throw Error('ordinary streaming must enter the tool workflow'); }
   };
@@ -41,6 +41,9 @@ async function main() {
   global.fetch = async (url, options) => {
     assert.match(String(url), /^http:\/\/127\.0\.0\.1:/);
     const body = JSON.parse(options.body); requests.push(body);
+    // Tool discovery must not opt the standalone endpoint into the hybrid
+    // account-header protocol or remove its existing transport isolation.
+    if (!hybrid && !options.headers['X-Panthorium-Account']) assert.equal(local.busy, true);
     assert.equal(body.parallel_tool_calls, false);
     return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: respond(body) }] }));
   };
@@ -73,10 +76,10 @@ async function main() {
 
     respond = () => ({ content: 'พยากรณ์ที่แต่งขึ้นโดยไม่เรียกแหล่งข้อมูล' });
     await assert.rejects(local.complete('s', [{ role:'user', content:'พรุ่งนี้กรุงเทพต้องพกร่มไหม' }],
-      { hybrid:true, tools:functions.declarationsFor(user) }), /local_required_public_evidence_missing/);
+      { hybrid, tools:functions.declarationsFor(user) }), /local_required_public_evidence_missing/);
     for (const question of ['ค้นเว็บเรื่องรถไฟไทย', 'อ่าน https://example.org/ ให้ฟัง']) {
       await assert.rejects(local.complete('s', [{ role:'user', content:question }],
-        { hybrid:true, tools:functions.declarationsFor(user) }), /local_required_public_evidence_missing/);
+        { hybrid, tools:functions.declarationsFor(user) }), /local_required_public_evidence_missing/);
     }
     const beforeClarification=executions.length;
     respond = body => {
@@ -120,7 +123,7 @@ async function main() {
     assert(providerCalls.every(p => p === 'local'));
     respond=()=>({content:'ไม่มีนัดหมาย โดยยังไม่ได้ตรวจสอบ'});
     await assert.rejects(local.complete('s',[{role:'user',content:'วันพรุ่งนี้ฉันว่างไหม'}],
-      {hybrid:true,tools:calendarOnly.declarationsFor(user)}),/local_required_account_tool_missing/);
+      {hybrid,tools:calendarOnly.declarationsFor(user)}),/local_required_account_tool_missing/);
 
     const permitted = calendarOnly.declarationsFor(user);
     for (const args of [{ name: 'panthorium_files_write' }, { name: 'panthorium_calendar_read', confirmed: true }, null]) {
@@ -171,7 +174,7 @@ async function main() {
     await local.complete('s', [{role:'user',content:'ตัวเลือกสำหรับฉัน'},
       {role:'model',parts:[{functionCall:{id:'large',name:SELECT_TOOL,args:{name:large.name}}}]},
       {role:'user',parts:[{functionResponse:{id:'large',name:SELECT_TOOL,response:{ok:true,selectedTool:large.name}}}]}],
-      {hybrid:true,tools:fullCatalogue});
+      {hybrid,tools:fullCatalogue});
 
     const forecast = { available: true, kind: 'forecast_not_observation', date: '2026-11-15',
       periods: Array.from({ length: 24 }, (_, hour) => ({ time: `2026-11-15T${String(hour).padStart(2,'0')}:00:00Z`, temperatureC: 30, note: 'forecast '.repeat(40) })),
@@ -193,7 +196,7 @@ async function main() {
     await sentinel.chat({ user, userId: user.sub, sessionId: 'screen', provider: 'local', message: 'สรุปหน้านี้',
       screen, functionCalling: functions });
     assert.equal(functions.declarationsFor({ sub: 'denied', permissions: [] }).length, 0);
-    console.log('PASS tool routing: typed/voice stream, compatible fallback, keyword-free weather, bounded discovery, large schemas and screen isolation');
+    console.log(`PASS tool routing (${hybrid ? 'hybrid' : 'standalone local'}): typed/voice stream, compatible fallback, keyword-free weather, bounded discovery, large schemas and screen isolation`);
   } finally { global.fetch = nativeFetch; }
 }
-main().catch(error => { console.error(error); process.exitCode = 1; });
+main(true).then(() => main(false)).catch(error => { console.error(error); process.exitCode = 1; });
