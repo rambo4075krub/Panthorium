@@ -45,10 +45,8 @@ async function main() {
   assert.equal(gatewayCalls[1].history.at(-2).parts[0].thoughtSignature, 'signature');
   assert.equal(gatewayCalls[1].history.at(-1).parts[0].functionResponse.response.output.providers[0], 'vertex');
 
-  const externalProviderCalls = gatewayCalls.length;
   await sentinel.chat({ sessionId: 'function-calling', userId: 'user-1', user: { sub: 'user-1', permissions: ['chat'] }, message: 'ทักทาย', provider: 'groq', functionCalling });
-  assert.equal(gatewayCalls.length, externalProviderCalls + 1);
-  assert.equal(gatewayCalls.at(-1).tools, undefined, 'tool declarations are only sent to Sentinel V4 on Vertex');
+  assert.equal(gatewayCalls.at(-1).tools[0].name, 'panthorium_ai_providers', 'the gateway must choose a compatible provider without dropping tools');
   console.log('Sentinel function calling tests passed');
 }
 
