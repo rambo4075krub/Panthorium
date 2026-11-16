@@ -18,6 +18,7 @@ async function main() {
   ];
   const calls = [];
   const agentService = {
+    ledger: {},
     catalogFor(user) {
       const permissions = new Set(user.permissions);
       return catalog.filter(tool => permissions.has(tool.permission));
@@ -36,7 +37,7 @@ async function main() {
   assert(regularTools.some(tool => tool.name === 'panthorium_ai_providers'));
   assert(!regularTools.some(tool => tool.name === 'panthorium_system_status'));
   assert(!regularTools.some(tool => tool.name === 'panthorium_training_status'));
-  assert(!regularTools.some(tool => tool.name === 'panthorium_conversation_clear'));
+  assert(regularTools.some(tool => tool.name === 'panthorium_conversation_clear'));
   assert(!regularTools.some(tool => tool.name === 'panthorium_window_open'), 'chat omits browser actions until the browser can acknowledge them');
   const guestTools = service.declarationsFor(guestUser, { surface: 'gemini-live' });
   for (const name of ['panthorium_calendar_read', 'panthorium_calendar_write', 'panthorium_notes_write', 'panthorium_reminders_write', 'panthorium_files_read', 'panthorium_knowledge_search', 'panthorium_video_generate']) {
@@ -44,7 +45,7 @@ async function main() {
   }
   assert(regularTools.some(tool => tool.name === 'panthorium_calendar_read'), 'current-user calendar reads are available in chat');
   for (const name of ['panthorium_calendar_write', 'panthorium_notes_write', 'panthorium_files_write', 'panthorium_video_generate']) {
-    assert(!regularTools.some(tool => tool.name === name), `${name} is not available to unconfirmed chat calls`);
+    assert(regularTools.some(tool => tool.name === name), `${name} is available only through durable approval in chat`);
   }
   const liveTools = service.declarationsFor(regularUser, { surface: 'gemini-live' });
   for (const definition of TOOL_DEFINITIONS) {
@@ -77,8 +78,8 @@ async function main() {
   assert.equal(pendingWrite.confirmation.mutates, true);
   assert.equal(calls.at(-1).confirmed, false);
   const approvedWrite = await service.execute({ user: regularUser, call: { id: 'call-4', name: 'panthorium_calendar_write', args: { action: 'create', title: 'Sprint' } }, source: 'gemini-live', requireCallId: true, confirmed: true });
-  assert.equal(approvedWrite.ok, true);
-  assert.equal(calls.at(-1).confirmed, true);
+  assert.equal(approvedWrite.requiresConfirmation, true, 'a model-side confirmed flag cannot approve a ledger action');
+  assert.equal(calls.at(-1).confirmed, false);
 
   const admin = { sub: 'admin-1', id: 'admin-1', roles: ['administrator'], permissions: ['chat', 'system:read', 'settings'] };
   const adminTools = service.declarationsFor(admin);
