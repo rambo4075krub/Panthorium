@@ -49,6 +49,7 @@
   }
 
   async function capturePage(root) {
+    const owner = accountId();
     const view = root.querySelector('[data-browser-view]');
     if (!view || !view.getURL?.()) throw new Error('page_not_ready');
     const page = await view.executeJavaScript(`({
@@ -56,12 +57,14 @@
       url: String(location.href || '').slice(0, 2048),
       text: String(document.body?.innerText || '').replace(/\\u0000/g, '').slice(0, ${maxPageText})
     })`, true);
+    if (!root.isConnected || owner !== accountId() || root.dataset.browserOwner !== owner || page?.url !== view.getURL()) throw new Error('page_changed');
     if (!page?.text?.trim()) throw new Error('page_has_no_text');
     root._pageContext = { title: String(page.title || ''), url: normalizeUrl(page.url), text: String(page.text).slice(0, maxPageText) };
     root.querySelector('[data-page-title]').textContent = root._pageContext.title || root._pageContext.url;
     root.querySelector('[data-page-preview]').value = root._pageContext.text;
     root.querySelector('[data-send-summary]').disabled = false;
     status(root, 'อ่านข้อความแล้ว · ตรวจตัวอย่างก่อนส่งให้ Sentinel');
+    return root._pageContext;
   }
 
   async function sendToSentinel(root) {
@@ -210,7 +213,14 @@
     return true;
   }
 
-  window.PanthoriumBrowser = { open, close: () => { const root = document.getElementById('panthorium-browser-dashboard'); if (root) close(root); }, normalizeUrl };
+  async function readCurrentPage() {
+    if(!accountUser()||!allowed()) return {ok:false,error:'voice_action_permission_denied',text:'บัญชีนี้ไม่มีสิทธิ์อ่านหน้าเว็บ'};
+    const root=document.getElementById('panthorium-browser-dashboard');
+    if(!root||!desktop()) return {ok:false,error:'external_page_unavailable',text:'อ่านหน้านี้ได้เมื่อเปิดเว็บภายใน Panthorium Browser Desktop; แท็บภายนอกยังอ่านไม่ได้'};
+    try {const page=await capturePage(root);return {ok:true,appId:'browser',title:page.title,url:page.url,text:page.text,controls:[]};}
+    catch {return {ok:false,error:'page_not_ready',text:'ยังอ่านหน้าเว็บไม่ได้ กรุณารอให้หน้าเว็บโหลดเสร็จแล้วสั่งอีกครั้ง'};}
+  }
+  window.PanthoriumBrowser = { open, readCurrentPage, close: () => { const root = document.getElementById('panthorium-browser-dashboard'); if (root) close(root); }, normalizeUrl };
   const sync = () => {
     const root = document.getElementById('panthorium-browser-dashboard');
     if (root && root.dataset.browserOwner !== accountId()) close(root);

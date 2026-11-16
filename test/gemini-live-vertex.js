@@ -44,6 +44,7 @@ async function main() {
   const { AgentFunctionCallingService, TOOL_DEFINITIONS } = require("../services/agentFunctionCallingService");
   const functionCalling = new AgentFunctionCallingService({
     agentService: {
+      ledger: {}, // Schema-only fixture; production actions require the durable ledger.
       catalogFor: () => TOOL_DEFINITIONS.map(tool => ({ id: tool.toolId, risk: "low" })),
       execute: async () => ({ ok: true })
     }

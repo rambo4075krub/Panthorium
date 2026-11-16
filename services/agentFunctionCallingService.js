@@ -9,6 +9,7 @@ const { STUDIO_TOOL_DEFINITIONS } = require('./creativeStudioTools');
 const { WORK_TOOL_DEFINITIONS } = require('./workAssistantTools');
 
 const TOOL_DEFINITIONS = [
+  ...require('./screenVoiceTools').SCREEN_TOOL_DEFINITIONS,
   {name:'panthorium_calculate',toolId:'calculator.evaluate',description:'Calculate arithmetic accurately. Always use for addition/subtraction/percentages, including Thai money questions. Pass the exact numbers and operations in the question, e.g. 546.02-10. Do not do arithmetic from memory.',properties:{expression:{type:'STRING',description:'Arithmetic expression using numbers + - * / parentheses, maximum 200 characters.'}},required:['expression']},
   ...PUBLIC_WEB_TOOL_DEFINITIONS,
   ...NOTIFICATION_TOOL_DEFINITIONS,
@@ -49,8 +50,13 @@ const TOOL_DEFINITIONS = [
   { name: 'panthorium_conversation_clear', toolId: 'conversation.clear', description: 'Delete one conversation owned by the current user. Panthorium will ask for on-screen confirmation.', properties: { sessionId: { type: 'STRING', description: 'Conversation session id.' } }, required: ['sessionId'] }
 ];
 
-const CHAT_APPROVAL_TOOL_IDS = new Set(['studio.create', 'studio.edit', 'notifications.write', 'mailbox.write', 'work.save', 'work.draft', 'work.export', 'work.task']);
+// Existing Live tools retain their original payload-key scheme. Newly exposed
+// chat actions must not change Live session/call receipt identity.
+const PAYLOAD_KEY_TOOL_IDS = new Set(['studio.create', 'studio.edit', 'notifications.write', 'mailbox.write', 'work.save', 'work.draft', 'work.export', 'work.task']);
+const CHAT_APPROVAL_TOOL_IDS = new Set(['studio.create', 'studio.edit', 'notifications.write', 'mailbox.write', 'work.save', 'work.draft', 'work.export', 'work.task',
+  'calendar.write', 'goals.write', 'notes.write', 'memory.write', 'reminders.write', 'files.write', 'knowledge.write', 'social.write', 'conversation.clear', 'media.video.plan_edit', 'media.video.ai_edit', 'media.video.generate', 'media.video.transcribe', 'media.video.render']);
 const ACCOUNT_ONLY_TOOL_IDS = new Set([
+  'screen.command', 'conversation.clear',
   ...WORK_TOOL_DEFINITIONS.map(tool => tool.toolId),
   ...MAILBOX_TOOL_DEFINITIONS.map(tool => tool.toolId),
   ...NOTIFICATION_TOOL_DEFINITIONS.map(tool => tool.toolId),
@@ -84,6 +90,7 @@ class AgentFunctionCallingService {
     const catalog = new Map(this.agentService.catalogFor(user).map(tool => [tool.id, tool]));
     const allowedWindows = windowCatalog.apps.filter(app => windowCatalog.allowed(app, user)).map(app => app.id);
     return TOOL_DEFINITIONS.flatMap(definition => {
+      if (definition.liveOnly && surface !== 'gemini-live') return [];
       if (ACCOUNT_ONLY_TOOL_IDS.has(definition.toolId) && (!user?.sub || String(user.sub).startsWith('guest:') || user.roles?.includes('guest'))) return [];
       const tool = catalog.get(definition.toolId);
       if (!tool) return [];
@@ -132,7 +139,7 @@ class AgentFunctionCallingService {
       return this.rejected({ user, requestId, name, error: 'tool_permission_denied', source, callId, toolId: definition.toolId });
     }
     let actionRequestId = requestId;
-    if (CHAT_APPROVAL_TOOL_IDS.has(definition.toolId) && requestId) {
+    if (CHAT_APPROVAL_TOOL_IDS.has(definition.toolId) && requestId && (source !== 'gemini-live' || PAYLOAD_KEY_TOOL_IDS.has(definition.toolId))) {
       // A server request may contain several different creative actions. Their
       // keys are derived here, never accepted as model arguments or call IDs.
       try { actionRequestId = `${definition.toolId === 'notifications.write' ? 'notification' : 'studio'}:${createHash('sha256').update(`${requestId}:${payloadHash(definition.toolId, args)}`).digest('hex')}`; }

@@ -5,7 +5,7 @@ const { SessionManager } = require("./sessionManager");
 const { PromptManager } = require("./promptManager");
 const { ProviderManager } = require("./providerManager");
 const { AiGateway } = require("./aiGateway");
-const { safeOutput } = require('./agentFunctionCallingService');
+const { safeOutput, CHAT_APPROVAL_TOOL_IDS } = require('./agentFunctionCallingService');
 const { VOICE_STYLE_INSTRUCTION, removeThaiPoliteParticles } = require('./voiceStyle');
 
 
@@ -162,6 +162,14 @@ class Sentinel {
         const execution = result.provider === 'local' && call.name === selection.SELECT_TOOL
           ? selection.selectTool(call, functionCalling.declarationsFor(user))
           : await functionCalling.execute({ user, call, requestId, source: 'sentinel-chat' });
+        // Browser effects terminate this turn with a bounded, observed receipt.
+        // Screen text cannot feed another tool round, and a pending review is
+        // never reported as the underlying operation having completed.
+        if (execution.uiCompletion) {
+          toolResults.push({toolId:execution.toolId,ok:execution.ok,output:execution.output});
+          result = {...result,ok:true,text:execution.uiCompletion,functionCalls:[]};
+          return true;
+        }
         if (['web.search','web.read','weather.get'].includes(execution.toolId) && execution.ok && execution.output?.available) {
           for (const source of (execution.output.sources || []).slice(0,3)) {
             if (typeof source.url==='string' && source.url.startsWith('https://')) publicSources.set(source.url, source);
@@ -169,7 +177,7 @@ class Sentinel {
         }
         functionResponses.push({ functionResponse: execution.functionResponse });
         toolResults.push({ toolId: execution.toolId, ok: execution.ok, ...(execution.error ? { error: execution.error } : {}), ...(execution.output?.uiAction ? { output: { uiAction: execution.output.uiAction } } : {}),
-          ...((execution.toolId?.startsWith('studio.') || execution.toolId?.startsWith('notifications.') || execution.toolId?.startsWith('mailbox.') || execution.toolId?.startsWith('work.')) ? {
+          ...((execution.toolId?.startsWith('studio.') || execution.toolId?.startsWith('notifications.') || execution.toolId?.startsWith('mailbox.') || execution.toolId?.startsWith('work.') || CHAT_APPROVAL_TOOL_IDS.has(execution.toolId)) ? {
             ...(execution.actionId ? { actionId: execution.actionId, actionState: execution.actionState } : {}),
             ...(execution.output ? { output: safeOutput(execution.output) } : {})
           } : {}),
@@ -198,17 +206,18 @@ class Sentinel {
     }
     return result || { ok: false, error: 'function_call_failed', text: '' };
   }
-  async chat({ sessionId, userId = "system", message, mode = "default", provider, model, voiceMode = false, user, functionCalling, requestId, signal, media, thinking }) {
+  async chat({ sessionId, userId = "system", message, mode = "default", provider, model, voiceMode = false, user, functionCalling, requestId, signal, media, thinking, screen }) {
     if (!message || !String(message).trim()) return { ok: false, error: "empty_message", text: "ไม่มีข้อความที่ต้องการประมวลผล" };
     const prepared = await this.prepareHistory({ sessionId, userId, message, historyLimit: voiceMode ? 12 : 40 });
     const [trainingContext, memoryContext] = await Promise.all([
       this.training ? this.training.contextFor(message) : Promise.resolve(''),
       this.memoryContextFor(userId, message, prepared.sid)
     ]);
+    if(screen) functionCalling=null;
     const functionGuidance = this.functionGuidance(user, functionCalling);
-    const result = this.normalizeVoiceAnswer(await this.completeWithFunctionCalls({ systemPrompt: this.prompts.build(mode)+currentTimeContext()+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard() + functionGuidance, history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, user, functionCalling, requestId, voiceMode, signal, media, thinking }));
+    const result = this.normalizeVoiceAnswer(await this.completeWithFunctionCalls({ systemPrompt: this.prompts.build(mode)+currentTimeContext()+(this.prompts.productContext?.()||'') + trainingContext + memoryContext + this.voiceLanguageGuard() + functionGuidance + require('./screenVoiceTools').screenInstruction(screen), history: prepared.history, preferredProvider: provider, preferredModel: model, userId, sessionId: prepared.sid, user, functionCalling, requestId, voiceMode, signal, media, thinking }));
     await this.persistAssistant({ userId, sid: prepared.sid, localId: prepared.localId, result });
-    if (!media?.length) this.captureTraining({message,result,userId,sessionId:prepared.sid});
+    if (!media?.length && !screen) this.captureTraining({message,result,userId,sessionId:prepared.sid});
     return result.ok ? { ...result, sessionId: prepared.sid, sentinel: "Sentinel" } : result;
   }
   functionGuidance(user, functionCalling) {

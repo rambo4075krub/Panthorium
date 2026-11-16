@@ -17,15 +17,18 @@ function validChatBody(body = {}) {
   if (body.provider != null && (typeof body.provider !== "string" || body.provider.length > 40)) return "invalid_provider";
   if (body.model != null && (typeof body.model !== "string" || body.model.length > 120)) return "invalid_model";
   if (body.voice != null && typeof body.voice !== "boolean") return "invalid_voice_mode";
+  if (body.uiActionProtocol != null && body.uiActionProtocol !== 1) return "invalid_ui_action_protocol";
   if (body.thinking != null && typeof body.thinking !== 'boolean') return 'invalid_thinking';
   return null;
 }
 const windowCatalog = require("../voice-window-catalog");
+const {screenContext} = require('../services/screenVoiceTools');
 const creativeVoice = require("../creative-voice-catalog");
 function hasVoicePermission(user, permission) { return (user?.permissions || []).includes(permission); }
 
 function createApiRouter(sentinel, authService, audit, aiOperations, agentService, agentPlanner, agentWorkflow, agentRuns, agentScheduler, biometrics, functionCalling = null) {
   const router = express.Router(); const auth = requireAuth(authService);
+  const uiActions = new (require("../services/chatUiActionBroker").ChatUiActionBroker)();
   router.use(['/ai', '/agent'], auth, denyGuest);
   const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
   const speechLimiter = rateLimit({ windowMs: 60 * 1000, limit: 90, standardHeaders: true, legacyHeaders: false });
@@ -46,10 +49,18 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
       if (!localAiAllowed(req.user)) return res.status(403).json({ok:false,error:'local_access_denied'});
       const message = req.body?.message;
       if (typeof message !== "string" || !message.trim() || message.length > 2000) return res.status(400).json({ok:false,error:"invalid_message"});
+      let screen;
+      try { screen = screenContext(req.body.screen,req.user); }
+      catch { return res.status(400).json({ok:false,error:"invalid_screen_context"}); }
       let media;
       try { media = require('../services/localMedia').validateMedia(req.body.media); }
       catch { return res.status(400).json({ok:false,error:'invalid_local_media'}); }
       if (req.body.thinking !== undefined && typeof req.body.thinking !== 'boolean') return res.status(400).json({ok:false,error:'invalid_thinking'});
+      const uiStream = req.body.uiActionProtocol === 1;
+      if (req.body.uiActionProtocol != null && !uiStream) return res.status(400).json({ok:false,error:'invalid_ui_action_protocol'});
+      // The isolated inference pilot and untrusted-screen summaries never gain
+      // product actions merely because a client advertises a protocol version.
+      if (uiStream && (process.env.PANTHORIUM_LOCAL_PROFILE === '1' || !sentinel.providers.hybrid || screen || !req.get('Accept')?.includes('text/event-stream'))) return res.status(409).json({ok:false,error:'local_ui_runtime_unavailable'});
       if (media.length && !sentinel.providers.hybrid) return res.status(503).json({ok:false,error:'local_vision_unavailable'});
       try {
         if (!require('../services/hybridAiPolicy').localEnabled() && hybridQwen) return res.status(503).json({ok:false,error:'local_disabled'});
@@ -59,13 +70,23 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
           const cancel = () => { if (!res.writableEnded) controller.abort(); };
           res.once('close',cancel);
           let result;
-          try { result = await sentinel.chat({message:message.trim(),media,thinking:req.body.thinking,sessionId:req.body.sessionId,userId,provider:'local',voiceMode:req.body.voice===true,user:req.user,functionCalling,requestId:stableActionRequestId(req)||req.requestId||randomUUID(),signal:controller.signal}); }
+          const event = (name,payload) => { if(!res.writableEnded&&!res.destroyed) res.write(`event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`); };
+          if(uiStream) {res.status(200).set({'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache, no-transform','X-Accel-Buffering':'no'});res.flushHeaders?.();event('start',{sentinel:'Sentinel'});}
+          const localFunctions = uiStream ? require('../services/chatUiFunctionCalling').withChatUiActions(functionCalling,{user:req.user,broker:uiActions,signal:controller.signal,authorize:localAiAllowed,send:payload=>event('ui-action',payload)}) : functionCalling;
+          try {
+            result = await sentinel.chat({message:message.trim(),screen,media,thinking:req.body.thinking,sessionId:req.body.sessionId,userId,provider:'local',voiceMode:req.body.voice===true,user:req.user,functionCalling:localFunctions,requestId:stableActionRequestId(req)||req.requestId||randomUUID(),signal:controller.signal});
+            if (res.destroyed) return;
+            if(uiStream) {
+              if(result.ok){event('delta',{delta:result.text||''});event('done',{...result,creditsCharged:0,billable:false});}
+              else event('error',{error:result.error||'local_inference_unavailable'});
+              return res.end();
+            }
+          } catch(error) { if(uiStream){event('error',{error:'local_inference_unavailable'});return res.end();} throw error; }
           finally { res.off('close',cancel); }
-          if (res.destroyed) return;
           return res.status(result.ok?200:503).json({...result,creditsCharged:0,billable:false});
         }
         const complete = hybridQwen ? hybridQwen.complete.bind(hybridQwen) : sentinel.providers.callDetailed.bind(sentinel.providers, "local");
-        const result = await complete("คุณคือผู้ช่วย Panthorium ตอบภาษาไทยสั้น ชัดเจน และซื่อสัตย์ ไม่มีเครื่องมือสั่งงานระบบจริง",[{role:'user',content:message.trim()}], {userId});
+        const result = await complete("คุณคือผู้ช่วย Panthorium ตอบภาษาไทยสั้น ชัดเจน และซื่อสัตย์ ไม่มีเครื่องมือสั่งงานระบบจริง"+require('../services/screenVoiceTools').screenInstruction(screen),[{role:'user',content:message.trim()}], {userId});
         res.json({ok:true,...result,creditsCharged:0,billable:false,actionsEnabled:false});
       } catch (error) {
         if (String(error.message).startsWith('quota_exceeded')) return res.status(402).json({ok:false,error:'quota_exceeded'});
@@ -271,6 +292,14 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
   router.get("/conversations", auth, requirePermission("chat"), async (req, res) => res.json({ ok: true, sessions: await sentinel.conversationSessions(req.user.sub, Number(req.query.limit) || 30) }));
   router.get("/conversations/:sessionId", auth, requirePermission("chat"), async (req, res) => { if (!validText(req.params.sessionId, 120)) return res.status(400).json({ ok: false, error: "invalid_session_id" }); res.json({ ok: true, sessionId: req.params.sessionId, messages: await sentinel.conversationHistory(req.user.sub, req.params.sessionId, Number(req.query.limit) || 40) }); });
   router.delete("/conversations/:sessionId", auth, requirePermission("chat"), async (req, res) => { if (!validText(req.params.sessionId, 120)) return res.status(400).json({ ok: false, error: "invalid_session_id" }); await sentinel.clearConversation(req.user.sub, req.params.sessionId); audit.record("ai.conversation_deleted", { userId: req.user.sub, sessionId: req.params.sessionId }); res.json({ ok: true }); });
+  // Browser acknowledgments are never model tools. Fresh auth validates the
+  // current session and principal before both claim and receipt acceptance.
+  for (const operation of ['claim', 'acknowledge']) router.post(`/chat/ui-actions/:id/${operation}`, auth, requirePermission('chat'), agentLimiter, (req, res) => {
+    const allowed = operation === 'claim' ? ['nonce'] : ['nonce', 'result'];
+    if (!req.body || Object.keys(req.body).some(key => !allowed.includes(key))) return res.status(400).json({ok:false,error:'invalid_ui_action_receipt'});
+    const result = uiActions[operation]({user:req.user,id:req.params.id,nonce:req.body.nonce,result:req.body.result});
+    res.status(result.ok ? 200 : 409).json(result);
+  });
   router.post("/chat/stream", auth, requirePermission("chat"), aiLimiter, async (req, res) => {
     const error = validChatBody(req.body || {});
     if (error) return res.status(400).json({ ok: false, error });
@@ -297,7 +326,9 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
         voiceMode: voice === true,
         thinking,
         user: req.user,
-        functionCalling,
+        functionCalling: req.body.uiActionProtocol === 1
+          ? require('../services/chatUiFunctionCalling').withChatUiActions(functionCalling, {user:req.user,broker:uiActions,signal:controller.signal,send:payload=>event('ui-action',payload)})
+          : functionCalling,
         requestId: stableActionRequestId(req) || req.requestId || randomUUID(),
         onProvider: (meta) => event("provider", meta),
         onDelta: (delta) => event("delta", { delta })
