@@ -1,6 +1,61 @@
 # Sentinel voice commands
 
-Both microphones classify voice input using `classifyVoiceInput` in the shared
+## Continuous voice and the current window
+
+The local/hybrid microphone now stays on until the user taps Stop, says
+`ปิดไมค์` / `หยุดฟัง` / `stop listening`, changes accounts, or leaves the page.
+An audio energy detector submits an utterance after a pause. Silence is discarded;
+recording pauses during inference and speech playback, then starts the next turn.
+Opening an in-app window does not end the voice session. Transcripts use the same
+window/creative command router as the normal command client before falling back
+to local chat. TTS failures preserve the visible answer and resume listening.
+
+The active window is the highest visible, permitted Panthorium window. The
+`screen-voice-client.js` bridge supports these Thai/English requests:
+
+| Request | Result |
+| --- | --- |
+| อ่านหน้านี้ / read this page | Read visible text and ordinary draft fields |
+| สรุปหน้านี้ / summarize this page | Summarize bounded current-window content |
+| แสดงปุ่ม / list controls | List exact labels and numbered controls |
+| เลื่อนลง / scroll down | Scroll the current window's scrollable content |
+| เลือกช่อง ชื่อ / focus field Name | Focus a named field |
+| กรอกช่อง ชื่อ ว่า งานใหม่ / fill Name with New work | Review a literal field change |
+| กดปุ่ม บันทึก / click button Save | Review a click on one exact control |
+| ยืนยัน / ยกเลิก | Confirm or cancel the current screen proposal |
+
+Clicks and field changes require a separate user confirmation, since input/change
+handlers can autosave. Review shows the target, proposed value and current form
+values. Approval is bound to the account/permissions, exact DOM element, active
+window and unchanged content/form values, and expires after 60 seconds. Duplicate
+labels require a numbered selection. Disabled, hidden, secret-bearing and other
+features' approval controls are excluded. A click acknowledgement proves dispatch
+only; the owning app remains responsible for reporting its operation's result.
+
+Gemini Live exposes `panthorium_screen_command` and receives the actual browser
+result before answering. The model cannot submit `ยืนยัน` through this tool.
+Final user transcripts handle screen confirmations directly in the browser.
+Screen content is untrusted evidence; it does not authorize additional work.
+Local summaries disable tools and do not enter training capture. Restricted Cloud
+App sessions cannot use this general screen bridge.
+
+The bridge controls Panthorium windows, not arbitrary operating-system apps or
+cross-origin tabs. An explicit read can capture the current HTTPS WebView inside
+Panthorium Browser Desktop; external browser popups return an unavailable result.
+Microphone access still requires the browser's initial user gesture/permission.
+Background execution depends on the operating system and browser lifecycle.
+
+`npm run test:screen-voice` covers active-window reads, exclusions, immutable
+approvals, account/scope isolation, tools-free summaries and Live UI round trips.
+`test/hybrid-voice-browser.js` runs real Chromium MediaRecorder/AudioContext with
+synthetic voiced/silent input and ASR/chat/TTS fixtures. It verifies continuous
+open/read/summary/fill/click/confirm turns, silence, TTS recovery, spoken stop and
+account switching in both local-only and quota-fallback modes. It does not prove
+physical microphone accuracy or provider health on a user's device.
+
+## Legacy speech-recognition transport
+
+Both legacy microphones classify voice input using `classifyVoiceInput` in the shared
 catalog. System commands use `/api/sentinel/command` (`voiceMode: true`) and run
 silently, except permission requests. Questions use `/api/chat` with `voice:true`
 (`conversationalVoice: true` in the browser) and play the returned answer through

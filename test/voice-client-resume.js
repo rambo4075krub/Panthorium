@@ -47,6 +47,13 @@ async function main() {
   creativePending=true;sockets[0].frame({serverContent:{inputTranscription:{text:'ไม่ต้องบันทึก',finished:true},turnComplete:true}});await tick();assert.equal(creativeCommands.length,1);
   sockets[0].frame({serverContent:{inputTranscription:{text:'ยกเลิก'},turnComplete:true}});await tick();assert.deepEqual(creativeCommands,['ยืนยัน','ยกเลิก']);
   delete window.PanthoriumCreativeStudio;
+  const screenCommands=[];let screenPending=true;
+  window.PanthoriumScreenVoice={hasPending:()=>screenPending,execute:async(text,options)=>{assert.equal(options.userInitiated,true);screenCommands.push(text);screenPending=false;return{ok:true,text:'กดปุ่มแล้ว'};}};
+  sockets[0].frame({serverContent:{outputTranscription:{text:'ยืนยัน'},turnComplete:true}});await tick();assert.equal(screenCommands.length,0,'model speech cannot approve a screen operation');
+  sockets[0].frame({serverContent:{inputTranscription:{text:'ยืน'}}});await tick();assert.equal(screenCommands.length,0);
+  sockets[0].frame({serverContent:{inputTranscription:{text:'ยัน',finished:true}}});await tick();assert.deepEqual(screenCommands,['ยืนยัน']);
+  sockets[0].frame({serverContent:{turnComplete:true}});await tick();assert.equal(screenCommands.length,1);
+  delete window.PanthoriumScreenVoice;
 
   sockets[0].bufferedAmount = 65537;
   processor.onaudioprocess({ inputBuffer: { getChannelData: () => new Float32Array(1024).fill(.1) } });
@@ -111,6 +118,8 @@ async function main() {
   await window.PanthoriumLiveVoice.toggle();
   oldClose({code:1006,reason:''});oldError();await tick();
   assert(window.PanthoriumLiveVoice.isActive(),'late callbacks cannot close a newer live session');
+  sockets.at(-1).frame({serverContent:{outputTranscription:{text:'ปิดไมค์'},turnComplete:true}});assert(window.PanthoriumLiveVoice.isActive(),'model speech must not end the microphone session');
+  sockets.at(-1).frame({serverContent:{inputTranscription:{text:'ปิดไมค์',finished:true}}});assert(!window.PanthoriumLiveVoice.isActive(),'a final user stop command ends capture');
   window.PanthoriumLiveVoice.stop();dom.window.close();
   console.log('Browser voice: bounded capture/playback, immediate stop, context/account changes, late-frame privacy and safe reconnect passed');
 }

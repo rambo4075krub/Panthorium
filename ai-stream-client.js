@@ -22,7 +22,7 @@
       await sleep(delay);
     }
   }
-  async function streamCall(prompt, { voiceMode = false, signal, thinking } = {}) {
+  async function streamCall(prompt, { voiceMode = false, signal, thinking, local = false, media, sessionId, localVoice = false, emitDone = true } = {}) {
     const system = getOS();
     const requestAccountId = accountId();
     if (window.PanthoriumAuth?.hasPermission && !window.PanthoriumAuth.hasPermission('chat')) return { ok: false, text: 'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat', provider: 'RBAC', via: 'rbac' };
@@ -32,12 +32,19 @@
     const requestId = window.crypto?.randomUUID?.() || `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const requestSignal = signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeoutSignal]) : signal || timeoutSignal;
     if (document.body.dataset.aiMode === "gemini-live-only") voiceMode = false;
-    const request = async () => fetch(base + '/api/chat/stream', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-session-id': system.config.sessionId, Accept: 'text/event-stream' }, body: JSON.stringify({ message: prompt, sessionId: system.config.sessionId, mode: 'default', voice: voiceMode, thinking, requestId }), signal: requestSignal });
+    const request = async () => fetch(base + (local ? '/api/local/chat' : '/api/chat/stream'), { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-session-id': system.config.sessionId, Accept: 'text/event-stream' }, body: JSON.stringify({ message: prompt, sessionId: sessionId || system.config.sessionId, mode: 'default', voice: local ? localVoice : voiceMode, thinking, ...(local ? {media} : {}), requestId, uiActionProtocol: 1 }), signal: requestSignal });
     let res = await request();
     if (res.status === 401 && window.PanthoriumAuth?.refreshSession) { const ok = await window.PanthoriumAuth.refreshSession().catch(() => false); if (ok) { token = getOS()?.config?.accessToken || ''; res = await request(); } }
     if (!res.ok || !res.body) throw new Error(`stream_http_${res.status}`);
     const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; const state = { text: '', speechText: '' }; let meta = {}; let sawDelta = false;
     emit('status', { text: 'กำลังเชื่อมต่อ Sentinel...' });
+    let uiActionAttempted = false; const uiSeen = new Set();
+    const uiController = new AbortController();
+    const stopUi = () => uiController.abort();
+    window.addEventListener('panthorium:auth-changed', stopUi);
+    window.addEventListener('pagehide', stopUi);
+    requestSignal.addEventListener('abort', stopUi, {once:true});
+    try {
     while (true) {
       const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true });
       const frames = buffer.split('\n\n'); buffer = frames.pop() || '';
@@ -45,6 +52,29 @@
         let event = 'message'; let data = null;
         for (const line of frame.split('\n')) { if (line.startsWith('event:')) event = line.slice(6).trim(); if (line.startsWith('data:')) { try { data = JSON.parse(line.slice(5).trim()); } catch (_) {} } }
         if (!data) continue;
+        if (event === 'ui-action') {
+          // Claim once using this stream's secret before touching the browser.
+          // No retry/fallback after this point, even if an acknowledgment is lost.
+          uiActionAttempted = true;
+          if (!data.id || !data.nonce || uiSeen.has(data.id)) continue;
+          uiSeen.add(data.id);
+          const current = () => requestAccountId === accountId() && getOS()?.config?.accessToken === token && !uiController.signal.aborted && !requestSignal.aborted && getOS()?.state?.user?.permissions?.includes('chat');
+          if (!current()) throw new Error('ui_action_account_changed');
+          const post = async (operation, body) => {
+            const response = await fetch(base + '/api/chat/ui-actions/' + encodeURIComponent(data.id) + '/' + operation, {method:'POST',credentials:'include',headers:{'Content-Type':'application/json',Authorization:`Bearer ${getOS()?.config?.accessToken || token}`},body:JSON.stringify({nonce:data.nonce,...body}),signal:requestSignal});
+            const receipt=await response.json();
+            if(!response.ok || !receipt.ok) throw new Error('ui_action_receipt_rejected');
+            return receipt;
+          };
+          const claim=await post('claim',{});
+          if (!current() || claim.action !== data.action) throw new Error('ui_action_account_changed');
+          let result;
+          try { result=await window.PanthoriumVoiceCommands?.windowAction(claim.action, {signal:uiController.signal}); }
+          catch { result={ok:false,error:'ui_action_failed'}; }
+          if (!current()) throw new Error('ui_action_account_changed');
+          await post('acknowledge',{result:{ok:result?.ok===true,error:String(result?.error||'').slice(0,120),text:String(result?.text||'').slice(0,data.action.startsWith('screen_command:')?6000:240),confirmationRequired:result?.confirmationRequired===true,...(typeof result?.dispatched==='boolean'?{dispatched:result.dispatched}:{})}});
+          continue;
+        }
         if (event === 'start') emit('status', { text: 'Sentinel กำลังประมวลผล...' });
         if (event === 'queue') emit('status',{text:data.running?'Sentinel AI · กำลังประมวลผล':`Sentinel AI · คิวที่ ${data.position} · รอได้ไม่เกิน ${data.maxWaitSeconds} วินาที${data.reason?' · กำลังรอทรัพยากร':''}`});
         if (event === 'provider') { meta = { ...meta, ...data }; emit('provider', data); }
@@ -77,17 +107,19 @@
           } else if (delta.length > 24) await revealBuffered(delta, state, 14);
           else { state.text += delta; emit('stream', { delta, text: state.text, simulated: false }); }
         }
-        if (event === 'done') { meta = { ...meta, ...data }; emit('done', { ...meta, text: state.text, accountId: requestAccountId }); }
+        if (event === 'done') { meta = { ...meta, ...data }; if(emitDone) emit('done', { ...meta, text: state.text, accountId: requestAccountId }); }
         if (event === 'error') throw new Error(data.error || 'stream_failed');
       }
     }
     if (!sawDelta || !state.text) throw new Error('empty_stream');
+    } catch (error) { if (uiActionAttempted) error.noAutomaticRetry = true; reader.cancel?.().catch(()=>{}); throw error; }
+    finally { window.removeEventListener('panthorium:auth-changed',stopUi);window.removeEventListener('pagehide',stopUi);requestSignal.removeEventListener('abort',stopUi); }
     let streamSpeechOk = false;
     if (voiceMode) {
       emit('stream-end', {});
       streamSpeechOk = await window.PanthoriumVoiceStream?.finish?.() === true;
     }
-    return { ok: true, text: state.text, provider: 'Sentinel AI', via: 'sentinel-stream', model: meta.model || null, usage: meta.usage || null, toolResults: meta.toolResults || [], latencyMs: meta.latencyMs || null, streaming: meta.streaming || 'unknown', streamSpoken: voiceMode, streamSpeechOk };
+    return { ok: true, text: state.text, provider: local ? 'local' : 'Sentinel AI', ...(local?{sessionId:meta.sessionId,creditsCharged:meta.creditsCharged,billable:meta.billable}:{}), via: 'sentinel-stream', model: meta.model || null, usage: meta.usage || null, toolResults: meta.toolResults || [], latencyMs: meta.latencyMs || null, streaming: meta.streaming || 'unknown', streamSpoken: voiceMode, streamSpeechOk };
   }
   function installVisualStreaming() {
     if (window.__panthoriumStreamVisualInstalled) return; window.__panthoriumStreamVisualInstalled = true;
@@ -109,6 +141,7 @@
       if (options?.conversationalVoice === true) {
         try { return await streamCall(prompt, { voiceMode: true, signal: options.signal }); }
         catch (error) {
+          if (error.noAutomaticRetry) return {ok:false,text:'ยังยืนยันผลคำสั่งหน้าจอไม่ได้ โปรดตรวจหน้าต่างก่อนสั่งซ้ำ',error:'ui_action_outcome_unknown'};
           if (options?.signal?.aborted) return { ok: false, text: "ยกเลิกรอบเสียงแล้ว", error: "voice_cancelled", provider: "Sentinel", via: "sentinel-stream" };
           console.warn('[Phase4 Voice Stream]', error.message);
           const raw = String(error?.message || 'voice_stream_failed');
@@ -125,6 +158,7 @@
       if (options?.voiceMode === true) return previous(prompt, options);
       try { const result = await streamCall(prompt, options); if (result.text) return result; }
       catch (error) {
+        if (error.noAutomaticRetry) return {ok:false,text:'ยังยืนยันผลคำสั่งหน้าจอไม่ได้ โปรดตรวจหน้าต่างก่อนสั่งซ้ำ',error:'ui_action_outcome_unknown'};
         console.warn('[Phase4 Stream]', error.message);
         const fallback = await previous(prompt, options);
         if (fallback?.toolResults?.length) emit('done', { ...fallback, accountId: requestAccountId });
@@ -139,9 +173,12 @@
     };
     wrapped.__panthoriumStreaming = true; callAI = wrapped; return true;
   }
-  // Notification mutations share the same durable exact-payload confirmation
+  // Chat mutations share the same durable exact-payload confirmation
   // boundary as Live voice. The model receives neither approvalHash nor a way
   // to approve its own proposal; only this authenticated user gesture submits it.
+  // Only ledger-backed server actions supported by this authenticated review UI.
+  // Window/screen actions stay excluded until chat has effect acknowledgment.
+  const chatApprovalTools = new Set(['notifications.write', 'mailbox.write', 'calendar.write', 'goals.write', 'notes.write', 'memory.write', 'reminders.write', 'files.write', 'knowledge.write', 'social.write', 'conversation.clear', 'media.video.plan_edit', 'media.video.ai_edit', 'media.video.generate', 'media.video.transcribe', 'media.video.render']);
   const notificationApprovals = new Map();
   function clearNotificationApprovals() {
     for (const record of notificationApprovals.values()) { record.controller.abort(); record.card.remove(); }
@@ -150,9 +187,9 @@
   function reviewNotification(result, owner) {
     const confirmation = result?.confirmation, user = getOS()?.state?.user;
     if (!owner || owner !== accountId() || owner.startsWith('guest:') || user?.roles?.includes('guest') || !user?.permissions?.includes('chat') ||
-        !['notifications.write','mailbox.write'].includes(result?.toolId) || confirmation?.toolId !== result.toolId || result.requiresConfirmation !== true ||
+        !chatApprovalTools.has(result?.toolId) || confirmation?.toolId !== result.toolId || result.requiresConfirmation !== true ||
         !/^[a-f0-9-]{36}$/i.test(confirmation.actionId || '') || !/^[a-f0-9]{64}$/.test(confirmation.approvalHash || '') ||
-        !Number.isFinite(Date.parse(confirmation.approvalExpiresAt)) || !confirmation.args || typeof confirmation.args !== 'object') return false;
+        !Number.isFinite(Date.parse(confirmation.approvalExpiresAt)) || !confirmation.args || typeof confirmation.args !== 'object' || Array.isArray(confirmation.args) || confirmation.args.truncated === true) return false;
     if (notificationApprovals.has(confirmation.actionId)) return false;
     const expiresAt = Date.parse(confirmation.approvalExpiresAt), controller = new AbortController();
     const make = (tag, value) => { const node = document.createElement(tag); if (value != null) node.textContent = value; return node; };
@@ -160,8 +197,9 @@
     card.style.cssText = 'padding:16px;border:1px solid var(--accent,#4ddac4);border-radius:12px;margin:10px 0;background:var(--bg-panel,#111c2a);color:var(--text,#f4f8fc);max-width:620px;overflow-wrap:anywhere';
     const actions = { send: 'ส่งการแจ้งเตือนถึงฉันตอนนี้', settings: 'เปลี่ยนตั้งค่าการแจ้งเตือน', mark_read: 'ทำเครื่องหมายอ่านแล้ว', delete: 'ลบการแจ้งเตือน' };
     const emailAction = result.toolId === 'mailbox.write';
+    const genericAction = !['mailbox.write','notifications.write'].includes(result.toolId);
     const label = make('h3', emailAction ? 'ตรวจสอบคำสั่งอีเมล' : actions[confirmation.args.action] || 'ตรวจสอบการแจ้งเตือน'); label.style.margin = '0 0 8px';
-    card.append(label, make('p', !emailAction && confirmation.args.action === 'send' ? 'การส่งตอนนี้จะบันทึกในศูนย์แจ้งเตือน และแสดงตามสวิตช์กับช่วงเวลาเงียบที่ตั้งไว้' : 'ตรวจสอบรายละเอียดด้านล่าง การเปลี่ยนแปลงจะเกิดขึ้นหลังคุณยืนยัน'));
+    card.append(label, make('p', !emailAction && !genericAction && confirmation.args.action === 'send' ? 'การส่งตอนนี้จะบันทึกในศูนย์แจ้งเตือน และแสดงตามสวิตช์กับช่วงเวลาเงียบที่ตั้งไว้' : 'ตรวจสอบรายละเอียดด้านล่าง การเปลี่ยนแปลงจะเกิดขึ้นหลังคุณยืนยัน'));
     const details = make('div');
     details.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;line-height:1.6';
     const categoryLabels = { system: 'ระบบ', security: 'ความปลอดภัยและบัญชี', operations: 'การดำเนินการ', reminders: 'การเตือนและกำหนดเวลา', calendar: 'ปฏิทิน', files: 'ไฟล์และเอกสาร', social: 'Social Media', billing: 'แพ็กเกจและชำระเงิน', ai: 'Sentinel AI' };
@@ -171,13 +209,23 @@
     const add = (name, value) => details.append(make('p', name + ': ' + value));
     const onOff = value => value === true ? 'เปิด' : 'ปิด';
     const args = confirmation.args;
-    if (emailAction) {
+    if (emailAction || genericAction) {
       const presentation = window.PanthoriumActionPresentation?.describe(confirmation);
-      label.textContent = presentation?.question || 'ยืนยันการดำเนินการกับอีเมลหรือไม่';
+      label.textContent = presentation?.question || (genericAction ? 'ตรวจสอบคำสั่ง ' + result.toolId : 'ยืนยันการดำเนินการกับอีเมลหรือไม่');
       for (const line of presentation?.details || []) details.append(make('p', line));
     }
-    if (!emailAction && args.action === 'send') { add('หัวข้อ', args.title); if (args.body) add('ข้อความ', args.body); add('หมวด', categoryLabels[args.category || 'system'] || args.category); }
-    if (args.action === 'settings') {
+    if (genericAction) {
+      details.append(make('p', 'บัญชี: ' + owner));
+      details.append(make('p', 'เครื่องมือ: ' + result.toolId));
+      details.append(make('p', confirmation.description));
+      if (/^(media)\./.test(result.toolId)) details.append(make('p', 'อาจใช้โควตาหรือมีค่าใช้จ่ายตามบริการที่เลือก'));
+      if (result.toolId === 'reminders.write') details.append(make('p', 'การสร้างหรือเลื่อนคำเตือนอาจส่งอีเมลถึงบัญชีที่ยืนยันแล้วตามรายละเอียดนี้'));
+      if (['delete','forget'].includes(args.action) || result.toolId === 'conversation.clear') details.append(make('p', 'คำสั่งลบนี้อาจกู้คืนไม่ได้ ตรวจรายการให้แน่ใจก่อนยืนยัน'));
+      // Render every frozen field as text, never HTML or a truncated summary.
+      details.append(make('pre', JSON.stringify(args, null, 2)));
+    }
+    if (!emailAction && !genericAction && args.action === 'send') { add('หัวข้อ', args.title); if (args.body) add('ข้อความ', args.body); add('หมวด', categoryLabels[args.category || 'system'] || args.category); }
+    if (!genericAction && args.action === 'settings') {
       for (const [key, value] of Object.entries(args.patch || {})) {
         if (Object.hasOwn(flagLabels, key)) add(flagLabels[key], onOff(value));
         else if (key === 'channels' || key === 'categories' || key === 'events') {
@@ -190,7 +238,7 @@
       }
       if (args.patch?.channels?.browser === true || args.patch?.channels?.voice === true || args.patch?.channels?.sound === true) details.append(make('small', 'อุปกรณ์อาจต้องอนุญาตการแจ้งเตือนหรือปลดล็อกเสียงในตั้งค่าการแจ้งเตือนก่อน'));
     }
-    if (!emailAction && (args.action === 'mark_read' || args.action === 'delete')) {
+    if (!emailAction && !genericAction && (args.action === 'mark_read' || args.action === 'delete')) {
       add('ขอบเขต', args.all === true ? 'รายการทั้งหมดในบัญชีนี้' : (args.ids?.length || 0) + ' รายการที่เลือก');
 
     }
@@ -218,15 +266,16 @@
     const showResult = (data, cancelled = false) => {
       if (!current()) return;
       const stored = data.action;
-      const outcome = stored ? stored.result : data;
+      const outcome = stored ? stored.result : cancelled ? data.result : data;
       if (cancelled && data.cancellationEffective) { status.textContent = 'ยกเลิกคำขอแล้ว'; record.finished = true; }
       else if (outcome?.ok === true) {
-        status.textContent = emailAction ? 'ดำเนินการคำสั่งอีเมลแล้ว ตรวจสถานะในกล่องอีเมล (การรับคำขอส่งยังไม่ยืนยันการส่งถึงผู้รับ)' : ({ send: 'บันทึกการแจ้งเตือนแล้ว', settings: 'บันทึกตั้งค่าการแจ้งเตือนแล้ว', mark_read: 'ทำเครื่องหมายอ่านแล้ว', delete: 'ลบการแจ้งเตือนแล้ว' })[confirmation.args.action] || 'ดำเนินการแล้ว';
+        status.textContent = genericAction ? 'เซิร์ฟเวอร์รับรองผลตามรายละเอียดด้านล่าง งานที่เข้าคิวยังไม่ถือว่าเสร็จ' : emailAction ? 'ดำเนินการคำสั่งอีเมลแล้ว ตรวจสถานะในกล่องอีเมล (การรับคำขอส่งยังไม่ยืนยันการส่งถึงผู้รับ)' : ({ send: 'บันทึกการแจ้งเตือนแล้ว', settings: 'บันทึกตั้งค่าการแจ้งเตือนแล้ว', mark_read: 'ทำเครื่องหมายอ่านแล้ว', delete: 'ลบการแจ้งเตือนแล้ว' })[confirmation.args.action] || 'ดำเนินการแล้ว';
+        if (genericAction) card.append(make('pre', JSON.stringify(outcome.output ?? outcome, null, 2)));
         record.finished = true; window.PanthoriumNotifications?.refresh?.();
         window.dispatchEvent(new CustomEvent('panthorium:notifications-changed'));
       } else if (data.error === 'action_confirmation_expired') { status.textContent = 'คำขอนี้หมดอายุแล้ว กรุณาสั่งใหม่'; record.finished = true; }
       else if (outcome?.ok === false && !outcome.reconciliationRequired && outcome.error !== 'action_in_progress') {
-        status.textContent = 'ดำเนินการไม่สำเร็จ กรุณาตรวจสอบการแจ้งเตือนและสั่งใหม่'; record.finished = true;
+        status.textContent = 'ดำเนินการไม่สำเร็จ กรุณาตรวจสอบผลก่อนสั่งใหม่'; record.finished = true;
       } else { status.textContent = 'ยังยืนยันผลไม่ได้ กดตรวจผลการดำเนินการก่อนสั่งซ้ำ'; check.hidden = false; }
       if (record.finished) { controls.remove(); details.remove(); }
     };
@@ -245,7 +294,7 @@
   }
   window.addEventListener('panthorium:ai-done', event => {
     for (const result of event.detail?.toolResults || []) {
-      if (!['notifications.write','mailbox.write'].includes(result.toolId)) continue;
+      if (!chatApprovalTools.has(result.toolId)) continue;
       if (result.requiresConfirmation) reviewNotification(result, event.detail?.accountId);
       else if (result.ok && (!event.detail?.accountId || event.detail.accountId === accountId())) window.PanthoriumNotifications?.refresh?.();
     }
@@ -255,5 +304,12 @@
   installVisualStreaming();
   let attempts = 0; const timer = setInterval(() => { attempts += 1; if (installCallAI() || attempts > 60) clearInterval(timer); }, 100);
   window.addEventListener('panthorium:auth-changed', () => setTimeout(installCallAI, 50));
-  window.PanthoriumAIStream = { call: streamCall, install: installCallAI };
+  window.PanthoriumAIStream = { call: streamCall, install: installCallAI,
+    // Only a product client with the real window runtime may advertise this.
+    local: async (prompt, options = {}) => {
+      if(typeof window.PanthoriumVoiceCommands?.windowAction !== 'function') throw new Error('local_ui_runtime_unavailable');
+      try {return await streamCall(prompt,{...options,local:true,voiceMode:false});}
+      catch(error) {if(error.noAutomaticRetry)return {ok:false,text:'ยังยืนยันผลคำสั่งหน้าจอไม่ได้ โปรดตรวจหน้าต่างก่อนสั่งซ้ำ',error:'ui_action_outcome_unknown'};throw error;}
+    }
+  };
 })();
