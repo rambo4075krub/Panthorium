@@ -48,6 +48,7 @@ async function run({pool}={}) {
     const leased=polls.find(r=>r.job),core=new RemoteAgentCore({root,userId:uid,scopes:device.scopes,request:async()=>{}});
     await core.init();core.limitBytes=leased.maxWorkspaceBytes;
     const completed=await core.run(leased.job);assert.equal(completed.state,'succeeded');assert.equal(await fs.readFile(path.join(root,'report.txt'),'utf8'),'private owner report');
+    const archived=JSON.parse(await fs.readFile(path.join(root,completed.result.archive.path),'utf8'));assert.equal(archived.id,leased.job.id);assert.equal(archived.result.steps[1].output.content,'private owner report');assert((await core.usage())>Buffer.byteLength('private owner report'),'result archives count toward the owner quota');
     const replay=await core.run(leased.job);assert.equal(replay.state,'succeeded','journal prevents executing the non-overwriting write twice');
     const resultBody={state:completed.state,leaseToken:completed.leaseToken,result:completed.result,workspaceBytes:await core.usage()};
     const ack=await http('/agent/jobs/'+proposal.id+'/result',resultBody,credentials);assert.equal(ack.job.state,'succeeded');
