@@ -38,6 +38,8 @@ jobs:
           cache: npm
       - name: Install locked dependencies and Electron runtime
         run: npm ci
+      - name: Verify desktop build dependency compatibility
+        run: node test/desktop-build-dependencies.js
       - name: Run real Electron main, preload, permissions and guest isolation
         run: npx --no-install electron test/electron-native-security.js
       - name: Render application icon
