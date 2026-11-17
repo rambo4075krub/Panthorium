@@ -20,6 +20,7 @@
   function stop(){clearInterval(queueTimer);queueTimer=null;clearInterval(detector);detector=null;mode='idle';generation++;active=false;controller?.abort();controller=null;clearTimeout(timer);timer=null;if(recorder&&recorder.state!=='inactive'){recorder.onstop=null;recorder.stop();}recorder=null;source?.disconnect();source=null;analyser=null;stream?.getTracks().forEach(t=>t.stop());stream=null;speech?.stop();speech=null;if(context){context.close().catch(()=>{});context=null;}window.dispatchEvent(new CustomEvent('panthorium:ai-speaking',{detail:{speaking:false}}));status('กดไมค์เพื่อเริ่มเสียง Sentinel AI');}
   function row(kind,text){const list=document.getElementById('chat-messages');if(!list)return;const r=document.createElement('div');r.className='msg '+kind;r.textContent=text;list.appendChild(r);list.scrollTop=list.scrollHeight;}
   async function answer(blob,id){
+    let personalRef=null;
     const check=()=>{if(id!==generation||identity!==account())throw new DOMException('Cancelled','AbortError');};
     try{
       check();status('Qwen ฟรี · กำลังถอดเสียงและคิดคำตอบ','processing');
@@ -32,15 +33,17 @@
       if(/^(หยุดฟัง|ปิดไมค์|ปิดไมโครโฟน|หยุดรับคำสั่ง|stoplistening|stopmicrophone)$/.test(phrase)){stop();return;}
       const creative=window.PanthoriumCreativeVoiceCatalog?.parse(transcription.text);
       const localCommand=window.PanthoriumVoiceCommands?.hasPending?.() || window.PanthoriumScreenVoiceCatalog?.parse(transcription.text) || window.PanthoriumWindowCatalog?.classifyVoiceInput(transcription.text)?.kind==='command' || creative&&(!['confirm','cancel'].includes(creative.action)||window.PanthoriumCreativeStudio?.hasVoicePending?.());
-      let result=localCommand&&window.PanthoriumVoiceCommands?await window.PanthoriumVoiceCommands.execute(transcription.text):await(await api('/api/local/chat',{message:transcription.text,sessionId,voice:true,requestId:crypto.randomUUID()},controller.signal)).json();check();
-      if(result.summarize&&result.screen) result=await(await api('/api/local/chat',{message:transcription.text,screen:result.screen,sessionId,voice:true,requestId:crypto.randomUUID()},controller.signal)).json();check();
+      if(!localCommand&&window.PanthoriumChats){personalRef=await window.PanthoriumChats.begin(transcription.text,'voice');sessionId=window.PanthoriumChats.getSessionId();}
+      let result=localCommand&&window.PanthoriumVoiceCommands?await window.PanthoriumVoiceCommands.execute(transcription.text):await(await api('/api/local/chat',{message:transcription.text,clientHistory:window.PanthoriumChats?.requestHistory?.(),sessionId,voice:true,requestId:crypto.randomUUID()},controller.signal)).json();check();
+      if(result.summarize&&result.screen) result=await(await api('/api/local/chat',{message:transcription.text,screen:result.screen,clientHistory:window.PanthoriumChats?.requestHistory?.(),sessionId,voice:true,requestId:crypto.randomUUID()},controller.signal)).json();check();
       if(!result.ok)throw new Error(result.text||'Qwen ยังตอบไม่ได้ กรุณาลองอีกครั้ง');
+      if(personalRef){await window.PanthoriumChats.finish(personalRef,result,'voice');personalRef=null;}
       sessionId=result.sessionId||sessionId;row('ai',result.text);window.dispatchEvent(new CustomEvent('panthorium:ai-done',{detail:{...result,source:'local',accountId:identity}}));
       status('Qwen ฟรี · กำลังเตรียมเสียงต่อเนื่อง','processing');
       speech=new window.PanthoriumSpeechBuffer.BufferedSpeech(context,async(text,signal)=>{check();return(await api('/api/hybrid/speech',{text},signal)).arrayBuffer();});
       window.dispatchEvent(new CustomEvent('panthorium:ai-speaking',{detail:{speaking:true}}));
       await speech.speak(result.text);check();
-    }catch(error){if(id!==generation)return;if(error.name!=='AbortError'){row('ai',error.message);status(error.message,'error');}}
+    }catch(error){if(personalRef){await window.PanthoriumChats?.finish(personalRef,{text:error.name==='AbortError'?'ยกเลิกคำขอแล้ว':error.message},'voice').catch(()=>{});personalRef=null;}if(id!==generation)return;if(error.name!=='AbortError'){row('ai',error.message);status(error.message,'error');}}
     finally{
       if(id===generation&&active){clearInterval(queueTimer);queueTimer=null;speech?.stop();speech=null;window.dispatchEvent(new CustomEvent('panthorium:ai-speaking',{detail:{speaking:false}}));recordTurn(id);}
     }

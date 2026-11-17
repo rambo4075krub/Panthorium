@@ -259,6 +259,7 @@
     }
     if (frame.type === "ready") {
       serverReady = true;
+      if(!frame.resumed){const history=window.PanthoriumChats?.requestHistory?.();if(history?.length&&socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({clientContent:{turns:history.map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]})),turnComplete:false}}));}
       resumeSessionId = typeof frame.sessionId === 'string' ? frame.sessionId : null;
       resumeEnabled = frame.resumable === true;
       setStatus("กำลังฟัง Sentinel AI · แตะไมค์เพื่อจบ", "listening");
@@ -283,7 +284,7 @@
     if (frame.type === "toolResult") {
       if (frame.toolId === 'calendar.write' && frame.ok && !frame.error) window.dispatchEvent(new CustomEvent('panthorium:calendar-changed'));
       if (frame.error) console.info("Sentinel AI function result", frame.toolId || "unknown", frame.error);
-      if (frame.toolId?.startsWith('studio.') || frame.toolId?.startsWith('social.') || frame.toolId?.startsWith('notifications.') || frame.toolId?.startsWith('mailbox.')) {
+      if (frame.toolId?.startsWith('studio.') || frame.toolId?.startsWith('social.') || frame.toolId?.startsWith('notifications.') || frame.toolId?.startsWith('mailbox.') || frame.toolId?.startsWith('remote.')) {
         window.dispatchEvent(new CustomEvent('panthorium:ai-done', { detail: { source: 'gemini-live', toolResults: [frame] } }));
       }
       return;
@@ -319,6 +320,7 @@
       }
     }
     if (content.turnComplete || content.turn_complete) {
+      if(inputTranscript||outputTranscript)window.PanthoriumChats?.recordVoice?.(inputTranscript,outputTranscript).catch(error=>{window.PanthoriumChats?.notify(error);cleanup();});
       creativeConfirmationHandled=false;screenConfirmationHandled=false;
       inputTranscript = ""; outputTranscript = ""; chatUserRow = null; chatAssistantRow = null;
       outputSuppressed = false;
@@ -328,6 +330,7 @@
 
   let creativeConfirmationHandled=false,screenConfirmationHandled=false;
   async function openLiveSession(generation) {
+    await window.PanthoriumChats?.prepareVoice?.();
     const ensureCurrent = () => { if (generation !== sessionGeneration || activeAccountKey !== null && activeAccountKey !== accountKey()) throw cancelled(); };
     creativeConfirmationHandled=false;screenConfirmationHandled=false;
     inputTranscript = ""; outputTranscript = ""; chatUserRow = null; chatAssistantRow = null;
@@ -360,7 +363,7 @@
       const context = window.PanthoriumCloudApps?.voiceContext?.() || null;
       activeContextKey = JSON.stringify(context);
       socket.onopen = () => { if (generation !== sessionGeneration || !socket) return; socket.send(JSON.stringify({ type: "auth", token, protocolVersion: 1,
-        ...(resumeSessionId && resumeEnabled ? { sessionId: resumeSessionId } : {}), context })); };
+        ...(resumeSessionId && resumeEnabled ? { sessionId: resumeSessionId } : {}), chatId:window.PanthoriumChats?.getSessionId?.(), context })); };
       socket.onerror = () => { if (generation !== sessionGeneration) return; clearTimeout(timeout); reject(new Error("เชื่อม Sentinel AI ไม่สำเร็จ")); };
       socket.onclose = event => {
         if (generation !== sessionGeneration) return;
