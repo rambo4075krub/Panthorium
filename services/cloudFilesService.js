@@ -133,7 +133,8 @@ class CloudFilesService {
   async list(userId) {
     this.ensureConfigured();
     const files = await this.listAll(userId);
-    const maxBytes=this.entitlements ? (await this.entitlements.state(userId)).remaining.storageBytes : MAX_USER_BYTES;
+    const packageBytes=this.entitlements ? (await this.entitlements.state(userId)).remaining.storageBytes : MAX_USER_BYTES;
+    const maxBytes=Math.max(0,packageBytes-(this.personalUsage?await this.personalUsage(userId):0));
     return { ...folderListing(files), usedBytes: files.reduce((sum, file) => sum + file.size, 0), maxBytes, maxFiles: this.maxUserFiles };
   }
 
@@ -153,6 +154,7 @@ class CloudFilesService {
     catch { /* The file remains the authoritative outcome. */ }
   }
   async uploadWithLimit(userId, filename, contentType, body, maxBytes) {
+    if(this.personalUsage)maxBytes=Math.max(0,maxBytes-await this.personalUsage(userId));
     const prefix = this.ownerPrefix(userId);
     this.ensureConfigured();
     const bytes = Buffer.isBuffer(body) ? body : Buffer.from(body || []);

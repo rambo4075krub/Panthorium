@@ -190,6 +190,13 @@ const organizationResources = new OrganizationResourceService({ organizations,
     ? createCloudAppCompletion({ entitlements: liveEntitlements, usageLedger, gate: workloadCapacity.gate('background') }) : null) });
 const organizationGovernance = new OrganizationGovernanceService({ organizations });
 const cloudFiles = new CloudFilesService({ ...objectOptions, entitlements:liveEntitlements, notifications });
+const remoteWorkspaces = new (require('./services/remoteWorkspaceService').RemoteWorkspaceService)({
+  repository:new (require('./services/remoteWorkspaceRepository').RemoteWorkspaceRepository)(cloudStoreOptions),
+  entitlements:liveEntitlements,notifications,secret:config.jwtSecret,
+  externalUsage:async userId=>cloudFiles.bucket?(await cloudFiles.listAll(userId)).reduce((total,file)=>total+file.size,0):0,
+  validatePrincipal:principal=>authService.validateAccountPrincipal(principal)
+});
+cloudFiles.personalUsage=userId=>remoteWorkspaces.managedUsage(userId);
 const social = new (require('./services/socialService').SocialService)({ repository: new (require('./services/socialRepository').SocialRepository)({...cloudStoreOptions,allowMemory:!config.isProduction&&!config.databaseUrl}), files:cloudFiles, accounts:authRepository, supportAdminUsername:config.adminUsername, systemNotifications:notifications });
 notifications.socialVisibility = (userId, sourceId) => social.notifications.systemNotificationVisible(userId, sourceId);
 const mediaStudio = new MediaStudioService({ files: cloudFiles, providers: sentinel.providers, gateway: sentinel.gateway, audit, jobSecret: config.jwtSecret });
@@ -241,6 +248,7 @@ require('./services/workAssistantTools').registerWorkAssistantTools(toolRegistry
 registerPublicWebTools(toolRegistry, { service: new PublicWebService() });
 registerPersonalFunctionTools(toolRegistry, { memory: agentMemory, reminders, files: cloudFiles, knowledge: agentKnowledge });
 registerNotificationTools(toolRegistry, { notifications });
+require('./services/remoteWorkspaceTools').registerRemoteWorkspaceTools(toolRegistry,{service:remoteWorkspaces});
 const userMailbox = new (require('./services/mailbox/service').UserMailboxService)({
   pool: billingService.pool, extract: require('./services/mailbox/extract').extractAttachment,
   complete: require('./services/mailbox/completion').createMailboxCompletion(sentinel.gateway)
@@ -340,6 +348,7 @@ app.use("/api/admin/billing", require("./routes/billingAdmin").createBillingAdmi
 app.get("/api/policies/operator", async(req,res)=>{ try { const p=await new (require("./services/billingAdminService").BillingAdminService)(billingService).profile(); res.json({ok:true,name:p.name,brand:p.brand,address:p.address||null,email:p.email||null}); } catch { res.status(503).json({ok:false,error:"operator_unavailable"}); } });
 app.use("/api/billing", require("./routes/billing").createBillingRouter(authService,billingService));
 app.use("/api/files", createFilesRouter(authService, cloudFiles));
+app.use("/api/remote",require("./routes/remoteWorkspace").createRemoteWorkspaceRouter(authService,remoteWorkspaces));
 app.use("/api/media", createMediaStudioRouter(authService, mediaStudio));
 app.use('/api/social',require('./routes/social').createSocialRouter(authService,social));
 app.use('/api/studio', createCreativeStudioRouter(authService, creativeStudio));
@@ -379,10 +388,10 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-voice-catalog.js", "creative-voice-ui.js", "creative-editors-ui.js", "creative-studio-ui.js", "work-assistant-ui.js", "social-rtc.js", "social-media-source.js", "social-ui.js", "screen-voice-catalog.js", "screen-voice-client.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js"];
+const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-voice-catalog.js", "creative-voice-ui.js", "creative-editors-ui.js", "creative-studio-ui.js", "work-assistant-ui.js", "social-rtc.js", "social-media-source.js", "social-ui.js", "screen-voice-catalog.js", "screen-voice-client.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js", "personal-chat-ui.js"];
 app.get("/vendor/hls.min.js", (req, res) => res.type("application/javascript").sendFile(require.resolve("hls.js/dist/hls.min.js")));
 
-for (const script of [...shellScripts, "panthorium-window-base.js", "workspace-ui.css", "social-player.html", "social-player.js"]) {
+for (const script of [...shellScripts, "panthorium-window-base.js", "personal-chat-ui.css", "workspace-ui.css", "social-player.html", "social-player.js"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
       res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -566,6 +575,7 @@ async function start() {
   await emailOtp.init();
   await reminders.init();
   await conversations.init();
+  await remoteWorkspaces.init();
   await agentRuns.init();
   await agentPending.init();
   await agentScheduler.init();
@@ -661,4 +671,4 @@ if (require.main === module) {
   }).catch((error) => { console.error("[BOOT]", error); process.exit(1); });
 }
 
-module.exports = { app, workloadCapacity, localInsights, notifications, notificationRepository, social, creativeStudio, organizationRepository, organizations, organizationResources, organizationGovernance, privacyRequests, actionLedger, voiceSessions, usageLedger, cloudApps, liveEntitlements, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
+module.exports = { app, remoteWorkspaces, workloadCapacity, localInsights, notifications, notificationRepository, social, creativeStudio, organizationRepository, organizations, organizationResources, organizationGovernance, privacyRequests, actionLedger, voiceSessions, usageLedger, cloudApps, liveEntitlements, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };

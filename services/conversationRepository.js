@@ -26,6 +26,7 @@ class ConversationRepository {
   }
   key(userId, sessionId) { return `${userId}:${sessionId}`; }
   async append({ userId, sessionId, role, content, provider = null, model = null, usage = null }) {
+    if(require('./personalChatHistory').isPersonalChat(sessionId))return;
     if (this.pool) {
       const stored = this.encryptContent ? this.cipher.seal(content, JSON.stringify(['mailbox-conversation-v1', userId, sessionId, role])) : content;
       await this.pool.query("INSERT INTO panthorium_conversation_messages(user_id,session_id,role,content,provider,model,usage,content_encrypted) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", [userId, sessionId, role, stored, provider, model, usage ? JSON.stringify(usage) : null, this.encryptContent]);

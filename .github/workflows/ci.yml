@@ -130,6 +130,8 @@ jobs:
           node test/creative-voice-browser.js
           node test/creative-mobile-voice-browser.js
           node test/work-assistant-browser.js
+          node test/personal-chat-browser.js
+          node test/personal-chat-shell.js
       - name: Speaker service contract tests
         run: |
           python3 -m pip install --user numpy==1.26.4

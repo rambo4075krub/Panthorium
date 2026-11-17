@@ -17,7 +17,7 @@ const source = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'ut
     let dialogs = 0, remote = '15.0.5', fail = false;
     const origin = 'https://panthorium.net';
     const electron = {
-      app: { isPackaged: true, getVersion: () => '15.0.4', getPath: () => '/tmp', setPath() {}, whenReady: () => ({ then() {} }), on() {} },
+      app: { isPackaged: true, getVersion: () => '15.0.4', getPath: () => '/tmp', setPath() {}, requestSingleInstanceLock:()=>true,whenReady: () => ({ then() {} }), on() {} },
       ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
       dialog: { async showMessageBox() { dialogs++; return { response: 1 }; } },
       net: { async fetch(url) {

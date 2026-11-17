@@ -89,6 +89,7 @@ function createGeminiLiveWebSocketGateway({
     let user = null;
     let accessToken = "";
     let userId = null;
+    let personalChatId = null;
     let settled = false;
     let eventStream = createEventStream();
     let resumeHandle = null;
@@ -179,6 +180,7 @@ function createGeminiLiveWebSocketGateway({
       if (isBinary) return rejectAuth(4401, "authentication_required");
       let frame;
       try { frame = JSON.parse(String(data)); } catch { return rejectAuth(4401, "authentication_required"); }
+      if(require('./personalChatHistory').isPersonalChat(frame.chatId))personalChatId=frame.chatId;
       const token = frame?.type === "auth" && typeof frame.token === "string" ? frame.token : "";
       if (!token || token.length > 4096) return rejectAuth(4401, "authentication_required");
       try { user = authService.verifyAccessToken(token); } catch { return rejectAuth(4401, "invalid_or_expired_token"); }
@@ -251,7 +253,7 @@ function createGeminiLiveWebSocketGateway({
         const contextInstruction = verifiedContext?.systemInstruction || verifiedContext?.systemPrompt;
         const studioInstruction = tools.some(tool => tool.name === 'panthorium_studio_create')
           ? '\nFor new images, videos, printable documents, spreadsheets, presentations, and connected creative workflows, prefer panthorium_studio_catalog followed by panthorium_studio_create. This keeps all outputs in the shared Creative Studio job history. Reuse exact current-account source file IDs and only compatible handoffs. Never describe a queued or running job as complete; read panthorium_studio_status for its actual state. Do not change Auto/Never settings or invent links. The exact workflow requires the on-screen approval before work starts.' : '';
-        const publicWebInstruction = tools.some(tool => tool.name === 'panthorium_web_search') ? PUBLIC_WEB_GUIDANCE : '';
+        const publicWebInstruction = (tools.some(tool => tool.name === 'panthorium_web_search') ? PUBLIC_WEB_GUIDANCE : '') + (tools.some(tool => tool.name === 'panthorium_remote_run') ? require('./remoteWorkspaceTools').REMOTE_GUIDANCE : '');
         const notificationInstruction = tools.some(tool => tool.name === 'panthorium_notifications_read') ? NOTIFICATION_GUIDANCE : '';
         const sessionInstruction = systemInstruction + '\nIdentify the assistant as Sentinel AI. Do not use internal model names as the service name or advertise free local inference to general users. Answer data-processor questions truthfully using the privacy policy.' + (tools.some(tool => tool.name === 'panthorium_mailbox_read') ? MAILBOX_GUIDANCE : '\nMailbox tools are unavailable in this session. You cannot inspect, read, search, send, or determine whether the user has emails. Never claim the inbox is empty or an email action succeeded. Explain that email access is not available, and offer to open user-mailbox to check connection status; opening that window does not read emails.') + studioInstruction + publicWebInstruction + notificationInstruction + (typeof contextInstruction === 'string' ? '\n' + contextInstruction.slice(0, 16000) : '');
         upstream = await connectLive({ projectId, location, signal:capacityAbort.signal, systemInstruction: sessionInstruction, tools, transcription: process.env.PANTHORIUM_AI_MODE === "gemini-live-only" || voiceApprovalEnabled,
@@ -448,7 +450,7 @@ function createGeminiLiveWebSocketGateway({
             continue;
           }
           let execution = functionCalling?.execute
-            ? await functionCalling.execute({ user: freshUser, call, requestId, source: "gemini-live", requireCallId: true })
+            ? await require('./remoteWorkspaceService').remoteWorkspaceContext.run({userId,sessionId:personalChatId},()=>functionCalling.execute({ user: freshUser, call, requestId, source: "gemini-live", requireCallId: true }))
             : { functionResponse: { name: String(call?.name || "unknown_function"), ...(id ? { id } : {}), response: { error: "function_not_available" } }, ok: false };
           if (id && (execution.actionId || execution.confirmation?.actionId)) durableCallIds.add(id);
           if (execution.requiresConfirmation && id && cancelledCallIds.has(id)) {

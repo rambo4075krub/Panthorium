@@ -22,17 +22,17 @@
       await sleep(delay);
     }
   }
-  async function streamCall(prompt, { voiceMode = false, signal, thinking } = {}) {
+  async function streamCall(prompt, { voiceMode = false, signal, thinking, requestId: suppliedRequestId } = {}) {
     const system = getOS();
     const requestAccountId = accountId();
     if (window.PanthoriumAuth?.hasPermission && !window.PanthoriumAuth.hasPermission('chat')) return { ok: false, text: 'บัญชีนี้ไม่มีสิทธิ์ใช้งาน Chat', provider: 'RBAC', via: 'rbac' };
     let token = await ensureToken(); if (!token) throw new Error('authentication_required');
     const base = (system?.config?.backendUrl || '').replace(/\/$/, '');
     const timeoutSignal = AbortSignal.timeout(210000);
-    const requestId = window.crypto?.randomUUID?.() || `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const requestId = suppliedRequestId || window.crypto?.randomUUID?.() || `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const requestSignal = signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeoutSignal]) : signal || timeoutSignal;
     if (document.body.dataset.aiMode === "gemini-live-only") voiceMode = false;
-    const request = async () => fetch(base + '/api/chat/stream', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-session-id': system.config.sessionId, Accept: 'text/event-stream' }, body: JSON.stringify({ message: prompt, sessionId: system.config.sessionId, mode: 'default', voice: voiceMode, thinking, requestId }), signal: requestSignal });
+    const request = async () => fetch(base + '/api/chat/stream', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-session-id': system.config.sessionId, Accept: 'text/event-stream' }, body: JSON.stringify({ message: prompt, clientHistory:window.PanthoriumChats?.requestHistory?.(), sessionId: system.config.sessionId, mode: 'default', voice: voiceMode, thinking, requestId }), signal: requestSignal });
     let res = await request();
     if (res.status === 401 && window.PanthoriumAuth?.refreshSession) { const ok = await window.PanthoriumAuth.refreshSession().catch(() => false); if (ok) { token = getOS()?.config?.accessToken || ''; res = await request(); } }
     if (!res.ok || !res.body) throw new Error(`stream_http_${res.status}`);

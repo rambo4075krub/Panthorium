@@ -881,6 +881,7 @@
     </style>
     <link rel="stylesheet" href="/panthorium-window-base.css?v=workspace-ux-20261015">
     <link rel="stylesheet" href="/workspace-ui.css?v=workspace-ux-20261015">
+    <link rel="stylesheet" href="/personal-chat-ui.css?v=20261117">
 </head>
 <body>
     <video id="faceVideo" autoplay muted playsinline></video>
@@ -2804,7 +2805,7 @@
         }
     }
 
-    async function callAI(prompt, { voiceMode = false, conversationalVoice = false, thinking } = {}) {
+    async function callAI(prompt, { voiceMode = false, conversationalVoice = false, thinking, requestId } = {}) {
         if (voiceMode) {
             if (!window.PanthoriumVoiceCommands) return { ok: false, text: "โมดูลคำสั่งเสียงยังโหลดไม่สำเร็จ กรุณาโหลดหน้าใหม่" };
             return window.PanthoriumVoiceCommands.execute(prompt);
@@ -2822,6 +2823,8 @@
                     body: JSON.stringify({
                         message: `ตอบด้วยภาษาของผู้ใช้และตอบกลับด้วยเสียงได้ ระบบนี้ไม่ใช่ระบบข้อความเท่านั้น ห้ามบอกว่าไม่มีเสียงพูด หากข้อความมีหลายภาษา ให้รักษาภาษาของแต่ละส่วนตามบริบท ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ\n${prompt}`,
                         sessionId: OS.config.sessionId,
+                        clientHistory:window.PanthoriumChats?.requestHistory?.(),
+                        requestId,
                         mode: "default",
                         voice: conversationalVoice,
                         thinking
@@ -3399,6 +3402,7 @@
             onClose: () => window.PanthoriumLiveVoice?.stopChatSession?.()
         });
         window.PanthoriumLiveVoice?.syncChatButton?.();
+        window.PanthoriumChats?.mount?.();
 
         const input = $("chat-input");
         const sendBtn = $("chat-send");

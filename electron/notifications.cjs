@@ -4,7 +4,7 @@
 // No credentials or notification contents are persisted by the native bridge.
 function createDesktopNotifications({ app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage, security, iconPath }) {
   const states = new Map();
-  let tray, quitting = false;
+  let tray, quitting = false, remoteActive = false;
   const reveal = win => { if (!win || win.isDestroyed()) return; if (win.isMinimized()) win.restore(); win.show(); win.focus(); };
   const clear = state => { for (const n of state.notices.values()) n.close(); state.notices.clear(); state.seen.clear(); state.enabled = false; };
   function ensureTray() {
@@ -12,12 +12,12 @@ function createDesktopNotifications({ app, BrowserWindow, ipcMain, Notification,
     const icon = nativeImage.createFromPath(iconPath);
     if (icon.isEmpty()) throw Error('notification_icon_unavailable');
     tray = new Tray(icon.resize({ width: 24, height: 24 }));
-    tray.setToolTip('Panthorium · รับการแจ้งเตือนเบื้องหลัง');
+    tray.setToolTip('Panthorium · งานและการแจ้งเตือนเบื้องหลัง');
     const open = () => { for (const state of states.values()) reveal(state.win); };
     tray.on('click', open);
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'เปิด Panthorium', click: open },
-      { label: 'ออกจากโปรแกรมและหยุดรับแจ้งเตือน', click: () => app.quit() }
+      { label: 'ออกจาก Panthorium และหยุดงานเบื้องหลัง', click: () => app.quit() }
     ]));
   }
   function get(event) {
@@ -60,11 +60,12 @@ function createDesktopNotifications({ app, BrowserWindow, ipcMain, Notification,
   app.on('before-quit', () => { quitting = true; });
   app.on('will-quit', () => { for (const state of states.values()) clear(state); tray?.destroy(); });
   return {
+    setRemoteBackground(enabled) { remoteActive = enabled === true; if (remoteActive) ensureTray(); },
     attach(win) {
       const id=win.webContents.id;
       const state = { win, account: '', enabled: false, notices: new Map(), seen: new Set() };
       states.set(win.webContents.id, state);
-      win.on('close', event => { if (state.enabled && !quitting) { event.preventDefault(); win.hide(); } });
+      win.on('close', event => { if ((state.enabled || remoteActive) && !quitting) { event.preventDefault(); win.hide(); } });
       win.webContents.on('render-process-gone', () => { clear(state); reveal(win); });
       win.on('closed', () => { clear(state); states.delete(id); });
     },

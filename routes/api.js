@@ -12,6 +12,7 @@ function stableActionRequestId(req) {
   return validText(value, 256) && !/[\x00-\x1f\x7f]/.test(value) ? value : null;
 }
 function validChatBody(body = {}) {
+  if(!require('../services/personalChatHistory').validClientHistory(body.clientHistory))return 'invalid_client_history';
   if (!validText(body.message, 8000)) return "invalid_message";
   if (body.sessionId != null && (typeof body.sessionId !== "string" || body.sessionId.length > 120)) return "invalid_session_id";
   if (body.provider != null && (typeof body.provider !== "string" || body.provider.length > 40)) return "invalid_provider";
@@ -63,7 +64,7 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
           const cancel = () => { if (!res.writableEnded) controller.abort(); };
           res.once('close',cancel);
           let result;
-          try { result = await sentinel.chat({message:message.trim(),screen,media,thinking:req.body.thinking,sessionId:req.body.sessionId,userId,provider:'local',voiceMode:req.body.voice===true,user:req.user,functionCalling,requestId:stableActionRequestId(req)||req.requestId||randomUUID(),signal:controller.signal}); }
+          try { result = await sentinel.chat({message:message.trim(),screen,media,thinking:req.body.thinking,sessionId:req.body.sessionId,clientHistory:req.body.clientHistory,userId,provider:'local',voiceMode:req.body.voice===true,user:req.user,functionCalling,requestId:stableActionRequestId(req)||req.requestId||randomUUID(),signal:controller.signal}); }
           finally { res.off('close',cancel); }
           if (res.destroyed) return;
           return res.status(result.ok?200:503).json({...result,creditsCharged:0,billable:false});
@@ -292,6 +293,7 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
     try {
       const result = await sentinel.streamChat({
         sessionId: sid,
+        clientHistory:req.body.clientHistory,
         userId: req.user.sub,
         signal:controller.signal,
         message,
@@ -318,7 +320,7 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
       if (!res.writableEnded) res.end();
     }
   });
-  router.post("/chat", auth, requirePermission("chat"), aiLimiter, async (req, res) => { const controller=new AbortController();const cancel=()=>{if(!res.writableEnded)controller.abort();};res.once('close',cancel);try { const error = validChatBody(req.body || {}); if (error) return res.status(400).json({ ok: false, error }); const { message, sessionId, provider, model, voice, thinking } = req.body || {}; const sid = sessionId || req.headers["x-session-id"] || randomUUID(); const result = await sentinel.chat({ signal:controller.signal,sessionId: sid, userId: req.user.sub, message, mode: "default", provider: provider?.toLowerCase(), model, thinking, voiceMode: voice === true, user: req.user, functionCalling, requestId: stableActionRequestId(req) || req.requestId || randomUUID() }); audit.record("sentinel.chat", { userId: req.user.sub, sessionId: sid, provider: result.provider || null, model: result.model || null, usage: result.usage || null, latencyMs: result.latencyMs || null, functionCallCount: result.functionCallCount || 0, ok: result.ok }); res.json({ ...result, sessionId: sid }); } catch (err) { if(!res.destroyed)res.status(500).json({ ok: false, error: "internal_error" }); } finally {res.off('close',cancel);} });
+  router.post("/chat", auth, requirePermission("chat"), aiLimiter, async (req, res) => { const controller=new AbortController();const cancel=()=>{if(!res.writableEnded)controller.abort();};res.once('close',cancel);try { const error = validChatBody(req.body || {}); if (error) return res.status(400).json({ ok: false, error }); const { message, sessionId, provider, model, voice, thinking } = req.body || {}; const sid = sessionId || req.headers["x-session-id"] || randomUUID(); const result = await sentinel.chat({ signal:controller.signal,clientHistory:req.body.clientHistory,sessionId: sid, userId: req.user.sub, message, mode: "default", provider: provider?.toLowerCase(), model, thinking, voiceMode: voice === true, user: req.user, functionCalling, requestId: stableActionRequestId(req) || req.requestId || randomUUID() }); audit.record("sentinel.chat", { userId: req.user.sub, sessionId: sid, provider: result.provider || null, model: result.model || null, usage: result.usage || null, latencyMs: result.latencyMs || null, functionCallCount: result.functionCallCount || 0, ok: result.ok }); res.json({ ...result, sessionId: sid }); } catch (err) { if(!res.destroyed)res.status(500).json({ ok: false, error: "internal_error" }); } finally {res.off('close',cancel);} });
   router.post("/sentinel/command", auth, aiLimiter, async (req, res, next) => {
     try {
       const { command, provider } = req.body || {};
