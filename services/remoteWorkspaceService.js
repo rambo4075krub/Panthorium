@@ -287,6 +287,8 @@ class RemoteWorkspaceService {
       if(!['running','cancel_requested','unknown'].includes(j.state)) return this.publicJob(j);
       j.state=input.state;j.completedAt=this.now();j.updatedAt=this.now();j.reservedBytes=0;j.transitUntil=this.now()+15*60000;
       j.resultEnvelope=this.cipher.seal(input.result||{},uid+':result:'+id);delete j.payload;
+      if(input.result?.archive?.path==='task-results/'+id+'.json')j.resultArchivePath=input.result.archive.path;
+      if(input.result?.archiveError)j.resultArchiveError=String(input.result.archiveError).slice(0,120);
       if(input.state==='unknown') {j.settled=input.result?.inactive===true;if(!j.settled)j.reservedBytes=4096;}
       if(input.state==='succeeded'&&j.syncChatId) {const thread=await this.repository.get('thread',j.syncChatId,uid,c);if(thread&&thread.version===j.syncVersion){thread.syncedVersion=j.syncVersion;await this.repository.put('thread',thread.id,uid,thread,c);}}
       await this.repository.put('job',id,uid,j,c,30*DAY);

@@ -143,6 +143,8 @@
     root.append(element('summary',{text:'งานในแชทนี้ · '+visible.length}));for(const job of visible.slice(0,20))root.append(button(job.title+' · '+(labels[job.state]||job.state),()=>reviewJob(job).catch(notify),{class:'personal-job'}));
   }
   async function reviewJob(reference){const {job}=await api('/jobs/'+reference.id),{body,node}=dialog(job.title);body.append(element('p',{text:(labels[job.state]||job.state)+' · '+job.deviceName}));
+    if(job.resultArchivePath)body.append(element('p',{text:'ผลลัพธ์เก็บบนเครื่องของคุณ: '+job.resultArchivePath}));
+    if(job.resultArchiveError)body.append(element('p',{text:'ยังเก็บสำเนาผลลัพธ์บนเครื่องไม่ได้ กรุณาตรวจพื้นที่และส่งออกผลที่ยังเปิดดูได้'}));
     if(job.steps)body.append(element('pre',{text:JSON.stringify(job.steps,null,2)}));
     if(job.result)body.append(element('pre',{text:JSON.stringify(job.result,null,2)}));else if(!job.resultAvailable&&['succeeded','failed','unknown'].includes(job.state))body.append(element('p',{text:'ผลที่ส่งผ่านระบบกลางมีอายุ 15 นาที ผลที่บันทึกไว้ดูได้ในแชทและไฟล์งานบนเครื่องของคุณ'}));
     if(job.state==='awaiting_confirmation')body.append(button('ยืนยันให้ทำงานตามรายละเอียดนี้',async()=>{try{await api('/jobs/'+job.id+'/approve',{method:'POST',body:{approvalHash:job.approvalHash}});node.close();await refreshJobs();}catch(e){notify(e);}}));

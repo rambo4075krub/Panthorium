@@ -54,6 +54,7 @@ const {createNativeRemoteAgent}=require('../electron/remote-agent.cjs');
     await core.journal('receipt',{id:'receipt',leaseToken:'lease',state:'succeeded',result:{content:'private transcript'}});
     assert.equal(await core.usage(),0,'bounded transport receipts are separate from user workspace accounting');
     await core.report(await core.journal('receipt'));assert.equal(JSON.stringify(await core.journal('receipt')).includes('private transcript'),false);
+    core.limitBytes=0;const unarchived=await core.run({id:'no-space-read',title:'Read at full quota',leaseToken:'fixture',steps:[{op:'files.list',args:{path:'.'}}]});assert.equal(unarchived.state,'succeeded');assert.equal(unarchived.result.archiveError,'personal_storage_full','archive failure must be explicit without changing the actual work outcome');
     core.stop();
     console.log('PASS native remote: consent, trusted-origin and account checks, local grants, credential lifecycle, cancellation, timeout and receipt minimization');
   }finally{native.close();await fs.rm(root,{recursive:true,force:true});}

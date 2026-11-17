@@ -157,6 +157,16 @@ class RemoteAgentCore {
     const outputs=record.steps.map(({index,op,output})=>({index,op,output}));
     const candidate={steps:outputs,error:record.error,journal:'.panthorium/jobs/'+job.id+'.json'};
     record.result=Buffer.byteLength(JSON.stringify(candidate))<=700*1024?candidate:{steps:outputs.map(s=>({index:s.index,op:s.op})),error:record.error,truncated:true,journal:candidate.journal};
+    if(steps.some(step=>!step.op.startsWith('chat.'))) {
+      // The owner can return after the relay's short result lifetime or while
+      // their phone was offline. This archive is ordinary quota-counted data.
+      const archivePath='task-results/'+job.id+'.json';
+      try {
+        const archive=JSON.stringify({id:job.id,title:job.title,state:record.state,startedAt:record.startedAt,completedAt:record.completedAt,commands:steps,result:record.result});
+        const saved=await this.writeFile(archivePath,archive);
+        record.result.archive={path:saved.path,bytes:saved.bytes};
+      }catch(error){record.result.archiveError=error.code||error.message;}
+    }
     await this.journal(job.id,record);return record;
   }
   async report(record) {
