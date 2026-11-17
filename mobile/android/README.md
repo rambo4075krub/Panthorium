@@ -140,7 +140,7 @@ the configured upload certificate. CI runs them without production secrets.
 ทดสอบตามเงื่อนไขที่ Console แสดง, เตรียมข้อมูลหน้าร้านตามฟังก์ชันจริง,
 ตรวจ Data safety และกระบวนการลบบัญชี รวมถึงให้ผู้ตรวจเข้าสู่ระบบได้
 
-Before uploading an AAB, test the signed variant on a physical phone and tablet through an appropriate test track: sign-in/out, microphone permission denial/retry, Thai/English streaming, immediate stop, Bluetooth route changes, returning from background, immersive bars, production origin, and native purchase guards. Background microphone operation and Play Billing are not implemented by this preparation. The Browser must accurately show when its connection or microphone is unavailable.
+Before uploading an AAB, test the signed variant on a physical phone and tablet through an appropriate test track: sign-in/out, microphone permission denial/retry, Thai/English streaming, immediate stop, Bluetooth route changes, returning from background, immersive bars, production origin, and native purchase guards. Background microphone operation is not implemented by this preparation. The native Google Play Billing bridge supports one-time purchases and server receipt verification, but purchasing remains disabled until Play products, server credentials and test-track purchases are verified. See [payment setup](../../docs/payments-stripe-play.md). The Browser must accurately show when its connection or microphone is unavailable.
 
 ## Official references
 

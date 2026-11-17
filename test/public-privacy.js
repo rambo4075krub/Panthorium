@@ -6,6 +6,8 @@ const fs = require('node:fs');
 const { createPublicPrivacyRouter } = require('../routes/publicPrivacy');
 const notice = require('../privacy-notice');
 async function main() {
+  const terms=notice.policies.find(p=>p.id==='terms-of-use');
+  assert(terms.sections.some(([,body])=>body.startsWith(require('../billing-catalog').refundSummary)), 'checkout and published payment terms must agree');
   const app = express(); app.use(createPublicPrivacyRouter());
   const server = app.listen(0,'127.0.0.1'); await new Promise(resolve => server.once('listening',resolve));
   try {

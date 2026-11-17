@@ -7,6 +7,7 @@
   const os = () => typeof OS !== 'undefined' ? OS : null;
   const price = value => value.toLocaleString('th-TH') + ' บาท';
   const nativeAndroid = () => window.Capacitor?.isNativePlatform?.() === true || /\bPanthoriumAndroid\b/i.test(navigator.userAgent);
+  const playPlugin = () => window.Capacitor?.Plugins?.PanthoriumBilling;
 
   function node(tag, text, className) {
     const element = document.createElement(tag);
@@ -39,6 +40,35 @@
     const nav = root.querySelector('[data-tabs]');
     const main = root.querySelector('[data-content]');
     const announce = root.querySelector('[data-status]');
+    let playReady = false; let playOffers = new Map();
+    async function loadPlay() {
+      if (!nativeAndroid() || !playPlugin()) return;
+      const owner = os()?.state?.user?.id || os()?.state?.user?.sub;
+      const same = () => root.isConnected && (os()?.state?.user?.id || os()?.state?.user?.sub) === owner;
+      const backend = String(window.PanthoriumAuth?.getBackendUrl?.() || os()?.config?.backendUrl || '').replace(/\/$/,'');
+      try {
+        const response = await fetch(backend+'/api/billing/play/status',{signal:AbortSignal.timeout(15000)}); const status = await response.json();
+        if(!same() || !response.ok || !status.checkoutEnabled)return;
+        const details = await playPlugin().getProducts({productIds:status.products.map(p=>p.storeProductId)});
+        if(!same())return;
+        playOffers = new Map(status.products.map(product=>[product.productId,details.products.find(offer=>offer.storeProductId===product.storeProductId && offer.currency===product.currency && offer.amountMicros===product.amountMicros)]).filter(([,offer])=>offer));
+        playReady = playOffers.size>0;render();
+        await restorePlay(owner);
+      } catch (_) { if(same())announce.textContent='ยังเชื่อม Google Play ไม่ได้ กรุณาเปิดหน้าแพ็กเกจใหม่'; }
+    }
+    async function restorePlay(owner) {
+      if(!playReady || !owner)return;
+      const same = () => root.isConnected && (os()?.state?.user?.id || os()?.state?.user?.sub)===owner;
+      const restored=await playPlugin().restorePurchases();
+      for(const purchase of restored.purchases||[]){
+        if(!same())return;
+        if(!purchase.orderId||!purchase.purchaseToken)continue;
+        const token=window.PanthoriumAuth?.getAccessToken?.() || os()?.config?.accessToken;
+        if(!token)return;
+        const backend=String(window.PanthoriumAuth?.getBackendUrl?.() || os()?.config?.backendUrl || '').replace(/\/$/,'');
+        await fetch(backend+'/api/billing/play/verify',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({orderId:purchase.orderId,purchaseToken:purchase.purchaseToken}),signal:AbortSignal.timeout(30000)});
+      }
+    }
     function switchTab(next) { category = next; render(); }
     function render() {
       nav.hidden = false;
@@ -68,7 +98,10 @@
           balance.textContent = value.unlimited?.includes('aiCredits') ? 'เครดิต Sentinel AI รวม: ไม่จำกัดในช่วงโปรโมชัน' : 'เครดิต Sentinel AI รวมคงเหลือ '+Number(value.remaining?.aiCredits || 0).toLocaleString('th-TH')+' เครดิต · ใช้ได้ทั้งเสียงและข้อความ';
         } catch (_) { if (balance.isConnected && (os()?.state?.user?.id || os()?.state?.user?.sub)===balanceId) balance.textContent = 'ยังโหลดโควต้าคงเหลือไม่ได้ กรุณาเปิดหน้านี้ใหม่'; } })();
       }
-      if (nativeAndroid()) main.append(node('p', 'การซื้อภายในแอปยังไม่เปิดให้บริการ', 'pb-notice'));
+      if (nativeAndroid()) {
+        main.append(node('p', playReady ? 'ชำระผ่าน Google Play · ใช้สิทธิ์ร่วมกับบัญชีเดิมทุกอุปกรณ์' : 'การซื้อภายในแอปยังไม่เปิดให้บริการ หรือแอปรุ่นนี้ยังไม่รองรับ', 'pb-notice'));
+        if(playReady)main.append(button('ตรวจและกู้คืนรายการซื้อ Google Play',async()=>{try{await restorePlay(os()?.state?.user?.id || os()?.state?.user?.sub);render();announce.textContent='ตรวจรายการแล้ว สิทธิ์ที่ยืนยันจะแสดงในบัญชีเดิม';}catch(_){announce.textContent='ยังตรวจรายการไม่ได้ กรุณาลองอีกครั้ง';}},'pb-back'));
+      }
       const grid = node('div', null, 'pb-grid');
       catalog.products.filter(item => item.category === category).sort((a,b) => a.price-b.price).forEach(product => {
         const card = node('article', null, 'pb-card' + (product.id === 'work' ? ' pb-featured' : ''));
@@ -79,7 +112,7 @@
         if (product.kind === 'free') card.appendChild(node('p', 'ไม่ต้องชำระเงิน · สิทธิ์จริงขึ้นกับบัญชี', 'pb-muted'));
         else {
           const select = button('ดูรายละเอียดและยอดชำระ', () => checkout(product), 'pb-primary');
-          select.disabled = nativeAndroid();
+          select.disabled = nativeAndroid() && (!playReady || !playOffers.has(product.id));
           select.dataset.productId = product.id;
           card.appendChild(select);
         }
@@ -113,7 +146,7 @@
       main.append(note); announce.textContent = nativeAndroid() ? 'โปรไฟล์องค์กร • รุ่นทดลอง • สอบถามข้อมูลการใช้งานองค์กร' : 'โปรไฟล์องค์กร • กำหนดเงื่อนไขตามสัญญา • ไม่มีการเรียกเก็บเงินจากหน้านี้';
     }
     function checkout(product) {
-      if (nativeAndroid()) return;
+      if (nativeAndroid() && (!playReady || !playOffers.has(product.id))) return;
       nav.hidden = true;
       main.replaceChildren();
       main.appendChild(button('← กลับไปเลือกแพ็กเกจ', render, 'pb-back'));
@@ -131,15 +164,17 @@
       const registered = !!user && !(user.roles || []).includes('guest');
       summary.append(node('p', registered ? 'รายการซื้อจะผูกกับบัญชีที่คุณเข้าสู่ระบบ' : 'ต้องเข้าสู่ระบบและยืนยันบัญชีก่อนซื้อแพ็กเกจ', 'pb-notice'));
       if (product.paidMembershipRequired) summary.append(node('p', 'ต้องมีสมาชิก Life ขึ้นไป ระบบจะตรวจสอบสิทธิ์ก่อนรับชำระ'));
-      if (product.kind === 'subscription') summary.append(node('p', 'รอบใช้งาน 1 เดือนนับจากชำระ ต่ออายุด้วยการสแกนจ่ายใหม่ ไม่มีหักเงินอัตโนมัติ ไม่มีการคิดยอดเฉลี่ยกลางรอบ'));
+      if (product.kind === 'subscription') summary.append(node('p', 'รอบใช้งาน 1 เดือนนับจากชำระ ต่ออายุด้วยการชำระใหม่ ไม่มีหักเงินอัตโนมัติ ไม่มีการคิดยอดเฉลี่ยกลางรอบ'));
       else summary.append(node('p', 'อายุ 30 วันนับจากชำระ · ไม่มีต่ออายุหรือเติมอัตโนมัติ'));
       const policy = button('ดู Privacy/Policy และเงื่อนไขบริการ', () => window.PanthoriumPrivacyPolicy?.open?.('terms-of-use'), 'pb-back');
       summary.appendChild(policy);
       const refund = node('section', null, 'pb-notice'); refund.dataset.refundPolicy = '';
-      refund.append(node('strong', 'การยกเลิกและคืนเงิน'), node('p', catalog.refundSummary)); summary.appendChild(refund);
-      const pay = button('ชำระเงินผ่าน Omise — กำลังตรวจระบบ', startPayment, 'pb-primary');
+      refund.append(node('strong', 'เงื่อนไขการซื้อและการไม่รับคืนเงิน'), node('p', catalog.refundSummary)); summary.appendChild(refund);
+      const pay = button('กำลังตรวจช่องทางชำระเงิน', startPayment, 'pb-primary');
       let busy = false;
-      let mode='test';let pollTimer=null;let qrObjectUrl=null;
+      let mode='test';let provider=nativeAndroid()?'google_play':'omise';let pollTimer=null;let qrObjectUrl=null;
+      const providerName = () => provider === 'google_play' ? 'Google Play' : provider === 'stripe' ? 'Stripe' : 'Omise';
+      const prefix = () => provider === 'google_play' ? '/play' : provider === 'stripe' ? '/stripe' : '';
       const consentText=document.createTextNode('');
       const userId = user?.id || user?.sub;
       const sameAccount = () => root.isConnected && (os()?.state?.user?.id || os()?.state?.user?.sub) === userId && summary.isConnected;
@@ -156,7 +191,7 @@
         if (!response.ok || !data.ok) throw new Error(data.error || 'billing_unavailable');
         return data;
       }
-      const cacheKey = () => 'panthorium-'+mode+'-order:' + userId + ':' + product.id;
+      const cacheKey = () => 'panthorium-'+provider+'-'+mode+'-order:' + userId + ':' + product.id;
       function requestKey() {
         let key; try { key = sessionStorage.getItem(cacheKey()); } catch (_) {}
         if (!key) { key = crypto.randomUUID(); try { sessionStorage.setItem(cacheKey(), key); } catch (_) {} }
@@ -167,8 +202,29 @@
         result.replaceChildren();
         clearTimeout(pollTimer);if(qrObjectUrl){URL.revokeObjectURL(qrObjectUrl);qrObjectUrl=null;}
         result.append(node('p', (mode==='live' ? 'ชำระเงินจริง' : 'โหมด Test')+' · คำสั่งซื้อ ' + order.id));
-        const names = {creating:'กำลังสร้างรายการ',verification_required:'รอตรวจสอบรายการ ห้ามสร้างรายการซ้ำ',pending:'รอยืนยันจาก Omise',paid:mode==='live' ? 'ชำระสำเร็จ · เปิดสิทธิ์แพ็กเกจแล้ว' : 'ชำระสำเร็จในโหมดทดสอบ',failed:'รายการไม่สำเร็จ',expired:'รายการหมดอายุ',refunded:'คืนเงิน / ยกเลิกรายการ'};
+        const names = {creating:'กำลังสร้างรายการ',verification_required:'รอตรวจสอบรายการ ห้ามสร้างรายการซ้ำ',pending:'รอยืนยันจาก '+providerName(),paid:mode==='live' ? 'ชำระสำเร็จ · เปิดสิทธิ์แพ็กเกจแล้ว' : 'ชำระสำเร็จในโหมดทดสอบ',failed:'รายการไม่สำเร็จ',expired:'รายการหมดอายุ',refunded:'คืนเงิน / ยกเลิกรายการ',disputed:'พักสิทธิ์ระหว่างตรวจสอบข้อโต้แย้งการชำระเงิน',paid_conflict:'ได้รับเงินแล้ว แต่มีสมาชิกที่ยังใช้งานอยู่ กรุณาติดต่อ account@panthorium.net พร้อมเลขคำสั่งซื้อ'};
         result.append(node('p', names[order.status] || 'รอตรวจสอบ'));
+        if (provider === 'stripe' && order.status === 'pending' && order.checkoutUrl) {
+          let url;
+          try { const parsed = new URL(order.checkoutUrl); if (parsed.origin === 'https://checkout.stripe.com' && !parsed.username && !parsed.password && !parsed.port && parsed.pathname.startsWith('/c/pay/')) url = parsed.href; } catch (_) {}
+          if (url) {
+            if (window.panthoriumDesktop?.isElectron) {
+              const launch = button('เปิดหน้าชำระเงิน Stripe', async () => {
+                if (!sameAccount()) return;
+                if (!window.panthoriumDesktop.openPaymentCheckout) { announce.textContent='กรุณาอัปเดต Panthorium Browser เพื่อเปิดหน้าชำระเงิน'; return; }
+                try { const opened = await window.panthoriumDesktop.openPaymentCheckout(url); if (!opened?.ok && sameAccount()) announce.textContent='เปิดหน้าชำระเงินไม่ได้ กรุณาลองอีกครั้ง'; } catch (_) { if (sameAccount()) announce.textContent='เปิดหน้าชำระเงินไม่ได้ กรุณาลองอีกครั้ง'; }
+              }, 'pb-primary'); result.append(launch);
+            } else {
+              const launch = node('a','เปิดหน้าชำระเงิน Stripe','pb-checkout-link'); launch.href=url; launch.target='_blank'; launch.rel='noopener noreferrer';
+              launch.addEventListener('click', event => { if (!sameAccount()) event.preventDefault(); }); result.append(launch);
+            }
+            result.append(node('p','ชำระเสร็จแล้วกลับมายังหน้านี้ ระบบจะตรวจสถานะและเปิดสิทธิ์ให้อัตโนมัติ'));
+          } else result.append(node('p','ยังเปิดหน้าชำระเงินไม่ได้ กรุณาตรวจสถานะอีกครั้ง'));
+          const cancel = button('ยกเลิกรายการที่ยังไม่ชำระ', async () => {
+            if (!sameAccount()) return; cancel.disabled=true;
+            try { display((await api(prefix()+'/orders/'+encodeURIComponent(order.id)+'/cancel',{})).order); } catch (_) { if(sameAccount())announce.textContent='ยังยกเลิกไม่ได้ กรุณาตรวจสถานะก่อน'; } finally {cancel.disabled=false;}
+          },'pb-back'); result.append(cancel);
+        }
         if (order.qrUrl && order.status === 'pending') {
           const qr = document.createElement('img'); qr.alt = 'QR PromptPay'; qr.style.cssText = 'display:block;width:240px;max-width:100%;margin:16px auto;background:white'; result.append(qr);
           const qrNote=node('p','กำลังโหลด QR…');result.append(qrNote);
@@ -182,9 +238,9 @@
 
         }
         if (order.chargeId) result.append(node('p', 'Omise: ' + order.chargeId, 'pb-muted'));
-        const refresh = button('ตรวจสถานะจาก Omise', async () => {
+        const refresh = button('ตรวจสถานะจาก '+providerName(), async () => {
           refresh.disabled = true;
-          try { display((await api('/orders/' + encodeURIComponent(order.id))).order); }
+          try { display((await api(prefix()+'/orders/' + encodeURIComponent(order.id))).order); }
           catch (_) { if (sameAccount()) announce.textContent = 'ตรวจสถานะไม่ได้ กรุณาลองอีกครั้ง'; }
           finally { refresh.disabled = false; }
         }, 'pb-back'); result.append(refresh);
@@ -192,34 +248,52 @@
         if (['paid','failed','expired','refunded'].includes(order.status)) {
           result.append(button(mode==='live' ? 'เลือกรายการอื่น' : 'เริ่มรายการทดสอบใหม่', () => {try {sessionStorage.removeItem(cacheKey());} catch (_) {} result.replaceChildren(); consent.checked = false; if(mode==='live')render();else pay.disabled = false;}, 'pb-back'));
         }
-        if(order.status==='pending')pollTimer=setTimeout(async()=>{if(!sameAccount())return;try{display((await api('/orders/'+encodeURIComponent(order.id))).order);}catch(_){if(sameAccount())announce.textContent='ตรวจสถานะอัตโนมัติไม่ได้ กดตรวจสถานะอีกครั้ง';}},10000);
+        if(['pending','creating','verification_required'].includes(order.status))pollTimer=setTimeout(async()=>{if(!sameAccount())return;try{display((await api(prefix()+'/orders/'+encodeURIComponent(order.id))).order);}catch(_){if(sameAccount())announce.textContent='ตรวจสถานะอัตโนมัติไม่ได้ กดตรวจสถานะอีกครั้ง';}},10000);
         if(mode==='live' && order.status==='paid')(async()=>{try{const e=await api('/entitlements');if(sameAccount() && result.isConnected)result.append(node('p','แพ็กเกจ '+e.plan+' · ใช้ได้ถึง '+new Date(e.expiresAt || e.grants[e.grants.length-1]?.expiresAt).toLocaleString('th-TH')));}catch(_){if(sameAccount())announce.textContent='ชำระสำเร็จแล้ว แต่โหลดรายละเอียดสิทธิ์ไม่ได้ กรุณาตรวจสถานะอีกครั้ง';}})();
       }
       async function startPayment() {
         if (busy || !sameAccount()) return;
         if (!consent.checked) {announce.textContent = mode==='live' ? 'กรุณายอมรับยอดและเงื่อนไขก่อนชำระ' : 'กรุณายืนยันว่าเป็นรายการทดสอบก่อน';return;}
-        busy = true; pay.disabled = true; announce.textContent = 'กำลังสร้างรายการกับ Omise…';
-        try {const data = await api('/checkout', {productId:product.id,requestKey:requestKey(),testAcknowledged:mode==='test',liveAcknowledged:mode==='live'}); display(data.order);if(sameAccount()) announce.textContent = mode==='live' ? 'รายการเงินจริง · กรุณาตรวจยอดและผู้รับก่อนยืนยันในแอปธนาคาร' : 'รายการนี้อยู่ในโหมด Test ไม่มีการเพิ่มสิทธิ์ใช้งานจริง';}
+        busy = true; pay.disabled = true; announce.textContent = 'กำลังสร้างรายการกับ '+providerName()+'…';
+        try {
+          const data = await api(prefix()+(provider==='google_play'?'/prepare':'/checkout'), {productId:product.id,requestKey:requestKey(),testAcknowledged:mode==='test',liveAcknowledged:mode==='live',policyVersion:window.PanthoriumPrivacyNotice?.version});
+          if(!sameAccount())return;
+          display(data.order);
+          if(provider==='google_play' && data.order.status==='creating') {
+            const purchased=await playPlugin().purchase({...playOffers.get(product.id),orderId:data.order.id,accountId:data.order.accountId});
+            if(!sameAccount())return;
+            if(purchased.cancelled)display((await api('/play/orders/'+encodeURIComponent(data.order.id)+'/cancel',{})).order);
+            else for(const purchase of purchased.purchases||[])if(purchase.orderId===data.order.id)display((await api('/play/verify',{orderId:data.order.id,purchaseToken:purchase.purchaseToken})).order);
+          }
+          if(sameAccount()) announce.textContent = mode==='live' ? 'รายการเงินจริง · กรุณาตรวจยอดและสถานะก่อนเริ่มรายการใหม่' : 'รายการนี้อยู่ในโหมด Test ไม่มีการเพิ่มสิทธิ์ใช้งานจริง';
+        }
         catch (error) {if(sameAccount()) {announce.textContent = ({paid_membership_required:'ต้องมีสมาชิก Life ขึ้นไปก่อนซื้อรายการนี้',membership_already_active:'มีสมาชิกที่ยังใช้งานได้อยู่ ต่ออายุได้เมื่อสิ้นรอบ',pending_membership_exists:'มีรายการสมาชิกที่รอชำระอยู่ กรุณาตรวจรายการเดิม'})[error.message] || 'ยังสร้างรายการไม่ได้ ลองรายการเดิมอีกครั้ง ระบบใช้รหัสเดิมเพื่อป้องกันรายการซ้ำ';pay.disabled = false;}}
         finally {busy = false;}
       }
-      (async () => {try { const status = await api('/status');if(!sameAccount())return;
+      (async () => {try { const status = await api(nativeAndroid()?'/play/status':'/status');if(!sameAccount())return;provider=nativeAndroid()?'google_play':status.provider==='stripe'?'stripe':'omise';
+        if(provider!=='omise' && status.policyVersion!==window.PanthoriumPrivacyNotice?.version){pay.textContent='กรุณาโหลดหน้าใหม่เพื่ออ่านเงื่อนไขล่าสุด';return;}
         if(status.checkoutEnabled && ['test','live'].includes(status.mode) && registered) {mode=status.mode;acknowledgement.hidden = false;
-          consentText.textContent=mode==='live' ? ' ฉันยอมรับยอด '+price(product.price)+' วิธีคิดโควต้าตามรายการและนโยบายยกเลิก/คืนเงินที่แสดง อายุ '+(product.kind==='subscription' ? '1 เดือน':'30 วัน')+' นับจากจ่าย ไม่ทบยอด ไม่มีการหักเงินต่ออายุอัตโนมัติ' : ' ฉันเข้าใจว่านี่คือรายการทดสอบ ไม่ตัดเงินจริง ไม่ต่ออายุอัตโนมัติ และไม่เพิ่มสิทธิ์ใช้งานจริง';
-          pay.textContent=mode==='live' ? 'ชำระ '+price(product.price)+' ผ่าน PromptPay' : 'สร้างรายการ PromptPay — โหมด Test';pay.disabled = false;announce.textContent=mode==='live' ? 'พร้อมรับชำระเงินจริงผ่าน Omise' : 'เชื่อม Omise Test พร้อมแล้ว · ไม่ตัดเงินจริงและไม่เพิ่มสิทธิ์จริง';
+          consentText.textContent=mode==='live' ? ' ฉันยอมรับยอด '+price(product.price)+' วิธีคิดโควต้าตามรายการและเงื่อนไขการไม่รับคืนเงินและข้อยกเว้นที่แสดง อายุ '+(product.kind==='subscription' ? '1 เดือน':'30 วัน')+' นับจากจ่าย ไม่ทบยอด ไม่มีการหักเงินต่ออายุอัตโนมัติ' : ' ฉันเข้าใจว่านี่คือรายการทดสอบ ไม่ตัดเงินจริง ไม่ต่ออายุอัตโนมัติ และไม่เพิ่มสิทธิ์ใช้งานจริง';
+          pay.textContent=mode==='live' ? 'ชำระ '+price(product.price)+' ผ่าน '+(provider==='omise'?'PromptPay':providerName()) : 'สร้างรายการ '+providerName()+' — โหมด Test';pay.disabled = false;announce.textContent=mode==='live' ? 'พร้อมรับชำระเงินจริงผ่าน '+providerName() : 'เชื่อม '+providerName()+' Test พร้อมแล้ว · ไม่ตัดเงินจริงและไม่เพิ่มสิทธิ์จริง';
+          if(provider!=='omise') {
+            pay.disabled=true;
+            try { const data=await api(prefix()+'/orders'); if(!sameAccount())return; const pending=data.orders.find(order=>order.productId===product.id && ['pending','creating','verification_required'].includes(order.status)); if(pending){if(pending.requestKey)try{sessionStorage.setItem(cacheKey(),pending.requestKey);}catch(_){}display(pending);if(provider==='google_play'&&pending.status==='creating')pay.disabled=false;}else {try{sessionStorage.removeItem(cacheKey());}catch(_){}pay.disabled=false;} }
+            catch (_) { if(sameAccount())announce.textContent='ตรวจรายการเดิมไม่ได้ กรุณาเปิดหน้าชำระเงินใหม่'; }
+          }
         }
-        else {pay.textContent = registered ? 'Omise ยังไม่พร้อม' : 'เข้าสู่ระบบก่อนทดสอบชำระเงิน';}
-      } catch (_) {if(sameAccount())pay.textContent = 'Omise ยังไม่พร้อม';} })();
+        else {pay.textContent = registered ? 'ระบบชำระเงินยังไม่พร้อม' : 'เข้าสู่ระบบก่อนชำระเงิน';}
+      } catch (_) {if(sameAccount())pay.textContent = 'ระบบชำระเงินยังไม่พร้อม';} })();
       pay.disabled = true;
       summary.appendChild(pay);
-      summary.append(node('p', 'ชำระด้วย PromptPay ไม่ต้องกรอกข้อมูลบัตร สิทธิ์เปิดเมื่อเซิร์ฟเวอร์ยืนยันการชำระแล้วเท่านั้น', 'pb-muted'));
+      summary.append(node('p', 'สิทธิ์เปิดเมื่อเซิร์ฟเวอร์ยืนยันการชำระแล้ว และใช้ได้ในบัญชีเดียวกันทั้งเว็บและแอป', 'pb-muted'));
       main.appendChild(summary);
       announce.textContent = 'นี่คือหน้าสรุปก่อนชำระ ยังไม่มีคำสั่งซื้อและยังไม่มีการตัดเงิน';
       main.scrollTop = 0;
       main.focus();
     }
-    root.addEventListener('panthorium:billing-reset', render);
+    root.addEventListener('panthorium:billing-reset', () => {playReady=false;playOffers=new Map();render();loadPlay();});
     render();
+    loadPlay();
     return true;
   }
   function markup() {
@@ -239,6 +313,7 @@
       [data-billing-root] .pb-card{padding:22px 18px;border:1px solid #30445d;border-radius:18px;background:linear-gradient(150deg,#18273b,#111e2e);display:flex;flex-direction:column}
       [data-billing-root] .pb-featured{border-color:#65dacf;box-shadow:0 0 0 1px #65dacf}[data-billing-root] .pb-price{font-size:30px;font-weight:700;letter-spacing:-.04em}
       [data-billing-root] .pb-card ul{flex:1;font-size:13px}[data-billing-root] .pb-primary{width:100%;padding:12px;background:#83e8da;color:#082c2b;border:0;font-weight:700}
+      [data-billing-root] .pb-checkout-link{display:block;text-align:center;margin:16px 0;padding:12px;background:#83e8da;color:#082c2b;border-radius:10px;font-weight:700;text-decoration:none}
       [data-billing-root] .pb-conditions{margin-top:24px;padding:20px;border:1px solid #30445d;border-radius:14px;color:#c7d4e5;font-size:13px}
       [data-billing-root] .pb-notice{background:#1e3445;border-left:3px solid #8ddad7;padding:12px 14px;border-radius:6px}
       [data-billing-root] .pb-summary{max-width:620px;margin:22px auto;padding:clamp(18px,4vw,32px);border:1px solid #35536c;border-radius:18px;background:#142336}

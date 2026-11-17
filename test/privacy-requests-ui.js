@@ -27,6 +27,7 @@ async function main() {
     if (body.details === 'hold report') return new Promise(resolve => { release = () => resolve(result({ ok: true, request: { id: 'previous-account-report', status: 'requested' } })); });
     return result({ ok: true, request: { id: 'report-1', status: 'requested' } });
   };
+  w.eval(fs.readFileSync(path.join(__dirname, '..', 'privacy-notice.js'), 'utf8'));
   w.eval(fs.readFileSync(path.join(__dirname, '..', 'privacy-policy-ui.js'), 'utf8'));
   d.dispatchEvent(new w.Event('DOMContentLoaded'));
   const q = s => d.querySelector('#panthorium-privacy-policy ' + s);
