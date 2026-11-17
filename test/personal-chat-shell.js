@@ -1,5 +1,6 @@
 'use strict';
-// Actual shell/theme/auth/stream wrappers, with only paid inference replaced.
+// Actual shell/theme/auth/stream wrappers with synthetic inference and speech.
+// Uses a temporary fixture account and fixed text; no microphone or user data.
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
@@ -10,6 +11,14 @@ process.env.NODE_ENV='test';
 process.env.JWT_SECRET='personal-full-shell-test-fixture-only';
 process.env.DATA_FILE=path.join(temporary,'users.json');
 process.env.AUDIT_FILE=path.join(temporary,'audit.log');
+// Stub before server/routes load the provider. Automatic answer playback must
+// never contact a speech service during this integration test.
+const silentAudio=Buffer.alloc(44+1600);
+silentAudio.write('RIFF');silentAudio.writeUInt32LE(silentAudio.length-8,4);silentAudio.write('WAVEfmt ',8);
+silentAudio.writeUInt32LE(16,16);silentAudio.writeUInt16LE(1,20);silentAudio.writeUInt16LE(1,22);
+silentAudio.writeUInt32LE(8000,24);silentAudio.writeUInt32LE(16000,28);silentAudio.writeUInt16LE(2,32);silentAudio.writeUInt16LE(16,34);
+silentAudio.write('data',36);silentAudio.writeUInt32LE(1600,40);
+require('../services/sentinelSpeechAudio').synthesizeSentinelMaleVoice=async()=>({audio:silentAudio,voice:'synthetic-fixture',contentType:'audio/wav'});
 const {app,authService,sentinel}=require('../server');
 sentinel.gateway.complete=async()=>({ok:true,text:'บันทึกแชทจากหน้าจอจริงแล้ว',provider:'fixture',usage:{totalTokens:0}});
 (async()=>{
@@ -20,6 +29,7 @@ sentinel.gateway.complete=async()=>({ok:true,text:'บันทึกแชท�
     const session=await authService.issueSession(await authService.repository.findUserById(user.id));
     browser=await chromium.launch({headless:true});
     const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];
+    await page.addInitScript(()=>{speechSynthesis.speak=()=>{};});
     page.on('pageerror',error=>errors.push(error.message));
     await page.goto('http://127.0.0.1:'+server.address().port,{waitUntil:'domcontentloaded'});
     await page.waitForFunction(()=>typeof OS!=='undefined'&&OS.state.booted&&OS.state.user?.roles?.includes('guest'));

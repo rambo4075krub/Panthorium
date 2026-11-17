@@ -84,6 +84,7 @@ async function run({pool}={}) {
     const latest=await service.syncChat(users.a,threadId,JSON.stringify(thread));
     assert.equal((await service.job(users.a,older.id)).state,'cancelled');assert.equal((await service.job(users.a,older.id)).superseded,true);
     assert.equal((await service.poll(device,{workspaceBytes:0})).job.id,latest.id);
+    const expiringThread='personal-'+randomUUID();await service.putThread(users.a,{id:expiringThread,title:'Expired pending task',bytes:100,version:0,channel:'text',vaultId:'browser:fixture'});await service.submit(users.a,{deviceId:device.id,chatId:expiringThread,title:'Pending read',steps:[{op:'files.read',args:{path:'report.txt'}}]});await assert.rejects(service.deleteThread(users.a,expiringThread),/chat_has_active_jobs/);now+=24*3600000+1;await service.deleteThread(users.a,expiringThread);
     // Atomic accounting, package expiry, and notifications are account-scoped.
     const makeThread=bytes=>({id:'personal-'+randomUUID(),title:'Quota fixture',bytes,version:0,channel:'text',vaultId:'browser:test'});
     const writes=await Promise.allSettled([service.putThread(users.b,makeThread(80000)),service.putThread(users.b,makeThread(80000))]);
@@ -95,7 +96,7 @@ async function run({pool}={}) {
     const outside=await fs.mkdtemp(path.join(os.tmpdir(),'panthorium-outside-'));try{await fs.writeFile(path.join(outside,'secret'),'never read');await fs.symlink(outside,path.join(root,'outside'));await assert.rejects(core.executeStep({op:'files.read',args:{path:'outside/secret'}}),/symlink_denied/);}finally{await fs.rm(outside,{recursive:true,force:true});}
     core.limitBytes=0;await assert.rejects(core.executeStep({op:'files.write',args:{path:'too-large.txt',content:'x'}}),/personal_storage_full/);
     suspended=true;assert.equal((await http('/agent/poll',{workspaceBytes:0},credentials)).status,403);suspended=false;
-    await service.updateDevice(users.a,device.id,{revoke:true});assert.equal((await http('/agent/poll',{workspaceBytes:0},credentials)).status,401);
+    await service.updateDevice(users.a,device.id,{revoke:true});assert.equal(await repository.get('storage','device:'+device.id,uid),null,'revoking a workspace releases its stale quota accounting');assert.equal((await service.job(users.a,latest.id)).state,'unknown');assert.equal((await service.job(users.a,latest.id)).settled,true);await service.deleteThread(users.a,threadId);assert.equal((await service.quota(users.a)).usedBytes,0);await fs.access(path.join(root,completed.result.archive.path));assert.equal((await http('/agent/poll',{workspaceBytes:0},credentials)).status,401);
     console.log('PASS remote workspace: ownership, local execution, approval, idempotency, lease recovery, encrypted transit expiry, voice archive retrieval, atomic package quotas and revocation');
   } finally {await new Promise(r=>server.close(r));await fs.rm(root,{recursive:true,force:true});if(pool)await pool.query('DELETE FROM panthorium_remote_workspace WHERE user_id=ANY($1::text[])',[['pairing',uid,other]]);}
 }

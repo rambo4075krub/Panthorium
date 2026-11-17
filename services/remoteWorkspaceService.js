@@ -121,9 +121,14 @@ class RemoteWorkspaceService {
       if (patch.revoke===true) {
         d.revokedAt=this.now();
         for (const job of await this.repository.list('job',uid,c)) if(job.deviceId===id && ACTIVE.has(job.state)) {
-          job.state=['running','unknown','cancel_requested'].includes(job.state)?'cancel_requested':'cancelled'; job.reservedBytes=0; delete job.payload;
+          const uncertain=['running','unknown','cancel_requested'].includes(job.state);
+          job.state=uncertain?'unknown':'cancelled';job.settled=true;job.reservedBytes=0;delete job.payload;
+          if(uncertain)job.error='device_revoked_outcome_unknown';
           await this.repository.put('job',job.id,uid,job,c,30*DAY);
         }
+        // Files remain on the owner's disk, but a disconnected workspace is no
+        // longer managed by this account. Re-pairing measures it again.
+        await this.repository.remove('storage','device:'+id,uid,c);
       }
       await this.repository.put('device',id,uid,d,c); return publicDevice(d);
     });
@@ -151,7 +156,7 @@ class RemoteWorkspaceService {
     const uid=owner(user);
     return this.repository.locked(uid,async c=>{
       if(!(await this.repository.get('thread',id,uid,c))) fail('chat_not_found',404);
-      const active=(await this.repository.list('job',uid,c)).some(j=>j.chatId===id&&ACTIVE.has(j.state)&&!j.settled);
+      const active=(await this.repository.list('job',uid,c)).some(j=>j.chatId===id&&ACTIVE.has(j.state)&&!j.settled&&j.expiresAt>this.now());
       if(active) fail('chat_has_active_jobs',409);
       await this.repository.remove('thread',id,uid,c); await this.repository.remove('storage','thread:'+id,uid,c);
       return {ok:true};
