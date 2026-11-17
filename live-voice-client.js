@@ -456,6 +456,11 @@
   }
 
   function cleanup(closeSocket = true, preserveResume = false) {
+    if (!preserveResume && activeAccountKey === accountKey() && (inputTranscript || outputTranscript)) {
+      const savedInput = inputTranscript, savedOutput = outputTranscript;
+      inputTranscript = ''; outputTranscript = '';
+      window.PanthoriumChats?.recordVoice?.(savedInput, savedOutput).catch(error => window.PanthoriumChats?.notify(error));
+    }
     sessionGeneration++;
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     if (!preserveResume) { resumeSessionId = null; resumeEnabled = false; reconnectAttempts = 0; activeAccountKey = null; }

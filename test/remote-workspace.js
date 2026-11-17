@@ -76,6 +76,13 @@ async function run({pool}={}) {
     const retrieve=await service.retrieveChat(users.a,threadId),fetchLease=await service.poll(device,{workspaceBytes:await core.usage()});core.running=null;
     const retrieved=await core.run(fetchLease.job);assert.equal(JSON.parse(retrieved.result.steps[0].output.content).messages[0].content,'เสียงส่วนตัว');
     await service.complete(device,retrieve.id,{state:retrieved.state,leaseToken:retrieved.leaseToken,result:retrieved.result,workspaceBytes:await core.usage()});
+    // Frequent voice updates coalesce waiting snapshots without replaying writes.
+    thread.serverVersion=2;await service.putThread(users.a,{id:threadId,title:thread.title,bytes:Buffer.byteLength(JSON.stringify(thread)),version:1,channel:'voice',vaultId:'device:'+device.id});
+    const older=await service.syncChat(users.a,threadId,JSON.stringify(thread));
+    thread.serverVersion=3;await service.putThread(users.a,{id:threadId,title:thread.title,bytes:Buffer.byteLength(JSON.stringify(thread)),version:2,channel:'voice',vaultId:'device:'+device.id});
+    const latest=await service.syncChat(users.a,threadId,JSON.stringify(thread));
+    assert.equal((await service.job(users.a,older.id)).state,'cancelled');assert.equal((await service.job(users.a,older.id)).superseded,true);
+    assert.equal((await service.poll(device,{workspaceBytes:0})).job.id,latest.id);
     // Atomic accounting, package expiry, and notifications are account-scoped.
     const makeThread=bytes=>({id:'personal-'+randomUUID(),title:'Quota fixture',bytes,version:0,channel:'text',vaultId:'browser:test'});
     const writes=await Promise.allSettled([service.putThread(users.b,makeThread(80000)),service.putThread(users.b,makeThread(80000))]);

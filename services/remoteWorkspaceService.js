@@ -187,6 +187,12 @@ class RemoteWorkspaceService {
       const needed=[...new Set(steps.map(s=>CAPABILITIES[s.op]))];
       if(needed.some(s=>!d.scopes.includes(s))) fail('device_permission_denied',403);
       const jobs=await this.repository.list('job',uid,c);
+      // Voice and streamed replies may update a vault faster than its computer
+      // polls. Keep the newest unstarted snapshot; never cancel a running write.
+      if(syncChatId)for(const previous of jobs)if(previous.syncChatId===syncChatId&&['queued','awaiting_confirmation'].includes(previous.state)) {
+        previous.state='cancelled';previous.superseded=true;previous.reservedBytes=0;delete previous.payload;
+        await this.repository.put('job',previous.id,uid,previous,c,30*DAY);
+      }
       if(jobs.filter(j=>ACTIVE.has(j.state)&&!j.settled&&j.expiresAt>this.now()).length>=20) fail('remote_queue_full',429);
       const budget=await this.budgetIn(uid,plan,c);
       const writeBytes=steps.reduce((n,s)=>n+(s.op.endsWith('.write')&&!s.op.startsWith('chat.')?Buffer.byteLength(s.args.content):0),0);

@@ -34,7 +34,7 @@ const {createRemoteWorkspaceRouter}=require('../routes/remoteWorkspace');
     await page.getByRole('button',{name:'รายการแชท',exact:true}).click();await page.waitForSelector('.personal-thread');assert((await page.locator('.personal-thread-title').first().textContent()).includes('รายงานส่วนตัวบัญชี A'));
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile controls must fit the viewport');
     if(process.env.PERSONAL_CHAT_SCREENSHOT)await page.screenshot({path:process.env.PERSONAL_CHAT_SCREENSHOT});
-    await page.evaluate(()=>window.switchAccount('b'));await page.waitForFunction(()=>!document.getElementById('chat-messages').textContent.includes('บัญชี A'));await page.waitForTimeout(200);
+    const switched=await page.evaluate(()=>{const waiting=window.PanthoriumChats.begin('private queued A','voice');window.switchAccount('b');return waiting.then(()=> 'unexpected').catch(e=>e.message);});assert.equal(switched,'account_changed');await page.waitForFunction(()=>!document.getElementById('chat-messages').textContent.includes('บัญชี A'));await page.waitForTimeout(200);
     await page.evaluate(()=>callAI('ข้อมูลเฉพาะบัญชี B'));assert.equal(calls.at(-1).user,'b');assert.deepEqual(calls.at(-1).clientHistory,[]);
     await page.getByRole('button',{name:'รายการแชท',exact:true}).click();assert(!(await page.locator('.personal-history-list').textContent()).includes('บัญชี A'));
     cap=1500;const before=calls.length;const full=await page.evaluate(()=>callAI('ท'.repeat(2000)));assert.equal(full.ok,false);assert.equal(calls.length,before,'full storage blocks a new billable request before sending');assert.match(full.error,/personal_storage_full/);

@@ -14,6 +14,9 @@ const EDITION=metadata.panthoriumEdition==='admin'?'admin':'user';
 const PRODUCT_NAME='Panthorium Browser '+(EDITION==='admin'?'Admin':'User');
 const START_URL=process.env.PANTHORIUM_URL||('https://panthorium.net'+(EDITION==='admin'?'/admin':'/'));
 app.setPath('userData',path.join(app.getPath('appData'),'Panthorium-Browser-'+EDITION));
+const ownsApplicationInstance=app.requestSingleInstanceLock();
+if(!ownsApplicationInstance)app.quit();
+app.on('second-instance',()=>{for(const win of BrowserWindow.getAllWindows()){if(win.isMinimized())win.restore();win.show();win.focus();}});
 const API_ORIGIN=new URL(START_URL).origin;
 const HOSTS=new Set(['www.youtube.com','www.facebook.com','line.me','www.tiktok.com','www.instagram.com','x.com']);
 function allowed(value){try{const u=new URL(value);return u.protocol==='https:'&&HOSTS.has(u.hostname);}catch(_){return false;}}
@@ -241,6 +244,7 @@ async function performUpdateCheck(options={}){
 }
 function create(){const win=new BrowserWindow({show:!(process.argv.includes('--remote-background')&&remoteAgent?.enabled()),width:1440,height:900,minWidth:960,minHeight:640,backgroundColor:'#050811',frame:false,title:PRODUCT_NAME,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,spellcheck:false,backgroundThrottling:false}});win.removeMenu();browserSecurity.registerShell(win.webContents);desktopNotifications.attach(win);win.loadURL(START_URL);return win;}
 app.whenReady().then(async()=>{
+  if(!ownsApplicationInstance)return;
   // Match the AppUserModelID installed on each edition's Start menu shortcut.
   if(process.platform==='win32')app.setAppUserModelId('com.panthorium.browser.'+EDITION);
   desktopNotifications=createDesktopNotifications({app,BrowserWindow,ipcMain,Notification,Tray,Menu,nativeImage,security:browserSecurity,iconPath:path.join(__dirname,'..','build','icon.png')});

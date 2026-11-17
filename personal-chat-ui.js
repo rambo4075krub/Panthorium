@@ -55,7 +55,7 @@
     }
     return thread;
   }
-  async function begin(prompt,source='text'){return serial(async()=>{const thread=await ensureActive();if(!thread)return null;const next=structuredClone(thread);
+  async function begin(prompt,source='text'){const uid=account(),initial=active?.owner===uid?structuredClone(active):null;return serial(async()=>{assertOwner(uid);const thread=initial?(await getLocal(uid,initial.id)||initial):await ensureActive();if(!thread)return null;const next=structuredClone(thread);
     next.messages.push({id:uuid(),role:'user',content:String(prompt),source,at:Date.now()});
     if(next.title==='แชทใหม่')next.title=String(prompt).trim().replace(/\s+/g,' ').slice(0,80)||'แชทใหม่';
     next.channel=next.messages.every(m=>m.source===source)?source:'mixed';
