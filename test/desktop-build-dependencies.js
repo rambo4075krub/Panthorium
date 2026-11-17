@@ -22,8 +22,8 @@ async function run() {
     await fs.writeFile('build/project.sln', 'fixture');
     await fs.writeFile('build/nested/ignored.sln', 'fixture');
     await fs.writeFile('build/project.mk', 'fixture');
-    assert.deepEqual(await glob('build/*.sln', { expandDirectories: false }), ['build/project.sln']);
-    assert.deepEqual(await glob('build/*.mk', { expandDirectories: false }), ['build/project.mk']);
+    assert.deepEqual((await glob('build/*.sln', { expandDirectories: false })).map(file => file.replaceAll('\\', '/')), ['build/project.sln']);
+    assert.deepEqual((await glob('build/*.mk', { expandDirectories: false })).map(file => file.replaceAll('\\', '/')), ['build/project.mk']);
 
     if (process.platform === 'win32') {
       // Run node-gyp's actual Windows solution discovery and argument setup.
