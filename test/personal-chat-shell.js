@@ -23,6 +23,7 @@ sentinel.gateway.complete=async()=>({ok:true,text:'บันทึกแชท�
     page.on('pageerror',error=>errors.push(error.message));
     await page.goto('http://127.0.0.1:'+server.address().port,{waitUntil:'domcontentloaded'});
     await page.waitForFunction(()=>typeof OS!=='undefined'&&OS.state.booted&&OS.state.user?.roles?.includes('guest'));
+    assert.equal(await page.evaluate(()=>PanthoriumChats.prepareVoice()),null,'guest voice remains available without personal storage or account setup');
     await page.evaluate(value=>{PanthoriumAuth.acceptSession({accessToken:value.accessToken,user:value.principal});openSentinel();},session);
     await page.waitForSelector('.personal-toolbar');
     await page.fill('#chat-input','ทดสอบแชทในหน้าจอจริง');await page.click('#chat-send');
