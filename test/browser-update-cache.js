@@ -17,7 +17,7 @@ const { signManifest } = require('../electron/update-signature.cjs');
     const manifest = signManifest({ edition: 'user', version: '15.1.1', assets: { windows: asset } }, privateKey.export({ type: 'pkcs8', format: 'pem' }), 'test', trust);
     let downloads = 0, dialogs = 0;
     const electron = {
-      app: { isPackaged: true, getVersion: () => '15.0.11', getPath: () => directory, setPath() {}, whenReady: () => ({ then() {} }), on() {} },
+      app: { isPackaged: true, getVersion: () => '15.0.11', getPath: () => directory, setPath() {}, requestSingleInstanceLock:()=>true,whenReady: () => ({ then() {} }), on() {} },
       dialog: { async showMessageBox() { dialogs++; return { response: 1 }; } },
       net: { async fetch(url) { if (url.endsWith('.exe')) { downloads++; return new Response(binary); } return Response.json(manifest); } }
     };
