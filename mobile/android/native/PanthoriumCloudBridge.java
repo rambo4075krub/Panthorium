@@ -22,11 +22,11 @@ public final class PanthoriumCloudBridge {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return;
         try {
             ArrayList<PluginHandle> plugins = new ArrayList<>();
-            for (String id : new String[]{"CapacitorCookies", "CapacitorHttp", "WebView", "PushNotifications", "PanthoriumNotifications"}) {
+            for (String id : new String[]{"CapacitorCookies", "CapacitorHttp", "WebView", "PushNotifications", "PanthoriumNotifications", "PanthoriumBilling"}) {
                 PluginHandle plugin = bridge.getPlugin(id);
                 if (plugin != null) plugins.add(plugin);
             }
-            String script = "if (!window.Capacitor?.Plugins?.PanthoriumNotifications) {\n"
+            String script = "if (!window.Capacitor?.Plugins?.PanthoriumBilling) {\n"
                 + JSExport.getGlobalJS(bridge.getContext(), bridge.getConfig().isLoggingEnabled(), bridge.isDevMode())
                 + "\nwindow.WEBVIEW_SERVER_URL=" + JSONObject.quote(bridge.getLocalUrl()) + ";\n"
                 + JSExport.getBridgeJS(bridge.getContext()) + "\n"

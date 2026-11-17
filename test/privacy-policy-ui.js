@@ -29,6 +29,7 @@ async function main() {
   };
   window.eval(fs.readFileSync(require.resolve('../start-menu-ui.js'), 'utf8'));
   window.eval(fs.readFileSync(require.resolve('../window-manager-ui.js'), 'utf8'));
+  window.eval(fs.readFileSync(require.resolve('../privacy-notice.js'), 'utf8'));
   window.eval(fs.readFileSync(require.resolve('../privacy-policy-ui.js'), 'utf8'));
 
   const api = window.PanthoriumPrivacyPolicy;

@@ -171,6 +171,11 @@ const notificationPush = new NotificationPushService({notifications,pool:notific
 }});
 notifications.push=notificationPush;
 billingService.notifications = notifications;
+const stripeBilling = new (require('./services/stripeBillingService').StripeBillingService)({pool:billingService.pool,notifications});
+const playBilling = new (require('./services/googlePlayBillingService').GooglePlayBillingService)({pool:billingService.pool,notifications});
+const stripePrimary = process.env.BILLING_PROVIDER === 'stripe';
+billingService.additionalBilling = [stripeBilling,playBilling];
+billingService.primaryBilling = stripePrimary ? stripeBilling : billingService;
 const voiceSessions = new VoiceSessionRepository({ ...cloudStoreOptions, secret: process.env.VOICE_SESSION_ENCRYPTION_KEY || config.jwtSecret });
 const usageLedger = new UsageLedgerRepository(cloudStoreOptions);
 const localAppCompletion = sentinel.providers.localOnly
@@ -306,6 +311,8 @@ app.use(requestContext(audit));
 app.use(require("./middleware/securityBlock").securityBlock(securityResponse));
 const adminMailbox = new (require('./services/adminMailboxService').AdminMailboxService)({pool:billingService.pool,config});
 app.post('/api/webhooks/resend', express.raw({type:'application/json',limit:'2mb'}), require('./routes/adminMailbox').mailboxWebhook(adminMailbox));
+// Stripe verifies the exact bytes sent by the provider. Keep this before JSON parsing.
+app.post('/api/billing/stripe/webhook', express.raw({type:'application/json',limit:'256kb'}), require('./routes/stripeBilling').stripeWebhook(stripeBilling));
 app.use(express.json({ limit: "2mb", type: "application/json" }));
 app.use(cookieParser());
 
@@ -346,7 +353,9 @@ app.use("/api/mailbox", require("./routes/userMailbox").createUserMailboxRouter(
 app.use("/api/admin/mailbox", require("./routes/adminMailbox").createAdminMailboxRouter(authService,adminMailbox));
 app.use("/api/admin/billing", require("./routes/billingAdmin").createBillingAdminRouter(authService,billingService));
 app.get("/api/policies/operator", async(req,res)=>{ try { const p=await new (require("./services/billingAdminService").BillingAdminService)(billingService).profile(); res.json({ok:true,name:p.name,brand:p.brand,address:p.address||null,email:p.email||null}); } catch { res.status(503).json({ok:false,error:"operator_unavailable"}); } });
-app.use("/api/billing", require("./routes/billing").createBillingRouter(authService,billingService));
+app.use('/api/billing/stripe', require('./routes/stripeBilling').createStripeBillingRouter(authService,stripeBilling));
+app.use('/api/billing/play', require('./routes/googlePlayBilling').createGooglePlayBillingRouter(authService,playBilling));
+app.use("/api/billing", require("./routes/billing").createBillingRouter(authService,billingService,{stripe:stripeBilling,stripePrimary}));
 app.use("/api/files", createFilesRouter(authService, cloudFiles));
 app.use("/api/remote",require("./routes/remoteWorkspace").createRemoteWorkspaceRouter(authService,remoteWorkspaces));
 app.use("/api/media", createMediaStudioRouter(authService, mediaStudio));
@@ -391,7 +400,7 @@ app.get("/sw.js", (req, res, next) => {
 const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-voice-catalog.js", "creative-voice-ui.js", "creative-editors-ui.js", "creative-studio-ui.js", "work-assistant-ui.js", "social-rtc.js", "social-media-source.js", "social-ui.js", "screen-voice-catalog.js", "screen-voice-client.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js", "personal-chat-ui.js"];
 app.get("/vendor/hls.min.js", (req, res) => res.type("application/javascript").sendFile(require.resolve("hls.js/dist/hls.min.js")));
 
-for (const script of [...shellScripts, "panthorium-window-base.js", "personal-chat-ui.css", "workspace-ui.css", "social-player.html", "social-player.js"]) {
+for (const script of [...shellScripts, "panthorium-window-base.js", "personal-chat-ui.css", "workspace-ui.css", "social-player.html", "social-player.js", "payment-return.html", "payment-return.css"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
       res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -551,6 +560,7 @@ app.use((err, req, res, next) => {
 
 let localPushTimer = null;
 let mailboxMaintenanceTimer = null;
+let playBillingTimer = null;
 
 async function start() {
   await workloadCapacity.init();
@@ -617,6 +627,11 @@ async function start() {
     liveGateway.attach(server);
     console.log("  Gemini Live WebSocket enabled · " + (process.env.GEMINI_LIVE_LOCATION || "us-central1"));
   }
+  if (process.env.PANTHORIUM_DEPLOY_PROBE !== '1' && playBilling.configured() && !playBillingTimer) {
+    const reconcilePlay = () => playBilling.tick().catch(() => console.error('[BILLING] Play reconciliation deferred'));
+    playBillingTimer = setInterval(reconcilePlay, 300000); playBillingTimer.unref();
+    reconcilePlay();
+  }
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== '1' && process.env.PANTHORIUM_LOCAL_PROFILE !== "1" && (!config.isProduction || process.env.PANTHORIUM_SCHEDULER_INTERVAL_FALLBACK === '1')) agentScheduler.start();
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== '1' && process.env.PANTHORIUM_LOCAL_PROFILE !== "1" && process.env.PANTHORIUM_PUSH_INTERVAL_FALLBACK === '1' && !localPushTimer) {
     localPushTimer = setInterval(() => notificationPush.tick().catch(() => console.error('[PUSH] local retry failed')), 60000);
@@ -638,6 +653,7 @@ function stopBackgroundWorkers() {
   localInsights.stop();
   if (localPushTimer) { clearInterval(localPushTimer); localPushTimer = null; }
   if (mailboxMaintenanceTimer) { clearInterval(mailboxMaintenanceTimer); mailboxMaintenanceTimer = null; }
+  if (playBillingTimer) { clearInterval(playBillingTimer); playBillingTimer = null; }
   agentScheduler.stop();
   sentinelTraining.stop();
   sentinelActiveLearning.shutdown?.();

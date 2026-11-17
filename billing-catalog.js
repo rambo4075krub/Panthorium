@@ -29,7 +29,7 @@
   const serviceDescription = 'Panthorium คือบริการผู้ช่วย AI ผ่านเว็บไซต์และแอป สำหรับถามตอบ สรุปข้อมูล ช่วยร่างข้อความ และสั่งงานเครื่องมือที่เปิดใช้งาน โดยพิมพ์ข้อความหรือพูดผ่านไมโครโฟน แล้วรับคำตอบเป็นข้อความหรือเสียง';
   const usageExplanation = 'Sentinel AI ใช้เครดิตร่วมสำหรับเสียงและข้อความตามแพ็กเกจของบัญชี เมื่อเครดิตไม่พอ ต้องรอรอบสิทธิ์ใหม่หรือเพิ่มเครดิตก่อนใช้งานต่อ ข้อความที่ส่งให้ AI รวมคำถาม คำสั่ง และบริบทที่จำเป็น โทเคนเป็นหน่วยย่อยของข้อความ ไม่ใช่จำนวนข้อความหรือจำนวนคำตายตัว โควต้านี้ไม่ใช่แพ็กเกจ SMS ค่าโทรศัพท์ หรือการส่งข้อความโฆษณา';
   const conversionDetails = Object.freeze(['ข้อความที่ส่งให้ AI 1 โทเคน = 1 เครดิต', 'คำตอบข้อความจาก AI 1 โทเคน = 5 เครดิต', 'เสียงที่ส่งให้ AI 1 วินาที = 100 เครดิต', 'เสียงคำตอบจาก AI 1 วินาที = 500 เครดิต']);
-  const refundSummary = 'ไม่มีหักเงินต่ออายุอัตโนมัติ หากชำระซ้ำ ไม่ได้รับสิทธิ์ หรือบริการมีปัญหา ติดต่อ account@panthorium.net พร้อมเลขคำสั่งซื้อเพื่อขอยกเลิกหรือคืนเงิน ผู้ให้บริการตรวจสอบรายการและสิทธิ์ตามกฎหมายก่อนแจ้งผล ไม่จำกัดสิทธิ์ผู้บริโภคตามกฎหมาย';
+  const refundSummary = "แพ็กเกจและโควต้าที่ชำระแล้วไม่รับคืนเงินตามความสมัครใจ เช่น เปลี่ยนใจ ไม่ได้ใช้งาน ใช้ไม่หมด หรือหยุดใช้ก่อนครบกำหนด ไม่มีการหักเงินต่ออายุอัตโนมัติ เงื่อนไขนี้ไม่ตัดสิทธิตามกฎหมายหรือข้อกำหนดของผู้ให้บริการชำระเงินและร้านค้าแอป หากชำระซ้ำ ยอดผิด ไม่ได้รับสิทธิ์ หรือสงสัยรายการที่ไม่ได้อนุญาต ให้ติดต่อ account@panthorium.net พร้อมเลขคำสั่งซื้อเพื่อตรวจสอบและแก้ไข";
   const products = [];
   function add(id, name, category, price, details, term, extra = {}) {
     products.push(Object.freeze({ id, name, category, price, amountSatang: price * 100, currency: 'THB', details: Object.freeze(details), term, ...extra }));
@@ -74,5 +74,5 @@
   const displayDetails = (product, now = Date.now()) => product.id === 'free' && promotionAt(now)
     ? product.details.map(detail => detail.startsWith('เครดิต Sentinel AI รวม') ? 'เครดิต Sentinel AI รวมไม่จำกัด ทั้งเสียงและข้อความในช่วงโปรโมชัน' : detail).concat('โปรโมชัน 18 ต.ค.–30 พ.ย. 2026 (เวลาไทย) · กลับโควต้าปกติ 1 ธ.ค. 2026')
     : product.details;
-  return Object.freeze({ version: '2026-11-05', aiRates, aiKeys, quotaPolicy, creditCost, creditBalance, serviceDescription, usageExplanation, conversionDetails, refundSummary, promotionAt, hasQuota, displayDetails, taxStatus: 'individual-not-vat-registered', products: Object.freeze(products), get: id => products.find(item => item.id === id) || null });
+  return Object.freeze({ version: '2026-11-17', aiRates, aiKeys, quotaPolicy, creditCost, creditBalance, serviceDescription, usageExplanation, conversionDetails, refundSummary, promotionAt, hasQuota, displayDetails, taxStatus: 'individual-not-vat-registered', products: Object.freeze(products), get: id => products.find(item => item.id === id) || null });
 });

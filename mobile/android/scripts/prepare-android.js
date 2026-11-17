@@ -82,6 +82,8 @@ gradle = gradle.replace(defaultConfig[0], block);
 // Capacitor's implementation dependency is not exposed to application Java.
 const webkitDependency = "implementation 'androidx.webkit:webkit:1.14.0'";
 if (!gradle.includes(webkitDependency)) gradle += '\n// Same WebKit version as the pinned Capacitor runtime.\ndependencies { ' + webkitDependency + ' }\n';
+const billingDependency = "implementation 'com.android.billingclient:billing:9.1.0'";
+if (!gradle.includes(billingDependency)) gradle += '\n// Google Play one-time purchases.\ndependencies { ' + billingDependency + ' }\n';
 const signingPolicy = "apply from: '../panthorium-release.gradle'";
 if (!gradle.includes(signingPolicy)) gradle += '\n// Panthorium release validation and upload-key signing.\n' + signingPolicy + '\n';
 fs.copyFileSync(path.join(mobileRoot, 'release-signing.gradle'), path.join(androidRoot, 'panthorium-release.gradle'));
@@ -127,6 +129,10 @@ const cloudBridge = fs.readFileSync(path.join(mobileRoot, 'native', 'PanthoriumC
   .replace('package com.panthorium.browser;', `package ${appNamespace};`)
   .replace('__PANTHORIUM_CLOUD_ORIGIN__', JSON.stringify(new URL(build.startUrl).origin));
 fs.writeFileSync(path.join(path.dirname(activityPath), 'PanthoriumCloudBridge.java'), cloudBridge);
+const billingPlugin = fs.readFileSync(path.join(mobileRoot, 'native', 'PanthoriumBillingPlugin.java'), 'utf8')
+  .replace('package com.panthorium.browser;', `package ${appNamespace};`)
+  .replace('__PANTHORIUM_CLOUD_ORIGIN__', JSON.stringify(new URL(build.startUrl).origin));
+fs.writeFileSync(path.join(path.dirname(activityPath), 'PanthoriumBillingPlugin.java'), billingPlugin);
 if (!activity.includes('registerPlugin(PanthoriumNotificationsPlugin.class)')) {
   if (/\bonCreate\s*\(/.test(activity)) throw new Error('Merge notification plugin registration into the existing onCreate method.');
   activity = activity.replace(/class\s+MainActivity\s+extends\s+BridgeActivity\s*\{/, match => match + `
@@ -141,6 +147,10 @@ if (!activity.includes('registerPlugin(PanthoriumNotificationsPlugin.class)')) {
 if (!activity.includes('PanthoriumCloudBridge.install(getBridge());')) {
   if (!activity.includes('super.onCreate(savedInstanceState);')) throw new Error('Cloud bridge requires the existing onCreate lifecycle.');
   activity = activity.replace('super.onCreate(savedInstanceState);', 'super.onCreate(savedInstanceState);\n        PanthoriumCloudBridge.install(getBridge());');
+  fs.writeFileSync(activityPath, activity);
+}
+if (!activity.includes('registerPlugin(PanthoriumBillingPlugin.class);')) {
+  activity = activity.replace('registerPlugin(PanthoriumNotificationsPlugin.class);', 'registerPlugin(PanthoriumNotificationsPlugin.class);\n        registerPlugin(PanthoriumBillingPlugin.class);');
   fs.writeFileSync(activityPath, activity);
 }
 const immersiveMarker = 'PANTHORIUM_IMMERSIVE_MODE';

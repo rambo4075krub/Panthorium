@@ -50,6 +50,7 @@ function postTranscription(payload){
   });
 }
 function installVoiceBridge(){
+  require('./payment-checkout.cjs').installPaymentCheckout({ipcMain,shell,security:browserSecurity});
   require('./mailbox-oauth.cjs').installMailboxOAuth({ipcMain,shell,security:browserSecurity,appOrigin:API_ORIGIN});
   ipcMain.handle('panthorium:browser-account',(event,accountId)=>{
     if(!browserSecurity.isTrustedShellEvent(event))return {ok:false,error:'untrusted_origin'};
