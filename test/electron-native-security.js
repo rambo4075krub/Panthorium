@@ -184,11 +184,15 @@ if (process.argv.includes('--verify-package')) {
     const bridge = await evaluate(shell.webContents, async () => ({
       version: window.panthoriumDesktop.bridgeVersion,
       mailbox: typeof window.panthoriumDesktop.openMailboxOAuth,
+      remote: typeof window.panthoriumDesktop.connectRemote,
+      unauthenticatedRemote: await window.panthoriumDesktop.remoteStatus(),
       unsafeMailboxUrl: await window.panthoriumDesktop.openMailboxOAuth('file:///C:/Windows/System32/calc.exe'),
       info: await window.panthoriumDesktop.getAppInfo()
     }));
-    assert.equal(bridge.version, '8');
+    assert.equal(bridge.version, '9');
     assert.equal(bridge.mailbox, 'function');
+    assert.equal(bridge.remote, 'function');
+    assert.equal(bridge.unauthenticatedRemote.error, 'remote_account_required');
     assert.equal(bridge.unsafeMailboxUrl.error, 'invalid_mailbox_oauth_url');
     assert.equal(bridge.info.packaged, false);
     assert.equal(bridge.info.platform, process.platform);
