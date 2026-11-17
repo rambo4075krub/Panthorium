@@ -184,16 +184,20 @@ if (process.argv.includes('--verify-package')) {
     const bridge = await evaluate(shell.webContents, async () => ({
       version: window.panthoriumDesktop.bridgeVersion,
       mailbox: typeof window.panthoriumDesktop.openMailboxOAuth,
+      checkout: typeof window.panthoriumDesktop.openPaymentCheckout,
       remote: typeof window.panthoriumDesktop.connectRemote,
       unauthenticatedRemote: await window.panthoriumDesktop.remoteStatus(),
       unsafeMailboxUrl: await window.panthoriumDesktop.openMailboxOAuth('file:///C:/Windows/System32/calc.exe'),
+      unsafeCheckoutUrl: await window.panthoriumDesktop.openPaymentCheckout('https://checkout.stripe.com.evil.test/c/pay/x'),
       info: await window.panthoriumDesktop.getAppInfo()
     }));
-    assert.equal(bridge.version, '9');
+    assert.equal(bridge.version, '10');
     assert.equal(bridge.mailbox, 'function');
+    assert.equal(bridge.checkout, 'function');
     assert.equal(bridge.remote, 'function');
     assert.equal(bridge.unauthenticatedRemote.error, 'remote_account_required');
     assert.equal(bridge.unsafeMailboxUrl.error, 'invalid_mailbox_oauth_url');
+    assert.equal(bridge.unsafeCheckoutUrl.error, 'invalid_checkout_url');
     assert.equal(bridge.info.packaged, false);
     assert.equal(bridge.info.platform, process.platform);
     const mic = await evaluate(shell.webContents, microphone);
@@ -220,6 +224,8 @@ if (process.argv.includes('--verify-package')) {
     assert.equal(badAccount.error, 'untrusted_origin');
     const badMailbox = await evaluate(unregistered.webContents, () => window.panthoriumDesktop.openMailboxOAuth('https://accounts.google.com/o/oauth2/v2/auth'));
     assert.equal(badMailbox.error, 'untrusted_origin');
+    const badCheckout = await evaluate(unregistered.webContents, () => window.panthoriumDesktop.openPaymentCheckout('https://checkout.stripe.com/c/pay/x'));
+    assert.equal(badCheckout.error, 'untrusted_origin');
     unregistered.destroy();
 
     const otherSession = session.fromPartition('native-security-unregistered');
