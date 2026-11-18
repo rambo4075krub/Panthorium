@@ -1,10 +1,12 @@
-const MODEL_ID = "gemini-3.8-live";
+const extended=()=>process.env.PANTHORIUM_GEMINI_EXTENDED==='1';
+const MODEL_ID = extended()?"gemini-3.8-live-extended-thinking":"gemini-3.8-live";
 const { VOICE_STYLE_INSTRUCTION } = require('./voiceStyle');
 const DEFAULT_LOCATION = "us-central1";
 const ALLOWED_LOCATIONS = new Set([DEFAULT_LOCATION]);
 const CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
 
 function resolveLiveTarget({ projectId, location = DEFAULT_LOCATION } = {}) {
+  if(extended())return {model:'models/gemini-3.8-live-extended-thinking',url:'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent'};
   const resolvedProjectId = String(projectId || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || "").trim();
   const resolvedLocation = String(location || "").trim();
   if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(resolvedProjectId)) {
@@ -19,7 +21,7 @@ function resolveLiveTarget({ projectId, location = DEFAULT_LOCATION } = {}) {
   };
 }
 
-function createSetupMessage({ model, systemInstruction = "", tools = [], transcription = false, responseModality = 'audio', sessionResumption = null, contextCompression = null, maxOutputTokens = null } = {}) {
+function createSetupMessage({ model, systemInstruction = "", tools = [], transcription = false, responseModality = 'audio', sessionResumption = null, contextCompression = null, maxOutputTokens = null, thinkingLevel='MEDIUM' } = {}) {
   const modality = String(responseModality).toLowerCase();
   if (!['audio', 'text'].includes(modality)) throw new Error('gemini_live_modality_unsupported');
   const setup = {
@@ -28,6 +30,12 @@ function createSetupMessage({ model, systemInstruction = "", tools = [], transcr
       response_modalities: [modality]
     }
   };
+  if(extended()){
+    if(modality!=='audio')throw new Error('extended_audio_response_required');
+    if(!['LOW','MEDIUM','HIGH'].includes(thinkingLevel))throw new Error('invalid_thinking_level');
+    setup.generation_config.thinking_config={thinking_level:thinkingLevel};
+    if(maxOutputTokens==null)maxOutputTokens=1024;
+  }
   if (maxOutputTokens != null) {
     if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 65536) throw new Error('invalid_live_output_limit');
     setup.generation_config.max_output_tokens = maxOutputTokens;
@@ -49,8 +57,8 @@ function createSetupMessage({ model, systemInstruction = "", tools = [], transcr
     if (!Number.isInteger(trigger) || trigger < 5000 || trigger > 128000 || !Number.isInteger(target) || target < 0 || target >= trigger) throw new Error('invalid_live_context_compression');
     setup.context_window_compression = { trigger_tokens: trigger, sliding_window: { target_tokens: target } };
   }
-  if (Array.isArray(tools) && tools.length) setup.tools = [{ function_declarations: tools }];
-  const instruction = [String(systemInstruction || "").trim(), VOICE_STYLE_INSTRUCTION].filter(Boolean).join('\n\n');
+  if (Array.isArray(tools) && tools.length) setup.tools = [{ function_declarations: extended()?tools.map(tool=>({...tool,behavior:'NON_BLOCKING'})):tools }];
+  const instruction = [String(systemInstruction || "").trim(), extended()?'Be concise. Do not append Thai polite particles. Read exact confirmation phrases unchanged.':VOICE_STYLE_INSTRUCTION].filter(Boolean).join('\n\n');
   if (instruction) setup.system_instruction = { parts: [{ text: instruction }] };
   return { setup };
 }
@@ -77,6 +85,7 @@ async function connectGeminiLive({
   sessionResumption = null,
   contextCompression = null,
   maxOutputTokens = null,
+  thinkingLevel = 'MEDIUM',
   signal = null,
   authClient,
   WebSocketImpl,
@@ -136,6 +145,15 @@ async function connectGeminiLive({
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) { onAbort(); return; }
     const connect = async () => {
+      if(extended()){
+        const key=process.env.PANTHORIUM_GEMINI_API_KEY;
+        if(!key)throw new Error('extended_api_credential_required');
+        const target=resolveLiveTarget();
+        setup=createSetupMessage({model:target.model,systemInstruction,tools,transcription,responseModality,maxOutputTokens,thinkingLevel,contextCompression});
+        const Socket=WebSocketImpl||require('ws');
+        socket=new Socket(target.url,{headers:{'x-goog-api-key':key},handshakeTimeout:handshakeTimeoutMs,maxPayload:8*1024*1024,perMessageDeflate:false});
+        socket.once('open',onOpen);socket.once('error',onError);socket.once('close',onClose);return;
+      }
       let client = authClient;
       let resolvedProjectId = projectId || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
       if (!client) {

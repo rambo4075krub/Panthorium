@@ -4,7 +4,8 @@
 // never a promise of a currency balance. No cache/free-tier discount is assumed.
 const { aiRates, creditCost } = require('../billing-catalog');
 const NANO_USD = Object.freeze({textInputTokens:750,textOutputTokens:4500,thinkingTokens:4500,
-  toolInputTokens:750,audioInputTokens:3000,audioOutputTokens:12000,imageInputTokens:1000,videoInputTokens:1000});
+  toolInputTokens:750,audioInputTokens:3000,audioOutputTokens:12000,imageInputTokens:1000,videoInputTokens:1000,
+  unclassifiedInputTokens:3000,unclassifiedOutputTokens:12000,estimatedTranscriptionTokens:4500});
 const count = value => {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error('invalid_provider_usage');
   return value;

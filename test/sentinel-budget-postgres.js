@@ -1,4 +1,5 @@
 'use strict';
+process.env.PANTHORIUM_GEMINI_EXTENDED='1';
 const assert=require('node:assert/strict');
 const {randomUUID,randomBytes}=require('node:crypto');
 const {Pool}=require('pg');
@@ -20,6 +21,8 @@ async function main(){
     assert.equal(raced.filter(r=>r.status==='fulfilled').length,1);
     const id=raced[0].status==='fulfilled'?'first':'second';
     assert.equal((await rights.state(user)).remaining.aiCredits,200);
+    assert.equal((await rights.state(user)).creditUsage.spent,0,'pending reservations are not used-credit alerts');
+    assert.equal((await rights.state(user)).pendingCredits,800);
     await assert.rejects(rights.consume(user,{textInputTokens:201}),/quota_exceeded/,'ordinary consumption cannot spend held credits');
     await assert.rejects(budget.reserve('another',id,10),/not_found/);
     const usage={textInputTokens:100,thinkingTokens:20};

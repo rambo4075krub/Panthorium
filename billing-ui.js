@@ -95,7 +95,9 @@
           const response = await fetch(backend+'/api/billing/entitlements', {headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(15000)});
           const value = await response.json(); if (!response.ok || !value.ok) throw new Error('unavailable');
           if (!balance.isConnected || (os()?.state?.user?.id || os()?.state?.user?.sub)!==balanceId) return;
-          balance.textContent = value.unlimited?.includes('aiCredits') ? 'เครดิต Sentinel AI รวม: ไม่จำกัดในช่วงโปรโมชัน' : 'เครดิต Sentinel AI รวมคงเหลือ '+Number(value.remaining?.aiCredits || 0).toLocaleString('th-TH')+' เครดิต · ใช้ได้ทั้งเสียงและข้อความ';
+          const available = Math.max(0, Number(value.remaining?.aiCredits || 0));
+          const pending = Math.max(0, Number(value.pendingCredits || 0));
+          balance.textContent = value.unlimited?.includes('aiCredits') ? 'Sentinel AI: ไม่จำกัดในช่วงโปรโมชัน' : 'โควต้าพร้อมใช้: ข้อความขาเข้าอย่างเดียวสูงสุด '+available.toLocaleString('th-TH')+' โทเคน หรือขาออกและการคิดอย่างเดียวสูงสุด '+Math.floor(available/5).toLocaleString('th-TH')+' โทเคน · ใช้ร่วมจากยอดเดียวกัน'+(pending ? ' · อีก '+pending.toLocaleString('th-TH')+' หน่วยกำลังกันไว้สำหรับงานหรือรอยืนยันยอด' : '');
         } catch (_) { if (balance.isConnected && (os()?.state?.user?.id || os()?.state?.user?.sub)===balanceId) balance.textContent = 'ยังโหลดโควต้าคงเหลือไม่ได้ กรุณาเปิดหน้านี้ใหม่'; } })();
       }
       if (nativeAndroid()) {

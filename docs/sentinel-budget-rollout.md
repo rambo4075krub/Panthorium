@@ -1,78 +1,90 @@
-# Sentinel budget migration — not ready for activation
+# Sentinel token packages and Extended Live rollout
 
-This branch prepares new sale snapshots, a token-oriented explanation, policy
-text, modality accounting and a durable reservation primitive. It must not be
-merged for production until the model-path and measurement gates below pass.
-The reservation primitive is not yet attached to every provider path.
+New purchases use Life THB 189 / 750,000 shared units, Work THB 489 /
+2,300,000, and Work Pro THB 1,589 / 8,000,000. Public cards explain these
+as maximum input-text tokens or one-fifth as many output-plus-thinking tokens.
+These are alternative uses of ONE budget, not separate input/output grants.
+Voice, image input, tool results and repeated context use the same budget.
+Existing paid snapshots retain their quantities and expiry. Free remains
+unlimited until 2026-12-01T00:00:00+07:00; afterwards its 5,000-unit trial
+uses a compact latest-question context, no tools, LOW thinking and a short
+answer. It is a minimal trial, not a promise of many chat turns.
 
-## Prepared values
+## Runtime and accounting
 
-| Plan | THB / month | Internal shared allowance | Input-text-only maximum | Output-text + thinking-only maximum |
-| --- | ---: | ---: | ---: | ---: |
-| Free, after promotion | 0 | 5,000 | 5,000 | 1,000 |
-| Life | 189 | 750,000 | 750,000 | 150,000 |
-| Work | 489 | 2,300,000 | 2,300,000 | 460,000 |
-| Work Pro | 1,589 | 8,000,000 | 8,000,000 | 1,600,000 |
+`PANTHORIUM_GEMINI_EXTENDED=1` selects only the requested Extended Thinking
+model via Google's Developer API, authenticated with the server-only restricted
+`PANTHORIUM_GEMINI_API_KEY`. Production startup disables local/hybrid inference
+and training. No fallback model is used. Public branding is Sentinel AI;
+privacy disclosures identify Google as the external processor.
 
-The token columns are alternatives from one shared budget, not two allowances.
-Voice, image input, repeated context and tools consume the same budget. Existing
-order/grant snapshots retain their quantities and expiration. The Free promotion
-ends exclusively at 2026-12-01T00:00:00+07:00 and remains unlimited before that.
+The exact model rejected TEXT-only setup in real probes. HTTP text chat uses
+AUDIO plus transcription and must include that cost. Tool declarations are
+NON_BLOCKING and completion waits for interaction_status=IDLE. Tool execution
+retains existing account checks and exact-action approval gates.
 
-## Required activation evidence
+Reservations precede HTTP, live and private voice-approval dispatch. Shared
+PostgreSQL locks prevent concurrent spending of the same allowance. Settlement
+returns unused units to the exact original grants. Process crashes or incomplete
+provider reports retain durable holds; they do not silently refund unknown cost.
+The UI separates available and pending units; pending reservations do not trigger
+90/95/100-percent actual-usage alerts. Operators must investigate unresolved
+holds against stored numeric usage before manual correction; there is no timed
+automatic refund. No prompt, audio, transcript or credential enters these records.
 
-1. Establish a paid production connection to the exact requested Extended
-   Thinking model. Bounded Developer API probes now establish AUDIO access
-   with HIGH thinking and an asynchronous tool round trip. Temporary restricted
-   probe keys were deleted afterwards; production credentials and billing
-   configuration have not been activated. Vertex access was not established.
-   Never substitute a different model or expose provider keys to the browser.
-2. Capture complete token-only usage for text, audio, image/video input,
-   thinking, repeated context, tool responses, cancellation and resumption.
-   `UsageAccumulator` requires an explicit verified session/turn contract.
-   It does not guess that two similar reports represent duplicate usage.
-   Actual Extended reports contain prompt totals larger than their modality
-   details, and total-token conventions differ between ordinary and tool turns.
-   The draft parser rejects these ambiguous reports rather than settling a
-   guessed charge. TEXT-only setup was rejected; audio plus transcription must
-   therefore be included in any supported text-chat cost benchmark.
-3. Wire reservations before every provider dispatch, including HTTP, live
-   audio, approval audio and background jobs. Bound input/context and output,
-   settle only with complete verified evidence, preserve unresolved holds on
-   disconnect, and close immediately on overrun. The database primitive alone
-   is not an enforced end-to-end cost cap.
-4. Implement and test asynchronous NON_BLOCKING calls. `turnComplete` is not
-   completion for this model: wait for `interaction_status=IDLE`. Preserve the
-   existing authorization and confirmation boundaries for tools.
-5. A full current tool prompt can exceed the proposed Free allowance. Compact
-   the server context and demonstrate a usable Free request before activation;
-   do not ship an allowance that cannot start a supported operation.
-6. Verify the Google Play production configuration and matching THB product
-   prices before enabling purchase. Stripe uses server-side inline price_data,
-   so deploying the catalog changes future checkouts, not existing grants.
-7. Native image/video creation is not provided by this single Live model.
-   Keep capability reporting truthful; do not add another model as a fallback.
-8. Publish the revised policy and token explanation together with the verified
-   catalog. General product surfaces use Sentinel AI; privacy disclosures still
-   identify the actual external processor.
+Provider modality details sometimes do not add up to prompt totals, and total
+counts sometimes include thoughts and sometimes exclude them. The disclosed
+service conversion conservatively prices unclassified input at 4 and output at
+14 units/token. Missing transcription counts use UTF-8 bytes as an upper-bound
+estimate at 5 units/byte, less any text output already reported. This is a service
+quota policy, not a claim of exact Google invoice classification. Each utterance
+rebills its context; snapshots within an utterance use per-field maxima. No cache
+discount is assumed. Unknown modalities or inconsistent totals stop the session.
 
-## Validation performed
+Paid requests use MEDIUM thinking, request 1,024 output tokens and accept at most
+96,000 estimated context units. Live sessions last at most three minutes and can
+be restarted. Provider thinking can exceed the configured output-token limit,
+as observed in the full-tool probe: do not treat that parameter as a guaranteed
+cost ceiling. Durable overrun evidence stops further dispatch, and pricing keeps
+a separate risk reserve. These controls do not guarantee project profitability.
 
-- Unit cases: all priced modalities, thoughts, repeated context, duplicate
-  reports, ambiguous counters, and asynchronous idle state.
-- PostgreSQL in an isolated staging schema: races, held-credit exclusion,
-  restart durability, exactly-once refunds, overrun evidence, period rollover
-  and promotion. Test-created schema is removed afterwards.
-- Existing billing summary, signed checkout, free promotion and public policy
-  regressions. These do not substitute for a real-model cost benchmark.
-- Synthetic Developer API: two AUDIO turns reached IDLE, and one NON_BLOCKING
-  tool round trip reached IN_PROGRESS then IDLE with HIGH / maxOutputTokens
-  2048. A 128-token tool test did not call the tool, so that limit is not an
-  acceptable default. No user content or production action was sent.
-- Production commit 73445c8ca9c43cc9c0611e35b4135eb123b69c51 contains the separate
-  telemetry and 90/95/exhausted-alert changes from PR #357. Main CI, publisher,
-  notebook activation, local health and served alert asset were verified.
-  It does not activate the prices, quotas or model proposed in this branch.
+## Validation
+
+- Real paid Developer API text and asynchronous toy-tool replies reached IDLE,
+  settled their reservations, and returned unused units.
+- Post-promotion Free answered a short Thai question: 5,000 reserved, 4,669 used,
+  331 returned in that sample. Actual costs vary by request.
+- All 62 current live tool schemas were accepted; an arithmetic request called
+  the calculator and finished: 114,064 reserved, 87,879 used. The maximum schema
+  fixture contains 78,049 UTF-8 bytes. This is a bounded synthetic test, not a
+  claim that every external connector or user operation has been exercised.
+- Model probes used temporary service-restricted keys, deleted afterwards.
+- Isolated PostgreSQL tests cover concurrent reservations, durable holds,
+  exactly-once refunds, overrun evidence, period rollover and promotion.
+- HTTP and gateway tests cover pre-dispatch reservation, asynchronous tools,
+  IDLE handling, queued usage during disconnect and disabling other models.
+- Existing billing, approval, policy and application regressions run in npm test
+  and GitHub CI before the deployment publisher can advance the notebook ref.
+
+## Activation and known limits
+
+1. Pass PR and main CI. Use `ops/ai/configure-notebook-extended.ps1` to create
+   a service-restricted production key in the existing encrypted configuration.
+   It never prints or accepts a key in chat. Deployment is still required.
+2. The normal CI publisher advances deploy/notebook-production; the notebook
+   backs up/restores a test copy, runs its probes, drains, swaps and health-checks.
+   Verify the actual activated SHA and served catalog, not just CI success.
+3. Stripe already uses server-side inline price_data; the catalog controls new
+   checkouts. Do not change or reprice already-paid orders.
+4. Google Play remains disabled: the authorized Android Publisher query returned
+   403 PERMISSION_DENIED on 2026-11-18. Correct account/service identity access,
+   matching store prices and a licensed purchase test are still required.
+5. This single Live model does not generate native images or videos. Do not
+   advertise those generation features as ready or invoke another model silently.
+   Existing supported tools retain their own permissions and availability.
+6. Production receipt and cost assumptions belong in the private owner report.
+   Historical GCP savings must not be subtracted twice; missing home-server,
+   support, tax and store-tier costs prevent a no-loss guarantee.
 
 References: https://aistudio.google.com/docs/models/gemini-3.8-live-extended-thinking
 and https://aistudio.google.com/docs/pricing#gemini-3.8-live

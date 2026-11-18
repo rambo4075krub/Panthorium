@@ -7,7 +7,7 @@
   'use strict';
   // Fixed service units, not money or provider prices. Preserve the full value of
   // all four old allowances when moving an existing grant into the shared pool.
-  const aiRates = Object.freeze({voiceInputSeconds:100,voiceOutputSeconds:500,textInputTokens:1,textOutputTokens:5,thinkingTokens:5,audioInputTokens:4,audioOutputTokens:14,imageInputTokens:2,videoInputTokens:2,toolInputTokens:1});
+  const aiRates = Object.freeze({voiceInputSeconds:100,voiceOutputSeconds:500,textInputTokens:1,textOutputTokens:5,thinkingTokens:5,audioInputTokens:4,audioOutputTokens:14,imageInputTokens:2,videoInputTokens:2,toolInputTokens:1,unclassifiedInputTokens:4,unclassifiedOutputTokens:14,estimatedTranscriptionTokens:5});
   const aiKeys = Object.freeze(Object.keys(aiRates));
   const quotaPolicy = Object.freeze({version:'ai-credits-v2',unit:'aiCredits',rates:aiRates});
   function creditCost(usage = {}) {
@@ -28,7 +28,7 @@
   }
   const serviceDescription = 'Panthorium คือบริการผู้ช่วย AI ผ่านเว็บไซต์และแอป สำหรับถามตอบ สรุปข้อมูล ช่วยร่างข้อความ และสั่งงานเครื่องมือที่เปิดใช้งาน โดยพิมพ์ข้อความหรือพูดผ่านไมโครโฟน แล้วรับคำตอบเป็นข้อความหรือเสียง';
   const usageExplanation = 'Sentinel AI ใช้เครดิตร่วมสำหรับข้อความ เสียง การคิด บริบท ผลเครื่องมือ และภาพหรือวิดีโอที่ส่งเข้าตามแพ็กเกจของบัญชี เมื่อเครดิตไม่พอ ต้องรอรอบสิทธิ์ใหม่หรือเพิ่มเครดิตก่อนใช้งานต่อ ข้อความที่ส่งให้ AI รวมคำถาม คำสั่ง และบริบทที่จำเป็น โทเคนเป็นหน่วยข้อมูลที่ใช้ประมวลผล ไม่ใช่จำนวนข้อความหรือจำนวนคำตายตัว โควต้านี้ไม่ใช่แพ็กเกจ SMS ค่าโทรศัพท์ หรือการส่งข้อความโฆษณา';
-  const conversionDetails = Object.freeze(['ข้อความและผลเครื่องมือที่ส่งให้ AI 1 โทเคน = 1 เครดิต', 'คำตอบข้อความและการคิดของ AI 1 โทเคน = 5 เครดิต', 'เสียงเข้า 1 โทเคน = 4 เครดิต · เสียงออก 1 โทเคน = 14 เครดิต', 'ภาพและวิดีโอที่ส่งให้ AI 1 โทเคน = 2 เครดิต', 'รวมบริบทที่ประมวลผลซ้ำตามยอดรายงานจริง ไม่ใช่เฉพาะคำถามล่าสุด']);
+  const conversionDetails = Object.freeze(['ข้อความและผลเครื่องมือที่ส่งให้ AI 1 โทเคน = 1 เครดิต', 'คำตอบข้อความและการคิดของ AI 1 โทเคน = 5 เครดิต', 'เสียงเข้า 1 โทเคน = 4 เครดิต · เสียงออก 1 โทเคน = 14 เครดิต', 'ภาพและวิดีโอที่ส่งให้ AI 1 โทเคน = 2 เครดิต', 'รวมบริบทที่ประมวลผลซ้ำตามยอดรายงานจริง ไม่ใช่เฉพาะคำถามล่าสุด', 'เมื่อผู้ให้บริการไม่แจกแจงชนิดของโทเคน ใช้อัตราเผื่อขาเข้า 4 / ขาออก 14 เครดิตต่อโทเคน ส่วนข้อความถอดเสียงที่ไม่มีจำนวนโทเคนใช้จำนวนไบต์ UTF-8 เป็นเพดานประมาณการ และแยกบันทึกจากยอดที่วัดได้']);
   const refundSummary = "แพ็กเกจและโควต้าที่ชำระแล้วไม่รับคืนเงินตามความสมัครใจ เช่น เปลี่ยนใจ ไม่ได้ใช้งาน ใช้ไม่หมด หรือหยุดใช้ก่อนครบกำหนด ไม่มีการหักเงินต่ออายุอัตโนมัติ เงื่อนไขนี้ไม่ตัดสิทธิตามกฎหมายหรือข้อกำหนดของผู้ให้บริการชำระเงินและร้านค้าแอป หากชำระซ้ำ ยอดผิด ไม่ได้รับสิทธิ์ หรือสงสัยรายการที่ไม่ได้อนุญาต ให้ติดต่อ account@panthorium.net พร้อมเลขคำสั่งซื้อเพื่อตรวจสอบและแก้ไข";
   const products = [];
   function add(id, name, category, price, details, term, extra = {}) {

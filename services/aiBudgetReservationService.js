@@ -2,6 +2,13 @@
 const {advanceUsage,usageCost}=require('./sentinelUsage');
 const valid=value=>Number.isSafeInteger(value)&&value>=0;
 const identity=value=>typeof value==='string'&&/^[a-zA-Z0-9:_-]{1,180}$/.test(value);
+const schemaSql=`CREATE TABLE IF NOT EXISTS panthorium_ai_reservations (
+      id TEXT PRIMARY KEY,user_id TEXT NOT NULL,reserved BIGINT NOT NULL DEFAULT 0,
+      allocations JSONB NOT NULL DEFAULT '[]',usage JSONB NOT NULL DEFAULT '{}',
+      actual_credits BIGINT NOT NULL DEFAULT 0,nano_usd BIGINT NOT NULL DEFAULT 0,
+      promotion BOOLEAN NOT NULL DEFAULT FALSE,state TEXT NOT NULL DEFAULT 'open',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+      CREATE INDEX IF NOT EXISTS panthorium_ai_reservation_owner ON panthorium_ai_reservations(user_id,state);`;
 
 // Debit a bounded request before contacting the provider. Holds survive process
 // crashes and never expire into spendable credits without a verified settlement.
@@ -10,13 +17,7 @@ class AiBudgetReservationService {
   constructor({entitlements}){this.entitlements=entitlements;this.ready=null;}
   async init(){
     await this.entitlements.init();
-    if(!this.ready)this.ready=this.entitlements.pool.query(`CREATE TABLE IF NOT EXISTS panthorium_ai_reservations (
-      id TEXT PRIMARY KEY,user_id TEXT NOT NULL,reserved BIGINT NOT NULL DEFAULT 0,
-      allocations JSONB NOT NULL DEFAULT '[]',usage JSONB NOT NULL DEFAULT '{}',
-      actual_credits BIGINT NOT NULL DEFAULT 0,nano_usd BIGINT NOT NULL DEFAULT 0,
-      promotion BOOLEAN NOT NULL DEFAULT FALSE,state TEXT NOT NULL DEFAULT 'open',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
-      CREATE INDEX IF NOT EXISTS panthorium_ai_reservation_owner ON panthorium_ai_reservations(user_id,state);`).catch(error=>{this.ready=null;throw error;});
+    if(!this.ready)this.ready=this.entitlements.pool.query(schemaSql).catch(error=>{this.ready=null;throw error;});
     await this.ready;
   }
   validate(userId,id){if(!identity(userId)||!identity(id))throw new Error('invalid_reservation_identity');}
@@ -74,4 +75,4 @@ class AiBudgetReservationService {
     return result;
   }
 }
-module.exports={AiBudgetReservationService};
+module.exports={AiBudgetReservationService,schemaSql};

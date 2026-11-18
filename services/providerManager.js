@@ -51,7 +51,7 @@ class ProviderManager {
       return;
     }
     this.liveOnly = process.env.PANTHORIUM_AI_MODE === "gemini-live-only";
-    this.hybrid = this.liveOnly && process.env.PANTHORIUM_HYBRID_AI === '1';
+    this.hybrid = this.liveOnly && process.env.PANTHORIUM_GEMINI_EXTENDED!=='1' && process.env.PANTHORIUM_HYBRID_AI === '1';
     if (this.hybrid) this.local = new (require('./localLlmProvider').LocalLlmProvider)();
     this.keys = { groq: process.env.GROQ_API_KEY || "", openai: process.env.OPENAI_API_KEY || "", gemini: process.env.GEMINI_API_KEY || "", anthropic: process.env.ANTHROPIC_API_KEY || "" };
     this.priority = (process.env.AI_PRIORITY || "vertex,groq,openai,gemini,anthropic").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -84,7 +84,7 @@ class ProviderManager {
       this.vertexEvaluatorModels = [];
     }
   }
-  vertexPublisherConfigured() { return /^[A-Za-z0-9.-]{3,100}$/.test(String(this.vertex.project || '')); }
+  vertexPublisherConfigured() { return process.env.PANTHORIUM_GEMINI_EXTENDED!=='1' && /^[A-Za-z0-9.-]{3,100}$/.test(String(this.vertex.project || '')); }
   vertexConfigured() { if (this.localOnly) return false; if (this.liveOnly) return false; return Boolean(this.vertex.project && (this.vertex.tuningJobId ? this.vertex.tuningJobLocation : (this.vertex.location && this.vertex.endpointId))); }
   async resolveTunedVertexEndpoint() {
     if (!this.vertex.tuningJobId || this.vertex.endpointId) return;
@@ -204,7 +204,7 @@ class ProviderManager {
     }
     if (this.liveOnly) {
       if (provider !== "gemini-live" || !this.available().length) throw new Error("provider_not_available");
-      return require("./geminiLiveCompletion").completeLive({ systemPrompt, history, tools:options.tools || [], entitlements:this.entitlements, userId:options.userId, signal:options.signal, onUsage:this.onUsage });
+      return require("./geminiLiveCompletion").completeLive({ systemPrompt, history, tools:options.tools || [], entitlements:this.entitlements, userId:options.userId, signal:options.signal, onUsage:this.onUsage, onFunctionCalls:options.onFunctionCalls });
     }
     const evaluatorIndex = /^vertex_eval_(\d+)$/.exec(String(provider || ""));
     if (evaluatorIndex) {
