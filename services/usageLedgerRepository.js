@@ -2,8 +2,8 @@
 
 const { getDatabasePool } = require('./databasePool');
 const { randomUUID } = require('crypto');
-const TOKEN_COUNTS = Object.freeze(['promptTokenCount','responseTokenCount','totalTokenCount','cachedContentTokenCount','thoughtsTokenCount','toolUsePromptTokenCount','prompt_token_count','response_token_count','total_token_count','cached_content_token_count','thoughts_token_count','tool_use_prompt_token_count']);
-const TOKEN_DETAILS = Object.freeze(['promptTokensDetails','responseTokensDetails','prompt_tokens_details','response_tokens_details']);
+const TOKEN_COUNTS = Object.freeze(['promptTokenCount','responseTokenCount','totalTokenCount','cachedContentTokenCount','thoughtsTokenCount','toolUsePromptTokenCount','prompt_token_count','response_token_count','total_token_count','cached_content_token_count','thoughts_token_count','tool_use_prompt_token_count','candidatesTokenCount','candidates_token_count']);
+const TOKEN_DETAILS = Object.freeze(['promptTokensDetails','responseTokensDetails','candidatesTokensDetails','toolUsePromptTokensDetails','cacheTokensDetails','prompt_tokens_details','response_tokens_details','candidates_tokens_details','tool_use_prompt_tokens_details','cache_tokens_details']);
 const MODALITIES = new Set(['TEXT','AUDIO','IMAGE','VIDEO','DOCUMENT']);
 const validCount = value => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 function scrubUsage(usage) {
