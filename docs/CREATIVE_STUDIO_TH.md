@@ -91,11 +91,24 @@ Auto ไม่ยกเลิกการตรวจบัญชีหรือ
 
 ## การทำงานเมื่อปิดเบราว์เซอร์
 
+เซิร์ฟเวอร์โน้ตบุ๊กที่ใช้ `PANTHORIUM_OBJECT_ROOT` เปิด
+`PANTHORIUM_STUDIO_WORKER_ENABLED=1` เพื่อเดินงานที่อนุมัติและบันทึกแล้วต่อได้
+แม้ปิดหน้าต่าง สั่งตรวจครั้งละหนึ่งงานทุก 15 วินาทีหลังรอบก่อนจบ ไม่มีรอบซ้อน
+และใช้ lease เดียวกับหน้าจอ ไม่เปิดโมเดลในเครื่อง ไม่สร้างงานใหม่เอง
+ตัวตรวจรุ่นก่อน deploy (`PANTHORIUM_DEPLOY_PROBE=1`) ไม่เริ่ม worker นี้
+เมื่อปิดแอปเซิร์ฟเวอร์จะหยุดรับรอบใหม่; งานที่ผลไม่แน่ชัดยังคงใช้ `needs_review`
+แทนการส่งคำขอที่อาจเสียเงินซ้ำ
+
+ค่าผู้ให้บริการรูปภาพและวิดีโอต้องมี `SENTINEL_VERTEX_PROJECT_ID`
+(หรือ `VERTEX_PROJECT`/`GOOGLE_CLOUD_PROJECT`) แม้ Gemini Live จะค้น project
+จากบัญชีบริการได้เอง ต้องใช้ project ของบัญชีบริการที่ได้รับอนุญาตจริง
+หน้า catalog ตรวจการตั้งค่า; ต้องทดสอบสร้างและบันทึก PNG/MP4 จริงแยกต่างหาก
+
 งานและ provider operation handle เก็บใน PostgreSQL โดยไม่มีการเปิดโมเดล inference
 ค้าง 24 ชั่วโมง การเดินงานต่อใช้ `POST /internal/jobs/tick` ที่ตรวจ Google OIDC
 และรวม `creativeStudio.tick()` กับ scheduler เดิม ฝั่งหน้าจอเรียก advance ได้เมื่อเปิดอยู่
 
-ต้องมี Cloud Scheduler จริง รวมทั้ง `SCHEDULER_OIDC_AUDIENCE` และ
+สำหรับการรันบน Cloud Run ต้องมี Cloud Scheduler จริง รวมทั้ง `SCHEDULER_OIDC_AUDIENCE` และ
 `SCHEDULER_SERVICE_ACCOUNTS` จึงจะเดินขั้นตอนต่อได้เมื่อไม่มีผู้เปิดหน้าจอ
 ตรวจการตั้งค่าด้วย `scripts/configure-cloud-scheduler.sh` และทดสอบ authenticated tick
 การบันทึกงานสำเร็จหรือหน้า health สีเขียวอย่างเดียวไม่ยืนยันความพร้อมส่วนนี้

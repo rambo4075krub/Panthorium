@@ -306,7 +306,7 @@
       if (audio) { setStatus("Sentinel AI กำลังตอบ", "listening"); playPcm24k(audio); }
     }
     if ((input?.finished===true||content.turnComplete||content.turn_complete)&&!screenConfirmationHandled&&window.PanthoriumScreenVoice?.hasPending?.()) {
-      const phrase=inputTranscript.normalize('NFC').replace(/[\s\p{P}\p{S}]+/gu,'').toLowerCase();
+      const phrase=inputTranscript.normalize('NFC').replace(/[\s\p{P}\p{S}]+/gu,'').toLowerCase().replace(/(?:นะครับ|นะคะ|ครับ|ค่ะ|คะ|please)$/u,'');
       if(['ยืนยัน','ยืนยันคำสั่ง','ยกเลิก','confirm','cancel'].includes(phrase)){
         screenConfirmationHandled=true;
         Promise.resolve(window.PanthoriumScreenVoice.execute(inputTranscript,{userInitiated:true})).then(result=>{if(result?.text)window.PanthoriumOrb?.setTranscript?.(result.text,0);}).catch(()=>{});

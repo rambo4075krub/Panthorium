@@ -22,6 +22,11 @@ The active window is the highest visible, permitted Panthorium window. The
 | เลือกช่อง ชื่อ / focus field Name | Focus a named field |
 | กรอกช่อง ชื่อ ว่า งานใหม่ / fill Name with New work | Review a literal field change |
 | กดปุ่ม บันทึก / click button Save | Review a click on one exact control |
+| เลือกแท็บ รูปภาพ / open tab Images | Review selecting an internal tab |
+| เปิดสวิตช์ บนอุปกรณ์ / turn on switch Device | Set an explicit on/off state; an already matching switch is unchanged |
+| เลือกค่า แนวตั้ง ในช่อง สัดส่วน / select Portrait in Ratio | Select one enabled, exact option |
+| ล้างช่อง ชื่อ / clear field Name | Review clearing a field |
+| คำสั่งเสียงทั้งหมด / voice help | Explain commands and list windows allowed for this account |
 | ยืนยัน / ยกเลิก | Confirm or cancel the current screen proposal |
 
 Clicks and field changes require a separate user confirmation, since input/change
@@ -38,6 +43,16 @@ Final user transcripts handle screen confirmations directly in the browser.
 Screen content is untrusted evidence; it does not authorize additional work.
 Local summaries disable tools and do not enter training capture. Restricted Cloud
 App sessions cannot use this general screen bridge.
+
+Start Menu, packages/billing and Help Center also have explicit voice navigation.
+The Start panel remains a panel; window management must not adopt or remove its
+DOM. `เปิดตั้งค่าการแจ้งเตือน` opens the existing reminders/notification window.
+Controls after the old 80-control cutoff are reachable by exact label. Lists
+show the first 200 numbered controls and dropdown options. Closed details,
+disabled fieldsets, private fields and password/OTP/payment approval remain
+protected. Wrapped select labels exclude option text, and changed dropdown
+options or ARIA switch state invalidate a pending approval. Valid numeric,
+range, date and color fields enforce their browser input constraints.
 
 The bridge controls Panthorium windows, not arbitrary operating-system apps or
 cross-origin tabs. An explicit read can capture the current HTTPS WebView inside

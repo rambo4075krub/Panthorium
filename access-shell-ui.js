@@ -132,6 +132,9 @@
     const catalog = window.PanthoriumWindowCatalog;
     if (!catalog) return;
     for (const app of catalog.apps) {
+      // Shell panels contain the login entry itself and must survive the
+      // initial null identity. Their entries retain their own access checks.
+      if (app.panel) continue;
       if (!catalog.allowed(app, user())) {
         const node = document.querySelector(app.selector);
         if (node) {

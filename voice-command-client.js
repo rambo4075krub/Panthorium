@@ -75,6 +75,8 @@
     const root = rootFor(app);
     if (app.external && typeof window.PanthoriumExternalApps?.close === 'function') window.PanthoriumExternalApps.close(app.id);
     if (!root) return;
+    const closer=resolve(app.closer);
+    if(closer) { closer(); return; }
     if (app.windowId && typeof closeWindow === 'function') closeWindow(app.windowId);
     else root.querySelector(app.closeButton)?.click();
   }
@@ -108,6 +110,7 @@
     if (!target) return failure('unknown_ui_action');
     const { app, operation } = target;
     if (!catalog.allowed(app, system()?.state?.user)) return failure('voice_action_permission_denied');
+    if(app.panel&&!['open','close'].includes(operation)) return failure('function_not_available');
     if (app.virtual) {
       const current = catalog.apps.filter(item => !item.virtual && !item.native && catalog.allowed(item, system()?.state?.user) && visible(rootFor(item)))
         .sort((a,b) => (parseInt(getComputedStyle(recordFor(b,rootFor(b))?.el || rootFor(b)).zIndex,10)||0) - (parseInt(getComputedStyle(recordFor(a,rootFor(a))?.el || rootFor(a)).zIndex,10)||0))[0];
@@ -128,7 +131,7 @@
         if (!root?.isConnected) return { ok: true, action, text: `ปิด ${app.label}`, alreadyClosed: true };
         dismiss(app);
         const record = recordFor(app, root);
-        if (record?.el?.isConnected) window.PanthoriumWindowManager.close(record.id || app.windowId || app.id);
+        if (!app.panel&&record?.el?.isConnected) window.PanthoriumWindowManager.close(record.id || app.windowId || app.id);
         if (visible(rootFor(app))) return failure('window_not_closed');
         return { ok: true, action, text: `ปิด ${app.label}` };
       }
@@ -214,7 +217,7 @@
       if (!result.ok || result.output?.ok === false || seen.has(index)) continue;
       // Only trusted navigation tool outputs may invoke the client. A search
       // document, integration payload or planner answer is never executable.
-      if (!['window.open', 'window.close', 'window.refresh', 'window.minimize', 'window.maximize', 'window.fullscreen', 'window.restore', 'window.function', 'calendar.view', 'learning_lab.open', 'studio.command'].includes(result.toolId)) continue;
+      if (!['window.open', 'window.close', 'window.refresh', 'window.minimize', 'window.maximize', 'window.fullscreen', 'window.restore', 'window.function', 'calendar.view', 'learning_lab.open', 'studio.command', 'screen.command'].includes(result.toolId)) continue;
       const action = result.output?.uiAction;
       const outcome = action?.startsWith('function_') ? await functionAction(action) : await windowAction(action);
       outcomes.push(outcome);
