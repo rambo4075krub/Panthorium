@@ -144,6 +144,9 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
     w.OS.state.user=guest;w.PanthoriumAccessShell.sync();
     assert.equal(w.document.getElementById('start-menu'),menu,'Guest keeps the original shell panel');
     assert.equal(w.document.getElementById('sm-apps'),apps,'login launcher container is preserved');
+    const pricing=w.document.createElement('div');pricing.className='window';pricing.dataset.id='billing';w.document.body.append(pricing);
+    w.PanthoriumAccessShell.sync();
+    assert(pricing.isConnected,'Guest can still view public pricing; checkout enforces account authentication separately');
   } finally { boot.window.close(); }
   for (const role of ['admin', 'guest', 'user']) for (const desktop of [true, false]) await scenario(role, desktop);
   await scenario('guest', true, true);
