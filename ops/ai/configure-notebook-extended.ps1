@@ -7,22 +7,27 @@ param(
 $ErrorActionPreference='Stop'
 $runtimePath=Join-Path $HostRoot "$Stage\runtime-ready.dpapi"
 if(-not(Test-Path -LiteralPath $runtimePath)){throw 'Notebook configuration is required.'}
+function Invoke-Gcloud([string[]]$Arguments) {
+  $preference=$ErrorActionPreference
+  try {$ErrorActionPreference='Continue';$result=& $Gcloud @Arguments 2>$null;$code=$LASTEXITCODE}
+  finally {$ErrorActionPreference=$preference}
+  if($code -ne 0){throw 'Google Cloud operation failed; no credential is printed.'}
+  return $result
+}
 $keyId=$null;$saved=$false;$apiKey=$null;$settings=$null
 try {
-  $billing=& $Gcloud billing projects describe $Project '--format=value(billingEnabled)' 2>$null
-  if($LASTEXITCODE -ne 0 -or ($billing -join '').Trim() -ne 'True'){throw 'Verify enabled project billing before configuring the model.'}
+  $billing=Invoke-Gcloud -Arguments @('billing','projects','describe',$Project,'--format=value(billingEnabled)')
+  if(($billing -join '').Trim() -ne 'True'){throw 'Verify enabled project billing before configuring the model.'}
   $secure=Get-Content -LiteralPath $runtimePath | ConvertTo-SecureString
   $settings=([pscredential]::new('local',$secure)).GetNetworkCredential().Password | ConvertFrom-Json
   if($settings.PANTHORIUM_GEMINI_API_KEY){throw 'Extended credentials already exist; verify the existing configuration instead of rotating automatically.'}
   $keyId='sentinel-extended-'+[guid]::NewGuid().ToString('N').Substring(0,16)
-  $raw=& $Gcloud services api-keys create "--key-id=$keyId" '--display-name=Panthorium Sentinel server' '--api-target=service=generativelanguage.googleapis.com' "--project=$Project" '--quiet' '--format=json' 2>$null
-  if($LASTEXITCODE -ne 0){throw 'Restricted API key creation failed.'}
+  $raw=Invoke-Gcloud -Arguments @('services','api-keys','create',"--key-id=$keyId",'--display-name=Panthorium Sentinel server','--api-target=service=generativelanguage.googleapis.com',"--project=$Project",'--quiet','--format=json')
   $created=($raw -join "`n") | ConvertFrom-Json
   $apiKey=$created.keyString
   if(-not $apiKey -and $created.response){$apiKey=$created.response.keyString}
   if(-not $apiKey){
-    $raw=& $Gcloud services api-keys get-key-string $keyId '--location=global' "--project=$Project" '--format=json' 2>$null
-    if($LASTEXITCODE -ne 0){throw 'New key could not be loaded.'}
+    $raw=Invoke-Gcloud -Arguments @('services','api-keys','get-key-string',$keyId,'--location=global',"--project=$Project",'--format=json')
     $apiKey=(($raw -join "`n") | ConvertFrom-Json).keyString
   }
   if(-not $apiKey){throw 'New key is empty.'}
@@ -37,6 +42,6 @@ try {
   @{stage=$Stage;project=$Project;keyId=$keyId;configuredAt=(Get-Date).ToUniversalTime().ToString('o');requiresDeployment=$true} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $HostRoot "$Stage\extended-configured.json") -Encoding UTF8
   Write-Output 'Restricted server credential saved in encrypted configuration. A verified application deployment is still required.'
 } finally {
-  if($keyId -and -not $saved){$null=& $Gcloud services api-keys delete $keyId '--location=global' "--project=$Project" '--quiet' 2>$null}
+  if($keyId -and -not $saved){$null=Invoke-Gcloud -Arguments @('services','api-keys','delete',$keyId,'--location=global',"--project=$Project",'--quiet')}
   $apiKey=$null;$settings=$null;$updates=$null;$encrypted=$null;$raw=$null;$created=$null;$secure=$null
 }
