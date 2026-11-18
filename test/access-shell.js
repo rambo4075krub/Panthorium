@@ -134,6 +134,17 @@ async function scenario(role, desktop, legacy = false, adminEntry = role === 'ad
   } finally { await new Promise(resolve => w.setTimeout(resolve, 50)); w.close(); }
 }
 (async () => {
+  const boot = new JSDOM(source('sentinel.html'), { url:'https://panthorium.net/', runScripts:'outside-only', pretendToBeVisual:true });
+  try {
+    const w=boot.window, menu=w.document.getElementById('start-menu'), apps=w.document.getElementById('sm-apps');
+    w.OS={state:{user:null},windows:new Map()};
+    for(const file of ['voice-window-catalog.js','access-shell-ui.js'])w.eval(source(file));
+    w.PanthoriumAccessShell.sync();
+    assert(menu.isConnected,'Start panel survives initial account loading');
+    w.OS.state.user=guest;w.PanthoriumAccessShell.sync();
+    assert.equal(w.document.getElementById('start-menu'),menu,'Guest keeps the original shell panel');
+    assert.equal(w.document.getElementById('sm-apps'),apps,'login launcher container is preserved');
+  } finally { boot.window.close(); }
   for (const role of ['admin', 'guest', 'user']) for (const desktop of [true, false]) await scenario(role, desktop);
   await scenario('guest', true, true);
   await scenario('admin', true, true);

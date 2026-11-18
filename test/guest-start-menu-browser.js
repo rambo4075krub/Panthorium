@@ -49,6 +49,12 @@ const deadline = setTimeout(() => { console.error('Guest shell stopped respondin
         assert.equal(await page.evaluate(() => window.menuMutations), before, mode + ': menu observers settle while idle');
       }
       await settled();
+      assert.equal(await page.locator('#start-menu').count(),1,mode+': Start panel survives the initial null account');
+      for(const operation of ['open','close','open','close']) {
+        const result=await page.evaluate(operation=>window.PanthoriumVoiceCommands.windowAction(operation+'_start_menu'),operation);
+        assert.equal(result.ok,true,mode+': voice '+operation+' Start');
+        assert.equal(await page.locator('#start-menu').evaluate(el=>el.classList.contains('open')),operation==='open');
+      }
       for (let attempt = 0; attempt < 3; attempt++) {
         await page.locator('#start-btn').click();
         assert(await page.locator('#start-menu').evaluate(el => el.classList.contains('open')));
