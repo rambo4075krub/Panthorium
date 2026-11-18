@@ -42,9 +42,10 @@ function normalizeUsage(usage) {
   if (promptCount != null && count(promptCount) !== sum(prompt)) throw new Error('ambiguous_provider_prompt_usage');
   if (responseCount != null && count(responseCount) !== sum(response)) throw new Error('ambiguous_provider_response_usage');
   const total = get(usage,'totalTokenCount','total_token_count');
-  // Counting thoughts twice is as wrong as omitting them. Unverified schemas
-  // stop settlement and retain the hold for reconciliation, never guess.
-  if (total != null && count(total) !== sum(prompt)+sum(response)+thoughts+tool) throw new Error('ambiguous_provider_total_usage');
+  // Live's documented total is prompt + response, not an invoice total that
+  // includes separately reported thoughts. Do not add thoughts into this
+  // consistency check or infer missing modality counts from the total.
+  if (total != null && count(total) !== sum(prompt)+sum(response)) throw new Error('ambiguous_provider_total_usage');
   return result;
 }
 function usageCost(usage) {

@@ -1,7 +1,7 @@
 'use strict';
 const assert=require('node:assert/strict');
 const {normalizeUsage,usageCost,UsageAccumulator,interactionIdle}=require('../services/sentinelUsage');
-const report=(input,output,thinking)=>({promptTokenCount:input,candidatesTokenCount:output,thoughtsTokenCount:thinking,totalTokenCount:input+output+thinking,promptTokensDetails:[{modality:'TEXT',tokenCount:input}],candidatesTokensDetails:[{modality:'AUDIO',tokenCount:output}]});
+const report=(input,output,thinking)=>({promptTokenCount:input,responseTokenCount:output,thoughtsTokenCount:thinking,totalTokenCount:input+output,promptTokensDetails:[{modality:'TEXT',tokenCount:input}],responseTokensDetails:[{modality:'AUDIO',tokenCount:output}]});
 assert.throws(()=>new UsageAccumulator(),/unverified/);
 const turns=new UsageAccumulator({semantics:'turn'});
 let totals=turns.add({turnId:'1',usage:report(15176,175,94)});
@@ -15,7 +15,15 @@ const cumulative=new UsageAccumulator({semantics:'session'});
 cumulative.add({usage:report(10,2,1)});assert.equal(cumulative.add({usage:report(15,3,2)}).textInputTokens,15);
 assert.throws(()=>cumulative.add({usage:report(14,3,2)}),/regressed/);
 assert.throws(()=>normalizeUsage({promptTokenCount:10}),/details_required/);
-assert.throws(()=>normalizeUsage({...report(10,2,1),totalTokenCount:12}),/ambiguous/);
+assert.throws(()=>normalizeUsage({...report(10,2,1),totalTokenCount:13}),/ambiguous/);
+// Actual synthetic Extended response: aggregate prompt includes tokens with
+// no supplied modality. Retain the hold rather than invent a price for them.
+assert.throws(()=>normalizeUsage({promptTokenCount:2947,responseTokenCount:26,totalTokenCount:2973,
+  promptTokensDetails:[{modality:'TEXT',tokenCount:2614},{modality:'AUDIO',tokenCount:222}],
+  responseTokensDetails:[{modality:'AUDIO',tokenCount:26}],thoughtsTokenCount:81}),/ambiguous_provider_prompt_usage/);
+assert.throws(()=>normalizeUsage({promptTokenCount:6172,responseTokenCount:23,totalTokenCount:6834,
+  promptTokensDetails:[{modality:'TEXT',tokenCount:5770},{modality:'AUDIO',tokenCount:269}],
+  responseTokensDetails:[{modality:'TEXT',tokenCount:23}],thoughtsTokenCount:639}),/ambiguous_provider_prompt_usage/);
 assert.throws(()=>normalizeUsage({promptTokensDetails:[{modality:'UNKNOWN',tokenCount:1}]}),/unpriced/);
 assert.throws(()=>normalizeUsage({thoughtsTokenCount:-1}),/invalid/);
 assert.deepEqual(usageCost({textInputTokens:1000,textOutputTokens:200,thinkingTokens:100}),{credits:2500,nanoUsd:2100000});

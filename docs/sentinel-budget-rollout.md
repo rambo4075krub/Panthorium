@@ -22,12 +22,20 @@ ends exclusively at 2026-12-01T00:00:00+07:00 and remains unlimited before that.
 ## Required activation evidence
 
 1. Establish a paid production connection to the exact requested Extended
-   Thinking model. Existing provider probes did not establish access. Never
-   substitute a different model or expose provider keys to the browser.
+   Thinking model. Bounded Developer API probes now establish AUDIO access
+   with HIGH thinking and an asynchronous tool round trip. Temporary restricted
+   probe keys were deleted afterwards; production credentials and billing
+   configuration have not been activated. Vertex access was not established.
+   Never substitute a different model or expose provider keys to the browser.
 2. Capture complete token-only usage for text, audio, image/video input,
    thinking, repeated context, tool responses, cancellation and resumption.
    `UsageAccumulator` requires an explicit verified session/turn contract.
    It does not guess that two similar reports represent duplicate usage.
+   Actual Extended reports contain prompt totals larger than their modality
+   details, and total-token conventions differ between ordinary and tool turns.
+   The draft parser rejects these ambiguous reports rather than settling a
+   guessed charge. TEXT-only setup was rejected; audio plus transcription must
+   therefore be included in any supported text-chat cost benchmark.
 3. Wire reservations before every provider dispatch, including HTTP, live
    audio, approval audio and background jobs. Bound input/context and output,
    settle only with complete verified evidence, preserve unresolved holds on
@@ -57,6 +65,14 @@ ends exclusively at 2026-12-01T00:00:00+07:00 and remains unlimited before that.
   and promotion. Test-created schema is removed afterwards.
 - Existing billing summary, signed checkout, free promotion and public policy
   regressions. These do not substitute for a real-model cost benchmark.
+- Synthetic Developer API: two AUDIO turns reached IDLE, and one NON_BLOCKING
+  tool round trip reached IN_PROGRESS then IDLE with HIGH / maxOutputTokens
+  2048. A 128-token tool test did not call the tool, so that limit is not an
+  acceptable default. No user content or production action was sent.
+- Production commit 73445c8ca9c43cc9c0611e35b4135eb123b69c51 contains the separate
+  telemetry and 90/95/exhausted-alert changes from PR #357. Main CI, publisher,
+  notebook activation, local health and served alert asset were verified.
+  It does not activate the prices, quotas or model proposed in this branch.
 
 References: https://aistudio.google.com/docs/models/gemini-3.8-live-extended-thinking
 and https://aistudio.google.com/docs/pricing#gemini-3.8-live
