@@ -4,6 +4,7 @@ const {randomUUID}=require('crypto');
 const {OmiseBillingService}=require('../services/omiseBillingService');
 const {EntitlementService}=require('../services/entitlementService');
 const {LiveQuotaMeter}=require('../services/liveQuotaMeter');
+const catalog=require('../billing-catalog');
 class Pool {
   constructor(){this.orders=new Map();this.receipts=new Map();this.grants=new Map();this.free=new Map();}
   async connect(){return this;}
@@ -51,10 +52,12 @@ async function main(){
   const {CloudFilesService}=require('../services/cloudFilesService');assert.equal(new CloudFilesService({entitlements:service.entitlements()}).maxUserFiles,10000,'large storage packs can fit beyond legacy 1000-file cap');
   const rights=service.entitlements();rights.now=()=>Date.parse('2026-12-01T00:00:00+07:00');let state=await rights.state(user);assert.equal(state.plan,'life');assert.equal(state.remaining.storageBytes,1024**3);
   await assert.rejects(rights.checkPurchase(user,require('../billing-catalog').get('work')),/membership_already_active/);
-  await rights.consume(user,{voiceInputSeconds:10,textInputTokens:20});state=await rights.state(user);assert.equal(state.remaining.aiCredits,2463980);assert.equal(state.remaining.voiceInputSeconds,undefined);
-  await assert.rejects(rights.consume(user,{voiceInputSeconds:100000}),/quota_exceeded/);assert.equal((await rights.state(user)).remaining.aiCredits,2463980,'failure rolls consumption back');
+  const lifeRemaining=catalog.get('life').quotas.aiCredits-1020;
+  await rights.consume(user,{voiceInputSeconds:10,textInputTokens:20});state=await rights.state(user);assert.equal(state.remaining.aiCredits,lifeRemaining);assert.equal(state.remaining.voiceInputSeconds,undefined);
+  await assert.rejects(rights.consume(user,{voiceInputSeconds:100000}),/quota_exceeded/);assert.equal((await rights.state(user)).remaining.aiCredits,lifeRemaining,'failure rolls consumption back');
   assert.equal((await rights.state('other')).plan,'free');await assert.rejects(rights.checkPurchase('other',require('../billing-catalog').get('storage-5')),/paid_membership_required/);
-  await rights.consume('free',{voiceInputSeconds:40,voiceOutputSeconds:20});await rights.consume('free',{textInputTokens:1000});assert.equal((await rights.state('free')).remaining.aiCredits,85000);
+  const freeAllowance=catalog.get('free').quotas.aiCredits;
+  await rights.consume('free',{voiceInputSeconds:4,voiceOutputSeconds:2});await rights.consume('free',{textInputTokens:100});assert.equal((await rights.state('free')).remaining.aiCredits,freeAllowance-1500);
   const expiry=pool.grants.get(order.id).ends_at;await service.webhook('evnt_fixture');assert.equal(pool.grants.get(order.id).ends_at,expiry,'retries never renew entitlement expiry');
   charge.refunded_amount=18900;await service.webhook('evnt_fixture');assert.equal((await rights.state(user)).plan,'free');assert.equal(pool.receipts.size,1,'live receipt retained for audit');
   const calls=[];const meter=new LiveQuotaMeter({userId:user,entitlements:{consume:async(id,amounts)=>calls.push({id,amounts})}});
@@ -68,11 +71,11 @@ async function main(){
   const starts=new Date(Date.now()-1000).toISOString(),ends=new Date(Date.now()+86400000).toISOString();
   pool.grants.set(legacyId,{order_id:legacyId,user_id:legacyUser,product_id:'voice-s',starts_at:starts,ends_at:ends,revoked_at:null,snapshot:{category:'voice',quotas:{voiceInputSeconds:20,voiceOutputSeconds:20}},used:{voiceInputSeconds:5}});
   pool.grants.set(expiredId,{order_id:expiredId,user_id:legacyUser,product_id:'text-s',starts_at:starts,ends_at:starts,revoked_at:null,snapshot:{category:'text',quotas:{textInputTokens:1000}},used:{}});
-  assert.equal((await rights.state(legacyUser)).remaining.aiCredits,111500,'free pool plus only unexpired old voice allowance');
+  assert.equal((await rights.state(legacyUser)).remaining.aiCredits,freeAllowance+11500,'free pool plus only unexpired old voice allowance');
   await rights.consume(legacyUser,{textInputTokens:1000,voiceOutputSeconds:1});
   assert.deepEqual(pool.grants.get(legacyId).used,{voiceInputSeconds:5,aiCredits:1500});
   assert.equal(pool.grants.get(legacyId).ends_at,ends,'conversion preserves original expiry');
-  assert.equal((await rights.state(legacyUser)).remaining.aiCredits,110000);
+  assert.equal((await rights.state(legacyUser)).remaining.aiCredits,freeAllowance+10000);
   const before=structuredClone(pool.grants.get(legacyId).used);
   await assert.rejects(rights.consume(legacyUser,{textInputTokens:1,downloadBytes:1}),/quota_exceeded/);
   assert.deepEqual(pool.grants.get(legacyId).used,before,'mixed AI/download rejection rolls back all debits');

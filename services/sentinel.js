@@ -131,22 +131,9 @@ class Sentinel {
     let functionCallCount = 0;
     let result = null;
     let lockedProvider;
-    await require('./toolWorkflow').runToolWorkflow({signal,modelStep:async round=>{
-      result = await this.gateway.complete({ systemPrompt, history: currentHistory, preferredProvider: lockedProvider || preferredProvider, preferredModel, userId, sessionId, tools: declarations, voiceMode, lockedProvider, signal, media, thinking });
-      if (result.usage) {
-        totalUsage.inputTokens += Number(result.usage.inputTokens ?? result.usage.prompt_tokens) || 0;
-        totalUsage.outputTokens += Number(result.usage.outputTokens ?? result.usage.completion_tokens) || 0;
-        totalUsage.totalTokens += Number(result.usage.totalTokens ?? result.usage.total_tokens) || 0;
-      }
-      if (!result.ok || !result.functionCalls?.length) return true;
-      lockedProvider = result.provider;
-      if (round === 3) {
-        result = { ...result, ok: false, error: 'function_call_round_limit', text: 'Sentinel: ใช้ขั้นตอนเชื่อมต่อฟังก์ชันครบขีดจำกัด กรุณาลองแยกคำสั่ง' };
-        return true;
-      }
-      return false;
-    },toolStep:async()=>{
-      const functionResponses = [];
+    let lastFunctionResponses=[];
+    const executeCalls=async()=>{
+      const functionResponses = []; lastFunctionResponses=functionResponses;
       for (const call of result.functionCalls) {
         signal?.throwIfAborted();
         functionCallCount += 1;
@@ -188,8 +175,25 @@ class Sentinel {
       currentHistory.push({ role: 'model', parts: result.modelParts || [] });
       currentHistory.push({ role: 'user', parts: functionResponses });
       return false;
-    }});
+    };
+    await require('./toolWorkflow').runToolWorkflow({signal,modelStep:async round=>{
+      result = await this.gateway.complete({ systemPrompt, history: currentHistory, preferredProvider: lockedProvider || preferredProvider, preferredModel, userId, sessionId, tools: declarations, voiceMode, lockedProvider, signal, media, thinking, onFunctionCalls: require('./extendedQuotaMeter').enabled()?async calls=>{result={provider:'gemini-live',functionCalls:calls,text:'',modelParts:calls.map(functionCall=>({functionCall}))};await executeCalls();return lastFunctionResponses.map(part=>part.functionResponse);}:undefined });
+      if (result.usage) {
+        totalUsage.inputTokens += Number(result.usage.inputTokens ?? result.usage.prompt_tokens) || 0;
+        totalUsage.outputTokens += Number(result.usage.outputTokens ?? result.usage.completion_tokens) || 0;
+        totalUsage.totalTokens += Number(result.usage.totalTokens ?? result.usage.total_tokens) || 0;
+      }
+      if (!result.ok || !result.functionCalls?.length) return true;
+      lockedProvider = result.provider;
+      if (round === 3) {
+        result = { ...result, ok: false, error: 'function_call_round_limit', text: 'Sentinel: ใช้ขั้นตอนเชื่อมต่อฟังก์ชันครบขีดจำกัด กรุณาลองแยกคำสั่ง' };
+        return true;
+      }
+      return false;
+    },toolStep:executeCalls
+    });
     if (result) {
+      if(toolResults.some(item=>item.requiresConfirmation)){result={...result,ok:true,text:toolResults.some(item=>item.toolId==='mailbox.write'&&item.requiresConfirmation)?'เตรียมอีเมลแล้ว โปรดตรวจบัญชี ผู้รับ เนื้อหา และไฟล์แนบก่อนยืนยัน':toolResults.some(item=>item.toolId==='notifications.write'&&item.requiresConfirmation)?'เตรียมรายละเอียดการแจ้งเตือนแล้ว โปรดตรวจสอบและกดยืนยันในบัตรคำขอ':'เตรียมรายละเอียดแล้ว โปรดตรวจสอบและกดยืนยันในบัตรคำขอเพื่อเริ่มดำเนินการ',functionCalls:[]};}
       if (publicSources.size && result.ok && result.text && !toolResults.some(item=>item.requiresConfirmation)) {
         result.sources = [...publicSources.values()].slice(0,3);
         const missing = result.sources.filter(source=>voiceMode ? !result.text.includes(source.title||source.url) : !result.text.includes(source.url));

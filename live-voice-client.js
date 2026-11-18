@@ -319,7 +319,7 @@
         Promise.resolve(window.PanthoriumCreativeStudio.command(inputTranscript)).then(result=>{if(result?.text)window.PanthoriumOrb?.setTranscript?.(result.text,0);}).catch(()=>{});
       }
     }
-    if (content.turnComplete || content.turn_complete) {
+    if ((content.turnComplete || content.turn_complete)&&(content.interactionStatus||content.interaction_status)!=='IN_PROGRESS') {
       if(inputTranscript||outputTranscript)window.PanthoriumChats?.recordVoice?.(inputTranscript,outputTranscript).catch(error=>{window.PanthoriumChats?.notify(error);cleanup();});
       creativeConfirmationHandled=false;screenConfirmationHandled=false;
       inputTranscript = ""; outputTranscript = ""; chatUserRow = null; chatAssistantRow = null;

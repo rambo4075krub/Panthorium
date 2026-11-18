@@ -1,0 +1,33 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {normalizeUsage,usageCost,UsageAccumulator,interactionIdle}=require('../services/sentinelUsage');
+const report=(input,output,thinking)=>({promptTokenCount:input,responseTokenCount:output,thoughtsTokenCount:thinking,totalTokenCount:input+output,promptTokensDetails:[{modality:'TEXT',tokenCount:input}],responseTokensDetails:[{modality:'AUDIO',tokenCount:output}]});
+assert.throws(()=>new UsageAccumulator(),/unverified/);
+const turns=new UsageAccumulator({semantics:'turn'});
+let totals=turns.add({turnId:'1',usage:report(15176,175,94)});
+assert.deepEqual(turns.add({turnId:'1',usage:report(15176,175,94)}),totals,'duplicate report within a turn is not added');
+totals=turns.add({turnId:'2',usage:report(15426,104,50)});
+assert.equal(totals.textInputTokens,30602,'repeated context in a new billed turn is included');
+assert.equal(totals.thinkingTokens,144,'a smaller next turn is not lost');
+assert.equal(totals.audioOutputTokens,279);
+assert.equal(usageCost(totals).credits,30602+144*5+279*14);
+const cumulative=new UsageAccumulator({semantics:'session'});
+cumulative.add({usage:report(10,2,1)});assert.equal(cumulative.add({usage:report(15,3,2)}).textInputTokens,15);
+assert.throws(()=>cumulative.add({usage:report(14,3,2)}),/regressed/);
+assert.throws(()=>normalizeUsage({promptTokenCount:10}),/details_required/);
+assert.throws(()=>normalizeUsage({...report(10,2,1),totalTokenCount:13}),/ambiguous/);
+// Actual synthetic Extended response: aggregate prompt includes tokens with
+// no supplied modality. Retain the hold rather than invent a price for them.
+assert.throws(()=>normalizeUsage({promptTokenCount:2947,responseTokenCount:26,totalTokenCount:2973,
+  promptTokensDetails:[{modality:'TEXT',tokenCount:2614},{modality:'AUDIO',tokenCount:222}],
+  responseTokensDetails:[{modality:'AUDIO',tokenCount:26}],thoughtsTokenCount:81}),/ambiguous_provider_prompt_usage/);
+assert.throws(()=>normalizeUsage({promptTokenCount:6172,responseTokenCount:23,totalTokenCount:6834,
+  promptTokensDetails:[{modality:'TEXT',tokenCount:5770},{modality:'AUDIO',tokenCount:269}],
+  responseTokensDetails:[{modality:'TEXT',tokenCount:23}],thoughtsTokenCount:639}),/ambiguous_provider_prompt_usage/);
+assert.throws(()=>normalizeUsage({promptTokensDetails:[{modality:'UNKNOWN',tokenCount:1}]}),/unpriced/);
+assert.throws(()=>normalizeUsage({thoughtsTokenCount:-1}),/invalid/);
+assert.deepEqual(usageCost({textInputTokens:1000,textOutputTokens:200,thinkingTokens:100}),{credits:2500,nanoUsd:2100000});
+assert.deepEqual(usageCost({audioInputTokens:1000,audioOutputTokens:1000,imageInputTokens:1000,videoInputTokens:1000,toolInputTokens:1000}),{credits:23000,nanoUsd:17750000});
+assert.equal(interactionIdle({serverContent:{turnComplete:true,interactionStatus:'IN_PROGRESS'}}),false);
+assert.equal(interactionIdle({server_content:{interaction_status:'IDLE'}}),true);
+console.log('Sentinel budget: multimodal/thinking prices, repeated context, duplicate reports, ambiguous counters and async idle passed');

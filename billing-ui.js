@@ -27,7 +27,7 @@
     const details = document.createElement('details'); const title = node('summary', 'ความหมายข้อความเข้า/ออก วิธีใช้ และอัตราโควต้า');
     details.append(title, node('p', catalog.usageExplanation), node('p', 'วิธีใช้: สมัครและเข้าสู่บัญชี → เปิดผู้ช่วย AI → พิมพ์คำถามหรือเปิดไมโครโฟนและอนุญาตเมื่อใช้เสียง → รับคำตอบในระบบ เมื่อซื้อแพ็กเกจ สิทธิ์จะเพิ่มในบัญชีหลังยืนยันการชำระสำเร็จ'));
     const list = node('ul'); catalog.conversionDetails.forEach(text => list.append(node('li', text)));
-    details.append(list, node('p', 'ตัวอย่าง Sentinel AI: ส่งข้อความ 1,000 โทเคนและรับคำตอบ 200 โทเคน ใช้ 2,000 เครดิต; ส่งเสียง 60 วินาทีและรับเสียงคำตอบ 60 วินาที ใช้ 36,000 เครดิต การใช้งานผสมคิดรวมจากยอดเดียวกัน'), node('p', 'ข้อความบริบทและข้อความถอดเสียงที่ส่งให้ AI ประมวลผลอาจนับเป็นโทเคนเพิ่มเติม เสียงนับตามเวลาข้อมูลเสียงที่รับส่งและปัดเศษสะสมเป็นวินาที ไม่ใช่เวลาที่เปิดหน้าต่างค้างไว้ เครดิตเป็นหน่วยบริการ ไม่ใช่เงินและโอนหรือแลกเงินสดไม่ได้'));
+    details.append(list, node('p', 'ตัวอย่าง Sentinel AI: ส่งข้อความ 1,000 โทเคน รับคำตอบ 200 โทเคน และใช้การคิด 100 โทเคน ใช้ 2,500 เครดิต การใช้งานผสมคิดรวมจากยอดเดียวกัน'), node('p', 'ข้อความบริบทและข้อความถอดเสียงที่ส่งให้ AI ประมวลผลอาจนับเป็นโทเคนเพิ่มเติม นับตามข้อมูลการใช้บริการ รวมการคิดและบริบทที่ประมวลผลซ้ำ อาจกันเครดิตก่อนเริ่มและคืนส่วนที่ไม่ได้ใช้เมื่อยืนยันยอดได้ เครดิตเป็นหน่วยบริการ ไม่ใช่เงินและโอนหรือแลกเงินสดไม่ได้'));
     info.append(details); return info;
   }
   function open() {
@@ -95,7 +95,9 @@
           const response = await fetch(backend+'/api/billing/entitlements', {headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(15000)});
           const value = await response.json(); if (!response.ok || !value.ok) throw new Error('unavailable');
           if (!balance.isConnected || (os()?.state?.user?.id || os()?.state?.user?.sub)!==balanceId) return;
-          balance.textContent = value.unlimited?.includes('aiCredits') ? 'เครดิต Sentinel AI รวม: ไม่จำกัดในช่วงโปรโมชัน' : 'เครดิต Sentinel AI รวมคงเหลือ '+Number(value.remaining?.aiCredits || 0).toLocaleString('th-TH')+' เครดิต · ใช้ได้ทั้งเสียงและข้อความ';
+          const available = Math.max(0, Number(value.remaining?.aiCredits || 0));
+          const pending = Math.max(0, Number(value.pendingCredits || 0));
+          balance.textContent = value.unlimited?.includes('aiCredits') ? 'Sentinel AI: ไม่จำกัดในช่วงโปรโมชัน' : 'โควต้าพร้อมใช้: ข้อความขาเข้าอย่างเดียวสูงสุด '+available.toLocaleString('th-TH')+' โทเคน หรือขาออกและการคิดอย่างเดียวสูงสุด '+Math.floor(available/5).toLocaleString('th-TH')+' โทเคน · ใช้ร่วมจากยอดเดียวกัน'+(pending ? ' · อีก '+pending.toLocaleString('th-TH')+' หน่วยกำลังกันไว้สำหรับงานหรือรอยืนยันยอด' : '');
         } catch (_) { if (balance.isConnected && (os()?.state?.user?.id || os()?.state?.user?.sub)===balanceId) balance.textContent = 'ยังโหลดโควต้าคงเหลือไม่ได้ กรุณาเปิดหน้านี้ใหม่'; } })();
       }
       if (nativeAndroid()) {

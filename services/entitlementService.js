@@ -18,6 +18,10 @@ class EntitlementService {
       user_id TEXT NOT NULL, period TEXT NOT NULL, used JSONB NOT NULL DEFAULT '{}',
       PRIMARY KEY(user_id,period));`).catch(e=>{this.ready=null;throw e;});
     await this.ready;
+    if(process.env.PANTHORIUM_GEMINI_EXTENDED==='1'){
+      if(!this.reservationsReady)this.reservationsReady=this.pool.query(require('./aiBudgetReservationService').schemaSql).catch(e=>{this.reservationsReady=null;throw e;});
+      await this.reservationsReady;
+    }
   }
   async locked(userId,fn){
     await this.init();const c=await this.pool.connect();
@@ -69,13 +73,27 @@ class EntitlementService {
     }
     const unlimited=promotion ? ['aiCredits'] : [];
     for(const k of unlimited)remaining[k]=null; // JSON-safe unlimited; consumers must use hasQuota.
-    return {creditUsage:creditUsage({rows:applicable,free,period,membership,promotion}),promotion,unlimited,quotaPolicy:catalog.quotaPolicy,plan:membership?.product_id || 'free',startsAt:membership?.starts_at || null,expiresAt:membership?.ends_at || null,remaining,grants:applicable.map(r=>({productId:r.product_id,startsAt:r.starts_at,expiresAt:r.ends_at})),automaticRenewal:false};
+    const usage=creditUsage({rows:applicable,free,period,membership,promotion});
+    let pendingCredits=0;
+    if(process.env.PANTHORIUM_GEMINI_EXTENDED==='1'&&!promotion){
+      const held=(await c.query("SELECT reserved,actual_credits,allocations FROM panthorium_ai_reservations WHERE user_id=$1 AND state='open' AND promotion=FALSE",[userId])).rows;
+      const ids=new Set(applicable.map(r=>r.order_id));
+      for(const row of held){let left=Math.max(0,Number(row.reserved)-Number(row.actual_credits));for(const allocation of [...row.allocations].reverse()){const n=Math.min(left,allocation.credits);if((allocation.orderId&&ids.has(allocation.orderId))||(!allocation.orderId&&!membership&&allocation.period===period))pendingCredits+=n;left-=n;}}
+      usage.remaining=Math.min(usage.limit,usage.remaining+pendingCredits);usage.spent=Math.max(0,usage.limit-usage.remaining);
+      usage.threshold=usage.remaining===0?100:usage.spent>=usage.limit*.95?95:usage.spent>=usage.limit*.9?90:0;
+    }
+    return {creditUsage:usage,pendingCredits,promotion,unlimited,quotaPolicy:catalog.quotaPolicy,plan:membership?.product_id || 'free',startsAt:membership?.starts_at || null,expiresAt:membership?.ends_at || null,remaining,grants:applicable.map(r=>({productId:r.product_id,startsAt:r.starts_at,expiresAt:r.ends_at})),automaticRenewal:false};
   }
   async consume(userId,amounts){
     for(const [k,v] of Object.entries(amounts))if(!KEYS.includes(k)||!Number.isSafeInteger(v)||v<0)throw new EntitlementError('invalid_usage',400);
     let credits;
     try{credits=catalog.creditCost(amounts);}catch{throw new EntitlementError('invalid_usage',400);}
-    const result=await this.locked(userId,async c=>{
+    const result=await this.locked(userId,c=>this.consumeIn(c,userId,amounts,credits));
+    if(process.env.PANTHORIUM_GEMINI_EXTENDED==='1')result.creditUsage=(await this.state(userId)).creditUsage;
+    else this.notifyCredits(userId,result.creditUsage);return result;
+  }
+  async consumeIn(c,userId,amounts,credits){
+      const allocations=[];
       const rows=await this.active(c,userId);const membership=rows.filter(r=>r.snapshot.category==='membership').sort((a,b)=>new Date(b.starts_at)-new Date(a.starts_at))[0];
       const applicable=rows.filter(r=>(r.snapshot.category!=='membership' || r.order_id===membership?.order_id) && (!r.snapshot.paidMembershipRequired || !!membership));
       const now=this.now();
@@ -92,15 +110,13 @@ class EntitlementService {
         if(!left)continue;
         // Legacy snapshots are converted on read, retaining old usage and expiry.
         // Newly consumed credits never erase or reset historical counters.
-        for(const r of applicable){const avail=k==='aiCredits' ? catalog.creditBalance(r.snapshot.quotas,r.used) : Math.max(0,(r.snapshot.quotas?.[k]||0)-(Number(r.used[k])||0));const take=Math.min(left,avail);if(take)r.used[k]=(Number(r.used[k])||0)+take;left-=take;if(!left)break;}
-        if(left&&!membership){const avail=k==='aiCredits' ? catalog.creditBalance(catalog.get('free').quotas,free) : Math.max(0,(catalog.get('free').quotas[k]||0)-(Number(free[k])||0));const take=Math.min(left,avail);if(take)free[k]=(Number(free[k])||0)+take;left-=take;}
+        for(const r of applicable){const avail=k==='aiCredits' ? catalog.creditBalance(r.snapshot.quotas,r.used) : Math.max(0,(r.snapshot.quotas?.[k]||0)-(Number(r.used[k])||0));const take=Math.min(left,avail);if(take){r.used[k]=(Number(r.used[k])||0)+take;if(k==='aiCredits')allocations.push({orderId:r.order_id,credits:take});}left-=take;if(!left)break;}
+        if(left&&!membership){const avail=k==='aiCredits' ? catalog.creditBalance(catalog.get('free').quotas,free) : Math.max(0,(catalog.get('free').quotas[k]||0)-(Number(free[k])||0));const take=Math.min(left,avail);if(take){free[k]=(Number(free[k])||0)+take;if(k==='aiCredits')allocations.push({period,credits:take});}left-=take;}
         if(left)throw new EntitlementError('quota_exceeded:'+k,402);
       }
       for(const r of applicable)await c.query('UPDATE panthorium_entitlement_grants SET used=$2 WHERE order_id=$1',[r.order_id,JSON.stringify(r.used)]);
       if(!membership)await c.query('UPDATE panthorium_free_usage SET used=$3 WHERE user_id=$1 AND period=$2',[userId,period,JSON.stringify(free)]);
-      return {ok:true,creditUsage:creditUsage({rows:applicable,free,period,membership,promotion})};
-    });
-    this.notifyCredits(userId,result.creditUsage);return result;
+      return {ok:true,allocations,promotion:!!promotion,creditUsage:creditUsage({rows:applicable,free,period,membership,promotion})};
   }
 }
 module.exports={EntitlementService,EntitlementError};
