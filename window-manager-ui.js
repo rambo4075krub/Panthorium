@@ -88,7 +88,7 @@
   function scan() {
     const apps = window.PanthoriumWindowCatalog?.apps || [];
     apps.forEach(app => {
-      if (!app.selector) return;
+      if (!app.selector || app.panel) return;
       let root;
       try { root = document.querySelector(app.selector); } catch (_) { return; }
       if (root) register(app, root);

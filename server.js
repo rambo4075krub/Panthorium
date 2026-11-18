@@ -561,6 +561,7 @@ app.use((err, req, res, next) => {
 let localPushTimer = null;
 let mailboxMaintenanceTimer = null;
 let playBillingTimer = null;
+const creativeWorker = new (require('./services/creativeStudioWorker').CreativeStudioWorker)({studio:creativeStudio,onError:()=>console.error('[STUDIO] background job check deferred')});
 
 async function start() {
   await workloadCapacity.init();
@@ -644,12 +645,14 @@ async function start() {
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== "1" && process.env.PANTHORIUM_LOCAL_PROFILE !== "1") sentinelTraining.start();
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== "1") { autonomousGovernance.start(); sentinelOrchestrator.start(); }
   server.on('close', stopBackgroundWorkers);
+  if(process.env.PANTHORIUM_DEPLOY_PROBE!=='1'&&process.env.PANTHORIUM_STUDIO_WORKER_ENABLED==='1'&&process.env.PANTHORIUM_OBJECT_ROOT) creativeWorker.start();
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== '1' && process.env.PANTHORIUM_LOCAL_PROFILE !== '1') localInsights.start();
   if (liveGateway) server.on('close', () => liveGateway.close());
   return server;
 }
 
 function stopBackgroundWorkers() {
+  creativeWorker.stop();
   localInsights.stop();
   if (localPushTimer) { clearInterval(localPushTimer); localPushTimer = null; }
   if (mailboxMaintenanceTimer) { clearInterval(mailboxMaintenanceTimer); mailboxMaintenanceTimer = null; }

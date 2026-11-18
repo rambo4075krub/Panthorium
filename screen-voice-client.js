@@ -7,6 +7,7 @@
   const account = () => !!(user()?.sub || user()?.id) && !String(user()?.sub || user()?.id).startsWith('guest:') && !user()?.roles?.includes('guest') && user()?.permissions?.includes('chat');
   const blocked = 'script,style,noscript,iframe,webview,[hidden],[aria-hidden="true"],[data-private],[data-sensitive],[data-no-ai],input[type="password"],input[type="hidden"]';
   const fields = 'input:not([type="hidden"]),textarea,select,[contenteditable="true"]';
+  const controlSelector = 'button,a[href],summary,input,textarea,select,[contenteditable="true"],[role="button"],[role="tab"],[role="switch"],[role="checkbox"],[role="radio"],[role="menuitem"],[role="menuitemcheckbox"],[role="menuitemradio"]';
   const norm = value => String(value || '').normalize('NFC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
   let pending = null, lastIdentity = identity();
   const failure = (error, text) => ({ok:false,error,text});
@@ -15,6 +16,7 @@
     for (let node=el;node;node=node.parentElement) {
       const style=getComputedStyle(node);
       if (node.hidden || node.getAttribute('aria-hidden')==='true' || style.display==='none' || style.visibility==='hidden' || style.opacity==='0') return false;
+      if(node.parentElement?.tagName==='DETAILS'&&!node.parentElement.open&&node!==node.parentElement.querySelector(':scope > summary')) return false;
     }
     return true;
   }
@@ -32,14 +34,18 @@
       for(let el=root;el;el=el.parentElement) level=Math.max(level,parseInt(getComputedStyle(el).zIndex,10)||0);
       return [{app,root,level}];
     });
-    return roots.sort((a,b)=>b.level-a.level || Number(b.root.classList.contains('is-focused'))-Number(a.root.classList.contains('is-focused')))[0] || null;
+    // A tab-specific catalog entry wins over its generic container.
+    return roots.sort((a,b)=>b.level-a.level || Number(b.root.classList.contains('is-focused'))-Number(a.root.classList.contains('is-focused')) || b.app.selector.length-a.app.selector.length)[0] || null;
   }
   function label(el) {
+    const labelText=node=>{const copy=node.cloneNode(true);copy.querySelectorAll(fields+','+blocked).forEach(child=>child.remove());return copy.textContent;};
     const labelled=(el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).map(id=>document.getElementById(id)?.textContent || '').join(' ');
-    return (el.getAttribute('aria-label') || labelled || Array.from(el.labels || []).map(item=>item.textContent).join(' ') || el.getAttribute('placeholder') || el.getAttribute('title') || (el.matches('button,a,[role="button"],[role="tab"]') ? el.textContent : el.name) || '').replace(/\s+/g,' ').trim().slice(0,160);
+    return (el.getAttribute('aria-label') || labelled || Array.from(el.labels || []).map(labelText).join(' ') || el.getAttribute('placeholder') || el.getAttribute('title') || (el.matches('button,a,summary,[role]') ? el.textContent : el.name) || '').replace(/\s+/g,' ').trim().slice(0,160);
   }
+  const checked = el => el.matches('input[type="checkbox"],input[type="radio"]') ? el.checked : el.getAttribute('aria-checked') === 'true';
+  const switchLike = el => el.matches('input[type="checkbox"],input[type="radio"],[role="switch"],[role="checkbox"],[role="radio"],[role="menuitemcheckbox"],[role="menuitemradio"]');
   function controls(root) {
-    return Array.from(root.querySelectorAll('button,a[href],input,textarea,select,[contenteditable="true"],[role="button"],[role="tab"]')).filter(el=>visible(el)&&!sensitive(el)&&!el.disabled&&el.getAttribute('aria-disabled')!=='true').map(el=>({el,label:label(el),kind:el.matches(fields)?'field':'button'})).filter(item=>item.label).slice(0,80);
+    return Array.from(root.querySelectorAll(controlSelector)).filter(el=>visible(el)&&!sensitive(el)&&!el.matches(':disabled')&&el.getAttribute('aria-disabled')!=='true').map(el=>({el,label:label(el),kind:switchLike(el)?'switch':el.matches('[role="tab"]')?'tab':el.matches(fields)?'field':'button'})).filter(item=>item.label);
   }
   function textOf(root) {
     const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
@@ -68,13 +74,13 @@
       if(owner!==identity()||active()?.root!==root) return failure('screen_changed','หน้าต่างหรือบัญชีเปลี่ยนแล้ว กรุณาสั่งใหม่');
       return result || failure('external_page_unavailable','อ่านได้เมื่อเปิดเว็บภายใน Panthorium Browser Desktop');
     }
-    const items=controls(root).map(({label,kind},i)=>({number:i+1,label,kind}));
+    const items=controls(root).slice(0,200).map(({el,label,kind},i)=>({number:i+1,label,kind,...(kind==='switch'?{checked:checked(el)}:{}),...(el.tagName==='SELECT'?{options:Array.from(el.options).filter(o=>!o.disabled&&!o.parentElement?.disabled).slice(0,40).map(o=>o.label)}:{})}));
     return {ok:true,appId:app.id,title:app.label,text:textOf(root),controls:items};
   }
   function fingerprint(root) {
     // Kept in memory only. Binding approval to all visible form values also
     // catches property-only changes that a MutationObserver would miss.
-    return JSON.stringify([textOf(root),controls(root).map(({el,label,kind})=>[label,kind,el.value ?? '',el.checked ?? null,el.getAttribute('href')])]);
+    return JSON.stringify([textOf(root),controls(root).map(({el,label,kind})=>[label,kind,el.value ?? '',switchLike(el)?checked(el):null,el.getAttribute('href'),el.readOnly,el.getAttribute('aria-selected'),el.tagName==='SELECT'?Array.from(el.options).map(o=>[o.value,o.label,o.disabled,!!o.parentElement?.disabled]):null])]);
   }
   function clear() { pending=null;document.getElementById('panthorium-screen-confirmation')?.remove(); }
   function review(text) {
@@ -86,19 +92,23 @@
     document.body.append(panel);
   }
   async function execute(command,{userInitiated=false}={}) {
-    const phrase=norm(command);
+    const phrase=norm(command).replace(/(?:นะครับ|นะคะ|ครับ|ค่ะ|คะ|please)$/u,'');
     if(['ยืนยัน','ยืนยันคำสั่ง','confirm','ยกเลิก','cancel'].includes(phrase)) {
       if(!userInitiated) return failure('screen_confirmation_user_required','รอผู้ใช้พูดยืนยันหรือยกเลิก');
       const proposal=pending;clear();
       if(!proposal) return failure('screen_confirmation_missing','ไม่มีคำสั่งหน้าจอรอยืนยัน');
       if(['ยกเลิก','cancel'].includes(phrase)) return {ok:true,text:'ยกเลิกคำสั่งหน้าจอแล้ว'};
       const {root,el,intent}=proposal;
-      if(!account()||identity()!==proposal.owner||Date.now()>proposal.expiresAt||active()?.root!==root||!visible(el)||el.disabled||el.getAttribute('aria-disabled')==='true'||sensitive(el)||fingerprint(root)!==proposal.fingerprint) return failure('screen_changed','หน้าต่างหรือข้อมูลเปลี่ยนแล้ว กรุณาสั่งใหม่เพื่อตรวจรายละเอียดอีกครั้ง');
-      if(intent.action==='fill') {
+      if(!account()||identity()!==proposal.owner||Date.now()>proposal.expiresAt||active()?.root!==root||!visible(el)||el.matches(':disabled')||el.getAttribute('aria-disabled')==='true'||sensitive(el)||fingerprint(root)!==proposal.fingerprint) return failure('screen_changed','หน้าต่างหรือข้อมูลเปลี่ยนแล้ว กรุณาสั่งใหม่เพื่อตรวจรายละเอียดอีกครั้ง');
+      if(intent.action==='toggle') {
+        if(checked(el)!==intent.checked) el.click();
+        return {ok:true,text:`ส่งคำสั่ง${intent.checked?'เปิด':'ปิด'}สวิตช์ ${proposal.label} แล้ว โปรดตรวจสถานะในหน้าต่าง`,dispatched:true};
+      }
+      if(intent.action==='fill'||intent.action==='select') {
         if(el.isContentEditable) el.textContent=intent.value;
         else {
           if(el.tagName==='SELECT') {
-            const option=Array.from(el.options).filter(o=>!o.disabled&&(norm(o.label)===norm(intent.value)||o.value===intent.value));
+            const option=Array.from(el.options).filter(o=>!o.disabled&&!o.parentElement?.disabled&&(norm(o.label)===norm(intent.value)||o.value===intent.value));
             if(option.length!==1) return failure('screen_option_ambiguous','ไม่พบตัวเลือกที่ตรงกันเพียงรายการเดียว');
             el.value=option[0].value;
           } else {
@@ -115,6 +125,11 @@
     if(pending) return {ok:true,text:'มีคำสั่งหน้าจอรอยืนยัน พูด ยืนยัน หรือ ยกเลิก ก่อน',confirmationRequired:true};
     const intent=catalog.parse(command);
     if(!intent) return null;
+    if(intent.action==='help') {
+      if(!account()||window.PanthoriumCloudApps?.voiceContext?.()) return failure('active_window_unavailable','เข้าสู่บัญชีและออกจากแอปเฉพาะก่อนดูคำสั่งระบบ');
+      const apps=(window.PanthoriumWindowCatalog?.apps||[]).filter(app=>!app.native&&!app.virtual&&!app.external&&window.PanthoriumWindowCatalog.allowed(app,user()));
+      return {ok:true,text:'พูด เปิด ตามด้วยชื่อหน้าต่าง แล้วสั่ง อ่านหน้านี้, แสดงปุ่ม, เลื่อนลง, กดปุ่ม ตามด้วยชื่อหรือหมายเลข, เลือกแท็บ ตามด้วยชื่อ, เปิดสวิตช์ หรือ ปิดสวิตช์ ตามด้วยชื่อ, กรอกช่อง ชื่อช่อง ว่า ข้อความ, เลือกค่า ตัวเลือก ในช่อง ชื่อช่อง หรือ ล้างช่อง ชื่อช่อง\nคำสั่งที่เปลี่ยนข้อมูลจะแสดงรายละเอียดให้พูด ยืนยัน หรือ ยกเลิก\nหน้าต่างที่บัญชีนี้ใช้ได้: '+apps.map(app=>app.label).join(', ')};
+    }
     const current=active();
     if(!current) return failure('active_window_unavailable','ไม่พบหน้าต่างที่บัญชีนี้สั่งงานได้');
     const {root,app}=current;
@@ -122,7 +137,7 @@
     if(['read','summarize','list'].includes(intent.action)) {
       const screen=await snapshot({external:intent.action!=='list'});
       if(!screen.ok) return screen;
-      if(intent.action==='list') return {ok:true,text:screen.controls.length?screen.controls.map(c=>`${c.number}. ${c.kind==='field'?'ช่อง':'ปุ่ม'} ${c.label}`).join('\n'):'ไม่พบปุ่มหรือช่องที่สั่งงานได้',screen};
+      if(intent.action==='list') return {ok:true,text:screen.controls.length?screen.controls.map(c=>`${c.number}. ${{field:'ช่อง',switch:'สวิตช์',tab:'แท็บ',button:'ปุ่ม'}[c.kind]} ${c.label}${c.kind==='switch'?(c.checked?' (เปิด)':' (ปิด)'):''}${c.options?.length?' — '+c.options.join(', '):''}`).join('\n'):'ไม่พบปุ่มหรือช่องที่สั่งงานได้',screen};
       return {ok:true,text:screen.text || 'หน้านี้ไม่มีข้อความที่อ่านได้',screen,summarize:intent.action==='summarize'};
     }
     if(intent.action==='scroll') {
@@ -137,14 +152,25 @@
     const matches=number?items.filter((_,i)=>i===Number(number[1])-1):items.filter(item=>norm(item.label)===norm(intent.target));
     if(matches.length!==1) return failure('screen_target_ambiguous',matches.length?'พบหลายรายการชื่อเดียวกัน พูด แสดงปุ่ม แล้วเลือกหมายเลข':'ไม่พบรายการนี้ พูด แสดงปุ่ม เพื่อฟังชื่อหรือหมายเลข');
     const {el,label,kind}=matches[0];
-    if((intent.action==='fill'||intent.action==='focus')&&kind!=='field') return failure('screen_field_required','รายการนี้ไม่ใช่ช่องกรอกข้อมูล');
+    if(['fill','select','focus'].includes(intent.action)&&kind!=='field') return failure('screen_field_required','รายการนี้ไม่ใช่ช่องกรอกข้อมูล');
+    if(intent.action==='select'&&el.tagName!=='SELECT') return failure('screen_field_required','รายการนี้ไม่ใช่ช่องตัวเลือก');
+    if(intent.action==='toggle'&&kind!=='switch') return failure('screen_switch_required','รายการนี้ไม่ใช่สวิตช์หรือตัวเลือก');
+    if(intent.action==='toggle'&&!intent.checked&&el.matches('input[type="radio"],[role="radio"],[role="menuitemradio"]')) return failure('screen_switch_required','ให้เลือกตัวเลือกอื่นในกลุ่มแทนการปิดรายการนี้');
+    if(intent.action==='tab'&&kind!=='tab'&&!el.matches('button')) return failure('screen_tab_required','รายการนี้ไม่ใช่แท็บหรือปุ่ม');
     if(intent.action==='focus') {el.focus();return {ok:true,text:`เลือกช่อง ${label} แล้ว`};}
-    if(intent.action==='fill'&&(el.readOnly||el.tagName==='INPUT'&&!['text','search','email','tel','url','number','date','time','datetime-local'].includes(el.type))) return failure('screen_field_unavailable','ช่องนี้ไม่รองรับการกรอกด้วยเสียง');
+    if(['fill','select'].includes(intent.action)&&(el.readOnly||el.tagName==='INPUT'&&!['text','search','email','tel','url','number','date','time','datetime-local','range','color'].includes(el.type))) return failure('screen_field_unavailable','ช่องนี้ไม่รองรับการกรอกด้วยเสียง');
+    if(['fill','select'].includes(intent.action)&&el.tagName==='SELECT'&&Array.from(el.options).filter(o=>!o.disabled&&!o.parentElement?.disabled&&(norm(o.label)===norm(intent.value)||o.value===intent.value)).length!==1) return failure('screen_option_ambiguous','ไม่พบตัวเลือกที่ตรงกันเพียงรายการเดียว');
+    if(intent.action==='fill'&&el.tagName==='INPUT') {
+      const probe=el.cloneNode();probe.value=intent.value;
+      if(probe.value!==intent.value||(intent.value&&!probe.checkValidity())) return failure('screen_value_invalid','ค่าที่สั่งไม่ตรงชนิดหรือช่วงที่ช่องนี้อนุญาต');
+    }
     // Never automate a secret-bearing form or another feature's approval UI.
     if((el.form?.querySelector('input[type="password"],input[autocomplete="one-time-code"]'))||el.closest('dialog,[data-approval],#panthorium-screen-confirmation')||/ยืนยัน|อนุมัติ|confirm|approve/i.test(label)) return failure('screen_protected_control','รายการนี้ต้องใช้ขั้นตอนยืนยันของหน้าต่างนั้น');
+    if(intent.action==='toggle'&&checked(el)===intent.checked) return {ok:true,text:`สวิตช์ ${label} ${intent.checked?'เปิด':'ปิด'}อยู่แล้ว`,alreadySet:true};
     pending={root,el,intent,label,owner:identity(),fingerprint:fingerprint(root),expiresAt:Date.now()+60000};
     const values=controls(root).filter(item=>item.kind==='field').map(item=>`${item.label}: ${item.el.value || ''}`).join('\n').slice(0,2000);
-    const text=`${intent.action==='fill'?`กรอกช่อง ${label} เป็น ${intent.value}`:`กดปุ่ม ${label}` } ใน ${app.label}${values?'\nข้อมูลในฟอร์มขณะนี้:\n'+values:''}\nพูด ยืนยัน เพื่อดำเนินการ หรือ ยกเลิก`;
+    const operation=intent.action==='toggle'?`${intent.checked?'เปิด':'ปิด'}สวิตช์ ${label}`:['fill','select'].includes(intent.action)?`กรอกช่อง ${label} เป็น ${intent.value||'(ว่าง)'}`:`กด${intent.action==='tab'?'แท็บ':'ปุ่ม'} ${label}`;
+    const text=`${operation} ใน ${app.label}${values?'\nข้อมูลในฟอร์มขณะนี้:\n'+values:''}\nพูด ยืนยัน เพื่อดำเนินการ หรือ ยกเลิก`;
     review(text);
     return {ok:true,text,confirmationRequired:true};
   }

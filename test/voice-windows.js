@@ -165,7 +165,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="files"]'), 'Files appears in Start menu after account authentication');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="goals"]'), 'Goals appears in Start menu for signed-in chat accounts');
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="assistant-preferences"]'), 'Sentinel Preferences appears in Start menu for signed-in chat accounts');
-    for (const file of ['user-manager.js', 'developer-studio-ui.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'window-manager-ui.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'local-insights-ui.js', 'cloud-apps-ui.js', 'organization-catalog.js', 'organizations-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'creative-studio-ui.js', 'work-assistant-ui.js', 'social-rtc.js', 'social-ui.js', 'privacy-notice.js', 'privacy-policy-ui.js', 'billing-admin-ui.js', 'admin-mailbox-ui.js', 'user-mailbox-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
+    for (const file of ['start-menu-ui.js', 'billing-catalog.js', 'billing-ui.js', 'contact-ui.js', 'user-manager.js', 'developer-studio-ui.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'window-manager-ui.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'local-insights-ui.js', 'cloud-apps-ui.js', 'organization-catalog.js', 'organizations-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'creative-studio-ui.js', 'work-assistant-ui.js', 'social-rtc.js', 'social-ui.js', 'privacy-notice.js', 'privacy-policy-ui.js', 'billing-admin-ui.js', 'admin-mailbox-ui.js', 'user-mailbox-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumStagingAdminDesktop.render();
     await new Promise(resolve => setTimeout(resolve, 40));
     for (const appId of ['media-studio', 'browser']) {
@@ -197,7 +197,7 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       assert.equal((await command(`เปิด ${app.aliases[0]}`)).ok, true);
       assert.equal(w.document.querySelectorAll(app.selector).length, 1, `${app.label}: duplicate window`);
       if (app.refresher || app.refreshButton) assert.equal((await command(`รีเฟรช ${app.aliases[0]}`)).ok, true, `${app.label} refresh`);
-      for (const verb of ['ขยาย','เต็มหน้าจอ','คืนขนาด','ย่อ','คืนขนาด']) {
+      for (const verb of app.panel ? [] : ['ขยาย','เต็มหน้าจอ','คืนขนาด','ย่อ','คืนขนาด']) {
         client++;
         const modeResult = await command(`${verb} ${app.aliases[0]}`);
         assert.equal(modeResult.ok,true,`${verb} ${app.label}: ${JSON.stringify(modeResult)}`);
@@ -495,7 +495,6 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     sw.close();
     console.log('PASS: separate account window can change password with email OTP and confirmation');
     console.log('PASS: guest and signed-in Voice Identity security flows are separated');
-    load('start-menu-ui.js');
     load('access-shell-ui.js');
     for (const [page, account] of [['/', registeredUser], ['/admin', admin]]) {
       dom.reconfigure({ url: 'https://panthorium-backend-staging.example.run.app' + page });

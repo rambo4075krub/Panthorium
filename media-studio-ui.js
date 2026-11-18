@@ -60,7 +60,7 @@
       invalid_ai_edit_plan: 'Sentinel ส่งแผนตัดต่อที่อยู่นอกช่วงวิดีโอ กรุณาลองสั่งใหม่',
       invalid_generation_prompt: 'พิมพ์ prompt สำหรับวิดีโอที่ต้องการสร้าง',
       ambiguous_media_file: 'พบชื่อไฟล์ซ้ำ กรุณาเลือกไฟล์ใน Media Studio โดยตรง',
-      video_generation_unavailable: 'ยังไม่ได้เปิดใช้ Veo video generation ใน staging',
+      video_generation_unavailable: 'บริการสร้างวิดีโอยังไม่พร้อม กรุณาตรวจการเชื่อมต่อผู้ให้บริการในระบบ',
       video_generation_capacity: 'Veo ใช้งานเต็มชั่วคราว กรุณาลองอีกครั้งภายหลัง',
       video_generation_filtered: 'คำขอนี้ถูกระบบความปลอดภัยของ Veo ปฏิเสธ',
       video_generation_failed: 'สร้างวิดีโอไม่สำเร็จ',
@@ -398,7 +398,7 @@
       const note = root.querySelector('[data-generation-capability]');
       if (!result.videoGeneration) {
         generate.disabled = true;
-        note.textContent = 'การสร้างวิดีโอด้วย Veo ยังไม่เปิดใช้ใน staging';
+        note.textContent = 'บริการสร้างวิดีโอยังไม่พร้อมใช้งานในระบบนี้';
         note.style.color = '#f5c46c';
       } else {
         note.textContent = 'ใช้ Sentinel ช่วยเรียบเรียงคำสั่งก่อนสร้าง · บันทึกไฟล์ลง Cloud Files';

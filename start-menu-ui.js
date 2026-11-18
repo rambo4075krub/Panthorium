@@ -192,5 +192,11 @@
     if (target) { listState(target); keepPinnedLast(target); }
     return true;
   }
-  root.PanthoriumStartMenuUI = Object.freeze({ filter, pinLast, keepPinnedLast, group, groupItems, icon });
+  function setOpen(opened) {
+    const menu=root.document?.getElementById('start-menu'),button=root.document?.getElementById('start-btn');
+    if(!menu||!button) return false;
+    if(menu.classList.contains('open')!==opened) button.click();
+    return menu.classList.contains('open')===opened;
+  }
+  root.PanthoriumStartMenuUI = Object.freeze({ filter, pinLast, keepPinnedLast, group, groupItems, icon, open:()=>setOpen(true), close:()=>setOpen(false) });
 })(window);
