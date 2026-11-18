@@ -178,6 +178,9 @@ billingService.additionalBilling = [stripeBilling,playBilling];
 billingService.primaryBilling = stripePrimary ? stripeBilling : billingService;
 const voiceSessions = new VoiceSessionRepository({ ...cloudStoreOptions, secret: process.env.VOICE_SESSION_ENCRYPTION_KEY || config.jwtSecret });
 const usageLedger = new UsageLedgerRepository(cloudStoreOptions);
+// The HTTP provider path must persist the same token-only evidence as voice
+// and background apps; model prompts and response content are never recorded here.
+sentinel.providers.onUsage = event => usageLedger.record({ ...event, userId:event.userId || 'anonymous', outcome:'usage_snapshot' });
 const localAppCompletion = sentinel.providers.localOnly
   ? require('./services/localAppCompletion').createLocalAppCompletion({gateway:sentinel.gateway}) : null;
 const cloudApps = new CloudAppRuntime({ ...cloudStoreOptions,
