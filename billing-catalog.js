@@ -7,9 +7,9 @@
   'use strict';
   // Fixed service units, not money or provider prices. Preserve the full value of
   // all four old allowances when moving an existing grant into the shared pool.
-  const aiRates = Object.freeze({voiceInputSeconds:100,voiceOutputSeconds:500,textInputTokens:1,textOutputTokens:5});
+  const aiRates = Object.freeze({voiceInputSeconds:100,voiceOutputSeconds:500,textInputTokens:1,textOutputTokens:5,thinkingTokens:5,audioInputTokens:4,audioOutputTokens:14,imageInputTokens:2,videoInputTokens:2,toolInputTokens:1});
   const aiKeys = Object.freeze(Object.keys(aiRates));
-  const quotaPolicy = Object.freeze({version:'ai-credits-v1',unit:'aiCredits',rates:aiRates});
+  const quotaPolicy = Object.freeze({version:'ai-credits-v2',unit:'aiCredits',rates:aiRates});
   function creditCost(usage = {}) {
     let total = 0;
     for (const key of aiKeys) {
@@ -27,31 +27,33 @@
     return Math.max(0, total - spent);
   }
   const serviceDescription = 'Panthorium คือบริการผู้ช่วย AI ผ่านเว็บไซต์และแอป สำหรับถามตอบ สรุปข้อมูล ช่วยร่างข้อความ และสั่งงานเครื่องมือที่เปิดใช้งาน โดยพิมพ์ข้อความหรือพูดผ่านไมโครโฟน แล้วรับคำตอบเป็นข้อความหรือเสียง';
-  const usageExplanation = 'Sentinel AI ใช้เครดิตร่วมสำหรับเสียงและข้อความตามแพ็กเกจของบัญชี เมื่อเครดิตไม่พอ ต้องรอรอบสิทธิ์ใหม่หรือเพิ่มเครดิตก่อนใช้งานต่อ ข้อความที่ส่งให้ AI รวมคำถาม คำสั่ง และบริบทที่จำเป็น โทเคนเป็นหน่วยย่อยของข้อความ ไม่ใช่จำนวนข้อความหรือจำนวนคำตายตัว โควต้านี้ไม่ใช่แพ็กเกจ SMS ค่าโทรศัพท์ หรือการส่งข้อความโฆษณา';
-  const conversionDetails = Object.freeze(['ข้อความที่ส่งให้ AI 1 โทเคน = 1 เครดิต', 'คำตอบข้อความจาก AI 1 โทเคน = 5 เครดิต', 'เสียงที่ส่งให้ AI 1 วินาที = 100 เครดิต', 'เสียงคำตอบจาก AI 1 วินาที = 500 เครดิต']);
+  const usageExplanation = 'Sentinel AI ใช้เครดิตร่วมสำหรับข้อความ เสียง การคิด บริบท ผลเครื่องมือ และภาพหรือวิดีโอที่ส่งเข้าตามแพ็กเกจของบัญชี เมื่อเครดิตไม่พอ ต้องรอรอบสิทธิ์ใหม่หรือเพิ่มเครดิตก่อนใช้งานต่อ ข้อความที่ส่งให้ AI รวมคำถาม คำสั่ง และบริบทที่จำเป็น โทเคนเป็นหน่วยข้อมูลที่ใช้ประมวลผล ไม่ใช่จำนวนข้อความหรือจำนวนคำตายตัว โควต้านี้ไม่ใช่แพ็กเกจ SMS ค่าโทรศัพท์ หรือการส่งข้อความโฆษณา';
+  const conversionDetails = Object.freeze(['ข้อความและผลเครื่องมือที่ส่งให้ AI 1 โทเคน = 1 เครดิต', 'คำตอบข้อความและการคิดของ AI 1 โทเคน = 5 เครดิต', 'เสียงเข้า 1 โทเคน = 4 เครดิต · เสียงออก 1 โทเคน = 14 เครดิต', 'ภาพและวิดีโอที่ส่งให้ AI 1 โทเคน = 2 เครดิต', 'รวมบริบทที่ประมวลผลซ้ำตามยอดรายงานจริง ไม่ใช่เฉพาะคำถามล่าสุด']);
   const refundSummary = "แพ็กเกจและโควต้าที่ชำระแล้วไม่รับคืนเงินตามความสมัครใจ เช่น เปลี่ยนใจ ไม่ได้ใช้งาน ใช้ไม่หมด หรือหยุดใช้ก่อนครบกำหนด ไม่มีการหักเงินต่ออายุอัตโนมัติ เงื่อนไขนี้ไม่ตัดสิทธิตามกฎหมายหรือข้อกำหนดของผู้ให้บริการชำระเงินและร้านค้าแอป หากชำระซ้ำ ยอดผิด ไม่ได้รับสิทธิ์ หรือสงสัยรายการที่ไม่ได้อนุญาต ให้ติดต่อ account@panthorium.net พร้อมเลขคำสั่งซื้อเพื่อตรวจสอบและแก้ไข";
   const products = [];
   function add(id, name, category, price, details, term, extra = {}) {
     products.push(Object.freeze({ id, name, category, price, amountSatang: price * 100, currency: 'THB', details: Object.freeze(details), term, ...extra }));
   }
   const plans = [
-    ['free', 'Free', 0, 2.5, 5000, 1000, '50 MiB', 'ไม่ได้'],
-    ['life', 'Life', 189, 65, 62500, 12500, '1 GiB', '1 GiB'],
-    ['work', 'Work', 489, 200, 200000, 40000, '3 GiB', '2 GiB'],
-    ['work-pro', 'Work Pro', 1089, 450, 600000, 120000, '5 GiB', '3 GiB']
+    ['free', 'Free', 0, 5000, 50*1024**2, 0],
+    ['life', 'Life', 189, 750000, 1024**3, 1024**3],
+    ['work', 'Work', 489, 2300000, 3*1024**3, 2*1024**3],
+    ['work-pro', 'Work Pro', 1589, 8000000, 5*1024**3, 3*1024**3]
   ];
   const n = value => value.toLocaleString('th-TH');
-  plans.forEach(([id, name, price, voice, input, output, storage, download]) => add(id, name, 'membership', price, [
-    `เครดิต Sentinel AI รวม ${n(creditCost({voiceInputSeconds:voice*60,voiceOutputSeconds:voice*60,textInputTokens:input,textOutputTokens:output}))} เครดิต/เดือน`,
-    'Sentinel AI ใช้เสียงและข้อความจากยอดเดียวกัน',
-    `พื้นที่ ${storage}`, `ดาวน์โหลด ${download}`
-  ], price ? 'รอบ 1 เดือน · ชำระใหม่เมื่อต้องการต่ออายุ · โควต้าไม่ทบยอด' : 'แพ็กเกจฟรี · โควต้ารายเดือน', { kind: price ? 'subscription' : 'free', quotaPolicy, quotas: {aiCredits:creditCost({voiceInputSeconds:voice*60,voiceOutputSeconds:voice*60,textInputTokens:input,textOutputTokens:output}),storageBytes: id==='free' ? 50*1024**2 : Number(storage.split(' ')[0])*1024**3,downloadBytes: id==='free' ? 0 : Number(download.split(' ')[0])*1024**3} }));
+  plans.forEach(([id, name, price, credits, storageBytes, downloadBytes]) => add(id, name, 'membership', price, [
+    `ข้อความเข้าอย่างเดียวสูงสุด ${n(credits)} โทเคน/เดือน`,
+    `หรือคำตอบและการคิดอย่างเดียวสูงสุด ${n(Math.floor(credits/5))} โทเคน/เดือน`,
+    'ใช้โควต้าก้อนเดียวกัน รวมเสียงและภาพนำเข้า ไม่ใช่ได้เต็มทั้งสองจำนวน',
+    `พื้นที่ ${id==='free'?'50 MiB':storageBytes/1024**3+' GiB'}`,
+    `ดาวน์โหลด ${downloadBytes?downloadBytes/1024**3+' GiB':'ไม่ได้'}`
+  ], price ? 'รอบ 1 เดือน · ชำระใหม่เมื่อต้องการต่ออายุ · โควต้าไม่ทบยอด' : 'แพ็กเกจฟรี · โควต้ารายเดือน', { kind: price ? 'subscription' : 'free', quotaPolicy, quotas: {aiCredits:credits,storageBytes,downloadBytes} }));
   function aiAddon(id, price, credits) {
-    add(id, 'AI ' + n(credits), 'ai', price, [`เครดิต Sentinel AI รวม ${n(credits)} เครดิต`, 'ใช้ได้ทั้งเสียงและข้อความจากยอดเดียวกัน'], 'ซื้อครั้งเดียว · อายุ 30 วันนับจากชำระ', {kind:'one-time',verifiedAccountRequired:true,quotaPolicy,quotas:{aiCredits:credits}});
+    add(id, 'AI · ขาเข้าสูงสุด ' + n(credits) + ' โทเคน', 'ai', price, [`ข้อความเข้าอย่างเดียวสูงสุด ${n(credits)} โทเคน`, `หรือคำตอบและการคิดอย่างเดียวสูงสุด ${n(Math.floor(credits/5))} โทเคน`, 'ใช้โควต้าก้อนเดียวกัน รวมเสียงและภาพนำเข้า'], 'ซื้อครั้งเดียว · อายุ 30 วันนับจากชำระ', {kind:'one-time',verifiedAccountRequired:true,quotaPolicy,quotas:{aiCredits:credits}});
   }
   // Stable IDs keep pending orders, payment receipts and historical grants valid.
-  [['S', 59, 20], ['M', 169, 70], ['L', 399, 175], ['XL', 849, 375]].forEach(([size, price, minutes]) => aiAddon('voice-'+size.toLowerCase(),price,creditCost({voiceInputSeconds:minutes*60,voiceOutputSeconds:minutes*60})));
-  [['S', 29, 150000, 30000], ['M', 99, 500000, 100000], ['L', 249, 1500000, 300000], ['XL', 499, 3000000, 600000]].forEach(([size, price, input, output]) => aiAddon('text-'+size.toLowerCase(),price,creditCost({textInputTokens:input,textOutputTokens:output})));
+  [['S',59,250000],['M',169,850000],['L',399,2200000],['XL',849,4500000]].forEach(([size,price,credits])=>aiAddon('voice-'+size.toLowerCase(),price,credits));
+  [['S',29,70000],['M',99,500000],['L',249,1300000],['XL',499,2700000]].forEach(([size,price,credits])=>aiAddon('text-'+size.toLowerCase(),price,credits));
   [[5, 49, 1], [20, 129, 4], [50, 279, 10], [100, 499, 20]].forEach(([size, price, download]) => add('storage-' + size, 'Storage ' + size, 'storage', price, [
     `พื้นที่เพิ่ม ${size} GiB`, `ดาวน์โหลดเพิ่ม ${download} GiB/รอบ`, 'ไม่เพิ่มโควต้า AI · เฉพาะสมาชิก Life ขึ้นไป'
   ], 'ต่ออายุรายเดือน · การซื้อกลางรอบต้องแจ้งยอดก่อนชำระ', { kind: 'subscription', paidMembershipRequired: true, quotas:{storageBytes:size*1024**3,downloadBytes:download*1024**3} }));
@@ -72,7 +74,7 @@
     return state.unlimited?.includes(key) || Number(state.remaining?.[key]) > 0;
   };
   const displayDetails = (product, now = Date.now()) => product.id === 'free' && promotionAt(now)
-    ? product.details.map(detail => detail.startsWith('เครดิต Sentinel AI รวม') ? 'เครดิต Sentinel AI รวมไม่จำกัด ทั้งเสียงและข้อความในช่วงโปรโมชัน' : detail).concat('โปรโมชัน 18 ต.ค.–30 พ.ย. 2026 (เวลาไทย) · กลับโควต้าปกติ 1 ธ.ค. 2026')
+    ? product.details.filter(detail=>!detail.startsWith('หรือคำตอบและการคิดอย่างเดียว')).map(detail => detail.startsWith('ข้อความเข้าอย่างเดียวสูงสุด') ? 'โควต้า Sentinel AI ไม่จำกัด ทั้งเสียงและข้อความในช่วงโปรโมชัน' : detail).concat('โปรโมชัน 18 ต.ค.–30 พ.ย. 2026 (เวลาไทย) · กลับโควต้าปกติ 1 ธ.ค. 2026')
     : product.details;
-  return Object.freeze({ version: '2026-11-17', aiRates, aiKeys, quotaPolicy, creditCost, creditBalance, serviceDescription, usageExplanation, conversionDetails, refundSummary, promotionAt, hasQuota, displayDetails, taxStatus: 'individual-not-vat-registered', products: Object.freeze(products), get: id => products.find(item => item.id === id) || null });
+  return Object.freeze({ version: '2026-11-18', aiRates, aiKeys, quotaPolicy, creditCost, creditBalance, serviceDescription, usageExplanation, conversionDetails, refundSummary, promotionAt, hasQuota, displayDetails, taxStatus: 'individual-not-vat-registered', products: Object.freeze(products), get: id => products.find(item => item.id === id) || null });
 });

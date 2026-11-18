@@ -24,7 +24,7 @@ class Pool {
   const start = Date.parse('2026-10-17T17:00:00Z'), end = Date.parse('2026-11-30T17:00:00Z');
   let now = start - 1;
   const pool = new Pool(), rights = new EntitlementService({ pool, now: () => now });
-  await rights.consume('free', { textInputTokens: 100000 });
+  await rights.consume('free', { textInputTokens: 5000 });
   await assert.rejects(rights.consume('free', { textInputTokens: 1 }), /quota_exceeded/);
   now = start;
   let state = JSON.parse(JSON.stringify(await rights.state('free')));
@@ -34,13 +34,13 @@ class Pool {
   pool.grants.push({ order_id: 'addon', user_id: 'free', snapshot: catalog.get('text-s'), used: {}, product_id: 'text-s' });
   await rights.consume('free', { textInputTokens: 10000000, textOutputTokens: 10000000 });
   assert.deepEqual(pool.grants[0].used, {}, 'promotion must preserve purchased add-ons');
-  assert.equal(pool.free.get('free:2026-10').aiCredits, 100000);
+  assert.equal(pool.free.get('free:2026-10').aiCredits, 5000);
   assert.equal(pool.free.get('free:2026-10').promotion_textInputTokens, 10000000);
   await assert.rejects(rights.consume('free', { textInputTokens: -1 }), /invalid_usage/);
   await assert.rejects(rights.consume('free', { textInputTokens: 0.5 }), /invalid_usage/);
   await assert.rejects(rights.consume('free', { downloadBytes: 1 }), /quota_exceeded/);
   await rights.consume('free', { voiceInputSeconds: 40, voiceOutputSeconds: 20 });
-  await rights.consume('free', { voiceInputSeconds: 100000, voiceOutputSeconds: 100000 });
+  await rights.consume('free', { voiceInputSeconds: 5000, voiceOutputSeconds: 5000 });
   assert.equal((await rights.state('free')).remaining.aiCredits, null);
   await assert.rejects(rights.consume('free', { textInputTokens: 1, downloadBytes: 1 }), /quota_exceeded/);
   assert.equal(pool.free.get('free:2026-10').promotion_textInputTokens, 10000000, 'failed mixed usage rolls back');
@@ -51,15 +51,15 @@ class Pool {
   await rights.consume('fresh', { textInputTokens: 10000000, textOutputTokens: 10000000 });
   assert.equal((await rights.state('fresh')).unlimited.length, 1);
   now = end;
-  state = await rights.state('fresh'); assert.equal(state.promotion, null); assert.equal(state.remaining.aiCredits, 100000);
-  await rights.consume('fresh', { textInputTokens: 100000 });
+  state = await rights.state('fresh'); assert.equal(state.promotion, null); assert.equal(state.remaining.aiCredits, 5000);
+  await rights.consume('fresh', { textInputTokens: 5000 });
   await assert.rejects(rights.consume('fresh', { textOutputTokens: 1 }), /quota_exceeded/);
   assert(!catalog.hasQuota(await rights.state('fresh'), 'textOutputTokens'));
   await assert.rejects(rights.consume('fresh', { voiceInputSeconds: 1 }), /quota_exceeded:aiCredits/);
   assert.equal((await rights.state('fresh')).remaining.aiCredits, 0);
-  assert(catalog.displayDetails(catalog.get('free'), start).some(x => x.includes('Sentinel AI รวมไม่จำกัด')));
-  assert(!catalog.displayDetails(catalog.get('free'), end).some(x => x.includes('Sentinel AI รวมไม่จำกัด')));
-  assert.equal(catalog.get('free').quotas.aiCredits, 100000, 'base shared quota returns after promotion');
+  assert(catalog.displayDetails(catalog.get('free'), start).some(x => x.includes('Sentinel AI ไม่จำกัด')));
+  assert(!catalog.displayDetails(catalog.get('free'), end).some(x => x.includes('Sentinel AI ไม่จำกัด')));
+  assert.equal(catalog.get('free').quotas.aiCredits, 5000, 'base shared quota returns after promotion');
   // Exercise the HTTP completion preflight and meter with JSON-safe unlimited quotas.
   const { EventEmitter } = require('node:events');
   const { completeLive } = require('../services/geminiLiveCompletion');
@@ -67,7 +67,7 @@ class Pool {
   now = start;
   const socket = new EventEmitter(); socket.readyState = 1;
   socket.close = () => { socket.readyState = 3; };
-  socket.send = () => socket.emit('message', JSON.stringify({ usageMetadata: { promptTokensDetails: [{ modality: 'TEXT', tokenCount: 1000000 }], responseTokensDetails: [{ modality: 'TEXT', tokenCount: 100000 }] }, serverContent: { outputTranscription: { text: 'hello' }, turnComplete: true } }));
+  socket.send = () => socket.emit('message', JSON.stringify({ usageMetadata: { promptTokensDetails: [{ modality: 'TEXT', tokenCount: 1000000 }], responseTokensDetails: [{ modality: 'TEXT', tokenCount: 5000 }] }, serverContent: { outputTranscription: { text: 'hello' }, turnComplete: true } }));
   const completion = await completeLive({ entitlements: rights, userId, connect: async () => { setImmediate(() => socket.emit('message', '{"setupComplete":{}}')); return socket; } });
   assert.equal(completion.text, 'hello');
   assert.equal(pool.free.get(userId + ':2026-10').promotion_textInputTokens, 1000000);

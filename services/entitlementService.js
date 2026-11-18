@@ -75,7 +75,11 @@ class EntitlementService {
     for(const [k,v] of Object.entries(amounts))if(!KEYS.includes(k)||!Number.isSafeInteger(v)||v<0)throw new EntitlementError('invalid_usage',400);
     let credits;
     try{credits=catalog.creditCost(amounts);}catch{throw new EntitlementError('invalid_usage',400);}
-    const result=await this.locked(userId,async c=>{
+    const result=await this.locked(userId,c=>this.consumeIn(c,userId,amounts,credits));
+    this.notifyCredits(userId,result.creditUsage);return result;
+  }
+  async consumeIn(c,userId,amounts,credits){
+      const allocations=[];
       const rows=await this.active(c,userId);const membership=rows.filter(r=>r.snapshot.category==='membership').sort((a,b)=>new Date(b.starts_at)-new Date(a.starts_at))[0];
       const applicable=rows.filter(r=>(r.snapshot.category!=='membership' || r.order_id===membership?.order_id) && (!r.snapshot.paidMembershipRequired || !!membership));
       const now=this.now();
@@ -92,15 +96,13 @@ class EntitlementService {
         if(!left)continue;
         // Legacy snapshots are converted on read, retaining old usage and expiry.
         // Newly consumed credits never erase or reset historical counters.
-        for(const r of applicable){const avail=k==='aiCredits' ? catalog.creditBalance(r.snapshot.quotas,r.used) : Math.max(0,(r.snapshot.quotas?.[k]||0)-(Number(r.used[k])||0));const take=Math.min(left,avail);if(take)r.used[k]=(Number(r.used[k])||0)+take;left-=take;if(!left)break;}
-        if(left&&!membership){const avail=k==='aiCredits' ? catalog.creditBalance(catalog.get('free').quotas,free) : Math.max(0,(catalog.get('free').quotas[k]||0)-(Number(free[k])||0));const take=Math.min(left,avail);if(take)free[k]=(Number(free[k])||0)+take;left-=take;}
+        for(const r of applicable){const avail=k==='aiCredits' ? catalog.creditBalance(r.snapshot.quotas,r.used) : Math.max(0,(r.snapshot.quotas?.[k]||0)-(Number(r.used[k])||0));const take=Math.min(left,avail);if(take){r.used[k]=(Number(r.used[k])||0)+take;if(k==='aiCredits')allocations.push({orderId:r.order_id,credits:take});}left-=take;if(!left)break;}
+        if(left&&!membership){const avail=k==='aiCredits' ? catalog.creditBalance(catalog.get('free').quotas,free) : Math.max(0,(catalog.get('free').quotas[k]||0)-(Number(free[k])||0));const take=Math.min(left,avail);if(take){free[k]=(Number(free[k])||0)+take;if(k==='aiCredits')allocations.push({period,credits:take});}left-=take;}
         if(left)throw new EntitlementError('quota_exceeded:'+k,402);
       }
       for(const r of applicable)await c.query('UPDATE panthorium_entitlement_grants SET used=$2 WHERE order_id=$1',[r.order_id,JSON.stringify(r.used)]);
       if(!membership)await c.query('UPDATE panthorium_free_usage SET used=$3 WHERE user_id=$1 AND period=$2',[userId,period,JSON.stringify(free)]);
-      return {ok:true,creditUsage:creditUsage({rows:applicable,free,period,membership,promotion})};
-    });
-    this.notifyCredits(userId,result.creditUsage);return result;
+      return {ok:true,allocations,promotion:!!promotion,creditUsage:creditUsage({rows:applicable,free,period,membership,promotion})};
   }
 }
 module.exports={EntitlementService,EntitlementError};

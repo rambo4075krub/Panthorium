@@ -9,7 +9,7 @@ const read = name => fs.readFileSync(require.resolve('../' + name), 'utf8');
 
 async function main() {
   assert.equal(catalog.products.length, 17);
-  assert.equal(catalog.get('work-pro').amountSatang, 108900);
+  assert.equal(catalog.get('work-pro').amountSatang, 158900);
   assert.equal(catalog.get('download-10').paidMembershipRequired, true);
   const dom = new JSDOM('<div id="windows"></div>', { runScripts: 'outside-only', url: 'https://panthorium.test' });
   const w = dom.window;
@@ -28,11 +28,11 @@ async function main() {
   const root = w.document.querySelector('[data-billing-root]');
   assert.equal(root.querySelectorAll('.pb-card').length, 4);
   assert.match(root.querySelector('[data-ai-service]').textContent, /ผู้ช่วย AI/);
-  assert.match(root.querySelector('.pb-card').textContent, /เครดิต Sentinel AI รวม/);
+  assert.match(root.querySelector('.pb-card').textContent, /โควต้า Sentinel AI ไม่จำกัด|ข้อความเข้าอย่างเดียวสูงสุด/);
   root.querySelector('[data-product-id="work-pro"]').click();
-  assert.match(root.querySelector('.pb-total').textContent, /1,089 บาท/);
+  assert.match(root.querySelector('.pb-total').textContent, /1,589 บาท/);
   assert.match(root.querySelector('[data-refund-policy]').textContent, /ชำระซ้ำ/);
-  assert.match(root.querySelector('.pb-summary').textContent, /17,400,000/);
+  assert.match(root.querySelector('.pb-summary').textContent, /8,000,000/);
   assert(!root.querySelector('.pb-summary').textContent.includes('แยกโควต้ากัน'));
   assert.equal(root.querySelector('.pb-primary').disabled, true, 'no payment before backend verification is integrated');
   assert.equal(root.querySelectorAll('input:not([type=checkbox])').length, 0, 'never collect card data for an unconfigured checkout');
@@ -90,7 +90,7 @@ async function main() {
     const base = 'http://127.0.0.1:' + server.address().port + '/api/billing';
     const listing = await (await fetch(base + '/catalog')).json();
     assert.equal(listing.checkoutEnabled, false);
-    assert.equal(listing.products.find(item => item.id === 'work-pro').amountSatang, 108900);
+    assert.equal(listing.products.find(item => item.id === 'work-pro').amountSatang, 158900);
     const checkout = token => fetch(base + '/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify({ productId: 'work-pro', amount: 1, status: 'paid' }) });
     assert.equal((await checkout()).status, 401);
     assert.equal((await checkout('guest')).status, 403);
