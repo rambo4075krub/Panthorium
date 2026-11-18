@@ -256,7 +256,9 @@ def verify_readiness(stage,state,front=False):
  if not matches(h,stage,state['sha']):raise RuntimeError('unexpected_served_release')
  with urllib.request.urlopen('http://127.0.0.1:'+str(port)+'/app-release.json',timeout=5) as r:
   if json.load(r).get('release')!=h['release'] or 'no-store' not in r.headers.get('Cache-Control',''):raise RuntimeError('client_update_release_mismatch')
- for route,expected in [('/',200),('/qwen-local.js',200),('/api/files',401)]:
+ # These assets are required by every web shell. Qwen is optional and its
+ # route is deliberately absent when local inference has been disabled.
+ for route,expected in [('/',200),('/live-voice-client.js',200),('/billing-catalog.js',200),('/api/files',401)]:
   req=urllib.request.Request('http://127.0.0.1:'+str(port)+route)
   try:
    with urllib.request.urlopen(req,timeout=5) as r:status=r.status
