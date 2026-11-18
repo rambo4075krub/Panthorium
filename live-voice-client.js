@@ -369,6 +369,7 @@
         if (generation !== sessionGeneration) return;
         if (activeAccountKey !== accountKey()) { cleanup(); return; }
         clearTimeout(timeout);
+        if(event.code===4402)window.PanthoriumCreditAlerts?.refresh?.();
         if (event.code === 4402 && window.PanthoriumHybridVoice) {
           if (!serverReady) reject(Object.assign(new Error('quota_exceeded'),{code:'quota_exceeded'}));
           else { useLocalAfterQuota(); }

@@ -1,10 +1,11 @@
 'use strict';
 const catalog = require('../billing-catalog');
+const {creditUsage}=require('./creditUsage');
 const dayKey=now=>new Date(now+7*3600000).toISOString().slice(0,10);
 const KEYS = [...catalog.aiKeys,'downloadBytes'];
 class EntitlementError extends Error { constructor(message,status=403){super(message);this.status=status;} }
 class EntitlementService {
-  constructor({pool, now = () => Date.now()}) { this.pool=pool;this.ready=null;this.now=now; }
+  constructor({pool, notifications=null, now = () => Date.now()}) { this.pool=pool;this.ready=null;this.now=now;this.notifications=notifications;this.quotaAlerts=new Map();this.pendingQuotaAlerts=new Set(); }
   async init(){
     if(!this.pool)throw new EntitlementError('entitlements_unavailable',503);
     if(!this.ready)this.ready=this.pool.query(`CREATE TABLE IF NOT EXISTS panthorium_entitlement_grants (
@@ -37,7 +38,21 @@ class EntitlementService {
     await c.query(`INSERT INTO panthorium_entitlement_grants(order_id,user_id,product_id,snapshot,starts_at,ends_at)
       VALUES($1,$2,$3,$4,$5::timestamptz,$5::timestamptz+$6::interval) ON CONFLICT(order_id) DO NOTHING`,[row.id,row.user_id,row.product_id,JSON.stringify(product),paidAt,product.kind==='subscription' ? '1 month':'30 days']);
   }
-  async state(userId){return this.locked(userId,c=>this.stateIn(c,userId));}
+  notifyCredits(userId,usage){
+    if(!this.notifications||!usage?.threshold||usage.unlimited)return;
+    const threshold=usage.threshold,sourceId='credits:'+usage.cycleId+':'+threshold,key=userId+':'+sourceId;
+    if(this.quotaAlerts.has(key))return;
+    this.quotaAlerts.set(key,true);
+    if(this.quotaAlerts.size>10000)this.quotaAlerts.delete(this.quotaAlerts.keys().next().value);
+    const pending=Promise.resolve().then(()=>this.notifications.publish({userId,category:'billing',type:'billing.credits_'+threshold,
+      title:threshold===100?'เครดิต Sentinel AI หมดแล้ว':`ใช้เครดิต Sentinel AI ถึง ${threshold}% แล้ว`,
+      body:threshold===100?'เปิดแพ็กเกจและชำระเงินเพื่อดูแพ็กเกจหรือเพิ่มเครดิต ระบบไม่ชำระเงินให้อัตโนมัติ':`เครดิตรอบนี้เหลือไม่เกิน ${100-threshold}% ตรวจยอดหรือเพิ่มเครดิตได้ในหน้าแพ็กเกจ`,
+      sourceId,severity:threshold===100?'error':'warning',sensitive:true
+    })).catch(()=>{this.quotaAlerts.delete(key);}).finally(()=>this.pendingQuotaAlerts.delete(pending));
+    this.pendingQuotaAlerts.add(pending);
+  }
+  async flushQuotaAlerts(){await Promise.allSettled([...this.pendingQuotaAlerts]);}
+  async state(userId){const state=await this.locked(userId,c=>this.stateIn(c,userId));this.notifyCredits(userId,state.creditUsage);return state;}
   async stateIn(c,userId){
     const rows=await this.active(c,userId);const membership=rows.filter(r=>r.snapshot.category==='membership').sort((a,b)=>new Date(b.starts_at)-new Date(a.starts_at))[0];
     const applicable=rows.filter(r=>(r.snapshot.category!=='membership' || r.order_id===membership?.order_id) && (!r.snapshot.paidMembershipRequired || !!membership));
@@ -54,13 +69,13 @@ class EntitlementService {
     }
     const unlimited=promotion ? ['aiCredits'] : [];
     for(const k of unlimited)remaining[k]=null; // JSON-safe unlimited; consumers must use hasQuota.
-    return {promotion,unlimited,quotaPolicy:catalog.quotaPolicy,plan:membership?.product_id || 'free',startsAt:membership?.starts_at || null,expiresAt:membership?.ends_at || null,remaining,grants:applicable.map(r=>({productId:r.product_id,startsAt:r.starts_at,expiresAt:r.ends_at})),automaticRenewal:false};
+    return {creditUsage:creditUsage({rows:applicable,free,period,membership,promotion}),promotion,unlimited,quotaPolicy:catalog.quotaPolicy,plan:membership?.product_id || 'free',startsAt:membership?.starts_at || null,expiresAt:membership?.ends_at || null,remaining,grants:applicable.map(r=>({productId:r.product_id,startsAt:r.starts_at,expiresAt:r.ends_at})),automaticRenewal:false};
   }
   async consume(userId,amounts){
     for(const [k,v] of Object.entries(amounts))if(!KEYS.includes(k)||!Number.isSafeInteger(v)||v<0)throw new EntitlementError('invalid_usage',400);
     let credits;
     try{credits=catalog.creditCost(amounts);}catch{throw new EntitlementError('invalid_usage',400);}
-    return this.locked(userId,async c=>{
+    const result=await this.locked(userId,async c=>{
       const rows=await this.active(c,userId);const membership=rows.filter(r=>r.snapshot.category==='membership').sort((a,b)=>new Date(b.starts_at)-new Date(a.starts_at))[0];
       const applicable=rows.filter(r=>(r.snapshot.category!=='membership' || r.order_id===membership?.order_id) && (!r.snapshot.paidMembershipRequired || !!membership));
       const now=this.now();
@@ -83,8 +98,9 @@ class EntitlementService {
       }
       for(const r of applicable)await c.query('UPDATE panthorium_entitlement_grants SET used=$2 WHERE order_id=$1',[r.order_id,JSON.stringify(r.used)]);
       if(!membership)await c.query('UPDATE panthorium_free_usage SET used=$3 WHERE user_id=$1 AND period=$2',[userId,period,JSON.stringify(free)]);
-      return {ok:true};
+      return {ok:true,creditUsage:creditUsage({rows:applicable,free,period,membership,promotion})};
     });
+    this.notifyCredits(userId,result.creditUsage);return result;
   }
 }
 module.exports={EntitlementService,EntitlementError};

@@ -35,6 +35,7 @@
     const request = async () => fetch(base + '/api/chat/stream', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-session-id': system.config.sessionId, Accept: 'text/event-stream' }, body: JSON.stringify({ message: prompt, clientHistory:window.PanthoriumChats?.requestHistory?.(), sessionId: system.config.sessionId, mode: 'default', voice: voiceMode, thinking, requestId }), signal: requestSignal });
     let res = await request();
     if (res.status === 401 && window.PanthoriumAuth?.refreshSession) { const ok = await window.PanthoriumAuth.refreshSession().catch(() => false); if (ok) { token = getOS()?.config?.accessToken || ''; res = await request(); } }
+    if(res.status===402)window.PanthoriumCreditAlerts?.refresh?.();
     if (!res.ok || !res.body) throw new Error(`stream_http_${res.status}`);
     const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; const state = { text: '', speechText: '' }; let meta = {}; let sawDelta = false;
     emit('status', { text: 'กำลังเชื่อมต่อ Sentinel...' });

@@ -52,7 +52,7 @@ class OmiseBillingService {
     } catch { return {configured:true,connected:false,mode:this.mode,checkoutEnabled:false}; }
   }
   view(row) { return {id:row.id,productId:row.product_id,amountSatang:row.amount,currency:row.currency,status:row.status,chargeId:row.charge_id,qrUrl:row.qr_url,expiresAt:row.expires_at,mode:this.mode,grantsRealEntitlements:this.live}; }
-  entitlements() { if(!this.entitlementService) {const {EntitlementService}=require('./entitlementService');this.entitlementService=new EntitlementService({pool:this.pool});}return this.entitlementService; }
+  entitlements() { if(!this.entitlementService) {const {EntitlementService}=require('./entitlementService');this.entitlementService=new EntitlementService({pool:this.pool,notifications:this.notifications});}return this.entitlementService; }
   paidAt(charge) { if(this.live && !charge.paid_at)fail('invalid_charge',400);const value=new Date(charge.paid_at || charge.authorized_at || charge.created_at || Date.now());if(!Number.isFinite(value.getTime()) || value.getTime()>Date.now()+60000) fail('invalid_charge',400);return value.toISOString(); }
   async grant(client,row,charge) { await this.entitlements().grant(client,row,this.paidAt(charge)); }
   async checkout(userId,productId,key) {
