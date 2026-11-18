@@ -5,7 +5,7 @@ const {JSDOM}=require('jsdom');
 const policy=require('../privacy-notice');
 const pause=()=>new Promise(resolve=>setTimeout(resolve,5));
 async function until(fn){for(let i=0;i<100;i++){if(fn())return;await pause();}throw Error('UI condition not reached');}
-async function scenario(native){
+async function scenario(native,checkoutPath='c'){
   const dom=new JSDOM('<div id="windows"></div>',{runScripts:'outside-only',url:'https://panthorium.test'}),w=dom.window;
   w.OS={state:{user:{id:'alice',roles:['user']}},windows:new Map()};w.PanthoriumAuth={getAccessToken:()=> 'alice'};
   w.createWindow=(id,title,html)=>{const el=w.document.createElement('div');el.className='window';el.dataset.id=id;el.innerHTML=html;w.document.body.append(el);w.OS.windows.set(id,el);};
@@ -29,7 +29,7 @@ async function scenario(native){
       if(native){assert(url.endsWith('/play/prepare'));return response({order:{id:'order_fixture',status:'creating',accountId:'a'.repeat(64)}});}
       assert(url.endsWith('/stripe/checkout'));return response({order:{id:'order_fixture',status:'pending',checkoutUrl:'https://checkout.stripe.com.evil.test/c/pay/x'}});
     }
-    if(url.endsWith('/orders/order_fixture'))return response({order:{id:'order_fixture',status:'pending',checkoutUrl:invalidUrl?'javascript:alert(1)':'https://checkout.stripe.com/c/pay/cs_fixture'}});
+    if(url.endsWith('/orders/order_fixture'))return response({order:{id:'order_fixture',status:'pending',checkoutUrl:invalidUrl?'javascript:alert(1)':'https://checkout.stripe.com/'+checkoutPath+'/pay/cs_fixture'}});
     throw Error('unexpected request '+url);
   };
   for(const name of ['privacy-notice.js','billing-catalog.js','billing-ui.js'])w.eval(fs.readFileSync(require.resolve('../'+name),'utf8'));
@@ -45,8 +45,9 @@ async function scenario(native){
       assert.equal(root.querySelector('.pb-checkout-link'),null,'reject lookalike payment domains');
       await until(()=>[...root.querySelectorAll('button')].some(b=>b.textContent==='ตรวจสถานะจาก Stripe'));invalidUrl=false;[...root.querySelectorAll('button')].find(b=>b.textContent==='ตรวจสถานะจาก Stripe').click();await until(()=>root.querySelector('.pb-checkout-link'));
       const link=root.querySelector('.pb-checkout-link');assert.equal(link.rel,'noopener noreferrer');assert.equal(link.target,'_blank');
+      assert.equal(link.href,'https://checkout.stripe.com/'+checkoutPath+'/pay/cs_fixture');
       w.OS.state.user={id:'bob',roles:['user']};w.dispatchEvent(new w.Event('panthorium:auth-changed'));assert.equal(root.querySelector('.pb-checkout-link'),null,'remove prior account checkout');
     }
   }finally{w.close();}
 }
-(async()=>{await scenario(false);await scenario(true);console.log('Checkout UI: current policy consent, duplicate submit, external URL validation, account reset and native Google Play purchase passed');})().catch(error=>{console.error(error);process.exitCode=1;});
+(async()=>{await scenario(false,'c');await scenario(false,'g');await scenario(true);console.log('Checkout UI: current policy consent, duplicate submit, hosted checkout paths, external URL validation, account reset and native Google Play purchase passed');})().catch(error=>{console.error(error);process.exitCode=1;});
