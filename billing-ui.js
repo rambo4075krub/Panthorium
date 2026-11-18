@@ -206,7 +206,7 @@
         result.append(node('p', names[order.status] || 'รอตรวจสอบ'));
         if (provider === 'stripe' && order.status === 'pending' && order.checkoutUrl) {
           let url;
-          try { const parsed = new URL(order.checkoutUrl); if (parsed.origin === 'https://checkout.stripe.com' && !parsed.username && !parsed.password && !parsed.port && parsed.pathname.startsWith('/c/pay/')) url = parsed.href; } catch (_) {}
+          try { const parsed = new URL(order.checkoutUrl); if (parsed.origin === 'https://checkout.stripe.com' && !parsed.username && !parsed.password && !parsed.port && /^\/[cg]\/pay\//.test(parsed.pathname)) url = parsed.href; } catch (_) {}
           if (url) {
             if (window.panthoriumDesktop?.isElectron) {
               const launch = button('เปิดหน้าชำระเงิน Stripe', async () => {

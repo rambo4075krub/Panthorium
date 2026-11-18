@@ -9,11 +9,14 @@ const {validPaymentCheckoutUrl,installPaymentCheckout}=require('../electron/paym
 const policy=require('../privacy-notice');
 async function run(){
   assert(validPaymentCheckoutUrl('https://checkout.stripe.com/c/pay/cs_test_fixture#abc'));
+  assert(validPaymentCheckoutUrl('https://checkout.stripe.com/g/pay/cs_test_fixture#abc'));
+  for(const url of ['https://checkout.stripe.com.evil.test/g/pay/x','https://checkout.stripe.com/g/pay','https://checkout.stripe.com/g/pay/../settings','https://checkout.stripe.com/x/pay/x'])assert.equal(validPaymentCheckoutUrl(url),false);
   for(const url of ['javascript:alert(1)','http://checkout.stripe.com/c/pay/x','https://checkout.stripe.com.evil.test/c/pay/x','https://evil.test@checkout.stripe.com/c/pay/x','https://checkout.stripe.com:444/c/pay/x','https://checkout.stripe.com/settings','file:///tmp/pay'])assert.equal(validPaymentCheckoutUrl(url),false);
   let handler,opened=0;installPaymentCheckout({ipcMain:{handle:(name,fn)=>{assert.equal(name,'panthorium:payment-checkout');handler=fn;}},shell:{openExternal:async()=>{opened++;}},security:{isTrustedShellEvent:event=>event.trusted===true}});
   assert.equal((await handler({},'https://checkout.stripe.com/c/pay/x')).ok,false);assert.equal(opened,0);
   assert.equal((await handler({trusted:true},'https://evil.test')).ok,false);assert.equal(opened,0);
   assert.equal((await handler({trusted:true},'https://checkout.stripe.com/c/pay/x')).ok,true);assert.equal(opened,1);
+  assert.equal((await handler({trusted:true},'https://checkout.stripe.com/g/pay/x')).ok,true);assert.equal(opened,2);
   const sdk=new Stripe('sk_test_fixture');
   const service=new StripeBillingService({pool:{},secret:'rk_test_fixture',webhookSecret:'whsec_fixture',client:sdk});
   assert.equal(new StripeBillingService({pool:{},secret:'rk_live_fixture',webhookSecret:'whsec_fixture',mode:'live'}).configured(),false);
