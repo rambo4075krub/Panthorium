@@ -11,9 +11,9 @@
     // Dictation is literal, including trailing Thai polite words in the value.
     const fill = /^(?:กรอก|พิมพ์(?:ใน)?|ใส่(?:ใน)?)\s*ช่อง\s*(.+?)\s*(?:ว่า|เป็น)\s*([\s\S]+)$|^fill\s+(.+?)\s+with\s+([\s\S]+)$/iu.exec(request);
     if (fill) return { action:'fill', target:(fill[1] || fill[3]).trim(), value:(fill[2] || fill[4]).trim() };
-    const select = /^(?:เลือกค่า|เลือกตัวเลือก)\s*(.+?)\s*ในช่อง\s*(.+)$|^select\s+(.+?)\s+in\s+(.+)$/iu.exec(request);
+    const text = request.replace(/(?:(?:ให้หน่อย|หน่อย|นะครับ|นะคะ|ครับ|ค่ะ|คะ|please)[.!?\s]*)+$/iu, '').trim();
+    const select = /^(?:เลือกค่า|เลือกตัวเลือก)\s*(.+?)\s*ในช่อง\s*(.+)$|^select\s+(.+?)\s+in\s+(.+)$/iu.exec(text);
     if (select) return { action:'select', target:(select[2] || select[4]).trim(), value:(select[1] || select[3]).trim() };
-    const text = request.replace(/(?:ให้หน่อย|หน่อย|ครับ|ค่ะ|คะ|please)[.!?\s]*$/iu, '').trim();
     if (/^(?:อย่า|ห้าม|ไม่ต้อง|do not\b|don't\b)/iu.test(text)) return null;
     if (/^(?:คำสั่งเสียงทั้งหมด|ช่วยเหลือคำสั่งเสียง|วิธีสั่งงานด้วยเสียง|voice commands|voice help)$/iu.test(text)) return { action:'help' };
     const toggle = /^(เปิด|ปิด)\s*(?:สวิตช์|สวิทช์|สวิช|ตัวเลือก)\s*(.+)$|^turn\s+(on|off)\s+(?:switch\s+)?(.+)$/iu.exec(text);

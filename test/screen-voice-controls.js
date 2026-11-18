@@ -6,6 +6,9 @@ for(const [command,action] of [
   ['เลือกแท็บ รูปภาพ','tab'],['open tab Images','tab'],['เลือกค่า แนวตั้ง ในช่อง สัดส่วน','select'],
   ['select Portrait in Ratio','select'],['ล้างช่อง ชื่อ','fill'],['คำสั่งเสียงทั้งหมด','help']
 ]) assert.equal(catalog.parse(command)?.action,action,command);
+assert.deepEqual(catalog.parse('เลือกค่า แนวตั้ง ในช่อง สัดส่วน ให้หน่อยครับ'),{action:'select',target:'สัดส่วน',value:'แนวตั้ง'});
+assert.deepEqual(catalog.parse('เปิดสวิตช์ เสียง นะครับ'),{action:'toggle',target:'เสียง',checked:true});
+assert.equal(catalog.parse('กรอกช่อง ข้อความ ว่า ขอบคุณครับ').value,'ขอบคุณครับ','dictated text retains its polite words');
 for(const command of ['อย่าเปิดสวิตช์ เสียง','ไม่ต้องเลือกแท็บ รูปภาพ','why turn on Sound','ยืนยันนะครับ']) assert.equal(catalog.parse(command),null);
 const dom=new JSDOM(`<body><section id="studio" data-studio-active="image" style="z-index:10">
   <label>บนอุปกรณ์<input id="device" type="checkbox"></label>
@@ -41,7 +44,7 @@ const confirm=()=>api.execute('ยืนยันนะครับ',{userInitia
  await api.execute('ปิดสวิตช์ เสียง');sound.setAttribute('aria-checked','false');
  assert.equal((await confirm()).error,'screen_changed');assert.equal(soundClicks,0,'changed ARIA state invalidates the old approval');
  sound.setAttribute('aria-checked','true');await api.execute('ปิดสวิตช์ เสียง');await confirm();assert.equal(soundClicks,1);
- await api.execute('เลือกค่า แนวตั้ง ในช่อง สัดส่วน');await confirm();assert.equal(w.document.getElementById('ratio').value,'portrait');
+ await api.execute('เลือกค่า แนวตั้ง ในช่อง สัดส่วน ให้หน่อยครับ');await confirm();assert.equal(w.document.getElementById('ratio').value,'portrait');
  assert.equal((await api.execute('เลือกค่า ห้ามเลือก ในช่อง สัดส่วน')).error,'screen_option_ambiguous');
  await api.execute('เลือกค่า จัตุรัส ในช่อง สัดส่วน');w.document.getElementById('ratio').options[0].disabled=true;
  assert.equal((await confirm()).error,'screen_changed','changing dropdown options invalidates approval');
