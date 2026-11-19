@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
-const provenanceFields = ['schemaVersion', 'name', 'version', 'license', 'purl', 'cpe', 'source', 'patches', 'configure'];
+const provenanceFields = ['schemaVersion', 'name', 'version', 'license', 'purl', 'cpe', 'source', 'patches', 'configure', 'excludedComponents'];
 
 // Enrich the complete image inventory; never replace or filter its packages.
 // The upstream version/CPE stays intact even when a patch was backported.
@@ -77,6 +77,7 @@ function enrichSbom(sbom, manifest, lock, binaries, image, profile = 'backend') 
       source: manifest.source,
       patches: manifest.patches,
       configure: manifest.configure,
+      compilation: manifest.compilation,
       binaries: verifiedBinaries,
       artifactId: id,
       artifactPurl,

@@ -1,0 +1,26 @@
+From upstream commit 1f7bdea654a8a9a1761759e22d83943371cff21f
+Subject: avcodec/riscv/llvidencdsp: return from diff_bytes for lengths of zero or less
+Upstream: https://github.com/FFmpeg/FFmpeg/commit/1f7bdea654a8a9a1761759e22d83943371cff21f
+Author: Michael Niedermayer
+
+Upstream changes applied without fuzz; patch context regenerated against the pinned release.
+
+--- a/libavcodec/riscv/llvidencdsp_rvv.S
++++ b/libavcodec/riscv/llvidencdsp_rvv.S
+@@ -22,6 +22,7 @@
+ 
+ func ff_llvidenc_diff_bytes_rvv, zve32x
+         lpad    0
++        blez    a3, 2f
+ 1:
+         vsetvli t0, a3, e8, m8, ta, ma
+         vle8.v  v0, (a1)
+@@ -33,7 +34,7 @@
+         vse8.v  v8, (a0)
+         add     a0, t0, a0
+         bnez    a3, 1b
+-
++2:
+         ret
+ endfunc
+ 

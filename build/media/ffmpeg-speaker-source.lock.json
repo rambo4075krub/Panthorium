@@ -26,6 +26,354 @@
           "sha256": "9e181b7cea30a6fbbd9c1bfa4f63ec2c9834001f9804edffb6d2b01984747145"
         }
       ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125257"
+      ],
+      "commit": "733bec3e19759520ccdbeb6c3c0cae280bbe6dc5",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/733bec3e19759520ccdbeb6c3c0cae280bbe6dc5",
+      "file": "patches/ffmpeg-733bec3e1975.patch",
+      "sha256": "0835137053f41a8ca4fdbce803891383b9026c4ebaef3bec6baebb0ce928a8b8",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/nellymoserenc.c",
+          "sha256": "2fa6bcfa27078927e763d9e1d522469d1527a1ef74aaf5db3a32081d7326fde7"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125181"
+      ],
+      "commit": "ee30fb98c0d4e97abbd5e371d2a3a926e92bec70",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/ee30fb98c0d4e97abbd5e371d2a3a926e92bec70",
+      "file": "patches/ffmpeg-ee30fb98c0d4.patch",
+      "sha256": "3f9c23cd6187819038587dd4cc585601ccfe414c84b80f66451e2c24098f9de8",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/flicvideo.c",
+          "sha256": "030a284316f54f80cb73a887b5955ccd8f98c1a625a6c634c54c324eb5551cee"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125181"
+      ],
+      "commit": "c0d308a9a616f4abcc4e0a4d86f7de92ecdef9f6",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/c0d308a9a616f4abcc4e0a4d86f7de92ecdef9f6",
+      "file": "patches/ffmpeg-c0d308a9a616.patch",
+      "sha256": "b6239ef4ecc722eed34bc69b34fb622eb3c7d03e12de420045f2034cca814fe8",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/flicvideo.c",
+          "sha256": "d4efa2cfe8e8d4627ab40c5c2617aff84d21ebea100ccbb5710a6ac5e8225ede"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125233"
+      ],
+      "commit": "7f80b2ad83f37a4998d9617495c92b28a7339a90",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/7f80b2ad83f37a4998d9617495c92b28a7339a90",
+      "file": "patches/ffmpeg-7f80b2ad83f3.patch",
+      "sha256": "e192245ee58dcbe0ef9b453d3db8153135ff96d104c4b287c11a40b16d87022a",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/dvbsubenc.c",
+          "sha256": "50c6e98ac48b59470f20c36576cafea85775d0b314a22f5a1c6739402eae0071"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125181"
+      ],
+      "commit": "eb47d7bb6cf13042c6ab14e22fc0c0c3a6e51e12",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/eb47d7bb6cf13042c6ab14e22fc0c0c3a6e51e12",
+      "file": "patches/ffmpeg-eb47d7bb6cf1.patch",
+      "sha256": "f6769e7aaf254f7fd969709c8b973fb723298c3911c4e36a5acbcfc389e0ec56",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/flicvideo.c",
+          "sha256": "194253b1c7efabac5cbaedd2e2d092a07fbd95b0002938f9608fc59295f34f07"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125227"
+      ],
+      "commit": "b89ce54d93bf644433dfa9fbc34f19c22237691a",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/b89ce54d93bf644433dfa9fbc34f19c22237691a",
+      "file": "patches/ffmpeg-b89ce54d93bf.patch",
+      "sha256": "9ae18bdb6424cd0e4bd84cdf39b596395e801d8e5510963c031c39e7b4c3d165",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/cbs_jpeg.c",
+          "sha256": "9d019529eb4f2b11e4d844c4ec44adb201ec27595f8e2a8262f485d325253961"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125196"
+      ],
+      "commit": "87cdb6cd6a8d1ec201cb82b30e64d5f946939e23",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/87cdb6cd6a8d1ec201cb82b30e64d5f946939e23",
+      "file": "patches/ffmpeg-87cdb6cd6a8d.patch",
+      "sha256": "3cc77bda13cdd4c4fd6933109e728f58143979ee4e3c9a583e4dcbe5f9cf06ab",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/liboapvenc.c",
+          "sha256": "c3945c807eb873124cb8086fbeef08b983083e0498a2ab21c70388796c7daf56"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125256"
+      ],
+      "commit": "1f7bdea654a8a9a1761759e22d83943371cff21f",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/1f7bdea654a8a9a1761759e22d83943371cff21f",
+      "file": "patches/ffmpeg-1f7bdea654a8.patch",
+      "sha256": "66f38787db8ba63193f028fab526aee00546c14355dc7afecc7e4d73fbc43d7e",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/riscv/llvidencdsp_rvv.S",
+          "sha256": "e74016faf425b806d20a12a2a7157c8c3654277548f9d1782d2ad0875e4c0c9e"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125229"
+      ],
+      "commit": "45f98d0819efe2b7ce93e9034b7e6a4ed6700621",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/45f98d0819efe2b7ce93e9034b7e6a4ed6700621",
+      "file": "patches/ffmpeg-45f98d0819ef.patch",
+      "sha256": "77292418afbc8b353749aeae2674545ae5097a0d704c0716663518ba42c8566c",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/huffyuvenc.c",
+          "sha256": "c1f25ec0b5a3ded55dd0be6d6619f5696a9871869b10ad8631fcd91cf4096f34"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125259"
+      ],
+      "commit": "439b452f9fe916a9f7d8788ab6afee8fac846b0b",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/439b452f9fe916a9f7d8788ab6afee8fac846b0b",
+      "file": "patches/ffmpeg-439b452f9fe9.patch",
+      "sha256": "49db84539e9659ab6793fa95e7e9e64f808306312738a054ed5dd43d0da7e955",
+      "adaptation": "Backported checked 64-bit bound and slice headroom; 9.0.2 predates the redundant per-frame slice calculation.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/proresenc_kostya.c",
+          "sha256": "9e36188ee2783634d587bec047d79dec27e1ca05aee33f136b709f27634f3874"
+        },
+        {
+          "path": "libavcodec/proresenc_kostya_common.c",
+          "sha256": "6de5ae021514898dc5a84faa17a2d3a8e3847d53d18e9e2460b6c6fc04d6eab2"
+        },
+        {
+          "path": "libavcodec/proresenc_kostya_common.h",
+          "sha256": "d4897313d4d9be9fa5ed37c562d9c583b5af51379af3696f3f2fe768a4692129"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125208"
+      ],
+      "commit": "b8f159858e2fd29dae4fa34d9e713bbf9bbf190e",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/b8f159858e2fd29dae4fa34d9e713bbf9bbf190e",
+      "file": "patches/ffmpeg-b8f159858e2f.patch",
+      "sha256": "5fe6c98f64a8923e39f45e947a1f27e2e0a6d44052b5d694bfec6e203ee7a123",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/v4l2_buffers.c",
+          "sha256": "ea89602fcfcda68cbf6660cee8d63202ff541abd0687fecf14a4e4b877537390"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125251"
+      ],
+      "commit": "053660fdb0d2403b838690689c47ad7685c3b10b",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/053660fdb0d2403b838690689c47ad7685c3b10b",
+      "file": "patches/ffmpeg-053660fdb0d2.patch",
+      "sha256": "4bb9cec9c1c674e1ad3221b07146fc0b8fe3cb2685dbc85f26cb04f88f77b046",
+      "adaptation": "Only surrounding context adapted; checked multiplication is identical to upstream.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/vvc/refs.c",
+          "sha256": "b6323f53e92bbd369ca9b7c3193a5ee048592f99563d16bc67af71c3e840f0a5"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125250"
+      ],
+      "commit": "26c2980980295e5516f308c5a2792d2a72e43eae",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/26c2980980295e5516f308c5a2792d2a72e43eae",
+      "file": "patches/ffmpeg-26c298098029.patch",
+      "sha256": "1d7cf12be7456700185516a842c71d3c11615712533fac26c2023078e6f2d0cb",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/gif.c",
+          "sha256": "97a7375b95848c0629fe449cba92861371443a18eaaa6ce1d6007c561ebcface"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125218",
+        "CVE-2026-125260",
+        "CVE-2026-125204",
+        "CVE-2026-125212",
+        "CVE-2026-125235"
+      ],
+      "commit": "9b99973b2bbecee0b7e1e57035b95498b42f54a6",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/9b99973b2bbecee0b7e1e57035b95498b42f54a6",
+      "file": "patches/ffmpeg-9b99973b2bbe.patch",
+      "sha256": "f2d719684ffee7d63a07de2c1602d2ed398bf400d570a8756285c3eb83950920",
+      "adaptation": "Backported complete input geometry guard; 9.0.2 predates the smaller-frame guard used as upstream context.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/encode.c",
+          "sha256": "0354bffedcfb73413108b909120039ab50d9329e7713f066a234f239ad7102ca"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125214"
+      ],
+      "commit": "a61b32df3fd67f76c1c8c7ea51be2a66efb0f945",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/a61b32df3fd67f76c1c8c7ea51be2a66efb0f945",
+      "file": "patches/ffmpeg-a61b32df3fd6.patch",
+      "sha256": "30dce4738b4dd8c6a2a22be19f1bd35847e77ce7a9cfbc86bb8f3a45be2dddac",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/pcm-bluray.c",
+          "sha256": "b4c48e61e31912b4dbe41de5236c71fa9dad7e5f1832a314a4d57487830afc03"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125213"
+      ],
+      "commit": "aa4b80b54ee8645b5a77fe835ab2bbae1c9c465c",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/aa4b80b54ee8645b5a77fe835ab2bbae1c9c465c",
+      "file": "patches/ffmpeg-aa4b80b54ee8.patch",
+      "sha256": "4f7dee3ccdc794f6fc3e8b6fe5b8753285e047a324fcebebd089c6af94a428fc",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/psd.c",
+          "sha256": "2d9f6bad3ddaa06d1b251bc9708c0c015504a819120fd6b396f50fc20be02db1"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125222"
+      ],
+      "commit": "62c308e0416bb701447817fe6f0bff074d206215",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/62c308e0416bb701447817fe6f0bff074d206215",
+      "file": "patches/ffmpeg-62c308e0416b.patch",
+      "sha256": "8ec23b63597eb7e00fd661cd7b69134a6dd357362aa90730454b1a3c2622bd55",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/hapdec.c",
+          "sha256": "4cf58aee82bc1bec4f74a78fe115b14f0b3c77be4f3cc1730c398ccf0d17470e"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125241"
+      ],
+      "commit": "27f612b306eb04f81138173f705df9a9b055b01d",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/27f612b306eb04f81138173f705df9a9b055b01d",
+      "file": "patches/ffmpeg-27f612b306eb.patch",
+      "sha256": "48c81fd745b2b6b8183df713db829aed530c10868c4d2736ce60c4cbc7681ef6",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/flicvideo.c",
+          "sha256": "21f5a6a8e84f2baa08d2bf1503d628949408b53d905efbfffa6a4fd3f5a0b550"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125269"
+      ],
+      "commit": "2c515eea07df719379e7f73deeeb7ccb8768433f",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/2c515eea07df719379e7f73deeeb7ccb8768433f",
+      "file": "patches/ffmpeg-2c515eea07df.patch",
+      "sha256": "e2213358ceacd81c2c06516a40a3ef4390d55497f2a83e8c6cdcdfb2d1230e9e",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/cbs_sei.c",
+          "sha256": "b24464134769a2b38592f45213bc10afa3afad7abc01ced4529181dbd1e56369"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125210"
+      ],
+      "commit": "7c06aea6f0d26dd70c94ccba6127059cd0a0e352",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/7c06aea6f0d26dd70c94ccba6127059cd0a0e352",
+      "file": "patches/ffmpeg-7c06aea6f0d2.patch",
+      "sha256": "72993e61d8247fe58e5401ae5176ac20df29e247708a27a5123b20a9301d86dd",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/libaribcaption.c",
+          "sha256": "48ffd4b32bf77e8211be4ea8f448233d5c4cba783a96e05794375252cc07ee9c"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-125211"
+      ],
+      "commit": "4ec127c82678b06658e963291f272881dc878735",
+      "url": "https://github.com/FFmpeg/FFmpeg/commit/4ec127c82678b06658e963291f272881dc878735",
+      "file": "patches/ffmpeg-4ec127c82678.patch",
+      "sha256": "83c3479de2b2fa30c6f0e144b8b0594b6ee112baf4623640541198a7efe836de",
+      "adaptation": "Upstream changes applied without fuzz; patch context regenerated against the pinned release.",
+      "patchedFiles": [
+        {
+          "path": "libavcodec/libaribcaption.c",
+          "sha256": "b80f8906b3f3808b1cc45d323171746ec7fa27f6346d825d49f2d2e8a07cb79b"
+        }
+      ]
     }
   ],
   "configure": [
@@ -51,6 +399,35 @@
     "--enable-filter=aresample,aformat,anull,atrim,asetpts",
     "--enable-pic",
     "--extra-cflags=-fstack-protector-strong -D_FORTIFY_SOURCE=2",
-    "--extra-ldflags=-Wl,-z,relro,-z,now"
-  ]
+    "--extra-ldflags=-Wl,-z,relro,-z,now",
+    "--disable-vaapi",
+    "--disable-vdpau",
+    "--disable-dxva2",
+    "--disable-d3d11va",
+    "--disable-d3d12va",
+    "--disable-vulkan",
+    "--disable-liblcevc-dec"
+  ],
+  "excludedComponents": {
+    "CVE-2026-125202": [
+      "CONFIG_VAAPI"
+    ],
+    "CVE-2026-125219": [
+      "CONFIG_VDPAU"
+    ],
+    "CVE-2026-125239": [
+      "CONFIG_DXVA2",
+      "CONFIG_D3D11VA",
+      "CONFIG_D3D12VA"
+    ],
+    "CVE-2026-125248": [
+      "CONFIG_VULKAN"
+    ],
+    "CVE-2026-125249": [
+      "CONFIG_VULKAN"
+    ],
+    "CVE-2026-125262": [
+      "CONFIG_LIBLCEVC_DEC"
+    ]
+  }
 }

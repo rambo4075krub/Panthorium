@@ -1,0 +1,18 @@
+From upstream commit 733bec3e19759520ccdbeb6c3c0cae280bbe6dc5
+Subject: avcodec/nellymoserenc: keep the trellis index below OPT_SIZE
+Upstream: https://github.com/FFmpeg/FFmpeg/commit/733bec3e19759520ccdbeb6c3c0cae280bbe6dc5
+Author: Michael Niedermayer
+
+Upstream changes applied without fuzz; patch context regenerated against the pinned release.
+
+--- a/libavcodec/nellymoserenc.c
++++ b/libavcodec/nellymoserenc.c
+@@ -259,7 +259,7 @@
+         power_candidate = cand[band];
+         for (q = 1000; !c && q < OPT_SIZE; q <<= 2) {
+             idx_min = FFMAX(0, cand[band] - q);
+-            idx_max = FFMIN(OPT_SIZE, cand[band - 1] + q);
++            idx_max = FFMIN(OPT_SIZE - 1, cand[band - 1] + q);
+             for (i = FFMAX(0, cand[band - 1] - q); i < FFMIN(OPT_SIZE, cand[band - 1] + q); i++) {
+                 if ( isinf(opt[band - 1][i]) )
+                     continue;

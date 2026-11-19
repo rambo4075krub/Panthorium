@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { enrichSbom } = require('./verify-container-sbom');
+const { verifyOpenSsl, loadOpenSslEvidence } = require('./verified-openssl-backport');
 const reviewedPolicy = require('../build/media/ffmpeg-backport-policy.json');
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
 const jsonHash = value => sha256(Buffer.from(JSON.stringify(value)));
@@ -18,48 +19,92 @@ function sortObject(value) {
 
 // The CLI always uses the committed reviewed policy. The explicit policy
 // argument permits hermetic unit fixtures; it is not a CLI/environment override.
-function createArtifacts({ rawSbom, sbom, manifest, lock, binaries, image, patchBytes, proof, profile, timestamp }, policy = reviewedPolicy) {
-  assert.equal(policy.schemaVersion, 1);
-  assert.equal(policy.vulnerability, 'CVE-2026-107696', 'Only the reviewed FFmpeg backport is supported');
-  assert.equal(policy.status, 'fixed');
+function createArtifacts({ rawSbom, sbom, manifest, lock, binaries, image, patchBytes, proof, profile, timestamp, compilationFiles, openSslEvidence }, policy = reviewedPolicy, opensslPolicy) {
+  assert.equal(policy.schemaVersion, 2);
   const profilePolicy = policy.profiles[profile];
   assert.ok(profilePolicy, 'Unreviewed build profile');
   assert.equal(image.Os, profilePolicy.os, 'Unreviewed operating system');
   assert.equal(image.Architecture, profilePolicy.architecture, 'Unreviewed architecture');
   assert.equal(jsonHash(lock), profilePolicy.sourceLockSha256, 'Source/configuration lock requires independent review');
   assert.equal(lock.source.gitCommit, policy.sourceCommit);
-  const patch = lock.patches.find(item => item.cve === policy.vulnerability);
-  assert.ok(patch, 'Reviewed backport missing');
-  assert.equal(patch.commit, policy.patchCommit, 'Unreviewed patch commit');
-  assert.equal(patch.sha256, policy.patchSha256);
-  assert.equal(sha256(patchBytes), policy.patchSha256, 'Patch bytes differ from reviewed patch');
-  assert.deepEqual(patch.patchedFiles, [{ path: policy.patchedFile, sha256: policy.patchedFileSha256 }]);
+  assert.equal(lock.patches.length, 22, 'Reviewed patch set missing');
+  for (const patch of lock.patches) {
+    assert.equal(sha256(patchBytes[patch.file]), patch.sha256, 'Patch bytes differ from reviewed patch');
+  }
   for (const binary of ['ffmpeg', 'ffprobe']) {
     assert.equal(sha256(binaries[binary]), profilePolicy.binaries[binary], `${binary} is not an independently reviewed executable`);
+  }
+  assert.equal(jsonHash(manifest.compilation), profilePolicy.compilationSha256, 'Compilation evidence requires independent review');
+  const macros = {};
+  for (const name of ['config.h', 'config_components.h']) {
+    assert.equal(sha256(compilationFiles[name]), manifest.compilation.configuration[name], 'Compiled configuration bytes differ');
+    for (const match of compilationFiles[name].toString('utf8').matchAll(/^#define (CONFIG_[A-Z0-9_]+) ([01])$/gm)) macros[match[1]] = Number(match[2]);
+  }
+  const codecObjects = JSON.parse(compilationFiles['codec-objects.json']);
+  assert.equal(jsonHash(codecObjects), manifest.compilation.codecObjectsSha256, 'Compiled object inventory differs');
+  assert.ok(!codecObjects.some(name => /^(?:vaapi_hevc|vdpau_hevc|dxva2_hevc|ffv1enc_vulkan|vulkan_decode|lcevcdec)\.o$/.test(name)), 'Excluded code is present');
+  for (const names of Object.values(lock.excludedComponents)) {
+    for (const name of names) {
+      assert.equal(macros[name], 0, 'Excluded component was enabled');
+      assert.equal(manifest.compilation.excludedMacros[name], 0, 'Excluded component evidence differs');
+    }
+  }
+  let openssl;
+  if (profile === 'backend') {
+    assert.ok(openSslEvidence, 'Backend OpenSSL evidence is required');
+    openssl = verifyOpenSsl(openSslEvidence, opensslPolicy);
+    assert.equal(openssl.proof.imageId, image.Id, 'OpenSSL proof describes a different image');
+    assert.deepEqual(rawSbom, openssl.sbom, 'OpenSSL inventory differs from verified package bytes');
+  } else {
+    assert.equal(openSslEvidence, undefined, 'Unexpected OpenSSL policy for speaker');
   }
   const expected = enrichSbom(rawSbom, manifest, lock, binaries, image, profile);
   assert.deepEqual(sbom, expected.sbom, 'Complete image SBOM was changed after verification');
   assert.deepEqual(proof, expected.proof, 'Source proof differs from actual bytes');
   assert.equal(new Date(timestamp).toISOString(), timestamp, 'Invalid VEX timestamp');
-  const identity = { imageId: image.Id, artifactPurl: proof.artifactPurl, vulnerability: policy.vulnerability, policySha256: jsonHash(policy) };
+  const fixed = new Map();
+  for (const patch of lock.patches) for (const cve of patch.cves || [patch.cve]) {
+    assert.match(cve, /^CVE-\d{4}-\d+$/);
+    fixed.set(cve, [...(fixed.get(cve) || []), patch.commit]);
+  }
+  const statements = [...fixed.entries()].sort().map(([cve, commits]) => ({
+    vulnerability: { '@id': `https://nvd.nist.gov/vuln/detail/${cve}`, name: cve },
+    products: [{ '@id': proof.artifactPurl }], status: 'fixed',
+    status_notes: `Upstream backports ${commits.join(', ')}; reviewed source, patches, configuration and both executable digests verified for this image.`
+  }));
+  for (const [cve, names] of Object.entries(lock.excludedComponents).sort()) {
+    assert.ok(!fixed.has(cve), 'Contradictory FFmpeg review');
+    statements.push({
+      vulnerability: { '@id': `https://nvd.nist.gov/vuln/detail/${cve}`, name: cve },
+      products: [{ '@id': proof.artifactPurl }], status: 'not_affected', justification: 'vulnerable_code_not_present',
+      impact_statement: `The pinned build disables ${names.join(', ')}. Generated configuration, codec archive membership and independently reviewed executable bytes verify the vulnerable implementation is absent.`
+    });
+  }
+  if (openssl) statements.push(...openssl.statements);
+  const identity = { imageId: image.Id, artifactPurl: proof.artifactPurl, policySha256: jsonHash(policy) };
   const vex = {
     '@context': 'https://openvex.dev/ns/v0.2.0',
     '@id': `urn:sha256:${jsonHash(identity)}`,
     author: 'Panthorium verified build policy',
     timestamp,
     version: 1,
-    statements: [{
-      vulnerability: { '@id': `https://nvd.nist.gov/vuln/detail/${policy.vulnerability}`, name: policy.vulnerability },
-      products: [{ '@id': proof.artifactPurl }],
-      status: 'fixed',
-      status_notes: `Upstream backport ${policy.patchCommit}; reviewed source, patch, configuration and both executable digests verified for this image.`
-    }]
+    statements
   };
   // This is an unsigned verification record, not a release signature. CI binds
   // it to extracted bytes and retains both unfiltered and VEX-aware reports.
   const record = {
-    schemaVersion: 1, profile, timestamp, ...identity,
-    binaries: proof.binaries, sourceLockSha256: jsonHash(lock), patchSha256: sha256(patchBytes),
+    schemaVersion: 2, profile, timestamp, ...identity,
+    binaries: proof.binaries, sourceLockSha256: jsonHash(lock),
+    patches: lock.patches.map(patch => ({ file: patch.file, sha256: sha256(patchBytes[patch.file]) })),
+    compilationSha256: jsonHash(manifest.compilation),
+    openssl: openssl?.proof || null,
+    accepted: statements.map(statement => {
+      const artifactPurl = statement.products[0]['@id'];
+      const native = openssl?.proof.packages.find(p => p.artifactPurl === artifactPurl);
+      return { vulnerability: statement.vulnerability.name, artifactPurl,
+        name: native?.name || 'ffmpeg', version: native?.version || '9.0.2', status: statement.status,
+        ...(statement.justification ? { justification: statement.justification } : {}) };
+    }),
     rawSbomSha256: jsonHash(rawSbom), sbomSha256: jsonHash(sbom), vexSha256: jsonHash(vex),
     evidenceRun: profilePolicy.evidenceRun || policy.evidenceRun
   };
@@ -87,14 +132,20 @@ function comparableConfig(config) {
   return result;
 }
 function verifyReports(raw, filtered, vex, record) {
-  assert.equal(record.vulnerability, 'CVE-2026-107696', 'Unreviewed vulnerability policy');
+  assert.equal(record.schemaVersion, 2, 'Unreviewed vulnerability policy');
   assert.match(record.imageId, /^sha256:[a-f0-9]{64}$/);
   assert.equal(record.artifactPurl, `pkg:generic/ffmpeg@9.0.2?checksum=sha256%3A${record.binaries.ffmpeg.sha256}&image_id=${encodeURIComponent(record.imageId)}`, 'Record is not bound to this executable and image');
   assert.equal(jsonHash(vex), record.vexSha256, 'VEX document changed after verification');
-  assert.equal(vex.statements.length, 1, 'Unexpected VEX statement');
-  assert.deepEqual(vex.statements[0].products, [{ '@id': record.artifactPurl }]);
-  assert.equal(vex.statements[0].vulnerability.name, 'CVE-2026-107696');
-  assert.equal(vex.statements[0].status, 'fixed');
+  assert.equal(vex.statements.length, record.accepted.length, 'Unexpected VEX statement');
+  for (const [index, accepted] of record.accepted.entries()) {
+    const statement = vex.statements[index];
+    assert.deepEqual(statement.products, [{ '@id': accepted.artifactPurl }]);
+    assert.equal(statement.vulnerability.name, accepted.vulnerability);
+    assert.equal(statement.status, accepted.status);
+    assert.equal(statement.justification, accepted.justification);
+    assert.ok(accepted.artifactPurl.includes(`image_id=${encodeURIComponent(record.imageId)}`));
+    assert.ok(accepted.artifactPurl.includes('checksum=sha256%3A'));
+  }
   assert.equal(raw.descriptor?.name, 'grype');
   assert.equal(raw.descriptor?.version, '0.118.0', 'Review scanner changes before applying policy');
   assert.equal(filtered.descriptor?.name, 'grype');
@@ -134,24 +185,31 @@ function verifyReports(raw, filtered, vex, record) {
   assert.deepEqual(allFiltered.map(canonical).sort(), raw.matches.map(canonical).sort(), 'Findings changed or disappeared between scans');
   const accepted = [];
   for (const match of filtered.ignoredMatches || []) {
-    assert.equal(match.vulnerability?.id, record.vulnerability, 'An unrelated vulnerability was suppressed');
-    assert.equal(match.artifact?.purl, record.artifactPurl, 'An unrelated package/image was suppressed');
-    assert.equal(match.artifact?.name, 'ffmpeg');
-    assert.equal(match.artifact?.version, '9.0.2');
+    const reviewed = record.accepted.filter(item => item.vulnerability === match.vulnerability?.id);
+    assert.ok(reviewed.length, 'An unrelated vulnerability was suppressed');
+    const exact = reviewed.find(item => item.artifactPurl === match.artifact?.purl);
+    assert.ok(exact, 'An unrelated package/image was suppressed');
+    assert.equal(match.artifact?.name, exact.name);
+    assert.equal(match.artifact?.version, exact.version);
     assert.ok(match.appliedIgnoreRules?.length === 1, 'Unexpected suppression rule');
     const rule = match.appliedIgnoreRules[0];
     assert.equal(rule.namespace, 'vex');
-    assert.equal(rule['vex-status'], 'fixed');
+    assert.equal(rule['vex-status'], exact.status);
+    // Grype 0.118 omits justification from its applied rule. The exact VEX
+    // statement, its justification and compiled-code evidence were verified
+    // above; an explicitly different rule justification is still forbidden.
+    if (exact.justification) assert.ok([undefined, exact.justification].includes(rule['vex-justification']), 'Unexpected VEX justification');
     // Grype 0.118 can omit the rule's vulnerability field. The finding itself
     // was matched above to the exact reviewed CVE and artifact, not this label.
-    assert.ok([undefined, '', record.vulnerability, `https://nvd.nist.gov/vuln/detail/${record.vulnerability}`].includes(rule.vulnerability));
-    accepted.push({ vulnerability: match.vulnerability.id, artifactPurl: match.artifact.purl });
+    assert.ok([undefined, '', exact.vulnerability, `https://nvd.nist.gov/vuln/detail/${exact.vulnerability}`].includes(rule.vulnerability));
+    accepted.push({ vulnerability: match.vulnerability.id, artifactPurl: match.artifact.purl, status: exact.status });
   }
   const remainingHigh = filtered.matches.filter(match => ['high', 'critical'].includes(String(match.vulnerability?.severity).toLowerCase()));
   return {
     schemaVersion: 1, imageId: record.imageId, rawScanSha256: jsonHash(raw), filteredScanSha256: jsonHash(filtered),
     vexSha256: record.vexSha256, rawMatchCount: raw.matches.length, remainingMatchCount: filtered.matches.length,
-    verifiedFixedMatches: accepted, remainingHighCount: remainingHigh.length
+    verifiedFixedMatches: accepted.filter(item => item.status === 'fixed'),
+    verifiedNotAffectedMatches: accepted.filter(item => item.status === 'not_affected'), remainingHighCount: remainingHigh.length
   };
 }
 
@@ -164,11 +222,13 @@ function loadEvidence(directory, timestamp) {
   const images = read('image-inspect.json');
   assert.ok(Array.isArray(images) && images.length === 1);
   return {
-    rawSbom: read(proof.profile === 'speaker-candidate-noble' ? 'service-sbom.with-native.syft.json' : 'container-sbom.raw.syft.json'),
+    rawSbom: read(proof.profile === 'speaker-candidate-noble' ? 'service-sbom.with-native.syft.json' : proof.profile === 'backend' ? 'container-sbom.with-openssl.syft.json' : 'container-sbom.raw.syft.json'),
     sbom: read(proof.profile === 'speaker-candidate-noble' ? 'service-sbom.syft.json' : 'container-sbom.syft.json'), manifest: read('ffmpeg-source.json'),
     lock, proof, profile: proof.profile, image: images[0], timestamp,
     binaries: { ffmpeg: fs.readFileSync(path.join(directory, 'ffmpeg')), ffprobe: fs.readFileSync(path.join(directory, 'ffprobe')) },
-    patchBytes: fs.readFileSync(path.join(__dirname, '../build/media/patches/ffmpeg-CVE-2026-107696.patch'))
+    patchBytes: Object.fromEntries(lock.patches.map(patch => [patch.file, fs.readFileSync(path.join(__dirname, '../build/media', patch.file))])),
+    compilationFiles: Object.fromEntries(['config.h', 'config_components.h', 'codec-objects.json'].map(name => [name, fs.readFileSync(path.join(directory, `ffmpeg-${name}`))])),
+    ...(proof.profile === 'backend' ? { openSslEvidence: loadOpenSslEvidence(directory, images[0]) } : {})
   };
 }
 if (require.main === module) {
@@ -180,7 +240,7 @@ if (require.main === module) {
     const { vex, record } = createArtifacts(loadEvidence(directory, new Date().toISOString()));
     write('ffmpeg-backport.vex.json', vex);
     write('ffmpeg-backport-verification.json', record);
-    console.log('Created one fixed statement for the reviewed executable and inspected image');
+    console.log(`Created ${vex.statements.length} verified statements for this exact image`);
   } else {
     const record = read('ffmpeg-backport-verification.json'), vex = read('ffmpeg-backport.vex.json');
     const expected = createArtifacts(loadEvidence(directory, record.timestamp));
@@ -188,7 +248,7 @@ if (require.main === module) {
     assert.deepEqual(vex, expected.vex, 'VEX document changed');
     const audit = verifyReports(read('container-vulnerabilities.raw.json'), read('container-vulnerabilities.json'), vex, record);
     write('scan-policy-audit.json', audit);
-    console.log(`Verified ${audit.verifiedFixedMatches.length} fixed matches; ${audit.remainingHighCount} High/Critical matches still block release`);
+    console.log(`Verified ${audit.verifiedFixedMatches.length} fixed and ${audit.verifiedNotAffectedMatches.length} absent-code matches; ${audit.remainingHighCount} High/Critical matches still block release`);
     if (audit.remainingHighCount) process.exitCode = 2;
   }
 }

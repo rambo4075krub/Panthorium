@@ -39,7 +39,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs build-essential pkg-config nasm patch cmake python3.12-venv binutils \
  && rm -rf /var/lib/apt/lists/*
 FROM service-toolchain AS service-media
-COPY build/media/ /build/media/
+COPY build/media/*.lock.json build/media/build-ffmpeg.mjs build/media/test-encoder-geometry.c /build/media/
+COPY build/media/patches/ /build/media/patches/
 RUN node /build/media/build-ffmpeg.mjs ffmpeg-speaker-source.lock.json
 
 FROM service-toolchain AS service-sndfile

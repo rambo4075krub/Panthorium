@@ -1,0 +1,18 @@
+From upstream commit a61b32df3fd67f76c1c8c7ea51be2a66efb0f945
+Subject: avcodec/pcm-bluray: copy only whole samples on big-endian hosts
+Upstream: https://github.com/FFmpeg/FFmpeg/commit/a61b32df3fd67f76c1c8c7ea51be2a66efb0f945
+Author: Michael Niedermayer
+
+Upstream changes applied without fuzz; patch context regenerated against the pinned release.
+
+--- a/libavcodec/pcm-bluray.c
++++ b/libavcodec/pcm-bluray.c
+@@ -167,7 +167,7 @@
+             samples *= num_source_channels;
+             if (AV_SAMPLE_FMT_S16 == avctx->sample_fmt) {
+ #if HAVE_BIGENDIAN
+-                bytestream2_get_buffer(&gb, (uint8_t*)dst16, buf_size);
++                bytestream2_get_buffer(&gb, (uint8_t*)dst16, samples * 2);
+ #else
+                 do {
+                     *dst16++ = bytestream2_get_be16u(&gb);

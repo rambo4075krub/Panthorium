@@ -1,0 +1,27 @@
+From upstream commit 7f80b2ad83f37a4998d9617495c92b28a7339a90
+Subject: avcodec/dvbsubenc: Account for the full CLUT segment header
+Upstream: https://github.com/FFmpeg/FFmpeg/commit/7f80b2ad83f37a4998d9617495c92b28a7339a90
+Author: Michael Niedermayer
+
+Upstream changes applied without fuzz; patch context regenerated against the pinned release.
+
+--- a/libavcodec/dvbsubenc.c
++++ b/libavcodec/dvbsubenc.c
+@@ -360,7 +360,7 @@
+                 return AVERROR(EINVAL);
+             }
+ 
+-            if (buf_size < 6 + h->rects[clut_id]->nb_colors * 6)
++            if (buf_size < 8 + h->rects[clut_id]->nb_colors * 6)
+                 return AVERROR_BUFFER_TOO_SMALL;
+ 
+             /* CLUT segment */
+@@ -391,7 +391,7 @@
+             }
+ 
+             bytestream_put_be16(&pseg_len, q - pseg_len - 2);
+-            buf_size -= 6 + h->rects[clut_id]->nb_colors * 6;
++            buf_size -= 8 + h->rects[clut_id]->nb_colors * 6;
+         }
+ 
+         if (buf_size < h->num_rects * 22)

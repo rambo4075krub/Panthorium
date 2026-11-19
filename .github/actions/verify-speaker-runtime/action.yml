@@ -52,6 +52,9 @@ runs:
       docker cp "$container_id:/usr/local/share/panthorium/." "$EVIDENCE_DIR/"
       docker cp "$container_id:/usr/local/bin/ffmpeg" "$EVIDENCE_DIR/ffmpeg"
       docker cp "$container_id:/usr/local/bin/ffprobe" "$EVIDENCE_DIR/ffprobe"
+      for evidence in ffmpeg-config.h ffmpeg-config_components.h ffmpeg-codec-objects.json; do
+        docker cp "$container_id:/usr/local/share/panthorium/$evidence" "$EVIDENCE_DIR/$evidence"
+      done
       docker cp "$container_id:/usr/lib/x86_64-linux-gnu/libsndfile.so.1.0.37" "$EVIDENCE_DIR/libsndfile.so.1.0.37"
       printf 'ignore: []\nmatch-upstream-kernel-headers: true\n' > "$EVIDENCE_DIR/grype.yaml"
     shell: bash
