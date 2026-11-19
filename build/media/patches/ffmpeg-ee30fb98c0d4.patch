@@ -1,0 +1,17 @@
+From upstream commit ee30fb98c0d4e97abbd5e371d2a3a926e92bec70
+Subject: avcodec/flicvideo: decrement pixel_countdown in the big endian FLI_BRUN byte swap
+Upstream: https://github.com/FFmpeg/FFmpeg/commit/ee30fb98c0d4e97abbd5e371d2a3a926e92bec70
+Author: Michael Niedermayer
+
+Upstream changes applied without fuzz; patch context regenerated against the pinned release.
+
+--- a/libavcodec/flicvideo.c
++++ b/libavcodec/flicvideo.c
+@@ -883,6 +883,7 @@
+                 while (pixel_countdown > 0) {
+                     *((signed short*)(&pixels[pixel_ptr])) = AV_RL16(&buf[pixel_ptr]);
+                     pixel_ptr += 2;
++                    pixel_countdown--;
+                 }
+ #endif
+                 y_ptr += s->frame->linesize[0];

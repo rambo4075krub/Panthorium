@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "name": "openssl",
+  "version": "3.5.9",
+  "packageVersion": "3.5.9-r1",
+  "license": "Apache-2.0",
+  "source": {
+    "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz",
+    "sha512": "c4c8136fd2c98d13bb85a57bfb0def25c906f47f1fe97675cd114594944eab957b5b81a3e0f48826e1a0f093afff5e83766b539d49768f6db68310fd678d7de6",
+    "gitCommit": "45e844fa2a14ec92d146bd8f5778ac130b6625fb",
+    "releaseTag": "openssl-3.5.9"
+  },
+  "distributionPatch": {
+    "file": "auxv.patch",
+    "sha256": "0b3a36c0f1b3d8e0adcf02c251374ce4d2578b0c9f4b88207bf85c5c1b58c7d8",
+    "url": "https://github.com/alpinelinux/aports/blob/3.23-stable/main/openssl/auxv.patch"
+  },
+  "patches": [
+    {
+      "cves": [
+        "CVE-2026-88823"
+      ],
+      "commit": "159e1de0c448d7b9f09ad768c8e141def4aa1eb4",
+      "url": "https://github.com/openssl/openssl/commit/159e1de0c448d7b9f09ad768c8e141def4aa1eb4",
+      "file": "openssl-159e1de0c448.patch",
+      "sha256": "060f165a167a60d5fb9a91dcd44491b10b05cb277a7309d06bc1cddc12bf83eb",
+      "patchedFiles": [
+        {
+          "path": "providers/implementations/ciphers/cipher_aes_gcm_siv.c",
+          "sha256": "1c9190d4dfbb2fd767c588376167358e7fd32b135aad0827b8d2cd6b78d69793"
+        },
+        {
+          "path": "providers/implementations/ciphers/cipher_aes_gcm_siv_hw.c",
+          "sha256": "d5ea349bd8c5d48634b3a6006f1a1ef233213564ee675ee2fce4faec824cc639"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-88822"
+      ],
+      "commit": "1a73dc590cbad62d6f0329ea4779eadaa8d8fd75",
+      "url": "https://github.com/openssl/openssl/commit/1a73dc590cbad62d6f0329ea4779eadaa8d8fd75",
+      "file": "openssl-1a73dc590cba.patch",
+      "sha256": "c4684eec781654fbcbd3ee4b54876a63abc826bf5e15f60883e46b09e6b18f4d",
+      "patchedFiles": [
+        {
+          "path": "crypto/bio/bss_dgram.c",
+          "sha256": "9b0e09c21fdc0ae8c253d1a7aed1114814090d83f92c1ae6e2d83a28c829cb64"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-107496"
+      ],
+      "commit": "a0051cfe699bf5a047bc1c4faef65f80f7987366",
+      "url": "https://github.com/openssl/openssl/commit/a0051cfe699bf5a047bc1c4faef65f80f7987366",
+      "file": "openssl-a0051cfe699b.patch",
+      "sha256": "82195df6f2fb62acb795044b66ec6c21c30d883a39b22f76e7bec8b4a616e668",
+      "patchedFiles": [
+        {
+          "path": "crypto/ec/ec_key.c",
+          "sha256": "72726357d1e33de2fdc28da42781bb489d4a87762ed308ce81e0c49feaaa82bb"
+        },
+        {
+          "path": "test/ectest.c",
+          "sha256": "404248bb6baaffa0ba1663cd21be5df7bd65e17c283591b29ab2664cc1ed6582"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-95692"
+      ],
+      "commit": "257a3427aa0ef8d9dd2ef5b3e2d1c021a221b116",
+      "url": "https://github.com/openssl/openssl/commit/257a3427aa0ef8d9dd2ef5b3e2d1c021a221b116",
+      "file": "openssl-257a3427aa0e.patch",
+      "sha256": "f0436c13b52b08079c35cd7a5d123a099e617813a7a5eac55cd06f85b92b26d7",
+      "patchedFiles": [
+        {
+          "path": "providers/implementations/ciphers/cipher_aes_gcm_siv.c",
+          "sha256": "62510edfb867c2c33b034ec7f1f04913551827441a0f156966bc857cc271c211"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-95691"
+      ],
+      "commit": "f6244675833e097c2429a40d1b206d95385bd42f",
+      "url": "https://github.com/openssl/openssl/commit/f6244675833e097c2429a40d1b206d95385bd42f",
+      "file": "openssl-f6244675833e.patch",
+      "sha256": "7d7870c832358fd44cb716d5fc965d25b925f5ada211a55740c497c60e5e8bdd",
+      "patchedFiles": [
+        {
+          "path": "include/internal/quic_strm_reas.h",
+          "sha256": "23cddd86dd8ed5246bca7f668197e73cec4a2653e476310a1d6a34ee243f4d1f"
+        },
+        {
+          "path": "ssl/quic/quic_rstream.c",
+          "sha256": "ca832c01b754e6556d0d29ee667616102870bb93be2c21e5845e461861b21c31"
+        },
+        {
+          "path": "ssl/quic/quic_strm_reas.c",
+          "sha256": "9ed4d3ab6508b79c04033ebb793c0fbcce5615e75323022de20bf2748f74c319"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-107493"
+      ],
+      "commit": "c8f6d04f8e6d40b1bf83334e4a2ec9daf5943a3d",
+      "url": "https://github.com/openssl/openssl/commit/c8f6d04f8e6d40b1bf83334e4a2ec9daf5943a3d",
+      "file": "openssl-c8f6d04f8e6d.patch",
+      "sha256": "8ddf5e35d9370d1cdaf79784600e10978b717068e4ea4cfa816f97d4b09ec9e1",
+      "patchedFiles": [
+        {
+          "path": "crypto/pem/pem_info.c",
+          "sha256": "25b5bdecc831e734fd3af3d8b1222883929a57f4f15fa44190c0e4f88376a475"
+        },
+        {
+          "path": "test/x509_check_cert_pkey_test.c",
+          "sha256": "fd7408c4e2fc6b87d5ce8c1b7c9264d16212cb855250b41445730fa5b6c059d2"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-35190"
+      ],
+      "commit": "9491b0d9cc7950af1f3dc89499bd5433b9cd4f43",
+      "url": "https://github.com/openssl/openssl/commit/9491b0d9cc7950af1f3dc89499bd5433b9cd4f43",
+      "file": "openssl-9491b0d9cc79.patch",
+      "sha256": "b18b0e4b7a082ef171fc8727eda633fb546f63f45551de5702c5052da20ab619",
+      "patchedFiles": [
+        {
+          "path": "ssl/statem/extensions_srvr.c",
+          "sha256": "004fb384e61fd3ca36d12c7d83baa29fa5ed42950ab727e3d19504f97f5606f6"
+        },
+        {
+          "path": "ssl/t1_lib.c",
+          "sha256": "3a5988443e2b6cd6aac52ab1438b5f211cab83864cbed90b32b0feba60ff5652"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-124709"
+      ],
+      "commit": "f3acb0a3328046741479482c51cec815839e1b05",
+      "url": "https://github.com/openssl/openssl/commit/f3acb0a3328046741479482c51cec815839e1b05",
+      "file": "openssl-f3acb0a33280.patch",
+      "sha256": "e4375afe671f3259f440da348f3f2ba3da79b61f5145669f5f965c09b923b89b",
+      "patchedFiles": [
+        {
+          "path": "ssl/quic/quic_stream_map.c",
+          "sha256": "7bceb5bdc408c3e5a46eb38944f5d16727b812e3e049dae6f2b2e4cdadce3616"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+From upstream commit 053660fdb0d2403b838690689c47ad7685c3b10b
+Subject: avcodec/vvc/refs: check the rpl allocation size for overflow
+Upstream: https://github.com/FFmpeg/FFmpeg/commit/053660fdb0d2403b838690689c47ad7685c3b10b
+Author: Michael Niedermayer
+
+Only surrounding context adapted; checked multiplication is identical to upstream.
+
+--- a/libavcodec/vvc/refs.c
++++ b/libavcodec/vvc/refs.c
+@@ -145,7 +145,10 @@
+         if (ret < 0)
+             return NULL;
+ 
+-        frame->rpl = av_refstruct_allocz(s->current_frame.nb_units * sizeof(RefPicListTab));
++        size_t rpl_size;
++        if (av_size_mult(s->current_frame.nb_units, sizeof(RefPicListTab), &rpl_size) < 0)
++            goto fail;
++        frame->rpl = av_refstruct_allocz(rpl_size);
+         if (!frame->rpl)
+             goto fail;
+         frame->nb_rpl_elems = s->current_frame.nb_units;

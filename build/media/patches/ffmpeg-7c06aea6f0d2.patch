@@ -1,0 +1,18 @@
+From upstream commit 7c06aea6f0d26dd70c94ccba6127059cd0a0e352
+Subject: avcodec/libaribcaption: allocate one rect in text mode
+Upstream: https://github.com/FFmpeg/FFmpeg/commit/7c06aea6f0d26dd70c94ccba6127059cd0a0e352
+Author: Ruk Doe
+
+Upstream changes applied without fuzz; patch context regenerated against the pinned release.
+
+--- a/libavcodec/libaribcaption.c
++++ b/libavcodec/libaribcaption.c
+@@ -796,7 +796,7 @@
+     int ret = 0;
+     const char *text;
+ 
+-    sub->rects = av_calloc(ctx->caption.region_count, sizeof(*sub->rects));
++    sub->rects = av_calloc(1, sizeof(*sub->rects));
+     if (!sub->rects) {
+         ret = AVERROR(ENOMEM);
+         goto fail;

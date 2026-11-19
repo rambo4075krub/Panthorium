@@ -1,0 +1,18 @@
+From upstream commit 87cdb6cd6a8d1ec201cb82b30e64d5f946939e23
+Subject: avcodec/liboapvenc: copy the input with the dimensions of the codec context
+Upstream: https://github.com/FFmpeg/FFmpeg/commit/87cdb6cd6a8d1ec201cb82b30e64d5f946939e23
+Author: Michael Niedermayer
+
+Upstream changes applied without fuzz; patch context regenerated against the pinned release.
+
+--- a/libavcodec/liboapvenc.c
++++ b/libavcodec/liboapvenc.c
+@@ -575,7 +575,7 @@
+     int ret;
+ 
+     av_image_copy2((uint8_t **)imgb->a, imgb->s, frame->data, frame->linesize,
+-                   frame->format, frame->width, frame->height);
++                   avctx->pix_fmt, avctx->width, avctx->height);
+ 
+     imgb->ts[0] = frame->pts;
+ 

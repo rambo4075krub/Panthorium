@@ -120,6 +120,14 @@ runs:
         docker cp "$container_id:/usr/local/share/panthorium/ffmpeg-source.json" "$EVIDENCE_DIR/ffmpeg-source.json"
         docker cp "$container_id:/usr/local/bin/ffmpeg" "$EVIDENCE_DIR/ffmpeg"
         docker cp "$container_id:/usr/local/bin/ffprobe" "$EVIDENCE_DIR/ffprobe"
+        for evidence in ffmpeg-config.h ffmpeg-config_components.h ffmpeg-codec-objects.json; do
+          docker cp "$container_id:/usr/local/share/panthorium/$evidence" "$EVIDENCE_DIR/$evidence"
+        done
+        if [ "$PROFILE" == backend ]; then
+          docker cp "$container_id:/usr/local/share/panthorium/openssl-source.json" "$EVIDENCE_DIR/openssl-source.json"
+          docker cp "$container_id:/usr/lib/libcrypto.so.3" "$EVIDENCE_DIR/libcrypto.so.3"
+          docker cp "$container_id:/usr/lib/libssl.so.3" "$EVIDENCE_DIR/libssl.so.3"
+        fi
         if [ "$PROFILE" == speaker ]; then
           docker cp "$container_id:/usr/local/share/panthorium/runtime-surface.json" "$EVIDENCE_DIR/runtime-surface.json"
           for manifest in libsndfile zlib; do

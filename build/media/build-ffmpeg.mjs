@@ -61,6 +61,13 @@ for (const patch of lock.patches) {
   for (const file of patch.patchedFiles) checkFile(path.join(source, file.path), file.sha256);
 }
 run('./configure', lock.configure, source);
+const configuration = Object.fromEntries(['config.h', 'config_components.h'].map(name => [name, fs.readFileSync(path.join(source, name), 'utf8')]));
+const macros = Object.fromEntries(Object.values(configuration).flatMap(text => [...text.matchAll(/^#define (CONFIG_[A-Z0-9_]+) ([01])$/gm)].map(match => [match[1], Number(match[2])])));
+for (const [cve, names] of Object.entries(lock.excludedComponents)) {
+  for (const name of names) {
+    if (macros[name] !== 0) throw new Error(`${cve}: excluded component ${name} was not disabled`);
+  }
+}
 // Keep CI memory usage bounded; adding more cores is not needed for this build.
 run('make', ['-j2'], source);
 run('make', ['install'], source);
@@ -68,6 +75,17 @@ run('make', ['install'], source);
 const share = path.join(installed, 'share/panthorium');
 fs.mkdirSync(path.join(share, 'ffmpeg-patches'), { recursive: true });
 const manifest = { ...lock, binaries: {} };
+const objects = execFileSync('ar', ['t', path.join(source, 'libavcodec/libavcodec.a')], { encoding: 'utf8' }).trim().split('\n').sort();
+if (objects.some(name => /^(?:vaapi_hevc|vdpau_hevc|dxva2_hevc|ffv1enc_vulkan|vulkan_decode|lcevcdec)\.o$/.test(name))) {
+  throw new Error('Excluded vulnerable component entered the codec archive');
+}
+manifest.compilation = {
+  configuration: Object.fromEntries(Object.entries(configuration).map(([name, text]) => [name, hash(Buffer.from(text))])),
+  excludedMacros: Object.fromEntries([...new Set(Object.values(lock.excludedComponents).flat())].sort().map(name => [name, macros[name]])),
+  codecObjectsSha256: hash(Buffer.from(JSON.stringify(objects)))
+};
+for (const [name, content] of Object.entries(configuration)) fs.writeFileSync(path.join(share, `ffmpeg-${name}`), content);
+fs.writeFileSync(path.join(share, 'ffmpeg-codec-objects.json'), JSON.stringify(objects, null, 2) + '\n');
 for (const binary of ['ffmpeg', 'ffprobe']) {
   const filename = path.join(installed, 'bin', binary);
   manifest.binaries[binary] = { path: `/usr/local/bin/${binary}`, sha256: hash(fs.readFileSync(filename)) };

@@ -1,0 +1,18 @@
+From upstream commit b89ce54d93bf644433dfa9fbc34f19c22237691a
+Subject: avcodec/cbs_jpeg: check the scan data size without overflowing size_t
+Upstream: https://github.com/FFmpeg/FFmpeg/commit/b89ce54d93bf644433dfa9fbc34f19c22237691a
+Author: Joshua Rogers
+
+Upstream changes applied without fuzz; patch context regenerated against the pinned release.
+
+--- a/libavcodec/cbs_jpeg.c
++++ b/libavcodec/cbs_jpeg.c
+@@ -296,7 +296,7 @@
+         return err;
+ 
+     if (scan->data) {
+-        if (scan->data_size * 8 > put_bits_left(pbc))
++        if (scan->data_size > put_bits_left(pbc) / 8)
+             return AVERROR(ENOSPC);
+ 
+         av_assert0(put_bits_count(pbc) % 8 == 0);

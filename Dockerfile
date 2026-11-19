@@ -15,6 +15,7 @@ COPY --from=native-security-build /out/packages/ /tmp/panthorium-security-packag
 RUN apk add --no-cache /tmp/panthorium-security-packages/*.apk x264-libs opus libass 'zlib>=1.4-r0' font-dejavu font-noto-thai \
     && rm -rf /tmp/panthorium-security-packages
 COPY build/alpine-security/sources.json /usr/local/share/panthorium/native-security-sources.json
+COPY --from=native-security-build /out/share/panthorium/ /usr/local/share/panthorium/
 COPY --from=media-build /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 COPY --from=media-build /opt/ffmpeg/share/panthorium/ /usr/local/share/panthorium/
 WORKDIR /app

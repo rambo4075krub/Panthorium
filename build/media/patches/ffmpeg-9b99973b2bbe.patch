@@ -1,0 +1,26 @@
+From upstream commit 9b99973b2bbecee0b7e1e57035b95498b42f54a6
+Subject: avcodec/encode: reject video frames larger than the encoder too
+Upstream: https://github.com/FFmpeg/FFmpeg/commit/9b99973b2bbecee0b7e1e57035b95498b42f54a6
+Author: Michael Niedermayer
+
+Backported complete input geometry guard; 9.0.2 predates the smaller-frame guard used as upstream context.
+
+--- a/libavcodec/encode.c
++++ b/libavcodec/encode.c
+@@ -519,6 +519,16 @@
+         }
+     }
+ 
++    if (avctx->codec->type == AVMEDIA_TYPE_VIDEO) {
++        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(src->format);
++        if (!(desc && desc->flags & AV_PIX_FMT_FLAG_HWACCEL) &&
++            (src->format != avctx->pix_fmt ||
++             src->width != avctx->width || src->height != avctx->height)) {
++            av_log(avctx, AV_LOG_ERROR, "Frame size or pixel format does not match the encoder\n");
++            return AVERROR(EINVAL);
++        }
++    }
++
+     ret = av_frame_ref(dst, src);
+     if (ret < 0)
+         return ret;

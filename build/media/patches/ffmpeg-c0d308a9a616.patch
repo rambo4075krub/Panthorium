@@ -1,0 +1,18 @@
+From upstream commit c0d308a9a616f4abcc4e0a4d86f7de92ecdef9f6
+Subject: avcodec/flicvideo: byte swap the decoded pixels in big endian FLI_BRUN
+Upstream: https://github.com/FFmpeg/FFmpeg/commit/c0d308a9a616f4abcc4e0a4d86f7de92ecdef9f6
+Author: Michael Niedermayer
+
+Upstream changes applied without fuzz; patch context regenerated against the pinned release.
+
+--- a/libavcodec/flicvideo.c
++++ b/libavcodec/flicvideo.c
+@@ -881,7 +881,7 @@
+                 pixel_ptr = y_ptr;
+                 pixel_countdown = s->avctx->width;
+                 while (pixel_countdown > 0) {
+-                    *((signed short*)(&pixels[pixel_ptr])) = AV_RL16(&buf[pixel_ptr]);
++                    *((signed short*)(&pixels[pixel_ptr])) = AV_RL16(&pixels[pixel_ptr]);
+                     pixel_ptr += 2;
+                     pixel_countdown--;
+                 }
