@@ -157,8 +157,13 @@ runs:
         set -euo pipefail
         SOURCE_LOCK=build/media/ffmpeg-source.lock.json
         if [ "$PROFILE" == speaker ]; then SOURCE_LOCK=build/media/ffmpeg-speaker-source.lock.json; fi
+        SOURCE_SBOM="$EVIDENCE_DIR/container-sbom.raw.syft.json"
+        if [ "$PROFILE" == backend ]; then
+          node scripts/verified-openssl-backport.js "$EVIDENCE_DIR"
+          SOURCE_SBOM="$EVIDENCE_DIR/container-sbom.with-openssl.syft.json"
+        fi
         node scripts/verify-container-sbom.js \
-          "$EVIDENCE_DIR/container-sbom.raw.syft.json" "$EVIDENCE_DIR/ffmpeg-source.json" \
+          "$SOURCE_SBOM" "$EVIDENCE_DIR/ffmpeg-source.json" \
           "$EVIDENCE_DIR" "$EVIDENCE_DIR/image-inspect.json" "$SOURCE_LOCK" \
           "$EVIDENCE_DIR/container-sbom.syft.json" "$EVIDENCE_DIR/ffmpeg-proof.json" "$PROFILE"
         printf 'ignore: []\nmatch-upstream-kernel-headers: true\n' > "$EVIDENCE_DIR/grype.yaml"

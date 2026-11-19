@@ -74,6 +74,16 @@ run('make', ['install'], source);
 
 const share = path.join(installed, 'share/panthorium');
 fs.mkdirSync(path.join(share, 'ffmpeg-patches'), { recursive: true });
+if (lockName === 'ffmpeg-source.lock.json') {
+  const flags = execFileSync('pkg-config', ['--libs', '--static', 'libavcodec', 'libavutil'], {
+    encoding: 'utf8', env: { ...process.env, PKG_CONFIG_PATH: `${installed}/lib/pkgconfig` }
+  }).trim().split(/\s+/);
+  const regression = path.join(work, 'test-encoder-geometry');
+  run('cc', [`-I${installed}/include`, path.join(directory, 'test-encoder-geometry.c'), '-o', regression, ...flags]);
+  const output = execFileSync(regression, [], { encoding: 'utf8', timeout: 30000 });
+  fs.writeFileSync(path.join(share, 'ffmpeg-encoder-regression.log'), output);
+  console.log(output.trim());
+}
 const manifest = { ...lock, binaries: {} };
 const objects = execFileSync('ar', ['t', path.join(source, 'libavcodec/libavcodec.a')], { encoding: 'utf8' }).trim().split('\n').sort();
 if (objects.some(name => /^(?:vaapi_hevc|vdpau_hevc|dxva2_hevc|ffv1enc_vulkan|vulkan_decode|lcevcdec)\.o$/.test(name))) {

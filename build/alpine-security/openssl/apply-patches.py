@@ -9,6 +9,7 @@ import sys
 directory = pathlib.Path(__file__).resolve().parent
 source = pathlib.Path(sys.argv[1]).resolve()
 lock = json.loads((directory / 'openssl-source.lock.json').read_text())
+assert hashlib.sha256((directory / 'APKBUILD').read_bytes()).hexdigest() == lock['buildRecipe']['sha256'], 'Build recipe differs'
 for patch in [lock['distributionPatch'], *lock['patches']]:
     filename = directory / patch['file']
     assert hashlib.sha256(filename.read_bytes()).hexdigest() == patch['sha256'], 'Patch checksum differs'

@@ -160,5 +160,10 @@
         }
       ]
     }
-  ]
+  ],
+  "buildRecipe": {
+    "sha256": "bbbe063ddcb21279a617a4c629a675af0983edb9907d4cfecb82ae8637cda87a",
+    "sourceDateEpoch": 1790690700,
+    "tests": "make -j2 test"
+  }
 }

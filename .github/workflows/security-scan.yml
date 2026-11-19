@@ -98,12 +98,36 @@ jobs:
           # Cache export is optional; all build, smoke and security failures remain fatal.
           cache-to: type=gha,mode=max,scope=${{ steps.build-context.outputs.cache-scope }},ignore-error=true,timeout=3m
       - name: Verify the exact built image
+        id: verified-image
         uses: ./.github/actions/verify-deployment-image
         with:
           image: panthorium-security:${{ github.sha }}
           profile: ${{ steps.build-context.outputs.profile }}
           evidence-dir: ${{ env.EVIDENCE_DIR }}
           require-model: ${{ inputs.image-context == 'speaker-service' && inputs.image-target == '' && 'true' || 'false' }}
+      - name: Export the verified main image for notebook installation
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE_ID: ${{ steps.verified-image.outputs.image-id }}
+          PROFILE: ${{ steps.build-context.outputs.profile }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]]
+          mkdir "$RUNNER_TEMP/notebook-native-image"
+          docker save "$IMAGE_ID" | gzip -1 > "$RUNNER_TEMP/notebook-native-image/image.tar.gz"
+          (cd "$RUNNER_TEMP/notebook-native-image" && sha256sum image.tar.gz > image.tar.gz.sha256)
+          cp "$EVIDENCE_DIR/image-inspect.json" "$EVIDENCE_DIR/scan-policy-audit.json" "$EVIDENCE_DIR/ffmpeg-backport-verification.json" "$RUNNER_TEMP/notebook-native-image/"
+          printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/notebook-native-image/source-sha.txt"
+          printf '%s\n' "$PROFILE" > "$RUNNER_TEMP/notebook-native-image/profile.txt"
+      - name: Retain verified native image for notebook delivery
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: notebook-native-${{ inputs.image-context == '.' && 'backend' || 'speaker' }}
+          path: ${{ runner.temp }}/notebook-native-image/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
       - name: Preserve image inventories, provenance, smoke results and vulnerability report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

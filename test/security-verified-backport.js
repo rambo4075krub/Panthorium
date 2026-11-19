@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { enrichSbom } = require('../scripts/verify-container-sbom');
-const { createArtifacts, verifyReports } = require('../scripts/verified-ffmpeg-backport');
+const { createArtifacts: verifyArtifacts, verifyReports } = require('../scripts/verified-ffmpeg-backport');
+const opensslFixture = require('./helpers/openssl-security-fixture');
 const reviewedPolicy = require('../build/media/ffmpeg-backport-policy.json');
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const clone = structuredClone;
@@ -15,21 +16,32 @@ function fixture(profile) {
   const image = { Id: `sha256:${'a'.repeat(64)}`, Os: 'linux', Architecture: 'amd64' };
   const binaries = { ffmpeg: Buffer.from('\x7fELFfixture-ffmpeg'), ffprobe: Buffer.from('\x7fELFfixture-ffprobe') };
   const manifest = { ...clone(lock), binaries: Object.fromEntries(Object.entries(binaries).map(([name, bytes]) => [name, { path: `/usr/local/bin/${name}`, sha256: hash(bytes) }])) };
-  const rawSbom = { schema: { version: '16.1.11' }, source: { id: 'image', type: 'image', metadata: { imageID: image.Id } }, distro: profile === 'speaker-candidate-noble' ? { id: 'ubuntu', versionID: '24.04' } : { id: profile === 'backend' ? 'alpine' : 'debian' }, artifacts: [{ id: 'base', name: 'base-library', version: '1.0', type: 'binary' }] };
+  const native = profile === 'backend' ? opensslFixture(image) : undefined;
+  const rawSbom = native?.result.sbom || { schema: { version: '16.1.11' }, source: { id: 'image', type: 'image', metadata: { imageID: image.Id } }, distro: profile === 'speaker-candidate-noble' ? { id: 'ubuntu', versionID: '24.04' } : { id: 'debian' }, artifacts: [{ id: 'base', name: 'base-library', version: '1.0', type: 'binary' }] };
+  const excluded = [...new Set(Object.values(lock.excludedComponents).flat())].sort();
+  const compilationFiles = { 'config.h': Buffer.from(excluded.map(name => `#define ${name} 0\n`).join('')), 'config_components.h': Buffer.from('#define CONFIG_H264_DECODER 1\n'), 'codec-objects.json': Buffer.from('["h264dec.o"]') };
+  manifest.compilation = {
+    configuration: Object.fromEntries(['config.h', 'config_components.h'].map(name => [name, hash(compilationFiles[name])])),
+    excludedMacros: Object.fromEntries(excluded.map(name => [name, 0])), codecObjectsSha256: hash(compilationFiles['codec-objects.json'])
+  };
   const { sbom, proof } = enrichSbom(rawSbom, manifest, lock, binaries, image, profile);
-  const input = { rawSbom, sbom, proof, manifest, lock, binaries, image, profile, timestamp: '2026-10-23T00:00:00.000Z', patchBytes: fs.readFileSync(path.join(__dirname, '../build/media/patches/ffmpeg-CVE-2026-107696.patch')) };
+  const input = { rawSbom, sbom, proof, manifest, lock, binaries, image, profile, timestamp: '2026-11-19T00:00:00.000Z', compilationFiles,
+    patchBytes: Object.fromEntries(lock.patches.map(patch => [patch.file, fs.readFileSync(path.join(__dirname, '../build/media', patch.file))])),
+    ...(native ? { openSslEvidence: native.input } : {}) };
   // Only tests substitute a reviewed executable identity. The CLI has no policy
   // override; fake executables must fail against the real committed policy.
   const policy = clone(reviewedPolicy);
   for (const name of ['ffmpeg', 'ffprobe']) policy.profiles[profile].binaries[name] = hash(binaries[name]);
-  return { input, policy };
+  policy.profiles[profile].compilationSha256 = hash(JSON.stringify(manifest.compilation));
+  return { input, policy, opensslPolicy: native?.policy };
 }
 
 for (const profile of ['backend', 'speaker', 'speaker-candidate-noble']) {
-  const { input, policy } = fixture(profile);
+  const { input, policy, opensslPolicy } = fixture(profile);
+  const createArtifacts = (evidence, review) => verifyArtifacts(evidence, review, opensslPolicy);
   assert.throws(() => createArtifacts(input), /not an independently reviewed executable/);
   const { vex, record } = createArtifacts(input, policy);
-  assert.equal(vex.statements.length, 1);
+  assert.equal(vex.statements.length, profile === 'backend' ? 46 : 30);
   assert.equal(vex.statements[0].status, 'fixed');
   assert.ok(vex.statements[0].products[0]['@id'].includes(`image_id=${encodeURIComponent(input.image.Id)}`));
   assert.ok(vex.statements[0].products[0]['@id'].includes(hash(input.binaries.ffmpeg)));
@@ -39,7 +51,9 @@ for (const profile of ['backend', 'speaker', 'speaker-candidate-noble']) {
   }
   const changedLock = clone(input.lock); changedLock.configure.push('--enable-network');
   assert.throws(() => createArtifacts({ ...input, lock: changedLock, manifest: { ...input.manifest, configure: changedLock.configure } }, policy), /lock requires independent review/);
-  assert.throws(() => createArtifacts({ ...input, patchBytes: Buffer.from('unreviewed patch') }, policy), /Patch bytes differ/);
+  assert.throws(() => createArtifacts({ ...input, patchBytes: { ...input.patchBytes, [input.lock.patches[0].file]: Buffer.from('unreviewed patch') } }, policy), /Patch bytes differ/);
+  assert.throws(() => createArtifacts({ ...input, compilationFiles: { ...input.compilationFiles, 'config.h': Buffer.from('#define CONFIG_VULKAN 1\n') } }, policy), /configuration bytes differ/);
+  if (profile === 'backend') assert.throws(() => createArtifacts({ ...input, openSslEvidence: undefined }, policy), /OpenSSL evidence is required/);
   assert.throws(() => createArtifacts({ ...input, image: { ...input.image, Architecture: 'arm64' } }, policy), /architecture/);
   assert.throws(() => createArtifacts({ ...input, image: { ...input.image, Id: `sha256:${'b'.repeat(64)}` } }, policy), /different image/);
   const missingPackage = clone(input.sbom); missingPackage.artifacts.shift();
@@ -69,6 +83,11 @@ for (const profile of ['backend', 'speaker', 'speaker-candidate-noble']) {
   assert.equal(audit.remainingHighCount, 1, 'An unrelated Critical still blocks release');
   assert.equal(verifyReports({ ...raw, matches: [fixedMatch] }, { ...filtered, matches: [] }, vex, record).remainingHighCount, 0);
   assert.equal(verifyReports({ ...raw, matches: [] }, { ...filtered, matches: [], ignoredMatches: [] }, vex, record).verifiedFixedMatches.length, 0, 'An absent finding needs no suppression');
+  const absent = { ...clone(fixedMatch), vulnerability: { id: 'CVE-2026-125248', severity: 'High' } };
+  const absentRule = { namespace: 'vex', 'vex-status': 'not_affected', 'vex-justification': 'vulnerable_code_not_present' };
+  const absentAudit = verifyReports({ ...raw, matches: [absent] }, { ...filtered, matches: [], ignoredMatches: [{ ...absent, appliedIgnoreRules: [absentRule] }] }, vex, record);
+  assert.equal(absentAudit.verifiedNotAffectedMatches.length, 1);
+  assert.equal(absentAudit.verifiedFixedMatches.length, 0, 'Absent code must not be reported as a source fix');
   assert.throws(() => verifyReports(raw, { ...filtered, matches: [] }, vex, record), /changed or disappeared/);
   const concealed = clone(filtered); concealed.ignoredMatches.push({ ...concealed.matches.pop(), appliedIgnoreRules: [ignore] });
   assert.throws(() => verifyReports(raw, concealed, vex, record), /unrelated vulnerability/);

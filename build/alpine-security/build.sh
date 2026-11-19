@@ -18,3 +18,5 @@ test -s /out/packages/libssl3-3.5.9-r1.apk
 apk add --no-cache /out/packages/libcrypto3-3.5.9-r1.apk /out/packages/libssl3-3.5.9-r1.apk /out/packages/openssl-3.5.9-r1.apk
 mkdir -p /out/share/panthorium
 node /build/alpine-security/openssl/record-build.mjs
+# The application needs the libraries, not the OpenSSL administration CLI.
+rm /out/packages/openssl-3.5.9-r1.apk

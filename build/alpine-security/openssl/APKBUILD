@@ -6,6 +6,8 @@ pkgname=openssl
 pkgver=3.5.9
 _abiver=${pkgver%.*.*}
 pkgrel=1
+# Fix the upstream release timestamp for independently reproducible ELF hashes.
+export SOURCE_DATE_EPOCH=1790690700
 pkgdesc="Toolkit for Transport Layer Security (TLS)"
 url="https://www.openssl.org/"
 arch="all"

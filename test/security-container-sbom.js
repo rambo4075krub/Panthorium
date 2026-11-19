@@ -11,7 +11,7 @@ const lock = {
   cpe: 'cpe:2.3:a:ffmpeg:ffmpeg:9.0.2:*:*:*:*:*:*:*',
   source: { url: 'https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz', sha256: 'a'.repeat(64) },
   patches: [{ cve: 'CVE-2026-99999', commit: 'b'.repeat(40), sha256: 'c'.repeat(64) }],
-  configure: ['--disable-network']
+  configure: ['--disable-network'], excludedComponents: {}
 };
 const manifest = { ...structuredClone(lock), binaries: Object.fromEntries(Object.entries(binaries).map(([name, bytes]) => [name, {
   path: `/usr/local/bin/${name}`, sha256: digest(bytes)

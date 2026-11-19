@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "sourceLockSha256": "cf85f389866e295fb4c1d301f186ebd8f6c447f603a8e0d99530d8468e0fa8ac",
+  "binaries": {
+    "libcrypto.so.3": "UNREVIEWED",
+    "libssl.so.3": "UNREVIEWED"
+  },
+  "vulnerabilities": [
+    "CVE-2026-107493",
+    "CVE-2026-107496",
+    "CVE-2026-124709",
+    "CVE-2026-35190",
+    "CVE-2026-88822",
+    "CVE-2026-88823",
+    "CVE-2026-95691",
+    "CVE-2026-95692"
+  ],
+  "evidenceRun": "Pending independent candidate review; this policy cannot authorize a release"
+}

@@ -7,4 +7,3 @@ cat >&2 <<-EOF
 * installed at /etc/openssl/openssl.cnf.fips and may be used.
 *
 EOF
-
