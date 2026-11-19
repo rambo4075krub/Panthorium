@@ -271,7 +271,10 @@ check() {
 	}
 	tail -n 40 "$srcdir/openssl-tests.log"
 	$CC $CFLAGS -Iinclude -I. /build/alpine-security/openssl/test-security.c -L. -lcrypto -o test-security
-	LD_LIBRARY_PATH="$builddir" ./test-security
+	LD_LIBRARY_PATH="$builddir" ./test-security > "$srcdir/openssl-security-tests.log"
+	cat "$srcdir/openssl-security-tests.log"
+	mkdir -p /out/share/panthorium
+	cp "$srcdir/openssl-tests.log" "$srcdir/openssl-security-tests.log" /out/share/panthorium/
 }
 
 package() {

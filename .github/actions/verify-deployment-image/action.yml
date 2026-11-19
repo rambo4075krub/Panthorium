@@ -125,6 +125,9 @@ runs:
         done
         if [ "$PROFILE" == backend ]; then
           docker cp "$container_id:/usr/local/share/panthorium/openssl-source.json" "$EVIDENCE_DIR/openssl-source.json"
+          for evidence in openssl-tests.log openssl-security-tests.log ffmpeg-encoder-regression.log; do
+            docker cp "$container_id:/usr/local/share/panthorium/$evidence" "$EVIDENCE_DIR/$evidence"
+          done
           docker cp "$container_id:/usr/lib/libcrypto.so.3" "$EVIDENCE_DIR/libcrypto.so.3"
           docker cp "$container_id:/usr/lib/libssl.so.3" "$EVIDENCE_DIR/libssl.so.3"
         fi

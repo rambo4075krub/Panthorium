@@ -6,6 +6,9 @@ const { input, policy, result } = fixture({ Id: `sha256:${'a'.repeat(64)}`, Os: 
 assert.throws(() => verifyOpenSsl(input), /not an independently reviewed executable/);
 assert.equal(result.statements.length, 16);
 assert.equal(result.sbom.artifacts.length, input.rawSbom.artifacts.length);
+assert.throws(() => verifyOpenSsl({ ...input, testLogs: {} }, policy), /test evidence missing/);
+assert.throws(() => verifyOpenSsl({ ...input, testLogs: { ...input.testLogs, 'openssl-tests.log': Buffer.from('Result: FAIL') } }, policy), /test log differs/);
+assert.throws(() => verifyOpenSsl({ ...input, manifest: { ...input.manifest, version: input.manifest.runtimeVersion } }, policy), /Unreviewed OpenSSL version/);
 for (let index = 0; index < result.sbom.artifacts.length; index++) {
   const original = input.rawSbom.artifacts[index];
   const decorated = result.sbom.artifacts[index];

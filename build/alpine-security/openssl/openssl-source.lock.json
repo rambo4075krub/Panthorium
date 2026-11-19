@@ -162,7 +162,7 @@
     }
   ],
   "buildRecipe": {
-    "sha256": "116c3573a49585b190c7a263055d9aff35633a2458d295e4d2a5ae0586924ad0",
+    "sha256": "40e47f0bce321df6762d0cca5c477cb6bfd50863fc85eddb3314ca2ba9a5e0f5",
     "sourceDateEpoch": 1790690700,
     "tests": [
       "make -j2 test",

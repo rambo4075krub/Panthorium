@@ -11,7 +11,7 @@ const directory = path.join(__dirname, '../build/alpine-security/openssl');
 
 // Preserve the complete APK inventory. Qualifiers identify the exact repaired
 // library and image; versions, CPEs, ownership, metadata and packages stay intact.
-function verifyOpenSsl({ rawSbom, manifest, lock, binaries, image, patches }, policy = reviewedPolicy) {
+function verifyOpenSsl({ rawSbom, manifest, lock, binaries, image, patches, testLogs }, policy = reviewedPolicy) {
   assert.equal(policy.schemaVersion, 1);
   assert.equal(image.Os, 'linux');
   assert.equal(image.Architecture, 'amd64');
@@ -24,6 +24,13 @@ function verifyOpenSsl({ rawSbom, manifest, lock, binaries, image, patches }, po
   assert.equal(lock.version, '3.5.9');
   assert.equal(lock.packageVersion, '3.5.9-r1');
   for (const key of Object.keys(lock)) assert.deepEqual(manifest[key], lock[key], `Unreviewed OpenSSL ${key}`);
+  assert.match(manifest.runtimeVersion || '', /^OpenSSL 3\.5\.9 /);
+  for (const name of ['openssl-tests.log', 'openssl-security-tests.log']) {
+    assert.ok(Buffer.isBuffer(testLogs?.[name]), 'OpenSSL test evidence missing');
+    assert.equal(sha256(testLogs[name]), manifest.testLogs?.[name], 'OpenSSL test log differs from manifest');
+  }
+  assert.match(testLogs['openssl-tests.log'].toString('utf8'), /All tests successful\.[\s\S]*Result: PASS/);
+  assert.ok(testLogs['openssl-security-tests.log'].toString('utf8').includes('PASS: empty AAD retains authentication, context reuse clears stale AAD, invalid nonce lengths rejected'));
   for (const patch of [lock.distributionPatch, ...lock.patches]) {
     assert.equal(sha256(patches[patch.file]), patch.sha256, 'OpenSSL patch bytes differ');
   }
@@ -79,6 +86,7 @@ function loadOpenSslEvidence(evidenceDirectory, image) {
   const lock = JSON.parse(fs.readFileSync(path.join(directory, 'openssl-source.lock.json'), 'utf8'));
   return {
     rawSbom: read('container-sbom.raw.syft.json'), manifest: read('openssl-source.json'), lock, image,
+    testLogs: Object.fromEntries(['openssl-tests.log', 'openssl-security-tests.log'].map(name => [name, fs.readFileSync(path.join(evidenceDirectory, name))])),
     binaries: Object.fromEntries(['libcrypto.so.3', 'libssl.so.3'].map(name => [name, fs.readFileSync(path.join(evidenceDirectory, name))])),
     patches: Object.fromEntries([lock.distributionPatch, ...lock.patches].map(patch => [patch.file, fs.readFileSync(path.join(directory, patch.file))]))
   };
