@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "sourceLockSha256": "6a05a6ec30a29b5443ba4ae7a343c1b378d104884e6e96315a1e65c9bc8c7186",
   "binaries": {
-    "libcrypto.so.3": "UNREVIEWED",
-    "libssl.so.3": "UNREVIEWED"
+    "libcrypto.so.3": "15af8b5686389770ea7a911fd8292cda0d1e698e5ce4f33cadf81f8a38dd0f70",
+    "libssl.so.3": "6f786873192d8185f55be57c12ee26c882cb5ddf6a7e8f6dd5327f8295961995"
   },
   "vulnerabilities": [
     "CVE-2026-107493",
@@ -15,5 +15,7 @@
     "CVE-2026-95691",
     "CVE-2026-95692"
   ],
-  "evidenceRun": "Pending independent candidate review; this policy cannot authorize a release"
+  "evidenceRun": "https://github.com/rambo4075krub/Panthorium/actions/runs/44440211900",
+  "reviewedAt": "2026-11-19",
+  "reproducedFrom": "https://github.com/rambo4075krub/Panthorium/actions/runs/44439228004"
 }
