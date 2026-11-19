@@ -195,7 +195,10 @@ function verifyReports(raw, filtered, vex, record) {
     const rule = match.appliedIgnoreRules[0];
     assert.equal(rule.namespace, 'vex');
     assert.equal(rule['vex-status'], exact.status);
-    if (exact.justification) assert.equal(rule['vex-justification'], exact.justification);
+    // Grype 0.118 omits justification from its applied rule. The exact VEX
+    // statement, its justification and compiled-code evidence were verified
+    // above; an explicitly different rule justification is still forbidden.
+    if (exact.justification) assert.ok([undefined, exact.justification].includes(rule['vex-justification']), 'Unexpected VEX justification');
     // Grype 0.118 can omit the rule's vulnerability field. The finding itself
     // was matched above to the exact reviewed CVE and artifact, not this label.
     assert.ok([undefined, '', exact.vulnerability, `https://nvd.nist.gov/vuln/detail/${exact.vulnerability}`].includes(rule.vulnerability));

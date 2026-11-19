@@ -1,11 +1,20 @@
 FROM node:24.22.3-alpine AS native-security-build
 RUN apk add --no-cache alpine-sdk meson python3-dev py3-packaging libffi-dev pcre2-dev 'zlib-dev>=1.4-r0' gettext-dev bash perl linux-headers
-COPY build/alpine-security/ /build/alpine-security/
+# Only compilation inputs invalidate the native build cache. Review policies
+# remain in the complete application checkout and are enforced after the build.
+COPY build/alpine-security/build.sh /build/alpine-security/
+COPY build/alpine-security/glib/ /build/alpine-security/glib/
+COPY build/alpine-security/expat/ /build/alpine-security/expat/
+COPY build/alpine-security/openssl/APKBUILD build/alpine-security/openssl/*.patch \
+    build/alpine-security/openssl/openssl-fips.post-install build/alpine-security/openssl/apply-patches.py \
+    build/alpine-security/openssl/record-build.mjs build/alpine-security/openssl/openssl-source.lock.json \
+    build/alpine-security/openssl/test-security.c /build/alpine-security/openssl/
 RUN sh /build/alpine-security/build.sh
 
 FROM node:24.22.3-alpine AS media-build
 RUN apk add --no-cache build-base pkgconf nasm patch x264-dev opus-dev libass-dev 'zlib-dev>=1.4-r0'
-COPY build/media/ /build/media/
+COPY build/media/*.lock.json build/media/build-ffmpeg.mjs build/media/test-encoder-geometry.c /build/media/
+COPY build/media/patches/ /build/media/patches/
 RUN node /build/media/build-ffmpeg.mjs
 
 FROM node:24.22.3-alpine AS runtime

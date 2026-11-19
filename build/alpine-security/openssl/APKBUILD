@@ -258,11 +258,20 @@ build() {
 	# dump configuration into logs
 	perl configdata.pm --dump
 
-	make -j2
+	make -j2 > "$srcdir/openssl-build.log" 2>&1 || {
+		tail -n 160 "$srcdir/openssl-build.log"
+		return 1
+	}
 }
 
 check() {
-    make -j2 test
+	make -j2 test > "$srcdir/openssl-tests.log" 2>&1 || {
+		tail -n 160 "$srcdir/openssl-tests.log"
+		return 1
+	}
+	tail -n 40 "$srcdir/openssl-tests.log"
+	$CC $CFLAGS -Iinclude -I. /build/alpine-security/openssl/test-security.c -L. -lcrypto -o test-security
+	LD_LIBRARY_PATH="$builddir" ./test-security
 }
 
 package() {

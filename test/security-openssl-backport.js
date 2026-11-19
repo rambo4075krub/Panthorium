@@ -10,7 +10,10 @@ for (let index = 0; index < result.sbom.artifacts.length; index++) {
   const original = input.rawSbom.artifacts[index];
   const decorated = result.sbom.artifacts[index];
   assert.deepEqual({ ...decorated, purl: original.purl }, original, 'Only binding qualifiers may change');
-  assert.ok(decorated.purl.startsWith(original.purl + '&checksum='));
+  assert.equal(decorated.purl.split('?')[0], original.purl.split('?')[0]);
+  const qualifiers = new URLSearchParams(decorated.purl.split('?')[1]);
+  qualifiers.delete('checksum'); qualifiers.delete('image_id');
+  assert.equal(qualifiers.toString(), original.purl.split('?')[1]);
 }
 for (const library of ['libcrypto.so.3', 'libssl.so.3']) {
   assert.throws(() => verifyOpenSsl({ ...input, binaries: { ...input.binaries, [library]: Buffer.from('\x7fELFtampered') } }, policy), /reviewed executable/);

@@ -88,6 +88,9 @@ for (const profile of ['backend', 'speaker', 'speaker-candidate-noble']) {
   const absentAudit = verifyReports({ ...raw, matches: [absent] }, { ...filtered, matches: [], ignoredMatches: [{ ...absent, appliedIgnoreRules: [absentRule] }] }, vex, record);
   assert.equal(absentAudit.verifiedNotAffectedMatches.length, 1);
   assert.equal(absentAudit.verifiedFixedMatches.length, 0, 'Absent code must not be reported as a source fix');
+  const omittedJustification = { ...absentRule }; delete omittedJustification['vex-justification'];
+  assert.equal(verifyReports({ ...raw, matches: [absent] }, { ...filtered, matches: [], ignoredMatches: [{ ...absent, appliedIgnoreRules: [omittedJustification] }] }, vex, record).verifiedNotAffectedMatches.length, 1);
+  assert.throws(() => verifyReports({ ...raw, matches: [absent] }, { ...filtered, matches: [], ignoredMatches: [{ ...absent, appliedIgnoreRules: [{ ...absentRule, 'vex-justification': 'component_not_present' }] }] }, vex, record), /Unexpected VEX justification/);
   assert.throws(() => verifyReports(raw, { ...filtered, matches: [] }, vex, record), /changed or disappeared/);
   const concealed = clone(filtered); concealed.ignoredMatches.push({ ...concealed.matches.pop(), appliedIgnoreRules: [ignore] });
   assert.throws(() => verifyReports(raw, concealed, vex, record), /unrelated vulnerability/);

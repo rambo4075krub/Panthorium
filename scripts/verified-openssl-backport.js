@@ -53,7 +53,12 @@ function verifyOpenSsl({ rawSbom, manifest, lock, binaries, image, patches }, po
     assert.ok(artifact.purl.startsWith(`pkg:apk/alpine/${name}@${lock.packageVersion}?`));
     assert.ok(!/[?&](?:checksum|image_id)=/.test(artifact.purl), 'OpenSSL artifact was already qualified');
     const originalPurl = artifact.purl;
-    artifact.purl += `&checksum=sha256%3A${digest}&image_id=${encodeURIComponent(image.Id)}`;
+    const [base, query] = artifact.purl.split('?');
+    const qualifiers = new URLSearchParams(query);
+    qualifiers.set('checksum', `sha256:${digest}`);
+    qualifiers.set('image_id', image.Id);
+    qualifiers.sort();
+    artifact.purl = `${base}?${qualifiers}`;
     verified.push({ name, version: artifact.version, library, sha256: digest, originalPurl, artifactPurl: artifact.purl });
   }
   return {

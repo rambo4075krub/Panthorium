@@ -162,8 +162,12 @@
     }
   ],
   "buildRecipe": {
-    "sha256": "bbbe063ddcb21279a617a4c629a675af0983edb9907d4cfecb82ae8637cda87a",
+    "sha256": "116c3573a49585b190c7a263055d9aff35633a2458d295e4d2a5ae0586924ad0",
     "sourceDateEpoch": 1790690700,
-    "tests": "make -j2 test"
+    "tests": [
+      "make -j2 test",
+      "AES-GCM-SIV authentication and nonce regression"
+    ],
+    "regressionSha256": "0ba979bd81ea474e742258d26fe9a7dbc53ad719270bad9732a698457efedb35"
   }
 }
