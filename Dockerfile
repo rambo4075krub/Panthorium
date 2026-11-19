@@ -1,5 +1,5 @@
 FROM node:24.22.3-alpine AS native-security-build
-RUN apk add --no-cache alpine-sdk meson python3-dev py3-packaging libffi-dev pcre2-dev 'zlib-dev>=1.4-r0' gettext-dev bash
+RUN apk add --no-cache alpine-sdk meson python3-dev py3-packaging libffi-dev pcre2-dev 'zlib-dev>=1.4-r0' gettext-dev bash perl linux-headers
 COPY build/alpine-security/ /build/alpine-security/
 RUN sh /build/alpine-security/build.sh
 
