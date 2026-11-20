@@ -1,6 +1,6 @@
 'use strict';
 const Stripe = require('stripe');
-const { CheckoutOrderStore, fail, uuid } = require('./checkoutOrderStore');
+const { CheckoutOrderStore, CheckoutError, fail, uuid } = require('./checkoutOrderStore');
 const INTEGRATION = 'panthorium_hosted_checkout_nvkqfdra';
 const API_VERSION = '2026-10-28.endive';
 const EVENTS = new Set(['checkout.session.completed', 'checkout.session.async_payment_succeeded', 'checkout.session.async_payment_failed', 'checkout.session.expired', 'charge.refunded', 'charge.dispute.created', 'charge.dispute.updated', 'charge.dispute.closed']);
@@ -24,8 +24,11 @@ class StripeBillingService {
     const base = { provider: 'stripe', policyVersion: require('../privacy-notice').version, configured: this.configured(), connected: false, mode: this.mode, checkoutEnabled: false, paymentMethods: ['stripe_checkout'], grantsRealEntitlements: this.live, automaticRenewal: false };
     if (!base.configured) return base;
     if (!this.health || Date.now() - this.health.at > 60000) {
-      try { await this.client.checkout.sessions.list({ limit: 1 }); this.health = { at: Date.now(), ok: true }; }
-      catch { this.health = { at: Date.now(), ok: false }; }
+      this.healthCheck ??= this.client.checkout.sessions.list({ limit: 1 }).then(
+        () => { this.health = { at: Date.now(), ok: true }; },
+        () => { this.health = { at: Date.now(), ok: false }; }
+      ).finally(() => { this.healthCheck = null; });
+      await this.healthCheck;
     }
     return { ...base, connected: this.health.ok, checkoutEnabled: this.health.ok };
   }
@@ -111,22 +114,51 @@ class StripeBillingService {
     if (session.status === 'open') await this.client.checkout.sessions.expire(session.id);
     return this.store.view(await this.reconcile(row));
   }
-  async webhook(raw, signature) {
+  async webhook(raw, signature, requestId) {
     this.requireConfig(); let event;
     try { event = this.client.webhooks.constructEvent(raw, signature, this.webhookSecret); } catch { fail('invalid_signature', 400); }
     if (event.livemode !== this.live || event.account) fail('payment_mismatch', 400);
     if (!EVENTS.has(event.type)) return { ignored: true };
+    const eventId = event.id;
+    if (typeof eventId !== 'string' || !/^evt_[A-Za-z0-9_-]{1,240}$/.test(eventId)) fail('payment_mismatch', 400);
+    const object = event.data.object;
+    if (event.type.startsWith('checkout.session.') && object.metadata?.integration !== INTEGRATION) return { ignored: true };
+    const claimedOrder = object.metadata?.panthorium_order_id;
+    const traceId = typeof requestId === 'string' ? requestId.slice(0, 160) : null;
+    try {
+      await this.store.init();
+      const receipt = await this.pool.query(`INSERT INTO panthorium_stripe_webhook_receipts
+        (live,event_id,event_type,order_id,last_request_id) VALUES($1,$2,$3,$4,$5)
+        ON CONFLICT(live,event_id) DO UPDATE SET attempts=panthorium_stripe_webhook_receipts.attempts+1,
+          last_received=NOW(),last_request_id=EXCLUDED.last_request_id RETURNING processed_at`,
+        [this.live,eventId,event.type,uuid(claimedOrder) ? claimedOrder : null,traceId]);
+      if (receipt.rows[0].processed_at) return { received: true };
+      const orderId = await this.applyWebhook(event);
+      // Settlement already enforces one grant and ledger entry per payment.
+      // A delivery retried between settlement and this update is safe to replay.
+      await this.pool.query(`UPDATE panthorium_stripe_webhook_receipts SET processed_at=COALESCE(processed_at,NOW()),
+        order_id=COALESCE($3,order_id),last_error=NULL WHERE live=$1 AND event_id=$2`, [this.live,eventId,orderId]);
+      return orderId ? { received: true } : { ignored: true };
+    } catch (error) {
+      const code = error instanceof CheckoutError ? error.message : 'billing_unavailable';
+      console.error('[Stripe webhook]', eventId, code);
+      await this.pool.query(`UPDATE panthorium_stripe_webhook_receipts SET last_error=$3
+        WHERE live=$1 AND event_id=$2 AND processed_at IS NULL`, [this.live,eventId,code]).catch(() => {});
+      throw error;
+    }
+  }
+
+  async applyWebhook(event) {
     const object = event.data.object;
     let orderId, hint = {};
     if (event.type.startsWith('checkout.session.')) {
-      if (object.metadata?.integration !== INTEGRATION) return { ignored: true };
       orderId = object.metadata?.panthorium_order_id;
       hint = { sessionId: object.id, failed: event.type === 'checkout.session.async_payment_failed' };
     } else {
       const charge = event.type.startsWith('charge.dispute.') ? await this.client.charges.retrieve(idOf(object.charge)) : object;
-      if (!idOf(charge.payment_intent)) return { ignored: true };
+      if (!idOf(charge.payment_intent)) return null;
       const pi = await this.client.paymentIntents.retrieve(idOf(charge.payment_intent));
-      if (pi.metadata?.integration !== INTEGRATION) return { ignored: true };
+      if (pi.metadata?.integration !== INTEGRATION) return null;
       orderId = pi.metadata.panthorium_order_id;
       if (event.type.startsWith('charge.dispute.')) hint.disputeId = object.id;
     }
@@ -135,7 +167,7 @@ class StripeBillingService {
     // Session metadata also recovers creation responses lost to a timeout.
     if (!row.provider_id && !hint.sessionId) fail('payment_verification_required');
     await this.reconcile(row, hint);
-    return { received: true };
+    return orderId;
   }
 }
 module.exports = { StripeBillingService, checkoutUrl, INTEGRATION, API_VERSION, EVENTS };

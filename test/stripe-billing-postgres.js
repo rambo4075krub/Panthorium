@@ -33,8 +33,8 @@ async function run() {
     expire:async id=>{sessions.get(id).status='expired';return clone(sessions.get(id));}
   }},refunds:{list:({charge})=>({async *[Symbol.asyncIterator](){for(const r of refunds.get(charge)||[])yield clone(r);}})},disputes:{retrieve:async id=>clone(disputes.get(id)),list:async()=>({data:[...disputes.values()],has_more:false})},paymentIntents:{retrieve:async id=>clone([...sessions.values()].find(s=>s.payment_intent?.id===id).payment_intent)},charges:{retrieve:async id=>clone([...sessions.values()].find(s=>s.payment_intent?.latest_charge?.id===id).payment_intent.latest_charge)}};
   const service = new StripeBillingService({pool,secret:'rk_live_fixture',webhookSecret:'whsec_fixture',mode:'live',liveEnabled:true,client});
-  const event = async (type,object) => {
-    const raw=Buffer.from(JSON.stringify({id:'evt_'+randomUUID(),object:'event',type,livemode:true,created:Math.floor(Date.now()/1000),data:{object:clone(object)}}));
+  const event = async (type,object,eventId='evt_'+randomUUID()) => {
+    const raw=Buffer.from(JSON.stringify({id:eventId,object:'event',type,livemode:true,created:Math.floor(Date.now()/1000),data:{object:clone(object)}}));
     return service.webhook(raw,webhooks.generateTestHeaderString({payload:raw.toString(),secret:'whsec_fixture'}));
   };
   const pay = row => {
@@ -62,11 +62,18 @@ async function run() {
     session.payment_status='paid';
     const verifiedBalance=session.payment_intent.latest_charge.balance_transaction;
     session.payment_intent.latest_charge.balance_transaction=null;
-    await assert.rejects(event('checkout.session.async_payment_succeeded',session),/payment_verification_required/);
+    const retriedEvent='evt_'+randomUUID();
+    await assert.rejects(event('checkout.session.async_payment_succeeded',session,retriedEvent),/payment_verification_required/);
+    const receipt=async()=>(await pool.query('SELECT attempts,order_id,last_error,processed_at FROM panthorium_stripe_webhook_receipts WHERE live AND event_id=$1',[retriedEvent])).rows[0];
+    assert.equal((await receipt()).last_error,'payment_verification_required');
     assert.equal((await pool.query('SELECT COUNT(*) FROM panthorium_entitlement_grants')).rows[0].count,'0');
     session.payment_intent.latest_charge.balance_transaction=verifiedBalance;
     session.payment_intent.latest_charge.created=verifiedBalance.created-86400;
-    await Promise.all([event('checkout.session.async_payment_succeeded',session),event('checkout.session.completed',session),service.order('alice',row.id)]);
+    await Promise.all([event('checkout.session.async_payment_succeeded',session,retriedEvent),event('checkout.session.async_payment_succeeded',session,retriedEvent),event('checkout.session.completed',session),service.order('alice',row.id)]);
+    const recoveredReceipt=await receipt();
+    assert.equal(recoveredReceipt.attempts,3);assert.equal(recoveredReceipt.order_id,row.id);assert.equal(recoveredReceipt.last_error,null);assert(recoveredReceipt.processed_at);
+    await event('checkout.session.async_payment_succeeded',session,retriedEvent);
+    assert.equal((await receipt()).attempts,4);
     let grants=(await pool.query('SELECT * FROM panthorium_entitlement_grants')).rows;
     assert.equal(grants.length,1);assert.equal(grants[0].user_id,'alice');const expiry=grants[0].ends_at.toISOString();
     assert.equal(grants[0].starts_at.toISOString(),new Date(verifiedBalance.created*1000).toISOString());

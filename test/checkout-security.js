@@ -23,7 +23,7 @@ async function run(){
   assert.equal(new StripeBillingService({pool:{},secret:'rk_live_fixture',webhookSecret:'whsec_fixture',mode:'test'}).configured(),false);
   const auth={verifyAccessToken:token=>({sub:token,roles:token==='guest'?['guest']:['user']})};let created=0;
   const app=express();app.post('/api/billing/stripe/webhook',express.raw({type:'application/json'}),stripeWebhook(service));app.use(express.json());
-  app.use('/api/billing/stripe',createStripeBillingRouter(auth,{live:false,checkout:async(owner,product,key)=>{created++;assert.equal(owner,'alice');assert.equal(product,'life');assert.equal(key,'fixture');return{id:'order',amountSatang:18900,status:'pending'};}}));
+  app.use('/api/billing/stripe',createStripeBillingRouter(auth,{live:false,pending:async()=>[],checkout:async(owner,product,key)=>{created++;assert(owner==='alice'||owner.startsWith('buyer-'));assert.equal(product,'life');assert.equal(key,'fixture');return{id:'order',amountSatang:18900,status:'pending'};}}));
   app.use('/api/billing',createBillingRouter(auth,{},{stripePrimary:true,stripe:service}));
   const server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
   const base='http://127.0.0.1:'+server.address().port;
@@ -36,6 +36,16 @@ async function run(){
     assert.equal((await post('/api/billing/stripe/checkout',{...data,testAcknowledged:false},'alice')).status,400);
     const response=await post('/api/billing/stripe/checkout',data,'alice');assert.equal(response.status,200);assert.equal((await response.json()).order.amountSatang,18900);assert.equal(created,1);
     assert.equal((await post('/api/billing/checkout',data,'alice')).status,409,'legacy creation is closed after provider migration');
+    const checkoutPath='/api/billing/stripe/checkout';
+    const browseOrders=token=>fetch(base+'/api/billing/stripe/orders',{headers:{authorization:'Bearer '+token}});
+    const crowd=await Promise.all(Array.from({length:40},(_,i)=>post(checkoutPath,data,'buyer-'+i)));
+    assert(crowd.every(r=>r.status===200),'buyers on one IP each have a checkout allowance');
+    for(let i=0;i<10;i++)assert.equal((await post(checkoutPath,data,'buyer-write-limit')).status,200);
+    assert.equal((await post(checkoutPath,data,'buyer-write-limit')).status,429);
+    assert.equal((await browseOrders('buyer-write-limit')).status,200,'checkout pressure leaves order polling available');
+    for(let i=0;i<60;i++)assert.equal((await browseOrders('buyer-read-limit')).status,200);
+    assert.equal((await browseOrders('buyer-read-limit')).status,429);
+    assert.equal((await post(checkoutPath,data,'buyer-read-limit')).status,200,'polling cannot block a checkout');
     const raw='{\n "id":"evt_fixture", "type":"unrelated.event", "livemode":false\n}';
     const signature=sdk.webhooks.generateTestHeaderString({payload:raw,secret:'whsec_fixture'});
     assert.equal((await post('/api/billing/stripe/webhook',raw,null,{'stripe-signature':signature})).status,200);

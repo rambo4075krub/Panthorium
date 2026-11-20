@@ -30,6 +30,10 @@ class CheckoutOrderStore {
         checkout_url TEXT, expires_at TIMESTAMPTZ, paid_at TIMESTAMPTZ, collected_amount INTEGER CHECK(collected_amount>=0),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         UNIQUE(provider,user_id,request_key), UNIQUE(provider,provider_id));
+        CREATE TABLE IF NOT EXISTS panthorium_stripe_webhook_receipts (
+          live BOOLEAN NOT NULL, event_id TEXT NOT NULL, event_type TEXT NOT NULL, order_id UUID,
+          attempts INTEGER NOT NULL DEFAULT 1, last_received TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          processed_at TIMESTAMPTZ, last_error TEXT, last_request_id TEXT, PRIMARY KEY(live,event_id));
         ALTER TABLE ${this.orders} ADD COLUMN IF NOT EXISTS collected_amount INTEGER CHECK(collected_amount>=0);
         CREATE INDEX IF NOT EXISTS ${this.orders}_owner ON ${this.orders}(user_id,created_at);
         CREATE UNIQUE INDEX IF NOT EXISTS ${this.orders}_pending_membership ON ${this.orders}(user_id)

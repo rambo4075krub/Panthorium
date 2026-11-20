@@ -29,7 +29,13 @@ class GooglePlayBillingService {
   async status(){
     const base={provider:this.provider,policyVersion:require('../privacy-notice').version,mode:this.mode,configured:this.configured(),checkoutEnabled:false,connected:false,automaticRenewal:false,packageName:PACKAGE,products:catalog.products.filter(p=>p.kind!=='free').map(p=>({productId:p.id,storeProductId:sku(p.id),amountMicros:p.amountSatang*10000,currency:p.currency}))};
     if(!base.configured)return base;
-    if(!this.health||Date.now()-this.health.at>60000){try{const p=await this.api('/oneTimeProducts/'+sku('life'));this.health={at:Date.now(),ok:p.productId===sku('life')&&p.packageName===PACKAGE};}catch{this.health={at:Date.now(),ok:false};}}
+    if(!this.health||Date.now()-this.health.at>60000){
+      this.healthCheck ??= this.api('/oneTimeProducts/'+sku('life')).then(
+        p=>{this.health={at:Date.now(),ok:p.productId===sku('life')&&p.packageName===PACKAGE};},
+        ()=>{this.health={at:Date.now(),ok:false};}
+      ).finally(()=>{this.healthCheck=null;});
+      await this.healthCheck;
+    }
     return {...base,checkoutEnabled:this.health.ok,connected:this.health.ok};
   }
   seal(token,orderId){const iv=randomBytes(12),c=createCipheriv('aes-256-gcm',Buffer.from(this.encryptionKey,'hex'),iv);c.setAAD(Buffer.from(orderId));const data=Buffer.concat([c.update(token,'utf8'),c.final()]);return Buffer.concat([iv,c.getAuthTag(),data]).toString('base64');}
