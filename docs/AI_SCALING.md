@@ -31,6 +31,11 @@ also requires a positive per-account waiting allowance. Typed AI endpoints allow
 30 requests per verified account per minute with an aggregate ceiling of 300 per
 IP per minute. Account and global active limits still apply to each model call.
 
+Password sign-in accepts up to 120 attempts per IP per minute. A separate shared
+15-minute budget of 20 counts failed or in-flight sign-ins and existing account
+verification or recovery requests. Successful password sign-ins release their
+place in that budget. Security blocks still apply before credentials are checked.
+
 ## Queue and lease semantics
 
 - Releasing a slot reserves it for an eligible waiter in the same PostgreSQL

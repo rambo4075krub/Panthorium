@@ -6,7 +6,15 @@ const { requireAuth } = require("../middleware/auth");
 
 function createAuthRouter(authService, config, securityResponse, biometricRepository, biometrics, emailOtp) {
   const router = express.Router();
-  const limiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false });
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    // Completed password sign-ins no longer consume the venue's failure budget.
+    // OTP, recovery, registration and in-flight requests still count as before.
+    requestWasSuccessful: (req, res) => req.route?.path === '/login' && res.statusCode === 200
+  });
+  const loginTraffic = rateLimit({ windowMs: 60000, limit: 120, standardHeaders: true, legacyHeaders: false,
+    message: { ok: false, error: 'auth_rate_limited' } });
   const otpLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false });
   const guestLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 120, standardHeaders: true, legacyHeaders: false });
   router.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
@@ -136,7 +144,7 @@ function createAuthRouter(authService, config, securityResponse, biometricReposi
     }
   });
 
-  router.post("/login", limiter, async (req, res, next) => {
+  router.post("/login", loginTraffic, limiter, async (req, res, next) => {
     try {
       const { username, password } = req.body || {};
       if (typeof username !== "string" || typeof password !== "string" || username.length > 254 || password.length > 256) {
