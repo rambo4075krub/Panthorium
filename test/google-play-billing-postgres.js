@@ -16,7 +16,15 @@ async function run(){
     return{data:structuredClone(request.url.includes('/orders/')?details:purchase)};
   }}});
   try{
-    assert.equal((await service.status()).checkoutEnabled,true);
+    const status = await service.status();
+    assert.equal(status.checkoutEnabled,true);
+    const offered = status.products.map(product=>product.productId);
+    for (const id of ['storage-20','storage-50','storage-100']) {
+      assert(!offered.includes(id));
+      await assert.rejects(service.prepare('alice',id,randomUUID()),{message:'product_sales_paused',status:409});
+    }
+    assert(offered.includes('storage-5') && offered.includes('download-10'));
+    assert.equal((await pool.query('SELECT COUNT(*) FROM '+service.store.orders)).rows[0].count,'0');
     const order=await service.prepare('alice','life',randomUUID());assert.equal(order.accountId,accountId('alice'));assert.equal(order.storeProductId,sku('life'));
     purchase={kind:'androidpublisher#productPurchase',productId:sku('life'),purchaseState:2,consumptionState:0,quantity:1,obfuscatedExternalAccountId:accountId('alice'),obfuscatedExternalProfileId:order.id};
     await assert.rejects(service.verify('bob',order.id,token),/order_not_found/);

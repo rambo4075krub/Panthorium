@@ -46,6 +46,12 @@ async function run() {
   };
   try {
     assert.equal((await service.status()).checkoutEnabled,true);
+    await service.store.init();
+    for (const id of ['storage-20','storage-50','storage-100']) {
+      await assert.rejects(service.checkout('alice',id,randomUUID()),{message:'product_sales_paused',status:409});
+    }
+    assert.equal(creates,0);
+    assert.equal((await pool.query('SELECT COUNT(*) FROM '+service.store.orders)).rows[0].count,'0');
     const key=randomUUID();
     const pair=await Promise.all([service.checkout('alice','life',key),service.checkout('alice','life',key)]);
     assert.equal(pair[0].id,pair[1].id);assert.equal(creates,1);assert.equal(pair[0].amountSatang,18900);

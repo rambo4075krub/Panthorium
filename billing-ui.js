@@ -8,6 +8,7 @@
   const price = value => value.toLocaleString('th-TH') + ' บาท';
   const nativeAndroid = () => window.Capacitor?.isNativePlatform?.() === true || /\bPanthoriumAndroid\b/i.test(navigator.userAgent);
   const playPlugin = () => window.Capacitor?.Plugins?.PanthoriumBilling;
+  const pausedLabel = 'ปิดขายชั่วคราว';
 
   function node(tag, text, className) {
     const element = document.createElement(tag);
@@ -113,8 +114,8 @@
         card.appendChild(list);
         if (product.kind === 'free') card.appendChild(node('p', 'ไม่ต้องชำระเงิน · สิทธิ์จริงขึ้นกับบัญชี', 'pb-muted'));
         else {
-          const select = button('ดูรายละเอียดและยอดชำระ', () => checkout(product), 'pb-primary');
-          select.disabled = nativeAndroid() && (!playReady || !playOffers.has(product.id));
+          const select = button(product.purchasePaused ? pausedLabel : 'ดูรายละเอียดและยอดชำระ', () => checkout(product), 'pb-primary');
+          select.disabled = product.purchasePaused || (nativeAndroid() && (!playReady || !playOffers.has(product.id)));
           select.dataset.productId = product.id;
           card.appendChild(select);
         }
@@ -148,7 +149,7 @@
       main.append(note); announce.textContent = nativeAndroid() ? 'โปรไฟล์องค์กร • รุ่นทดลอง • สอบถามข้อมูลการใช้งานองค์กร' : 'โปรไฟล์องค์กร • กำหนดเงื่อนไขตามสัญญา • ไม่มีการเรียกเก็บเงินจากหน้านี้';
     }
     function checkout(product) {
-      if (nativeAndroid() && (!playReady || !playOffers.has(product.id))) return;
+      if (product.purchasePaused || (nativeAndroid() && (!playReady || !playOffers.has(product.id)))) return;
       nav.hidden = true;
       main.replaceChildren();
       main.appendChild(button('← กลับไปเลือกแพ็กเกจ', render, 'pb-back'));
@@ -269,7 +270,16 @@
           }
           if(sameAccount()) announce.textContent = mode==='live' ? 'รายการเงินจริง · กรุณาตรวจยอดและสถานะก่อนเริ่มรายการใหม่' : 'รายการนี้อยู่ในโหมด Test ไม่มีการเพิ่มสิทธิ์ใช้งานจริง';
         }
-        catch (error) {if(sameAccount()) {announce.textContent = ({paid_membership_required:'ต้องมีสมาชิก Life ขึ้นไปก่อนซื้อรายการนี้',membership_already_active:'มีสมาชิกที่ยังใช้งานได้อยู่ ต่ออายุได้เมื่อสิ้นรอบ',pending_membership_exists:'มีรายการสมาชิกที่รอชำระอยู่ กรุณาตรวจรายการเดิม'})[error.message] || 'ยังสร้างรายการไม่ได้ ลองรายการเดิมอีกครั้ง ระบบใช้รหัสเดิมเพื่อป้องกันรายการซ้ำ';pay.disabled = false;}}
+        catch (error) {
+          if (!sameAccount()) return;
+          if (error.message === 'product_sales_paused') {
+            pay.textContent = pausedLabel;
+            announce.textContent = product.name + ' ' + pausedLabel;
+            return;
+          }
+          announce.textContent = ({paid_membership_required:'ต้องมีสมาชิก Life ขึ้นไปก่อนซื้อรายการนี้',membership_already_active:'มีสมาชิกที่ยังใช้งานได้อยู่ ต่ออายุได้เมื่อสิ้นรอบ',pending_membership_exists:'มีรายการสมาชิกที่รอชำระอยู่ กรุณาตรวจรายการเดิม'})[error.message] || 'ยังสร้างรายการไม่ได้ ลองรายการเดิมอีกครั้ง ระบบใช้รหัสเดิมเพื่อป้องกันรายการซ้ำ';
+          pay.disabled = false;
+        }
         finally {busy = false;}
       }
       (async () => {try { const status = await api(nativeAndroid()?'/play/status':'/status');if(!sameAccount())return;provider=nativeAndroid()?'google_play':status.provider==='stripe'?'stripe':'omise';

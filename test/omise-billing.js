@@ -55,6 +55,13 @@ async function main(){
  const server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
  try{const base='http://127.0.0.1:'+server.address().port+'/api/billing';const send=(token,body)=>fetch(base+'/checkout',{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(body)});
  assert.equal((await send(null,{})).status,401);assert.equal((await send('guest',{})).status,403);
+ for (const productId of ['storage-20','storage-50','storage-100']) {
+   const before=pool.orders.size;
+   const blocked=await send('owner',{productId,requestKey:randomUUID(),testAcknowledged:true});
+   assert.equal(blocked.status,409);
+   assert.equal((await blocked.json()).error,'product_sales_paused');
+   assert.equal(pool.orders.size,before);
+ }
  assert.equal((await send('owner',{productId:'life'})).status,400);
  const response=await send('owner',{productId:'life',requestKey:key,testAcknowledged:true,amount:1,status:'paid'});assert.equal(response.status,200);assert.equal((await response.json()).order.amountSatang,18900);
  const forged=await fetch(base+'/webhook',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'evnt_live_fake',data:{status:'successful'}})});assert.equal(forged.status,400);

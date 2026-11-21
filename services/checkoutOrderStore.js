@@ -57,6 +57,7 @@ class CheckoutOrderStore {
   async begin(provider, userId, productId, requestKey) {
     const product = catalog.get(productId);
     if (!product || product.kind === 'free') fail('invalid_product', 400);
+    if (product.purchasePaused) fail('product_sales_paused', 409);
     if (!uuid(requestKey)) fail('invalid_request_key', 400);
     return this.transaction(userId, async c => {
       const old = (await c.query(`SELECT * FROM ${this.orders} WHERE provider=$1 AND user_id=$2 AND request_key=$3`, [provider, userId, requestKey])).rows[0];
