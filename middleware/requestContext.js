@@ -15,7 +15,7 @@ function requestContext(audit) {
         userId: req.user?.sub || null,
         ip: req.ip || req.socket?.remoteAddress || null,
         userAgent: req.headers["user-agent"] || null
-      });
+      }, { journalHttp: true });
     });
     next();
   };

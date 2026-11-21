@@ -2,14 +2,18 @@ const { canonicalIp } = require('./securityIp');
 const { migrateSecurityIps } = require('./securityIpMigration');
 const fs = require("fs");
 const path = require("path");
-const { createHash } = require("crypto");
+const { createHash, randomUUID } = require("crypto");
 const { getDatabasePool } = require('./databasePool');
+
+const { HttpAuditQueue } = require('./httpAuditQueue');
+const knownFields = new Set(["requestId", "actorUserId", "userId", "targetUserId", "ip", "method", "path", "status", "durationMs", "userAgent"]);
 
 class AuditService {
   constructor(options) {
     if (typeof options === "string") options = { file: options };
     options = options || {};
     this.file = options.file;
+    this.httpJournalFile = options.httpJournalFile || (this.file && this.file + '.pending.sqlite3');
     this.databaseUrl = options.databaseUrl || "";
     this.databaseSslMode = options.databaseSslMode || "disable";
     this.pool = null;
@@ -27,6 +31,8 @@ class AuditService {
         request_id TEXT, actor_user_id TEXT, target_user_id TEXT, ip TEXT, method TEXT, path TEXT,
         status INTEGER, duration_ms INTEGER, user_agent TEXT, metadata JSONB NOT NULL DEFAULT '{}'::jsonb
       );
+      ALTER TABLE panthorium_audit_events ADD COLUMN IF NOT EXISTS event_id UUID;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_panthorium_audit_event_id ON panthorium_audit_events(event_id) WHERE event_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_panthorium_audit_time ON panthorium_audit_events(time DESC);
       CREATE INDEX IF NOT EXISTS idx_panthorium_audit_event ON panthorium_audit_events(event);
       CREATE INDEX IF NOT EXISTS idx_panthorium_audit_actor ON panthorium_audit_events(actor_user_id);
@@ -41,6 +47,9 @@ class AuditService {
       CREATE INDEX IF NOT EXISTS idx_panthorium_alert_ack_expiry ON panthorium_security_alert_acknowledgements(expires_at);
     `);
     await migrateSecurityIps(this.pool, "audit");
+    if (this.httpJournalFile && !this.httpQueue) {
+      this.httpQueue = new HttpAuditQueue(this.httpJournalFile, rows => this.persist(rows));
+    }
   }
 
   subscribe(listener) {
@@ -49,31 +58,51 @@ class AuditService {
     return () => this.listeners.delete(listener);
   }
 
-  record(event, fields = {}) {
+  record(event, fields = {}, { journalHttp = false } = {}) {
     fields = { ...fields, ...(fields.ip ? { ip: canonicalIp(fields.ip) || null } : {}) };
     const writes = [];
     const entry = { time: new Date().toISOString(), event, ...fields };
-    if (this.file) writes.push(fs.promises.appendFile(this.file, JSON.stringify(entry) + "\n").catch(error => console.error("[Audit] File write failed:", error.message)));
+    const eventId = randomUUID();
+    if (this.file) writes.push(fs.promises.appendFile(this.file, JSON.stringify({ ...entry, eventId }) + "\n").catch(error => console.error("[Audit] File write failed:", error.message)));
     if (this.pool) {
-      const known = new Set(["requestId", "actorUserId", "userId", "targetUserId", "ip", "method", "path", "status", "durationMs", "userAgent"]);
-      const metadata = {};
-      for (const [key, value] of Object.entries(fields)) if (!known.has(key)) metadata[key] = value;
-      writes.push(this.pool.query(
-        `INSERT INTO panthorium_audit_events
-         (time,event,request_id,actor_user_id,target_user_id,ip,method,path,status,duration_ms,user_agent,metadata)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)`,
-        [entry.time, event, fields.requestId || null, fields.actorUserId || fields.userId || null, fields.targetUserId || null,
-          fields.ip || null, fields.method || null, fields.path || null,
-          Number.isFinite(Number(fields.status)) ? Number(fields.status) : null,
-          Number.isFinite(Number(fields.durationMs)) ? Number(fields.durationMs) : null,
-          fields.userAgent || null, JSON.stringify(metadata)]
-      ).catch((error) => console.error("[Audit] PostgreSQL write failed:", error.message)));
+      const row = {
+        event_id: eventId, time: entry.time, event, request_id: fields.requestId || null,
+        actor_user_id: fields.actorUserId || fields.userId || null, target_user_id: fields.targetUserId || null,
+        ip: fields.ip || null, method: fields.method || null, path: fields.path || null,
+        status: Number.isFinite(Number(fields.status)) ? Number(fields.status) : null,
+        duration_ms: Number.isFinite(Number(fields.durationMs)) ? Number(fields.durationMs) : null,
+        user_agent: fields.userAgent || null,
+        metadata: Object.fromEntries(Object.entries(fields).filter(([key]) => !knownFields.has(key)))
+      };
+      let queued = false;
+      if (journalHttp && event === 'http.request' && this.httpQueue) {
+        try {
+          this.httpQueue.append(row);
+          queued = true;
+        } catch (error) {
+          console.error('[Audit] Local HTTP journal unavailable:', error.code || error.name);
+        }
+      }
+      if (!queued) writes.push(this.persist([row]).catch(error => console.error("[Audit] PostgreSQL write failed:", error.message)));
     }
     for (const listener of this.listeners) {
       try { Promise.resolve(listener({ ...entry })).catch(() => {}); }
       catch { /* Observers cannot break the audited operation. */ }
     }
     return Promise.all(writes);
+  }
+
+  persist(rows) {
+    return this.pool.query(`INSERT INTO panthorium_audit_events
+      (event_id,time,event,request_id,actor_user_id,target_user_id,ip,method,path,status,duration_ms,user_agent,metadata)
+      SELECT * FROM jsonb_to_recordset($1::jsonb) AS e(event_id UUID,time TIMESTAMPTZ,event TEXT,request_id TEXT,
+        actor_user_id TEXT,target_user_id TEXT,ip TEXT,method TEXT,path TEXT,status INT,duration_ms INT,user_agent TEXT,metadata JSONB)
+      ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING`, [JSON.stringify(rows)]);
+  }
+
+  async close() {
+    await this.httpQueue?.close();
+    this.httpQueue = null;
   }
 
   normalizeFilters(filters = {}) {
@@ -126,7 +155,7 @@ class AuditService {
     if (this.pool) counts = (await this.pool.query("SELECT event,COUNT(*)::int AS count FROM panthorium_audit_events WHERE time>=NOW()-INTERVAL '24 hours' GROUP BY event")).rows;
     else { const map = new Map(); for (const e of this.fileWindow(Date.now()-86400000)) map.set(e.event,(map.get(e.event)||0)+1); counts = [...map].map(([event,count])=>({event,count})); }
     const count = event => counts.find(row=>row.event===event)?.count || 0;
-    return {total24h:counts.reduce((n,r)=>n+r.count,0),loginSuccess24h:count('auth.login_success'),loginFailed24h:count('auth.login_failed'),refresh24h:count('auth.refresh'),guestSessions24h:count('auth.guest_session'),userChanges24h:counts.filter(r=>r.event.startsWith('auth.user_')).reduce((n,r)=>n+r.count,0)};
+    return {...(this.httpQueue ? {httpHistory: this.httpQueue.stats()} : {}),total24h:counts.reduce((n,r)=>n+r.count,0),loginSuccess24h:count('auth.login_success'),loginFailed24h:count('auth.login_failed'),refresh24h:count('auth.refresh'),guestSessions24h:count('auth.guest_session'),userChanges24h:counts.filter(r=>r.event.startsWith('auth.user_')).reduce((n,r)=>n+r.count,0)};
   }
 
   async securityCounts() {

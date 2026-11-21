@@ -1,16 +1,15 @@
 'use strict';
 const { randomUUID } = require('node:crypto');
-const { setTimeout: delay } = require('node:timers/promises');
 const { getDatabasePool } = require('./databasePool');
 const { CapacityRepository } = require('./capacityRepository');
 const { ConcurrencyGate, capacityError } = require('./concurrencyGate');
 
 const DEFAULTS = Object.freeze({
-  text:       { limit: 8, maxQueue: 32, perUserLimit: 2, maxQueuedPerUser: 1, queueTimeoutMs: 15000 },
+  text:       { limit: 16, maxQueue: 64, perUserLimit: 2, maxQueuedPerUser: 1, queueTimeoutMs: 15000 },
   background: { limit: 2, maxQueue: 8, perUserLimit: 1, maxQueuedPerUser: 1, queueTimeoutMs: 15000 },
   image:      { limit: 2, maxQueue: 4, perUserLimit: 1, maxQueuedPerUser: 1, queueTimeoutMs: 15000 },
   media:      { limit: 1, maxQueue: 2, perUserLimit: 1, maxQueuedPerUser: 1, queueTimeoutMs: 15000 },
-  voice:      { limit: 50, maxQueue: 0, perUserLimit: 1, maxQueuedPerUser: 0, queueTimeoutMs: 1000 },
+  voice:      { limit: 75, maxQueue: 0, perUserLimit: 1, maxQueuedPerUser: 0, queueTimeoutMs: 1000 },
   local:      { limit: 5, maxQueue: 0, perUserLimit: 1, maxQueuedPerUser: 0, queueTimeoutMs: 1000 }
 });
 function policies(raw) {
@@ -30,7 +29,7 @@ function policies(raw) {
   }));
 }
 class SharedCapacityGate {
-  constructor({ repository, name, policy, pollMs = 750, audit } = {}) {
+  constructor({ repository, name, policy, pollMs = 200, audit } = {}) {
     Object.assign(this, { repository, name, policy, pollMs, audit });
     this.active = 0; this.queued = 0; this.admitting = 0; this.rejected = 0; this.completed = 0; this.waitMs = 0;
   }
@@ -54,7 +53,8 @@ class SharedCapacityGate {
         registered = true;
         if (state === 'active') break;
         if (!queued) { queued = true; this.queued++; }
-        await delay(Math.min(this.pollMs + Math.random()*100, Math.max(1,this.policy.queueTimeoutMs-(performance.now()-started))), undefined, { signal });
+        const remaining = this.policy.queueTimeoutMs - (performance.now() - started);
+        await this.repository.wait(ticketId, Math.min(this.pollMs + Math.random()*25, Math.max(1, remaining)), signal);
       } while (true);
       signal?.throwIfAborted();
       if (queued && performance.now()-started >= this.policy.queueTimeoutMs) throw capacityError();
@@ -63,8 +63,9 @@ class SharedCapacityGate {
     } catch (error) {
       // A commit response may be lost. Delete our ticket even after poll fails;
       // if the database is unavailable, its lease still expires.
-      await this.repository.release(ticketId).catch(() => {});
+      await this.repository.release(ticketId, this.name).catch(() => {});
       if (signal?.aborted) throw signal.reason;
+      if (queued && error.code === 'capacity_lease_lost') error = capacityError();
       this.rejected++;
       this.audit?.record('production.capacity_rejected', { lane: this.name, reason: error.code === 'system_busy' ? 'busy' : 'unavailable' });
       if (['system_busy','capacity_configuration_mismatch','capacity_lease_lost'].includes(error.code)) throw error;
@@ -97,7 +98,7 @@ class SharedCapacityGate {
     const release = async () => {
       if (released) return;
       released = true; clearInterval(heartbeat); clearTimeout(deadline); this.active--; this.completed++;
-      await this.repository.release(ticketId).catch(() => {});
+      await this.repository.release(ticketId, this.name).catch(() => {});
     };
     release.signal = signal;
     return release;

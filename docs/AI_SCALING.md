@@ -8,11 +8,11 @@ Development without a database uses an abortable in-memory gate.
 
 | Lane | Default active | Waiting | Active per account | Integration |
 | --- | ---: | ---: | ---: | --- |
-| text | 8 | 32 | 2 | Interactive gateway calls and streaming |
+| text | 16 | 64 | 2 | Interactive gateway calls and streaming |
 | background | 2 | 8 | 1 | Cloud App/organization drafts, office/work generation, media planning |
 | image | 2 | 4 | 1 | Creative Studio image generation |
 | media | 1 | 2 | 1 | Video render/timeline/transcription and Studio file edits |
-| voice | 50 | 0 | 1 | Authenticated Gemini Live connections |
+| voice | 75 | 0 | 1 | Authenticated Gemini Live connections |
 | local | 5 | 0 | 1 | Requests admitted to the existing local broker |
 
 These are admission limits, not measured model throughput or a supported-user
@@ -25,11 +25,24 @@ cannot bypass its gate. Explicit local selection, entitlement checks, locked
 tool-provider turns and no-replay-after-stream-output behavior remain in place.
 Do not add a second outer gate around calls already using the same lane.
 
+The production voice WebSocket accepts up to the configured active plus waiting
+slots per process. The shared gate enforces the aggregate ceiling. Voice waiting
+also requires a positive per-account waiting allowance. Typed AI endpoints allow
+30 requests per verified account per minute with an aggregate ceiling of 300 per
+IP per minute. Account and global active limits still apply to each model call.
+
+Password sign-in accepts up to 120 attempts per IP per minute. A separate shared
+15-minute budget of 20 counts failed or in-flight sign-ins and existing account
+verification or recovery requests. Successful password sign-ins release their
+place in that budget. Security blocks still apply before credentials are checked.
+
 ## Queue and lease semantics
 
-- A short transaction locks the scope/lane row, expires dead tickets and admits
-  the oldest eligible waiter. Per-account caps prevent one account monopolizing
-  the lane; a blocked account does not prevent other eligible accounts starting.
+- Releasing a slot reserves it for an eligible waiter in the same PostgreSQL
+  transaction. The owning process wakes its local waiters after commit. Other
+  processes observe their reservations on their next bounded poll, normally
+  within 225 ms. The scheduler fills free slots in FIFO order subject to each
+  account's active limit.
 - Tickets contain an account identifier and scheduling metadata, never prompts,
   transcripts, files, credentials or results. They are removed after completion,
   refusal, cancellation or timeout; expired records are purged on lane access.

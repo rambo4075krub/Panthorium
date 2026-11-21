@@ -55,3 +55,14 @@ The finance view includes Stripe, Google Play and historical Omise orders. Verif
 ## Validation before activation
 
 Run `npm run check`, `npm test`, `npm run test:postgres` against an explicitly isolated `TEST_DATABASE_URL`, and the Android release build smoke check. Run a real sandbox checkout and licensed Play test purchase, including cancel/pending/duplicate callback/restore/refund cases. Verify no production entitlement is created by either test mode. Confirm signed webhook delivery and account ownership on the notebook backend. Enable live settings only after provider tests pass and the correct release is active.
+
+### Campaign traffic and webhook recovery
+
+Authenticated billing routes have separate per-account allowances of 10 mutations
+and 60 status reads per minute per channel, plus an aggregate IP limit of 3,600
+per minute per router. Stripe verifies signatures and the mode before accepting
+a relevant event. Look up the signed event ID and mode in
+`panthorium_stripe_webhook_receipts` to see the order ID, number of attempts,
+last request ID, last error and completion time. A failed attempt can be
+retried. A processed event can be acknowledged again. Settlement continues to
+deduplicate income and entitlements by payment and order.

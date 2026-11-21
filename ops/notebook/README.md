@@ -56,3 +56,25 @@ receipt confirms whether it was actually activated.
 
 The controller's explicit deploy command is an operator-only recovery/bootstrap
 path. Scheduled operation only invokes agent.py once and enforces the CI refs.
+
+## Billing recovery drill
+
+Run the following on a Windows host prepared with the notebook controller, local
+PostgreSQL service and the deployment role for the selected stage. The drill
+checks both manifest hashes, restores into a newly named probe database, and
+compares each paid Stripe order with its entitlement and income. It reports
+aggregate counts and removes only the database it created.
+
+```powershell
+python ops/notebook/verify-billing-backup.py 'D:\Panthorium\Deploy\operations\production\<operation>\before-activation'
+```
+
+For a second host, restore an approved backup into an isolated database and
+storage directory first. Keep scheduled jobs, live providers and incoming
+traffic disabled during the drill. Verify logins, storage and billing counts,
+then record the backup timestamp and elapsed restore time. A traffic cutover
+requires a final snapshot after draining the previous writer. Start the standby
+with that snapshot, verify health and purchase reconciliation, then switch the
+route. Only one host should accept writes and run billing jobs at a time.
+On notebook deployments the pending HTTP audit journal is in the backed-up
+`objects.sqlite3` database and resumes after application startup.

@@ -127,7 +127,10 @@ app.use(require("./services/securityIp").requestIdentity(config.trustProxy));
 const authRepository = createAuthRepository(config);
 const biometricIdentityRepository = createBiometricIdentityRepository(config);
 const emailOtpRepository = createEmailOtpRepository(config);
-const audit = new AuditService({ file: config.auditFile, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
+const audit = new AuditService({
+  file: config.auditFile, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode,
+  httpJournalFile: process.env.PANTHORIUM_OBJECT_ROOT ? path.join(process.env.PANTHORIUM_OBJECT_ROOT, 'objects.sqlite3') : undefined
+});
 const securityResponse = new SecurityResponseService({ audit, databaseUrl: config.databaseUrl, databaseSslMode: config.databaseSslMode });
 const authService = new AuthService({ repository: authRepository, config, audit });
 const biometrics = new BiometricIdentityService({ repository: biometricIdentityRepository, audit, providerUrl: config.biometricSpeakerUrl, providerToken: config.biometricSpeakerToken, encryptionKey: config.biometricTemplateKey, gateEnabled: config.biometricGateEnabled, matchThreshold: config.biometricVoiceThreshold, enrollmentThreshold: config.biometricEnrollmentThreshold });
@@ -436,11 +439,13 @@ function renderShell() {
   return html;
 }
 
+let shellHtml;
 function serveShell(req, res, next) {
   try {
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.set("Surrogate-Control", "no-store");
-    res.type("html").send(renderShell());
+    shellHtml ??= renderShell();
+    res.type("html").send(shellHtml);
   } catch (error) {
     next(error);
   }
@@ -608,6 +613,7 @@ async function start() {
 
   const liveGateway = process.env.GEMINI_LIVE_ENABLED === "1"
     ? createGeminiLiveWebSocketGateway({ authService, securityResponse, trustProxy: config.trustProxy, allowedOrigins: config.allowedOrigins, location: process.env.GEMINI_LIVE_LOCATION || "us-central1", functionCalling: agentFunctionCalling, entitlements:liveEntitlements,
+      maxSessions: workloadCapacity.policy.voice.limit + workloadCapacity.policy.voice.maxQueue,
       capacityGate: workloadCapacity.gate('voice'),
       sessionStore: voiceSessions.available() ? voiceSessions : null,
       contextProvider: args => cloudApps.voiceContext(args),
@@ -679,6 +685,7 @@ if (require.main === module) {
       deadline.unref();
       server.close(async () => {
         try {
+          await audit.close();
           await closeDatabasePools();
           clearTimeout(deadline);
           process.exit(0);

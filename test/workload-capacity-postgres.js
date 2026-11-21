@@ -63,6 +63,18 @@ async function main() {
     assert.equal((await one.snapshot()).find(row=>row.lane==='fair').active,2);
     await other();await owner();await (await queued)();
 
+    // Reserve the next slot during release, even when its remote owner is asleep.
+    const reservePolicy={...base,limit:1,maxQueue:2};
+    const firstId=randomUUID(),secondId=randomUUID(),thirdId=randomUUID();
+    const register=(ticketId,userId)=>two.poll({lane:'reserve',policy:reservePolicy,ticketId,userId,create:true});
+    assert.equal(await register(firstId,'one'),'active');
+    assert.equal(await register(secondId,'two'),'waiting');
+    assert.equal(await register(thirdId,'three'),'waiting');
+    await one.release(firstId,'reserve');
+    const reserved=await second.query("SELECT ticket_id FROM panthorium_capacity_tickets WHERE lane='reserve' AND state='active'");
+    assert.equal(reserved.rows[0].ticket_id,secondId);
+    await one.release(secondId,'reserve');await one.release(thirdId,'reserve');
+
     const crashed=randomUUID();
     assert.equal(await one.poll({lane:'crash',policy:base,ticketId:crashed,userId:'dead-worker',create:true}),'active');
     await first.query("UPDATE panthorium_capacity_tickets SET expires_at=clock_timestamp()-INTERVAL '1 second' WHERE ticket_id=$1",[crashed]);

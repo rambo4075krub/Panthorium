@@ -9,7 +9,7 @@ const { createEventStream, createVoiceChallenge, matchVoiceChallenge } = require
 const { safeOutput } = require('./agentFunctionCallingService');
 
 const AUTH_TIMEOUT_MS = 5000;
-const MAX_SESSIONS_PER_INSTANCE = 50;
+const MAX_SESSIONS_PER_INSTANCE = require('./workloadCapacity').DEFAULTS.voice.limit;
 const LIVE_SETUP_TIMEOUT_MS = 30000;
 const TOOL_APPROVAL_TIMEOUT_MS = 60000;
 
