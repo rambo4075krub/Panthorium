@@ -58,6 +58,7 @@ class OmiseBillingService {
   async checkout(userId,productId,key) {
     const product=catalog.get(productId);
     if (!product || product.kind==='free') fail('invalid_product',400);
+    if (product.purchasePaused) fail('product_sales_paused',409);
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(key || '')) fail('invalid_request_key',400);
     await this.init();
     // Durable insert wins before any network call; duplicate/ambiguous requests never create another charge.

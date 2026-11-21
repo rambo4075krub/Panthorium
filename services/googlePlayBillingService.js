@@ -27,7 +27,9 @@ class GooglePlayBillingService {
     catch { fail('google_play_unavailable'); }
   }
   async status(){
-    const base={provider:this.provider,policyVersion:require('../privacy-notice').version,mode:this.mode,configured:this.configured(),checkoutEnabled:false,connected:false,automaticRenewal:false,packageName:PACKAGE,products:catalog.products.filter(p=>p.kind!=='free').map(p=>({productId:p.id,storeProductId:sku(p.id),amountMicros:p.amountSatang*10000,currency:p.currency}))};
+    const products = catalog.products.filter(p => p.kind !== 'free' && !p.purchasePaused)
+      .map(p => ({productId:p.id,storeProductId:sku(p.id),amountMicros:p.amountSatang*10000,currency:p.currency}));
+    const base={provider:this.provider,policyVersion:require('../privacy-notice').version,mode:this.mode,configured:this.configured(),checkoutEnabled:false,connected:false,automaticRenewal:false,packageName:PACKAGE,products};
     if(!base.configured)return base;
     if(!this.health||Date.now()-this.health.at>60000){
       this.healthCheck ??= this.api('/oneTimeProducts/'+sku('life')).then(

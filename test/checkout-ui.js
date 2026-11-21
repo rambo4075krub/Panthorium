@@ -12,14 +12,16 @@ async function scenario(native,checkoutPath='c'){
   let created=0,verified=0,productCalls=0,invalidUrl=true;
   const response=data=>({ok:true,json:async()=>({ok:true,...data})});
   const baseStatus={mode:'live',policyVersion:policy.version,checkoutEnabled:true};
+  const offers = [['life',189],['storage-5',49],['storage-20',129],['storage-50',279],['storage-100',499],['download-10',99]]
+    .map(([productId,baht]) => ({productId,storeProductId:'panthorium_'+productId.replaceAll('-','_'),amountMicros:baht*1000000,currency:'THB'}));
   if(native)w.Capacitor={isNativePlatform:()=>true,Plugins:{PanthoriumBilling:{
-    getProducts:async()=>{productCalls++;return{products:[{storeProductId:'panthorium_life',offerToken:'offer_fixture',amountMicros:189000000,currency:'THB',formattedPrice:'฿189.00'}]};},
+    getProducts:async()=>{productCalls++;return{products:offers.map(offer=>({...offer,offerToken:'offer_fixture'}))};},
     restorePurchases:async()=>({purchases:[]}),
     purchase:async options=>{assert.equal(options.storeProductId,'panthorium_life');assert.equal(options.orderId,'order_fixture');return{purchases:[{orderId:options.orderId,purchaseToken:'receipt_fixture'}]};}
   }}};
   w.fetch=async(url,options={})=>{
     if(url.endsWith('/entitlements'))return response({plan:'life',expiresAt:new Date(Date.now()+86400000).toISOString(),grants:[],remaining:{aiCredits:1000}});
-    if(url.endsWith('/play/status'))return response({...baseStatus,provider:'google_play',products:[{productId:'life',storeProductId:'panthorium_life',amountMicros:189000000,currency:'THB'}]});
+    if(url.endsWith('/play/status'))return response({...baseStatus,provider:'google_play',products:offers});
     if(url.endsWith('/status'))return response({...baseStatus,provider:'stripe'});
     assert.equal(options.headers.Authorization,'Bearer alice');
     if(url.endsWith('/orders'))return response({orders:[]});
@@ -36,6 +38,16 @@ async function scenario(native,checkoutPath='c'){
   try{
     w.PanthoriumBilling.open();const root=w.document.querySelector('[data-billing-root]');
     if(native)await until(()=>productCalls===1&&!root.querySelector('[data-product-id="life"]').disabled);
+    root.querySelectorAll('.pb-tab')[2].click();
+    for (const id of ['storage-20','storage-50','storage-100']) {
+      const button = root.querySelector('[data-product-id="'+id+'"]');
+      assert.equal(button.textContent,'ปิดขายชั่วคราว');
+      assert.equal(button.disabled,true);
+      button.click();
+      assert.equal(root.querySelector('.pb-summary'),null);
+    }
+    for (const id of ['storage-5','download-10']) assert.equal(root.querySelector('[data-product-id="'+id+'"]').disabled,false);
+    root.querySelector('.pb-tab').click();
     root.querySelector('[data-product-id="life"]').click();await until(()=>!root.querySelector('.pb-summary > .pb-primary').disabled);
     assert.match(root.querySelector('[data-refund-policy]').textContent,/ไม่รับคืนเงินตามความสมัครใจ/);
     const pay=root.querySelector('.pb-summary > .pb-primary');pay.click();await pause();assert.equal(created,0);

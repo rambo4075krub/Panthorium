@@ -56,7 +56,10 @@
   [['S',29,70000],['M',99,500000],['L',249,1300000],['XL',499,2700000]].forEach(([size,price,credits])=>aiAddon('text-'+size.toLowerCase(),price,credits));
   [[5, 49, 1], [20, 129, 4], [50, 279, 10], [100, 499, 20]].forEach(([size, price, download]) => add('storage-' + size, 'Storage ' + size, 'storage', price, [
     `พื้นที่เพิ่ม ${size} GiB`, `ดาวน์โหลดเพิ่ม ${download} GiB/รอบ`, 'ไม่เพิ่มโควต้า AI · เฉพาะสมาชิก Life ขึ้นไป'
-  ], 'ต่ออายุรายเดือน · การซื้อกลางรอบต้องแจ้งยอดก่อนชำระ', { kind: 'subscription', paidMembershipRequired: true, quotas:{storageBytes:size*1024**3,downloadBytes:download*1024**3} }));
+  ], 'ต่ออายุรายเดือน · การซื้อกลางรอบต้องแจ้งยอดก่อนชำระ', {
+    kind: 'subscription', paidMembershipRequired: true, purchasePaused: [20, 50, 100].includes(size),
+    quotas: {storageBytes:size*1024**3,downloadBytes:download*1024**3}
+  }));
   add('download-10', 'Download 10', 'storage', 99, ['ดาวน์โหลดเพิ่ม 10 GiB', 'ไม่เพิ่มพื้นที่หรือโควต้า AI', 'เฉพาะสมาชิก Life ขึ้นไป'], 'ซื้อครั้งเดียว · อายุ 30 วันนับจากชำระ', { kind: 'one-time', paidMembershipRequired: true, quotas:{downloadBytes:10*1024**3} });
   // Bangkok-local, end-exclusive: restores the original plan on Dec 1 without a scheduled job.
   const freeTokenPromotion = Object.freeze({
@@ -76,5 +79,5 @@
   const displayDetails = (product, now = Date.now()) => product.id === 'free' && promotionAt(now)
     ? product.details.filter(detail=>!detail.startsWith('หรือคำตอบและการคิดอย่างเดียว')).map(detail => detail.startsWith('ข้อความเข้าอย่างเดียวสูงสุด') ? 'โควต้า Sentinel AI ไม่จำกัด ทั้งเสียงและข้อความในช่วงโปรโมชัน' : detail).concat('โปรโมชัน 18 ต.ค.–30 พ.ย. 2026 (เวลาไทย) · กลับโควต้าปกติ 1 ธ.ค. 2026')
     : product.details;
-  return Object.freeze({ version: '2026-11-18', aiRates, aiKeys, quotaPolicy, creditCost, creditBalance, serviceDescription, usageExplanation, conversionDetails, refundSummary, promotionAt, hasQuota, displayDetails, taxStatus: 'individual-not-vat-registered', products: Object.freeze(products), get: id => products.find(item => item.id === id) || null });
+  return Object.freeze({ version: '2026-11-21', aiRates, aiKeys, quotaPolicy, creditCost, creditBalance, serviceDescription, usageExplanation, conversionDetails, refundSummary, promotionAt, hasQuota, displayDetails, taxStatus: 'individual-not-vat-registered', products: Object.freeze(products), get: id => products.find(item => item.id === id) || null });
 });
