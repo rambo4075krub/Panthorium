@@ -4,7 +4,7 @@ const { verifyOpenSsl } = require('../scripts/verified-openssl-backport');
 const fixture = require('./helpers/openssl-security-fixture');
 const { input, policy, result } = fixture({ Id: `sha256:${'a'.repeat(64)}`, Os: 'linux', Architecture: 'amd64' });
 assert.throws(() => verifyOpenSsl(input), /not an independently reviewed executable/);
-assert.equal(result.statements.length, 16);
+assert.equal(result.statements.length, 24);
 assert.equal(result.sbom.artifacts.length, input.rawSbom.artifacts.length);
 assert.throws(() => verifyOpenSsl({ ...input, testLogs: {} }, policy), /test evidence missing/);
 assert.throws(() => verifyOpenSsl({ ...input, testLogs: { ...input.testLogs, 'openssl-tests.log': Buffer.from('Result: FAIL') } }, policy), /test log differs/);

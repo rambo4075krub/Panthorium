@@ -94,6 +94,7 @@ class AuthService {
       permissions: normalizeList(permissions, ALLOWED_PERMISSIONS),
       createdAt: new Date().toISOString()
     });
+    await this.onCustomerCreated?.(user);
     this.audit.record("auth.user_created", { actorId, userId: user.id, username: user.username });
     return this.publicUser(user);
   }
@@ -228,6 +229,7 @@ class AuthService {
       if (error.code === "23505" || error.message === "email_exists") throw new Error("email_exists");
       throw error;
     }
+    await this.onCustomerCreated?.(user);
     this.audit.record("auth.email_account_created", { actorId, userId: user.id });
     return user;
   }

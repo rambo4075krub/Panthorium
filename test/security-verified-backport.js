@@ -41,7 +41,7 @@ for (const profile of ['backend', 'speaker', 'speaker-candidate-noble']) {
   const createArtifacts = (evidence, review) => verifyArtifacts(evidence, review, opensslPolicy);
   assert.throws(() => createArtifacts(input), /not an independently reviewed executable/);
   const { vex, record } = createArtifacts(input, policy);
-  assert.equal(vex.statements.length, profile === 'backend' ? 46 : 30);
+  assert.equal(vex.statements.length, profile === 'backend' ? 54 : 30);
   assert.equal(vex.statements[0].status, 'fixed');
   assert.ok(vex.statements[0].products[0]['@id'].includes(`image_id=${encodeURIComponent(input.image.Id)}`));
   assert.ok(vex.statements[0].products[0]['@id'].includes(hash(input.binaries.ffmpeg)));

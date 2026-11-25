@@ -1,21 +1,25 @@
 {
   "schemaVersion": 1,
-  "sourceLockSha256": "6a05a6ec30a29b5443ba4ae7a343c1b378d104884e6e96315a1e65c9bc8c7186",
+  "sourceLockSha256": "1968cdf1180e69ced6a031d0687ee2747274743729aa0e9cf0b0ced8a5928520",
   "binaries": {
-    "libcrypto.so.3": "15af8b5686389770ea7a911fd8292cda0d1e698e5ce4f33cadf81f8a38dd0f70",
-    "libssl.so.3": "6f786873192d8185f55be57c12ee26c882cb5ddf6a7e8f6dd5327f8295961995"
+    "libcrypto.so.3": "7ebb0cd88770d6193da048bc71a6a9fd5e255f5f884f2d8fe87181b93c54de9a",
+    "libssl.so.3": "4be3967fa7aef378226fe3999e090d1e95d9dbac1c53ece4337d5379d3c81040"
   },
   "vulnerabilities": [
     "CVE-2026-107493",
+    "CVE-2026-107494",
     "CVE-2026-107496",
+    "CVE-2026-121482",
     "CVE-2026-124709",
     "CVE-2026-35190",
+    "CVE-2026-84785",
+    "CVE-2026-84786",
     "CVE-2026-88822",
     "CVE-2026-88823",
     "CVE-2026-95691",
     "CVE-2026-95692"
   ],
-  "evidenceRun": "https://github.com/rambo4075krub/Panthorium/actions/runs/44440211900",
+  "evidenceRun": "https://github.com/rambo4075krub/Panthorium/actions/runs/45550558675",
   "reviewedAt": "2026-11-19",
   "reproducedFrom": "https://github.com/rambo4075krub/Panthorium/actions/runs/44439228004"
 }

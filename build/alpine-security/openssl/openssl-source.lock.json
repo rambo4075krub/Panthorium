@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "openssl",
   "version": "3.5.9",
-  "packageVersion": "3.5.9-r1",
+  "packageVersion": "3.5.9-r2",
   "license": "Apache-2.0",
   "source": {
     "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz",
@@ -159,10 +159,89 @@
           "sha256": "7bceb5bdc408c3e5a46eb38944f5d16727b812e3e049dae6f2b2e4cdadce3616"
         }
       ]
+    },
+    {
+      "cves": [
+        "CVE-2026-121482"
+      ],
+      "commit": "468c287cf451a834b370b69ab321b8ffdfac23aa",
+      "url": "https://github.com/openssl/openssl/commit/468c287cf451a834b370b69ab321b8ffdfac23aa",
+      "file": "openssl-468c287cf451.patch",
+      "sha256": "c1cd7f81cb9599ed6b0463afd1f091d2698aff3e10633d906722cea39e9b42c9",
+      "patchedFiles": [
+        {
+          "path": "crypto/x509/x509_vfy.c",
+          "sha256": "1c825c2b2f17a1f6c47d3fba483fb4cae540d1dc29f6786f8f45d8f1940907bd",
+          "upstreamSha256": "b0d127f71a439bf83935fdbcdda3fdd5e38fa8cf66edfe493aa359d8820c087e"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-107494"
+      ],
+      "commit": "734c6cd7444bdbf589bfec917e47598c1b21ddd3",
+      "url": "https://github.com/openssl/openssl/commit/734c6cd7444bdbf589bfec917e47598c1b21ddd3",
+      "file": "openssl-734c6cd7444b.patch",
+      "sha256": "74b089fc3cb3e4bd169e87bc61bbed57a1d2524edcfc5b9fc1c5870b933f60d0",
+      "patchedFiles": [
+        {
+          "path": "include/internal/quic_channel.h",
+          "sha256": "3baf3cf15d701f818d08207824f2b9750c2976444a1d9d623192547a268fdc22"
+        },
+        {
+          "path": "ssl/quic/quic_channel.c",
+          "sha256": "f2d149fc745d3e0862d62ec94517c6558e7c813d0788e7862763d00a114e55a1",
+          "upstreamSha256": "726de1669c4e78af2f76be7a43c241458221a6c0368d0de3054513f0c12eaaca"
+        },
+        {
+          "path": "ssl/quic/quic_channel_local.h",
+          "sha256": "81e651ba367dcaa6c6a8582d66d315d69f9ad89e8221467fcf7bf25bc87b0346"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-84785"
+      ],
+      "commit": "7a14b6e410c881365881596231ea6f88e7d27c6e",
+      "url": "https://github.com/openssl/openssl/commit/7a14b6e410c881365881596231ea6f88e7d27c6e",
+      "file": "openssl-7a14b6e410c8.patch",
+      "sha256": "9a514184a3bce19ea0ee879e03278dd65c4fd46541dcc17865d26fbd20a405b8",
+      "patchedFiles": [
+        {
+          "path": "include/internal/quic_strm_reas.h",
+          "sha256": "418db989ae8e72d7d6a83c41c0844704d3e923fa003374bd0e0289ad7f0d87da"
+        },
+        {
+          "path": "ssl/quic/quic_strm_reas.c",
+          "sha256": "fc45e1dd59584c73b3b6cb27bae9939238d821f3fc13150984fdd674774b2d7d"
+        },
+        {
+          "path": "test/quic_stream_test.c",
+          "sha256": "e9ab3520db18ac0e2e1a017a50fceeb540a01d0f124ebc14aa5df830691c3357"
+        }
+      ]
+    },
+    {
+      "cves": [
+        "CVE-2026-84786"
+      ],
+      "commit": "1ad851363d5b8588b0d40edcc045fd633e93f0c2",
+      "url": "https://github.com/openssl/openssl/commit/1ad851363d5b8588b0d40edcc045fd633e93f0c2",
+      "file": "openssl-1ad851363d5b.patch",
+      "sha256": "4f1e1a73a70be64ad40aca4908eda5bc0eee969c7b17e33ce8f41d3f76e86002",
+      "patchedFiles": [
+        {
+          "path": "crypto/x509/x509_vfy.c",
+          "sha256": "0ef96f292f8fc84e01bc1486bcc9fc6cc52fd0b79930725aa24501fcd16eeccb",
+          "upstreamSha256": "d8615639ca482d3374d1873e53f7867ac929a0db71669f48882acbbf95290ad2"
+        }
+      ]
     }
   ],
   "buildRecipe": {
-    "sha256": "40e47f0bce321df6762d0cca5c477cb6bfd50863fc85eddb3314ca2ba9a5e0f5",
+    "sha256": "f3ab3324b42592eccb7ee4e911ae927c44a09827b7d8fba47d1717ba439f21ea",
     "sourceDateEpoch": 1790690700,
     "tests": [
       "make -j2 test",
