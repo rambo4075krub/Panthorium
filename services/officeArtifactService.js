@@ -629,4 +629,4 @@ class OfficeArtifactService {
     return { files: uploaded, summary: `สร้าง ${EXT[pluginId].toUpperCase()} ที่แก้ไขได้ พร้อมเอกสาร HTML สำหรับพิมพ์หรือบันทึก PDF${source.images.length ? ` แนบภาพ ${source.images.length} ภาพ (ไม่มีการวิเคราะห์ภาพ)` : ''}` };
   }
 }
-module.exports = { OfficeArtifactService, OfficeArtifactError, validateContent, extractOfficeText, LIMITS, _internals: { zip, unzip, documentBuffer, spreadsheetBuffer, presentationBuffer, printHtml, presentationPages, imageInfo, parseTable, validateOfficeXmlEntries, xmlMatches, xmlReplace, xmlReplaceSelected, xmlDirectMatches, xmlParagraphMatches, xmlWithoutAttributes, xmlInsertChild, xmlCacheStats } };
+module.exports = { OfficeArtifactService, OfficeArtifactError, imageInfo, validateContent, extractOfficeText, LIMITS, _internals: { zip, unzip, documentBuffer, spreadsheetBuffer, presentationBuffer, printHtml, presentationPages, imageInfo, parseTable, validateOfficeXmlEntries, xmlMatches, xmlReplace, xmlReplaceSelected, xmlDirectMatches, xmlParagraphMatches, xmlWithoutAttributes, xmlInsertChild, xmlCacheStats } };

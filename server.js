@@ -214,6 +214,7 @@ const publicWeb = new PublicWebService();
 const marketing = new (require("./services/marketingService").MarketingService)({
   pool:social.repo.pool, runner:new (require("./services/marketingRunner").MarketingRunner)(), web:publicWeb,
 });
+const onlineTools = new (require('./services/onlineToolsService').OnlineToolsService)(social.repo.pool, notifications);
 notifications.socialVisibility = (userId, sourceId) => social.notifications.systemNotificationVisible(userId, sourceId);
 const mediaStudio = new MediaStudioService({ files: cloudFiles, providers: sentinel.providers, gateway: sentinel.gateway, audit, jobSecret: config.jwtSecret });
 const creativeStudio = new CreativeStudioService({
@@ -370,6 +371,7 @@ app.use("/api/billing", require("./routes/billing").createBillingRouter(authServ
 app.use("/api/files", createFilesRouter(authService, cloudFiles));
 app.use("/api/remote",require("./routes/remoteWorkspace").createRemoteWorkspaceRouter(authService,remoteWorkspaces));
 app.use("/api/media", createMediaStudioRouter(authService, mediaStudio));
+app.use('/api/online-tools', require('./routes/onlineTools').createOnlineToolsRouter(authService, onlineTools));
 app.use('/api/marketing',require('./routes/marketing').createMarketingRouter(authService,marketing,social));
 app.use('/api/social',require('./routes/social').createSocialRouter(authService,social));
 app.use('/api/studio', createCreativeStudioRouter(authService, creativeStudio));
@@ -409,10 +411,20 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-voice-catalog.js", "creative-voice-ui.js", "creative-editors-ui.js", "creative-studio-ui.js", "work-assistant-ui.js", "social-rtc.js", "social-media-source.js", "marketing-ui.js", "social-ui.js", "screen-voice-catalog.js", "screen-voice-client.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "credit-alert-client.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js", "personal-chat-ui.js"];
+const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-voice-catalog.js", "creative-voice-ui.js", "creative-editors-ui.js", "creative-studio-ui.js", "online-tools-common.js", "online-tools-files.js", "online-tools-projects.js", "online-tools-ui.js", "work-assistant-ui.js", "social-rtc.js", "social-media-source.js", "marketing-ui.js", "social-ui.js", "screen-voice-catalog.js", "screen-voice-client.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "credit-alert-client.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js", "personal-chat-ui.js"];
+app.get('/online-share', (_req, res) => {
+  res.set('Cache-Control','no-store');
+  res.set('Referrer-Policy','no-referrer');
+  res.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+  res.sendFile(path.join(frontendRoot,'online-share.html'));
+});
+app.get('/vendor/online-pdf-1.17.1.js', (_req, res) => {
+  res.set('Cache-Control','public, max-age=31536000, immutable');
+  res.type('application/javascript').sendFile(require.resolve('pdf-lib/dist/pdf-lib.min.js'));
+});
 app.get("/vendor/hls.min.js", (req, res) => res.type("application/javascript").sendFile(require.resolve("hls.js/dist/hls.min.js")));
 
-for (const script of [...shellScripts, "panthorium-window-base.js", "personal-chat-ui.css", "workspace-ui.css", "social-player.html", "social-player.js", "payment-return.html", "payment-return.css"]) {
+for (const script of [...shellScripts, "panthorium-window-base.js", "personal-chat-ui.css", "workspace-ui.css", "online-tools.css", "online-share.js", "social-player.html", "social-player.js", "payment-return.html", "payment-return.css"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
       res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -572,6 +584,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ ok: false, error: "internal_error" });
 });
 
+let onlineNoticeTimer = null;
 let localPushTimer = null;
 let mailboxMaintenanceTimer = null;
 let playBillingTimer = null;
@@ -594,6 +607,7 @@ async function start() {
   await securityResponse.init();
   await authService.init();
   await marketing.init();
+  await onlineTools.init();
   await localInsights.init();
   if (mcpOAuthRepository) await mcpOAuthRepository.init();
   await organizationRepository.init();
@@ -664,6 +678,12 @@ async function start() {
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== "1") {
     social.backfillSupport().catch(()=>console.warn("[SOCIAL] official inbox backfill deferred"));
     marketing.start();
+    if (onlineTools.pool && !onlineNoticeTimer) {
+      const deliver = () => onlineTools.flush().catch(() => console.warn('[TOOLS] notification delivery deferred'));
+      onlineNoticeTimer = setInterval(deliver, 30000);
+      onlineNoticeTimer.unref();
+      deliver();
+    }
   }
   if(process.env.PANTHORIUM_DEPLOY_PROBE!=='1'&&process.env.PANTHORIUM_STUDIO_WORKER_ENABLED==='1'&&process.env.PANTHORIUM_OBJECT_ROOT) creativeWorker.start();
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== '1' && process.env.PANTHORIUM_LOCAL_PROFILE !== '1') localInsights.start();
@@ -673,6 +693,7 @@ async function start() {
 
 function stopBackgroundWorkers() {
   marketing.stop();
+  if (onlineNoticeTimer) { clearInterval(onlineNoticeTimer); onlineNoticeTimer = null; }
   creativeWorker.stop();
   localInsights.stop();
   if (localPushTimer) { clearInterval(localPushTimer); localPushTimer = null; }

@@ -24,7 +24,7 @@ function run(command, args, cwd = work) {
   execFileSync(command, args, { cwd, stdio: 'inherit', timeout: 35 * 60 * 1000 });
 }
 
-if (lock.name !== 'ffmpeg' || lock.version !== '9.0.2' ||
+if (lock.name !== 'ffmpeg' || lock.version !== '9.1' ||
     !/^https:\/\/github\.com\/FFmpeg\/FFmpeg\/archive\/[a-f0-9]{40}\.tar\.gz$/.test(lock.source.url) ||
     lock.source.archiveRoot !== `FFmpeg-${lock.source.gitCommit}`) {
   throw new Error('Unexpected FFmpeg source lock');

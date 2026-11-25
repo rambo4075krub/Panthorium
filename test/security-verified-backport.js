@@ -1,8 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const crypto = require('node:crypto');
 const { enrichSbom } = require('../scripts/verify-container-sbom');
 const { createArtifacts: verifyArtifacts, verifyReports } = require('../scripts/verified-ffmpeg-backport');
@@ -12,7 +10,10 @@ const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const clone = structuredClone;
 
 function fixture(profile) {
-  const lock = require(`../build/media/${profile === 'backend' ? 'ffmpeg-source' : 'ffmpeg-speaker-source'}.lock.json`);
+  const releaseLock = require(`../build/media/${profile === 'backend' ? 'ffmpeg-source' : 'ffmpeg-speaker-source'}.lock.json`);
+  // Retain coverage for a future vendor patch even when the release has no local patches.
+  const patch = Buffer.from('synthetic reviewed unit-test patch');
+  const lock = { ...clone(releaseLock), patches: [{ file: 'fixture.patch', sha256: hash(patch), cve: 'CVE-2026-107696', commit: 'a'.repeat(40) }] };
   const image = { Id: `sha256:${'a'.repeat(64)}`, Os: 'linux', Architecture: 'amd64' };
   const binaries = { ffmpeg: Buffer.from('\x7fELFfixture-ffmpeg'), ffprobe: Buffer.from('\x7fELFfixture-ffprobe') };
   const manifest = { ...clone(lock), binaries: Object.fromEntries(Object.entries(binaries).map(([name, bytes]) => [name, { path: `/usr/local/bin/${name}`, sha256: hash(bytes) }])) };
@@ -26,11 +27,12 @@ function fixture(profile) {
   };
   const { sbom, proof } = enrichSbom(rawSbom, manifest, lock, binaries, image, profile);
   const input = { rawSbom, sbom, proof, manifest, lock, binaries, image, profile, timestamp: '2026-11-19T00:00:00.000Z', compilationFiles,
-    patchBytes: Object.fromEntries(lock.patches.map(patch => [patch.file, fs.readFileSync(path.join(__dirname, '../build/media', patch.file))])),
+    patchBytes: { 'fixture.patch': patch },
     ...(native ? { openSslEvidence: native.input } : {}) };
   // Only tests substitute a reviewed executable identity. The CLI has no policy
   // override; fake executables must fail against the real committed policy.
   const policy = clone(reviewedPolicy);
+  policy.profiles[profile].sourceLockSha256 = hash(JSON.stringify(lock));
   for (const name of ['ffmpeg', 'ffprobe']) policy.profiles[profile].binaries[name] = hash(binaries[name]);
   policy.profiles[profile].compilationSha256 = hash(JSON.stringify(manifest.compilation));
   return { input, policy, opensslPolicy: native?.policy };
@@ -39,9 +41,9 @@ function fixture(profile) {
 for (const profile of ['backend', 'speaker', 'speaker-candidate-noble']) {
   const { input, policy, opensslPolicy } = fixture(profile);
   const createArtifacts = (evidence, review) => verifyArtifacts(evidence, review, opensslPolicy);
-  assert.throws(() => createArtifacts(input), /not an independently reviewed executable/);
+  assert.throws(() => createArtifacts(input), /lock requires independent review/);
   const { vex, record } = createArtifacts(input, policy);
-  assert.equal(vex.statements.length, profile === 'backend' ? 54 : 30);
+  assert.equal(vex.statements.length, profile === 'backend' ? 31 : 7);
   assert.equal(vex.statements[0].status, 'fixed');
   assert.ok(vex.statements[0].products[0]['@id'].includes(`image_id=${encodeURIComponent(input.image.Id)}`));
   assert.ok(vex.statements[0].products[0]['@id'].includes(hash(input.binaries.ffmpeg)));
@@ -61,7 +63,7 @@ for (const profile of ['backend', 'speaker', 'speaker-candidate-noble']) {
   const changedProof = clone(input.proof); changedProof.artifactPurl = input.lock.purl;
   assert.throws(() => createArtifacts({ ...input, proof: changedProof }, policy), /Source proof differs/);
 
-  const fixedMatch = { vulnerability: { id: 'CVE-2026-107696', severity: 'High' }, artifact: { name: 'ffmpeg', version: '9.0.2', purl: record.artifactPurl } };
+  const fixedMatch = { vulnerability: { id: 'CVE-2026-107696', severity: 'High' }, artifact: { name: 'ffmpeg', version: input.lock.version, purl: record.artifactPurl } };
   const unrelated = { vulnerability: { id: 'CVE-2026-999999', severity: 'Critical' }, artifact: { name: 'base-library', version: '1.0', purl: 'pkg:generic/base-library@1.0' } };
   const config = { 'only-fixed': false, 'only-notfixed': false, 'ignore-wontfix': '', exclude: [], ignore: [],
     'vex-documents': [], 'vex-add': [], output: ['json'], 'fail-on-severity': '', distro: '', 'by-cve': false,

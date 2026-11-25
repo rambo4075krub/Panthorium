@@ -27,7 +27,7 @@ function createArtifacts({ rawSbom, sbom, manifest, lock, binaries, image, patch
   assert.equal(image.Architecture, profilePolicy.architecture, 'Unreviewed architecture');
   assert.equal(jsonHash(lock), profilePolicy.sourceLockSha256, 'Source/configuration lock requires independent review');
   assert.equal(lock.source.gitCommit, policy.sourceCommit);
-  assert.equal(lock.patches.length, 22, 'Reviewed patch set missing');
+  assert.equal(lock.version, policy.version, 'Unexpected reviewed FFmpeg version');
   for (const patch of lock.patches) {
     assert.equal(sha256(patchBytes[patch.file]), patch.sha256, 'Patch bytes differ from reviewed patch');
   }
@@ -93,7 +93,7 @@ function createArtifacts({ rawSbom, sbom, manifest, lock, binaries, image, patch
   // This is an unsigned verification record, not a release signature. CI binds
   // it to extracted bytes and retains both unfiltered and VEX-aware reports.
   const record = {
-    schemaVersion: 2, profile, timestamp, ...identity,
+    schemaVersion: 2, profile, timestamp, ...identity, ffmpegVersion: lock.version,
     binaries: proof.binaries, sourceLockSha256: jsonHash(lock),
     patches: lock.patches.map(patch => ({ file: patch.file, sha256: sha256(patchBytes[patch.file]) })),
     compilationSha256: jsonHash(manifest.compilation),
@@ -102,7 +102,7 @@ function createArtifacts({ rawSbom, sbom, manifest, lock, binaries, image, patch
       const artifactPurl = statement.products[0]['@id'];
       const native = openssl?.proof.packages.find(p => p.artifactPurl === artifactPurl);
       return { vulnerability: statement.vulnerability.name, artifactPurl,
-        name: native?.name || 'ffmpeg', version: native?.version || '9.0.2', status: statement.status,
+        name: native?.name || 'ffmpeg', version: native?.version || lock.version, status: statement.status,
         ...(statement.justification ? { justification: statement.justification } : {}) };
     }),
     rawSbomSha256: jsonHash(rawSbom), sbomSha256: jsonHash(sbom), vexSha256: jsonHash(vex),
@@ -134,7 +134,8 @@ function comparableConfig(config) {
 function verifyReports(raw, filtered, vex, record) {
   assert.equal(record.schemaVersion, 2, 'Unreviewed vulnerability policy');
   assert.match(record.imageId, /^sha256:[a-f0-9]{64}$/);
-  assert.equal(record.artifactPurl, `pkg:generic/ffmpeg@9.0.2?checksum=sha256%3A${record.binaries.ffmpeg.sha256}&image_id=${encodeURIComponent(record.imageId)}`, 'Record is not bound to this executable and image');
+  assert.match(record.ffmpegVersion, /^\d+\.\d+(?:\.\d+)?$/);
+  assert.equal(record.artifactPurl, `pkg:generic/ffmpeg@${record.ffmpegVersion}?checksum=sha256%3A${record.binaries.ffmpeg.sha256}&image_id=${encodeURIComponent(record.imageId)}`, 'Record is not bound to this executable and image');
   assert.equal(jsonHash(vex), record.vexSha256, 'VEX document changed after verification');
   assert.equal(vex.statements.length, record.accepted.length, 'Unexpected VEX statement');
   for (const [index, accepted] of record.accepted.entries()) {
