@@ -1,0 +1,255 @@
+.ot {
+  --ot-ink: #eaf3f5;
+  --ot-muted: #aebfc9;
+  --ot-bg: #111e29;
+  --ot-surface: #182b38;
+  --ot-line: #385263;
+  --ot-active: #83e5ca;
+  color: var(--ot-ink);
+  font:
+    15px/1.5 system-ui,
+    sans-serif;
+  overflow-wrap: anywhere;
+}
+.ot *,
+.ot *::before,
+.ot *::after {
+  box-sizing: border-box;
+}
+.ot [hidden] {
+  display: none !important;
+}
+.ot-shell {
+  display: grid;
+  grid-template-columns: minmax(150px, 195px) minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  background: var(--ot-bg);
+  overflow: auto;
+}
+.ot-shell nav {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 16px 9px;
+  border-right: 1px solid var(--ot-line);
+}
+.ot button,
+.ot-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  max-width: 100%;
+  margin: 3px;
+  border: 1px solid var(--ot-line);
+  border-radius: 9px;
+  padding: 7px 13px;
+  color: var(--ot-ink);
+  background: var(--ot-surface);
+  font: inherit;
+  text-decoration: none;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.ot button:hover,
+.ot-action:hover {
+  border-color: var(--ot-active);
+}
+.ot :focus-visible {
+  outline: 2px solid var(--ot-active);
+  outline-offset: 2px;
+}
+.ot-shell nav button {
+  text-align: start;
+  justify-content: start;
+  margin: 0;
+  border-color: transparent;
+  background: transparent;
+}
+.ot-shell nav button[aria-current='true'] {
+  color: var(--ot-active);
+  background: var(--ot-surface);
+}
+.ot-shell nav svg {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+}
+.ot-content {
+  min-width: 0;
+  padding: clamp(12px, 2.5vw, 26px);
+}
+.ot h2 {
+  margin: 0 0 12px;
+  font-size: 1.4rem;
+}
+.ot-panel {
+  min-width: 0;
+}
+.ot-status {
+  color: var(--ot-active);
+  white-space: pre-line;
+}
+.ot-status:not(:empty) {
+  padding: 8px 0 12px;
+}
+.ot-grid,
+.ot-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+  gap: 10px;
+}
+.ot-cards {
+  margin: 16px 0;
+}
+.ot-grid button,
+.ot-cards button {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  text-align: start;
+  padding: 15px;
+  margin: 0;
+}
+.ot-grid span,
+.ot small,
+.ot label > span {
+  color: var(--ot-muted);
+}
+.ot-grid span {
+  font-size: 0.85em;
+}
+.ot label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  margin: 8px 0;
+}
+.ot label > span {
+  font-size: 0.9em;
+}
+.ot input,
+.ot textarea,
+.ot select {
+  max-width: 100%;
+  min-width: 0;
+  color-scheme: dark;
+  font: inherit;
+  color: var(--ot-ink);
+  border: 1px solid var(--ot-line);
+  border-radius: 7px;
+  background: var(--ot-bg);
+  padding: 7px 9px;
+}
+.ot input[type='checkbox'] {
+  align-self: flex-start;
+  min-width: 19px;
+  min-height: 19px;
+  accent-color: var(--ot-active);
+}
+.ot input[type='color'] {
+  padding: 2px;
+  width: 60px;
+  height: 33px;
+}
+.ot textarea {
+  resize: vertical;
+}
+.ot fieldset,
+.ot details,
+.ot-filelist li {
+  min-width: 0;
+  padding: 12px;
+  margin: 12px 0;
+  border: 1px solid var(--ot-line);
+  border-radius: 10px;
+}
+.ot summary {
+  cursor: pointer;
+}
+.ot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 6px;
+  margin: 5px 0;
+}
+.ot-row > label {
+  flex: 1 1 130px;
+}
+.ot-design {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.85fr);
+  align-items: start;
+  gap: 16px;
+}
+.ot-poster {
+  text-align: center;
+}
+.ot-poster canvas,
+.ot-cut {
+  display: block;
+  max-width: 100%;
+  max-height: 470px;
+  width: auto;
+  height: auto;
+  margin: 8px auto;
+}
+.ot-cut {
+  touch-action: none;
+  background: repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 0 0/16px 16px;
+}
+.ot-filelist {
+  padding-inline-start: 25px;
+}
+.ot-public {
+  margin: 0;
+  min-height: 100vh;
+  padding: 28px 12px;
+  background: #0c1820;
+}
+.ot-share {
+  max-width: 660px;
+  margin: 0 auto;
+  border: 1px solid var(--ot-line);
+  border-radius: 12px;
+  background: var(--ot-bg);
+  padding: clamp(16px, 4vw, 34px);
+}
+.ot-share p {
+  white-space: pre-wrap;
+}
+.ot-brand {
+  color: var(--ot-active);
+  font-weight: 700;
+  text-decoration: none;
+}
+.ot button:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+@media (max-width: 720px) {
+  .ot-shell {
+    display: block;
+  }
+  .ot-shell nav {
+    flex-flow: row wrap;
+    border-right: 0;
+    border-bottom: 1px solid var(--ot-line);
+    padding: 6px;
+  }
+  .ot-shell nav button {
+    min-height: 36px;
+    font-size: 0.82em;
+    padding: 3px 7px;
+  }
+  .ot-shell nav svg {
+    display: none;
+  }
+  .ot-design {
+    grid-template-columns: 1fr;
+  }
+}

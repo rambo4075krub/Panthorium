@@ -16,6 +16,7 @@
     ['security_password', 'security', 'รหัสผ่านถูกเปลี่ยน', 'แจ้งเมื่อรหัสผ่านบัญชีถูกตั้งใหม่', ['auth.user_password_reset', 'auth.voice_password_reset']],
     ['security_access', 'security', 'สิทธิ์บัญชีเปลี่ยนแปลง', 'แจ้งเมื่อสิทธิ์การเข้าถึงบัญชีถูกปรับ', ['auth.user_access_updated']],
     ['security_protection', 'security', 'การป้องกันการเข้าถึงเปลี่ยนแปลง', 'การบล็อกหรือปลดบล็อกที่เกี่ยวข้องกับบัญชี', ['security.ip_blocked', 'security.ip_unblocked']],
+    ['online_form_received', 'operations', 'แบบฟอร์มมีคำตอบใหม่', 'แจ้งทีมเมื่อแบบฟอร์มที่ผูกกับงานอัตโนมัติได้รับคำตอบ', ['tools.form_received']],
     ['operation_scheduled', 'operations', 'ตั้งเวลาดำเนินงานแล้ว', 'บันทึกงานที่จะดำเนินการตามกำหนดเวลา', ['agent.job_scheduled']],
     ['operation_started', 'operations', 'เริ่มดำเนินงาน', 'เริ่มงาน วางแผน หรือเริ่มการทำงานหลายขั้นตอน', ['action.running', 'agent.tool_started', 'agent.job_started', 'agent.workflow_plan_started', 'agent.orchestration_started']],
     ['operation_approval', 'operations', 'งานรอการยืนยัน', 'มีขั้นตอนที่ต้องให้คุณยืนยันก่อนทำต่อ', ['action.awaiting_confirmation', 'agent.job_waiting_confirmation']],

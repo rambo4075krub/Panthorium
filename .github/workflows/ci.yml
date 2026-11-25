@@ -123,6 +123,7 @@ jobs:
           node test/social-redesign-browser.js
           node test/social-watch-browser.js
           node test/social-tv-browser.js
+          TEST_DATABASE_URL=postgres://postgres:panthorium_ci_only@127.0.0.1:5432/panthorium_ci npm run test:online-tools:browser
           node test/office-suite-browser.js
           node test/creative-workspace-browser.js
           node test/creative-inline-browser.js
