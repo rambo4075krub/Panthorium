@@ -37,6 +37,7 @@ function color(value) {
 }
 function normalize(kind, raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('invalid_project');
+  if (kind === 'film') return require('./filmStudioModel').normalizeFilm(raw);
   if (kind === 'form') {
     const fields = list(raw.fields, 20).map((f) => {
       if (!f || typeof f !== 'object') fail('invalid_field');

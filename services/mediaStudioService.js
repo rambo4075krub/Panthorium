@@ -329,12 +329,12 @@ class MediaStudioService {
     return { ok: true, plan: planned.plan, summary: planned.summary, file: rendered.file, durationSeconds: rendered.durationSeconds, aspect: rendered.aspect };
   }
 
-  async generationPrompt({ user, prompt } = {}) {
+  async generationPrompt({ user, prompt, filmDirection = false } = {}) {
     const userId = this.requireAccount(user);
     const command = safePromptText(prompt, 1600);
     if (!command || String(prompt || '').length > 1600) throw new MediaStudioError(400, 'invalid_generation_prompt');
     if (!this.gateway?.complete) throw new MediaStudioError(503, 'media_ai_unavailable');
-    const result = await this.gateway.complete({ workload:'background',
+    const result = await this.gateway.complete({ workload:'background', ...(filmDirection ? {preferredProvider:'gemini-live',lockedProvider:'gemini-live'} : {}),
       systemPrompt: [
         'You are Sentinel, preparing a concise Veo video-generation prompt from the user\'s creative direction.',
         'Return only a production-ready English visual prompt, at most 900 characters, with subject, action, setting, camera, lighting, and style when useful.',
@@ -393,7 +393,7 @@ class MediaStudioService {
     return data;
   }
 
-  async startGeneration({ user, prompt, durationSeconds = 8, aspectRatio = '16:9', name = '', confirmed = false, sourceFileId = '' } = {}) {
+  async startGeneration({ user, prompt, durationSeconds = 8, aspectRatio = '16:9', name = '', confirmed = false, sourceFileId = '', filmDirection = false } = {}) {
     const userId = this.requireAccount(user);
     if (confirmed !== true) throw new MediaStudioError(409, 'generation_confirmation_required');
     const features = this.capabilities();
@@ -418,7 +418,7 @@ class MediaStudioService {
       if (bytes.length > 8 * 1024 * 1024) throw new MediaStudioError(413, 'source_image_too_large');
       image = { bytesBase64Encoded: bytes.toString('base64'), mimeType: source.contentType };
     }
-    const prepared = await this.generationPrompt({ user, prompt });
+    const prepared = await this.generationPrompt({ user, prompt, filmDirection });
     let accessToken;
     try { accessToken = await this.providers.vertexAccessToken(); } catch (_) { throw new MediaStudioError(503, 'video_generation_unavailable'); }
     if (!accessToken) throw new MediaStudioError(503, 'video_generation_unavailable');

@@ -11,7 +11,7 @@
     ['form', 'แบบฟอร์ม', 'ลิงก์รับคำตอบ · CSV', 'chart'],
     ['design', 'ออกแบบสื่อร้านค้า', 'โปสเตอร์ · เมนู · แค็ตตาล็อก', 'pen'],
     ['cutout', 'ลบพื้นหลัง', 'รูปสินค้าพื้นโปร่งใส · PNG', 'image'],
-    ['video', 'ตัดต่อวิดีโอ', 'ไทม์ไลน์ · ซับไตเติล · MP4', 'video'],
+    ['video', 'ตัดต่อวิดีโอ', 'สร้างหนังและซีรีส์ · ไทม์ไลน์ · MP4', 'video'],
     ['pdf', 'จัดการ PDF', 'เลือกหน้า · จัดลำดับ · รวมไฟล์', 'document'],
     ['page', 'หน้าจดงานและแม่แบบ', 'เช็กลิสต์ · แผนคอนเทนต์ · แชร์สำเนา', 'work'],
     ['flow', 'งานอัตโนมัติ', 'รับฟอร์ม · ติดตาม · แจ้งทีม', 'settings']
@@ -30,6 +30,7 @@
     loginLink = '';
   function close() {
     if (view) {
+      view.page?.abort();
       view.controller.abort();
       view = null;
     }
@@ -51,6 +52,7 @@
       height: 760,
       onClose: () => {
         if (view) {
+          view.page?.abort();
           view.controller.abort();
           view = null;
         }
@@ -156,6 +158,8 @@
     };
     return {
       panel: v.panel,
+      request: (path,opts,raw) => live() ? request(v,path,opts,raw) : Promise.reject(Error('auth_required')),
+      signal: v.page.signal,
       live,
       report,
       handle,
@@ -185,6 +189,8 @@
     };
   }
   function reset(v, title) {
+    v.page?.abort();
+    v.page = new AbortController();
     v.epoch++;
     v.dirty = false;
     v.heading.textContent = title;
@@ -212,6 +218,7 @@
       return;
     }
     if (kind === 'office' || kind === 'video') {
+      if (kind === 'video') ctx.panel.append(ctx.act('สร้างหนังและซีรีส์', () => navigateFilm(v)));
       const items =
         kind === 'video'
           ? [['video', 'เปิดไทม์ไลน์วิดีโอ']]
@@ -482,8 +489,14 @@
         );
     }
   }
+  function navigateFilm(v) {
+    const ctx = reset(v, 'สตูดิโอหนังและซีรีส์');
+    for (const b of v.nav.children) b.setAttribute('aria-current',String(b.dataset.tool === 'video'));
+    window.PanthoriumFilmStudio.mount(ctx);
+  }
   function handleLink() {
-    const direct = location.hash === '#online-tools';
+    const film = location.hash === '#film-studio';
+    const direct = film || location.hash === '#online-tools';
     const m = location.hash.match(/^#online-(copy|join)=([a-f\d-]{36})$/i);
     if (!m && !direct) {
       pending = '';
@@ -519,7 +532,11 @@
     }
     loginLink = '';
     if (direct) {
-      if (open()) history.replaceState(null, '', location.pathname + location.search);
+      const v = open();
+      if (v && (!film || leave(v))) {
+        if (film) navigateFilm(v);
+        history.replaceState(null, '', location.pathname + location.search);
+      }
       return;
     }
     if (pending === location.hash) return;
@@ -576,7 +593,7 @@
     launch.className = 'sm-app';
     launch.dataset.appId = id;
     launch.dataset.searchText =
-      'เครื่องมือออนไลน์ แบบฟอร์ม เอกสาร ตาราง สไลด์ ออกแบบ ลบพื้นหลัง วิดีโอ PDF แม่แบบ อัตโนมัติ';
+      'เครื่องมือออนไลน์ แบบฟอร์ม เอกสาร ตาราง สไลด์ ออกแบบ ลบพื้นหลัง วิดีโอ หนัง ซีรีส์ หนังสั้น สตอรีบอร์ด PDF แม่แบบ อัตโนมัติ';
     const graphic = el('span', null, {class: 'sm-pack-icon'}),
       icon = window.PanthoriumStartMenuUI?.icon('work');
     if (icon) graphic.append(icon);

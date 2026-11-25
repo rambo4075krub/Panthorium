@@ -10,7 +10,7 @@ const {Resvg} = require('@resvg/resvg-js');
 const {withToolAccounts} = require('./online-tools-postgres');
 const {createOnlineToolsRouter} = require('../routes/onlineTools');
 
-async function verify({accounts: [owner, collaborator], service}) {
+async function verify({accounts: [owner, collaborator], service, pool}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'panthorium-tools-browser-'));
   process.env.NODE_ENV = 'test';
   process.env.JWT_SECRET = 'online-tools-local-fixture-only';
@@ -46,11 +46,13 @@ async function verify({accounts: [owner, collaborator], service}) {
     roles: ['user'],
     permissions: ['chat']
   });
+  const filmTest = require('./film-studio-browser');
+  const filmFixture = await filmTest.fixture({studio:real.creativeStudio,service,pool,dir});
   const app = express();
   app.use(
     '/api/online-tools',
     express.json({limit: '2mb'}),
-    createOnlineToolsRouter(real.authService, service)
+    createOnlineToolsRouter(real.authService, service, filmFixture.film)
   );
   app.use(real.app);
   const server = app.listen(0, '127.0.0.1');
@@ -233,6 +235,7 @@ async function verify({accounts: [owner, collaborator], service}) {
       );
       await page.evaluate(() => window.PanthoriumCreativeStudio.close());
     }
+    await filmTest.verify({page,hub,owner,other:collaborator,fixture:filmFixture,service,pool,dir});
     await page.setViewportSize({width: 390, height: 844});
     await tool('design');
     assert(await hub.evaluate((n) => n.scrollWidth <= n.clientWidth + 1));
