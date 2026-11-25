@@ -10,7 +10,7 @@ const {Resvg} = require('@resvg/resvg-js');
 const {withToolAccounts} = require('./online-tools-postgres');
 const {createOnlineToolsRouter} = require('../routes/onlineTools');
 
-async function verify({accounts: [owner, collaborator], service}) {
+async function verify({accounts: [owner, collaborator], service, pool}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'panthorium-tools-browser-'));
   process.env.NODE_ENV = 'test';
   process.env.JWT_SECRET = 'online-tools-local-fixture-only';
@@ -46,11 +46,13 @@ async function verify({accounts: [owner, collaborator], service}) {
     roles: ['user'],
     permissions: ['chat']
   });
+  const filmTest = require('./film-studio-browser');
+  const filmFixture = await filmTest.fixture({studio: real.creativeStudio, service, pool, dir});
   const app = express();
   app.use(
     '/api/online-tools',
     express.json({limit: '2mb'}),
-    createOnlineToolsRouter(real.authService, service)
+    createOnlineToolsRouter(real.authService, service, filmFixture.film)
   );
   app.use(real.app);
   const server = app.listen(0, '127.0.0.1');
@@ -74,10 +76,40 @@ async function verify({accounts: [owner, collaborator], service}) {
     assert.equal(await page.locator('[data-app-id="online-tools"]').count(), 0);
     await page.evaluate((cred) => window.PanthoriumAuth.login(...cred), [loginEmail, loginPassword]);
     await page.locator('#start-btn').click();
-    await page.locator('[data-app-id="online-tools"]').click();
-    const hub = page.locator('[data-online-tools]');
+    const group = page.locator('[data-start-group="creative"]');
+    await group.locator('[data-start-group-toggle]').click();
+    assert.equal(await page.locator('[data-app-id="online-tools"]').count(), 0);
+    assert.deepEqual(
+      await group.locator('.sm-app').evaluateAll((nodes) => nodes.map((n) => n.dataset.appId)),
+      [
+        'studio-image',
+        'studio-video',
+        'studio-document',
+        'studio-spreadsheet',
+        'studio-presentation',
+        'studio-form',
+        'studio-pdf',
+        'studio-page',
+        'studio-flow'
+      ]
+    );
+    const search=page.locator('#start-search');
+    await search.fill('ซีรีส์');
+    await group.locator('[data-app-id="studio-video"]:visible').waitFor();
+    assert.deepEqual(await group.locator('.sm-app:visible').evaluateAll(nodes=>nodes.map(n=>n.dataset.appId)),['studio-video']);
+    await search.fill('เครื่องมือออนไลน์');
+    await group.locator('[data-app-id="studio-flow"]:visible').waitFor();
+    assert.equal(await group.locator('.sm-app:visible').count(),9);
+    await search.fill('');
+    await group.locator('[data-app-id="studio-form"]').click();
+    const shell = page.locator('.window[data-id="creative-studio"]');
+    const hub = shell.locator('[data-online-tools]:visible');
     const btn = (name) => hub.getByRole('button', {name, exact: true});
-    const tool = (k) => hub.locator('nav [data-tool="' + k + '"]').click();
+    const tool = async (k) => {
+      const parent = {design: 'image', cutout: 'image', film: 'video'}[k];
+      await shell.locator('[data-studio-section="' + (parent || k) + '"]').click();
+      if (parent) await shell.locator('[data-studio-mode-id="' + k + '"]').click();
+    };
     async function save() {
       await btn('บันทึกงาน').click();
       await hub.getByText('บันทึกแล้ว', {exact: true}).waitFor();
@@ -86,10 +118,14 @@ async function verify({accounts: [owner, collaborator], service}) {
       const [d] = await Promise.all([page.waitForEvent('download'), b.click()]);
       return fs.readFile(await d.path());
     }
-    assert.equal(await hub.locator('nav button').count(), 8);
+    assert.equal(await shell.locator('[data-studio-tabs] button').count(), 9);
+    assert.equal(await page.locator('.window[data-id="online-tools"]').count(), 0);
     await tool('form');
     await btn('สร้างใหม่').click();
     await hub.getByLabel('ชื่องาน', {exact: true}).fill('ใบจองสินค้า');
+    await tool('pdf');
+    await tool('form');
+    assert.equal(await hub.getByLabel('ชื่องาน', {exact: true}).inputValue(), 'ใบจองสินค้า');
     await hub.getByLabel('คำถาม', {exact: true}).fill('ชื่อสินค้า');
     await save();
     await hub.getByText('ลิงก์และสิทธิ์', {exact: true}).click();
@@ -121,17 +157,16 @@ async function verify({accounts: [owner, collaborator], service}) {
     await btn('ทำเครื่องหมายเสร็จ').click();
     await btn('เปิดงานอีกครั้ง').waitFor();
     await tool('form');
-    await hub.getByRole('button', {name: /ใบจองสินค้า/}).click();
+    assert.equal(await hub.getByLabel('ชื่องาน', {exact: true}).inputValue(), 'ใบจองสินค้า');
     await hub.getByText('คำตอบและไฟล์ CSV', {exact: true}).click();
     assert((await download(btn('ดาวน์โหลดคำตอบทั้งหมด CSV'))).toString().includes('"กระเป๋าผ้า"'));
     await tool('flow');
-    await hub
-      .getByLabel('นำเข้าแม่แบบ JSON')
-      .setInputFiles({
-        name: 'workflow.json',
-        mimeType: 'application/json',
-        buffer: Buffer.from(JSON.stringify(portable))
-      });
+    await btn('กลับไปรายการ').click();
+    await hub.getByLabel('นำเข้าแม่แบบ JSON').setInputFiles({
+      name: 'workflow.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(portable))
+    });
     assert.equal(await hub.getByLabel('ชื่องาน', {exact: true}).inputValue(), 'ติดตามใบจอง');
     assert.equal(await hub.getByLabel('เมื่อมีคำตอบเข้าแบบฟอร์ม').inputValue(), '');
     assert.equal(await hub.getByLabel('เปิดใช้งานเมื่อบันทึก').isChecked(), false);
@@ -163,10 +198,7 @@ async function verify({accounts: [owner, collaborator], service}) {
       .locator('[data-online-tools]')
       .getByRole('button', {name: 'บันทึกงาน', exact: true})
       .waitFor();
-    assert.equal(
-      (await service.list(collaborator)).filter((x) => x.kind === 'design' && x.owner).length,
-      1
-    );
+    assert.equal((await service.list(collaborator)).filter((x) => x.kind === 'design' && x.owner).length, 1);
     await tool('page');
     await btn('เช็กลิสต์เปิดร้าน').click();
     await save();
@@ -218,21 +250,19 @@ async function verify({accounts: [owner, collaborator], service}) {
       merged.getPages().map((p) => Math.round(p.getWidth())),
       [595, 200, 100]
     );
-    for (const [kind, title, plugin] of [
-      ['office', 'เปิดเอกสาร Word', 'document'],
-      ['office', 'เปิดตาราง Excel', 'spreadsheet'],
-      ['office', 'เปิดงานนำเสนอ PowerPoint', 'presentation'],
-      ['video', 'เปิดไทม์ไลน์วิดีโอ', 'video']
-    ]) {
-      await tool(kind);
-      await btn(title).click();
-      await page.locator('.window[data-id="creative-studio"] [data-studio]').waitFor();
+    for (const plugin of ['document', 'spreadsheet', 'presentation', 'image', 'video']) {
+      await tool(plugin);
       assert.equal(
-        await page.locator('[data-studio-tabs] [aria-selected="true"]').getAttribute('data-plugin-id'),
+        await shell.locator('[data-studio-tabs] [aria-selected="true"]').getAttribute('data-plugin-id'),
         plugin
       );
-      await page.evaluate(() => window.PanthoriumCreativeStudio.close());
+      assert.equal(await shell.locator('[data-workspace-kind="' + plugin + '"]:visible').count(), 1);
+      assert.equal(await hub.count(), 0);
     }
+    await page.evaluate(() => (location.hash = 'online-tools'));
+    await shell.locator('[data-studio-section="image"][aria-selected="true"]').waitFor();
+    assert.equal(await page.locator('.window[data-id="online-tools"]').count(), 0);
+    await filmTest.verify({page, hub, owner, other: collaborator, fixture: filmFixture, service, pool, dir});
     await page.setViewportSize({width: 390, height: 844});
     await tool('design');
     assert(await hub.evaluate((n) => n.scrollWidth <= n.clientWidth + 1));
@@ -243,13 +273,11 @@ async function verify({accounts: [owner, collaborator], service}) {
     assert.equal(await hub.count(), 0);
     assert.deepEqual(scriptErrors, []);
     console.log(
-      'Signed-in Start menu, eight tools, customer form to team task and CSV, reusable workflow and design, transparent PNG, ordered PDF and account cleanup passed in Chromium.'
+      'Unified creative Start menu, nine distinct sections, legacy landing, retained drafts, customer form to team task and CSV, reusable workflow and design, transparent PNG, ordered PDF and account cleanup passed in Chromium.'
     );
   } catch (err) {
     if (page)
-      console.error(
-        (await page.locator('[data-online-tools]').allTextContents()).join(' ').slice(-1200)
-      );
+      console.error((await page.locator('[data-online-tools]').allTextContents()).join(' ').slice(-1200));
     throw err;
   } finally {
     if (browser) await browser.close();

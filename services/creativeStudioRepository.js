@@ -11,6 +11,7 @@ class CreativeStudioRepositoryError extends Error {
 }
 function checkLimits(rows, proposed) {
   if (rows.filter(row=>['queued','running'].includes(row.status)).length >= LIMITS.activeJobs) throw new CreativeStudioRepositoryError('studio_active_limit');
+  if (proposed.film && rows.some(row => row.film?.project === proposed.film.project && ['queued','running'].includes(row.status))) throw new CreativeStudioRepositoryError('film_job_active');
   const today=rows.filter(row=>new Date(row.createdAt).getTime()>=dayStart().getTime());
   const media=steps=>(steps||[]).filter(step=>['image','video'].includes(step.pluginId)).length;
   if (today.length >= LIMITS.dailyJobs || today.reduce((sum,row)=>sum+media(row.steps),0)+media(proposed.steps)>LIMITS.dailyMediaSteps) throw new CreativeStudioRepositoryError('studio_daily_limit');
@@ -34,6 +35,7 @@ class PostgresCreativeStudioRepository {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         UNIQUE(owner_id, idempotency_key)
       );
+      CREATE INDEX IF NOT EXISTS idx_studio_film_projects ON panthorium_studio_jobs(owner_id, (data->'film'->>'project'), created_at DESC) WHERE (data->'film'->>'project') IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_studio_jobs_due ON panthorium_studio_jobs(status, next_run_at);
       CREATE INDEX IF NOT EXISTS idx_studio_jobs_owner ON panthorium_studio_jobs(owner_id, created_at);
       CREATE TABLE IF NOT EXISTS panthorium_office_drafts (
@@ -83,6 +85,20 @@ class PostgresCreativeStudioRepository {
   }
   async get(ownerId, id) { return this.map((await this.pool.query('SELECT * FROM panthorium_studio_jobs WHERE owner_id=$1 AND id=$2', [ownerId, id])).rows[0]); }
   async list(ownerId) { return (await this.pool.query('SELECT * FROM panthorium_studio_jobs WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50', [ownerId])).rows.map(row => this.map(row)); }
+  async filmState(ownerId, project) {
+    const args = [ownerId,project];
+    const where = "owner_id=$1 AND data->'film'->>'project'=$2";
+    const latest = await this.pool.query('SELECT * FROM panthorium_studio_jobs WHERE '+where+' ORDER BY created_at DESC,id DESC LIMIT 1',args);
+    const rows = await this.pool.query(`SELECT DISTINCT ON (target->>'key') target, step->'files'->0 AS file
+      FROM panthorium_studio_jobs CROSS JOIN LATERAL jsonb_array_elements(data->'film'->'targets') WITH ORDINALITY AS t(target,n)
+      CROSS JOIN LATERAL (SELECT data->'steps'->((n-1)::int) AS step) AS s
+      WHERE ${where} AND step->>'status'='completed' AND step->'files'->0 IS NOT NULL
+      ORDER BY target->>'key',created_at DESC,id DESC`,args);
+    return {last:this.map(latest.rows[0]),assets:Object.fromEntries(rows.rows.map(r => [r.target.key,{...r.target,file:r.file}]))};
+  }
+  async byRequest(ownerId, key) {
+    return this.map((await this.pool.query('SELECT * FROM panthorium_studio_jobs WHERE owner_id=$1 AND idempotency_key=$2',[ownerId,key])).rows[0]);
+  }
   async modes(ownerId) { return Object.fromEntries((await this.pool.query('SELECT plugin_id,mode FROM panthorium_studio_modes WHERE owner_id=$1', [ownerId])).rows.map(row => [row.plugin_id, row.mode])); }
   async setMode(ownerId, pluginId, mode) { await this.pool.query(`INSERT INTO panthorium_studio_modes(owner_id,plugin_id,mode) VALUES($1,$2,$3)
     ON CONFLICT(owner_id,plugin_id) DO UPDATE SET mode=EXCLUDED.mode,updated_at=NOW()`, [ownerId, pluginId, mode]); }
@@ -118,6 +134,23 @@ class MemoryCreativeStudioRepository {
   }
   async get(ownerId, id) { const row = this.jobs.get(id); return row?.ownerId === ownerId ? copy(row) : null; }
   async list(ownerId) { return [...this.jobs.values()].filter(row => row.ownerId === ownerId).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,50).map(copy); }
+  async filmState(ownerId, project) {
+    const assets = {};
+    let last = null;
+    for (const job of this.jobs.values()) {
+      if (job.ownerId !== ownerId || job.film?.project !== project) continue;
+      last = copy(job);
+      job.film.targets.forEach((t,i) => {
+        const step = job.steps[i];
+        if (step.status === 'completed' && step.files[0]) assets[t.key] = {...t,file:copy(step.files[0])};
+      });
+    }
+    return {last,assets};
+  }
+  async byRequest(ownerId, key) {
+    const row = [...this.jobs.values()].find(j => j.ownerId === ownerId && j.idempotencyKey === key);
+    return row ? copy(row) : null;
+  }
   async modes(ownerId) { return { ...(this.policy.get(ownerId) || {}) }; }
   async setMode(ownerId, pluginId, mode) { this.policy.set(ownerId, { ...await this.modes(ownerId), [pluginId]: mode }); }
   async claim(ownerId, id) {

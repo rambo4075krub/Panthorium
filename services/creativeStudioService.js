@@ -130,13 +130,27 @@ class CreativeStudioService {
       steps: job.steps.map(step => ({ pluginId: step.pluginId, status: displayState(step), files: step.files || [], sourceFileIds: step.resolvedSourceFileIds || step.sourceFileIds, usePrevious: step.usePrevious, error: step.error || null })),
       files: job.files || [], summary: job.summary || '', error: job.error || null, createdAt: job.createdAt, updatedAt: job.updatedAt };
   }
-  async start({ user, pluginId, input, sourceFileIds = [], idempotencyKey, confirmed = false, steps } = {}) {
+  async start({ user, pluginId, input, sourceFileIds = [], idempotencyKey, confirmed = false, steps, film } = {}) {
     let current, ownerId, normalized;
     try {
     current = await this.principal(user); ownerId = this.requireAccount(current); this.requireStorage();
     if (typeof idempotencyKey !== 'string' || !/^[A-Za-z0-9:_-]{8,128}$/.test(idempotencyKey)) throw new CreativeStudioError(400, 'invalid_idempotency_key');
-    normalized = normalizeSteps({ pluginId, input, sourceFileIds, steps });
+    // Film graphs are compiled only by FilmStudioService. Public studio submissions
+    // still pass the original strict step validator and cannot supply dependency graphs.
+    normalized = film ? steps.map((step,i) => {
+      const assemble = step.pluginId === 'film-assemble';
+      if (!Array.isArray(step.sources) || step.sources.length > (assemble ? 8 : step.pluginId === 'video' ? 1 : 3) ||
+          step.sources.some(s => s.fileId ? !UUID.test(s.fileId) : !Number.isInteger(s.step) || s.step < 0 || s.step >= i)) throw new CreativeStudioError(400, 'invalid_film_target');
+      const base = assemble ? {pluginId:step.pluginId,input:step.input,status:'queued',files:[],error:null,usePrevious:false}
+        : normalizeSteps({pluginId:step.pluginId,input:step.input})[0];
+      return {...base,sourceFileIds:step.sources.filter(s=>s.fileId).map(s=>s.fileId),filmSources:step.sources};
+    }) : normalizeSteps({ pluginId, input, sourceFileIds, steps });
     for (const step of normalized) {
+      if (step.pluginId === 'film-assemble') {
+        if (!this.fileStorageReady()) throw new CreativeStudioError(503, 'files_storage_unconfigured');
+        for (const id of step.sourceFileIds) await this.files.findObject(ownerId,id);
+        continue;
+      }
       await this.assertAllowed(current, step.pluginId);
       const unavailable = step.input.edit || step.input.content ? (this.fileStorageReady() ? null : 'files_storage_unconfigured') : this.available(step.pluginId); if (unavailable) throw new CreativeStudioError(503, unavailable);
       if (['image','video'].includes(step.pluginId) && confirmed !== true) throw new CreativeStudioError(409, 'generation_confirmation_required');
@@ -145,10 +159,10 @@ class CreativeStudioService {
     } catch(error) { error.sideEffectNotApplied=true; throw error; }
     const fingerprint = crypto.createHash('sha256').update(JSON.stringify(stable({ steps: normalized }))).digest('hex');
     const principal = { sub: ownerId, roles: current.roles, permissions: current.permissions, ...(current.accountVersion != null ? { accountVersion: current.accountVersion } : {}) };
-    const result = await this.repository.create({ id: crypto.randomUUID(), ownerId, principal, idempotencyKey, fingerprint, confirmed: confirmed === true, steps: normalized, status: 'queued', currentStep: 0, files: [], summary: '', error: null });
+    const result = await this.repository.create({ id: crypto.randomUUID(), ownerId, principal, ...(film ? {film} : {}), idempotencyKey, fingerprint, confirmed: confirmed === true, steps: normalized, status: 'queued', currentStep: 0, files: [], summary: '', error: null });
     if (!result.job || result.job.fingerprint !== fingerprint) throw new CreativeStudioError(409, 'studio_idempotency_conflict');
     // The caller awaits a bounded step. No detached promise is required to preserve a job.
-    if (result.created) return this.advance({ user: current, jobId: result.job.id });
+    if (result.created && !film) return this.advance({ user: current, jobId: result.job.id });
     return { job: this.publicJob(result.job) };
   }
   async get({ user, jobId }) {
@@ -170,12 +184,15 @@ class CreativeStudioService {
     let admitted = false;
     try {
       const user = await this.principal(job.principal);
-      await this.assertAllowed(user, step.pluginId);
-      const unavailable = step.input.edit || step.input.content ? (this.fileStorageReady() ? null : 'files_storage_unconfigured') : this.available(step.pluginId); if (unavailable) throw new CreativeStudioError(503, unavailable);
+      const assemble = step.pluginId === 'film-assemble' && !!job.film;
+      if (!assemble) await this.assertAllowed(user, step.pluginId);
+      const unavailable = assemble || step.input.edit || step.input.content ? (this.fileStorageReady() ? null : 'files_storage_unconfigured') : this.available(step.pluginId); if (unavailable) throw new CreativeStudioError(503, unavailable);
       // The previous process may have crossed a billing/storage boundary before it died.
       if (step.status === 'submitting') throw new CreativeStudioError(409, 'studio_submission_uncertain', true);
       const previous = step.usePrevious ? job.steps[job.currentStep - 1].files.map(file => file.id) : [];
-      const ids = sourceIds([...new Set([...step.sourceFileIds, ...previous])]);
+      const ids = step.filmSources ? step.filmSources.map(src => src.fileId || job.steps[src.step]?.files[0]?.id)
+        : sourceIds([...new Set([...step.sourceFileIds, ...previous])]);
+      if (ids.some(id => !UUID.test(String(id)))) throw new CreativeStudioError(422,'missing_film_source');
       step.resolvedSourceFileIds = ids;
       for (const id of ids) await this.files.findObject(job.ownerId, id);
       if (step.pluginId === 'video' && (ids.length > 1 || (ids.length && !['image/png','image/jpeg'].includes((await this.files.findObject(job.ownerId,ids[0])).contentType)))) throw new CreativeStudioError(415,'video_image_source_required');
@@ -197,14 +214,19 @@ class CreativeStudioService {
         step.status = 'submitting'; job.status = 'running';
         await this.repository.save(job);
         if (step.pluginId === 'video') {
-          try { result = await this.mediaStudio.startGeneration({ user, ...step.input, ...(ids.length ? { sourceFileId: ids[0] } : {}), confirmed: job.confirmed }); }
+          try { result = await this.mediaStudio.startGeneration({ user, ...step.input, ...(job.film ? {filmDirection:true} : {}), ...(ids.length ? { sourceFileId: ids[0] } : {}), confirmed: job.confirmed }); }
           catch (error) { throw new CreativeStudioError(error.status || 503, error.code || 'video_generation_unavailable', true); }
           if (!result.jobToken) throw new CreativeStudioError(503, 'studio_submission_uncertain', true);
           step.providerJobToken = result.jobToken; step.status = 'running';
           return this.repository.save(job, { release: true, delayMs: 15000 });
         }
-        if (step.input.edit) result = await this.editGate.run(signal=>{admitted=true;return this.editor.apply({user,pluginId:step.pluginId,input:step.input,signal});},{userId:job.ownerId});
-        else if (step.pluginId === 'image') result = await this.imageGate.run(signal=>{admitted=true;return this.generateImage({ user, input: step.input, sourceFileIds: ids, signal });},{userId:job.ownerId});
+        if (assemble) {
+          const clips = ids.map((fileId,i) => ({fileId,start:0,end:step.input.durations[i],speed:1,volume:1,fade:false}));
+          const output = await this.mediaStudio.renderTimeline({user,clips,requestId:job.id,name:step.input.name,
+            aspect:step.input.aspectRatio === '9:16' ? 'vertical' : 'widescreen'});
+          result = {files:[output.file],summary:'รวมช็อตเป็นไฟล์ MP4 แล้ว'};
+        } else if (step.input.edit) result = await this.editGate.run(signal=>{admitted=true;return this.editor.apply({user,pluginId:step.pluginId,input:step.input,signal});},{userId:job.ownerId});
+        else if (step.pluginId === 'image') result = await this.imageGate.run(signal=>{admitted=true;return this.generateImage({ user, input: step.input, sourceFileIds: ids, signal, filmImage:!!job.film });},{userId:job.ownerId});
         else {
           const officeInput = Object.fromEntries(Object.entries(step.input).filter(([key]) => ['prompt','title','content'].includes(key)));
           result = await this.office.create({ user, pluginId: step.pluginId, input: officeInput, sourceFileIds: ids, name: step.input.name || '' });
@@ -221,7 +243,7 @@ class CreativeStudioService {
       return await this.repository.save(job, { release: true });
     } catch (error) {
       if (error.code === 'studio_lease_lost') throw error;
-      if (!admitted && (step.input.edit || step.pluginId==='image') && (error.code==='system_busy' || String(error.code||'').startsWith('capacity_'))) {
+      if (!admitted && (step.input.edit || ['image','film-assemble'].includes(step.pluginId)) && (['system_busy','media_worker_busy'].includes(error.code) || String(error.code||'').startsWith('capacity_'))) {
         step.status='queued';job.status='queued';
         return this.repository.save(job,{release:true,delayMs:5000});
       }
@@ -240,7 +262,7 @@ class CreativeStudioService {
     for (const item of jobs) { const job = await this.repository.claim(item.ownerId,item.id); if (job) { await this.executeClaim(job); processed += 1; } }
     return { processed };
   }
-  async generateImage({ user, input, sourceFileIds, signal }) {
+  async generateImage({ user, input, sourceFileIds, signal, filmImage = false }) {
     const ownerId = this.requireAccount(user), config = this.imageConfig();
     if (sourceFileIds.length > 3) throw new CreativeStudioError(400, 'too_many_image_sources');
     const parts = [{ text: 'Create one image following the user request. Return the image with a short description.\n' + input.prompt }];
@@ -270,12 +292,14 @@ class CreativeStudioService {
     for (const part of images) {
       const encoded = part.inlineData.data;
       if (typeof encoded !== 'string' || encoded.length > Math.ceil(MAX_FILE_BYTES*4/3)+16 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw new CreativeStudioError(413, 'generated_image_too_large', true);
-      const bytes = Buffer.from(encoded,'base64');
-      const type = part.inlineData.mimeType;
+      let bytes = Buffer.from(encoded,'base64');
+      let type = part.inlineData.mimeType;
       const valid = type === 'image/png' ? bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])) : type === 'image/jpeg' ? bytes[0] === 255 && bytes[1] === 216 : bytes.subarray(0,4).toString() === 'RIFF' && bytes.subarray(8,12).toString() === 'WEBP';
       if (!valid || !bytes.length || bytes.length>MAX_FILE_BYTES) throw new CreativeStudioError(502, 'invalid_generated_image', true);
-      const extension = { 'image/png':'png', 'image/jpeg':'jpg', 'image/webp':'webp' }[type];
-      await this.validateGeneratedImage(bytes,type,extension);
+      let extension = { 'image/png':'png', 'image/jpeg':'jpg', 'image/webp':'webp' }[type];
+      const convert = filmImage && (type === 'image/webp' || bytes.length > 4*1024*1024);
+      const jpeg = await this.validateGeneratedImage(bytes,type,extension,convert);
+      if (convert) { bytes=jpeg; type='image/jpeg'; extension='jpg'; }
       const name = sanitizeFilename(input.name || 'sentinel-image').replace(/\.[^.]*$/,'').slice(0,140) + '.' + extension;
       signal?.throwIfAborted();
       try { files.push(await this.files.upload(ownerId,name,type,bytes)); }
@@ -283,7 +307,7 @@ class CreativeStudioService {
     }
     return { files, summary: output.filter(part => typeof part.text === 'string' && !part.thought).map(part => part.text).join('\n').slice(0,1000) || 'สร้างรูปภาพเรียบร้อยแล้ว' };
   }
-  async validateGeneratedImage(bytes,type,extension) {
+  async validateGeneratedImage(bytes,type,extension,convert = false) {
     let directory;
     try {
       directory=await fs.mkdtemp(path.join(os.tmpdir(),'panthorium-image-'));
@@ -291,7 +315,12 @@ class CreativeStudioService {
       // Decode one bounded frame using the existing deployed media encoder.
       // Fixed image decoder + local-only protocols prevent playlist/URL interpretation.
       const decoder={'image/png':'png','image/jpeg':'mjpeg','image/webp':'webp'}[type];
-      await runProcess(process.env.FFMPEG_PATH || 'ffmpeg',['-hide_banner','-v','error','-xerror','-err_detect','explode','-protocol_whitelist','file,pipe','-f','image2','-pattern_type','none','-c:v',decoder,'-max_pixels','16777216','-i',file,'-frames:v','1','-f','null','-'],{timeoutMs:10000,maxOutputBytes:1024});
+      await runProcess(process.env.FFMPEG_PATH || 'ffmpeg',['-hide_banner','-v','error','-xerror','-err_detect','explode','-protocol_whitelist','file,pipe','-f','image2','-pattern_type','none','-c:v',decoder,'-max_pixels','16777216','-i',file,'-frames:v','1',...(convert ? ['-vf',"scale=w='min(1600,iw)':h='min(1600,ih)':force_original_aspect_ratio=decrease",'-threads','1','-c:v','mjpeg','-q:v','3','-f','image2',path.join(directory,'reference.jpg')] : ['-f','null','-'])],{timeoutMs:10000,maxOutputBytes:1024});
+      if (convert) {
+        const jpeg = await fs.readFile(path.join(directory,'reference.jpg'));
+        if (!jpeg.length || jpeg.length > 4*1024*1024) throw Error('invalid_film_reference');
+        return jpeg;
+      }
     } catch(_) { throw new CreativeStudioError(502,'invalid_generated_image',true); }
     finally { if(directory) await fs.rm(directory,{recursive:true,force:true}).catch(()=>{}); }
   }

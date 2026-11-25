@@ -3,7 +3,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const {requireAuth, requirePermission} = require('../middleware/auth');
 const {account} = require('../services/socialService');
-function createOnlineToolsRouter(auth, tools) {
+function createOnlineToolsRouter(auth, tools, film) {
   const r = express.Router();
   const limit = (n) =>
     rateLimit({windowMs: 60000, limit: n, standardHeaders: true, legacyHeaders: false});
@@ -42,6 +42,20 @@ function createOnlineToolsRouter(auth, tools) {
     },
     limit(160)
   );
+  if (film) {
+    r.get('/film/:key/:episode', route(q => film.state(q.user,q.params.key,q.params.episode)));
+    r.post('/film/:key/master', limit(3), async (q,res,next) => {
+      const controller = new AbortController();
+      res.once('close',() => { if (!res.writableFinished) controller.abort(); });
+      const send = (file,name) => new Promise((resolve,reject) =>
+        res.download(file,name,{acceptRanges:false,cacheControl:false},error => error ? reject(error) : resolve()));
+      try { await film.download(q.user,q.params.key,body(q).revision,send,controller.signal); }
+      catch(e) { if (!res.destroyed && !res.headersSent) next(e); }
+    });
+    r.post('/film/:key/plan', limit(5), route(q => film.plan(q.user,q.params.key,body(q))));
+    r.post('/film/:key/quote', route(q => film.produce(q.user,q.params.key,body(q),false)));
+    r.post('/film/:key/produce', limit(8), route(q => film.produce(q.user,q.params.key,body(q),true)));
+  }
   r.get(
     '/projects',
     route(async (q) => ({items: await tools.list(q.toolOwner)}))

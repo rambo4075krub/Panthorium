@@ -381,7 +381,7 @@ class OnlineToolsService {
             category: 'operations',
             type: 'tools.form_received',
             title: 'มีคำตอบใหม่ในเวิร์กโฟลว์',
-            body: 'เปิดเครื่องมือออนไลน์ แล้วเลือกรายการงานอัตโนมัติเพื่อตรวจสอบ',
+            body: 'เปิด “สร้างสรรค์และเอกสาร” แล้วเลือก “งานอัตโนมัติ” เพื่อดูคำตอบ',
             sourceId: n.run
           });
           await this.pool.query('DELETE FROM panthorium_tool_notices WHERE run=$1 AND recipient=$2', [
