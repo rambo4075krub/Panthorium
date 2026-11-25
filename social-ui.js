@@ -1096,6 +1096,8 @@
           "textarea",
         );
       card.append(f);
+      if (r.kind === "thread" && r.context === "support" && window.PanthoriumMarketing)
+        window.PanthoriumMarketing.room({v,r,card,text,el,button,api,write,refresh:()=>detail(v,id),status});
       const getFiles = r.kind === "thread" ? await attachments(v, f) : () => [];
       const submit = bindForm(
         v,
@@ -1291,13 +1293,13 @@
       if (!reuse) c.append(
         el(
           "small",
-          (msg.ownerId === v.uid ? "คุณ" : msg.author?.name || "สมาชิก") +
+          (msg.ownerId === v.uid && !msg.officialBot ? "คุณ" : msg.author?.name || "สมาชิก") +
             " • " +
             new Date(msg.createdAt).toLocaleString("th-TH"),
         ),
         el("p", msg.text),
       );
-      if (chat && msg.ownerId === v.uid) {
+      if (chat && msg.ownerId === v.uid && !msg.officialBot) {
         const label = msg.readAt ? msg.kind === "group-message" ? "อ่านแล้ว " + msg.readCount + " คน" : "อ่านแล้ว" : "ส่งแล้ว";
         const receipt = c.querySelector(".social-message-receipt") || el("span", null, {
           class: "social-message-receipt", "data-delivery": msg.readAt ? "read" : "sent",
@@ -1973,7 +1975,13 @@
         toolbar.append(b); return b;
       });
     }
-    if (v.module === "talk") toolbar.append(button(v, "ค้นหาเพื่อน", () => open("friends")));
+    if (v.module === "talk") {
+      toolbar.append(button(v, "Panthorium", () => support(v)), button(v, "ค้นหาเพื่อน", () => open("friends")));
+      if (os()?.state?.user?.roles?.includes("administrator") && os()?.state?.user?.permissions?.includes("settings"))
+        toolbar.append(button(v, "การตลาดหลังบ้าน", () => {
+          clear(v); return window.PanthoriumMarketing.admin({v,el,button,input,select,section,api,status});
+        }));
+    }
     if (v.module === "market") toolbar.append(button(v, "รายการซื้อขาย", () => orders(v)));
     if (v.module === "connect") {
       toolbar.append(button(v, "ตั้งค่า Connect", () => connectSettings(v)), button(v, "ค้นหาคู่", () => feed(v, null, "discover")), button(v, "บทสนทนา Connect", () => feed(v, null, "chats")));
@@ -2039,6 +2047,7 @@
       document.addEventListener("visibilitychange", () => { scheduleRead(v); if (document.visibilityState === "hidden") v.viewer?.pause(); v.updatePlayback?.(); }, { signal: v.controller.signal });
     }
     activate(module);
+    window.PanthoriumMarketing?.observe(v,module,api);
     v.noticeThrough = new Date().toISOString();
     try {
       if (options.support) await support(v);

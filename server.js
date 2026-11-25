@@ -209,6 +209,11 @@ const remoteWorkspaces = new (require('./services/remoteWorkspaceService').Remot
 });
 cloudFiles.personalUsage=userId=>remoteWorkspaces.managedUsage(userId);
 const social = new (require('./services/socialService').SocialService)({ repository: new (require('./services/socialRepository').SocialRepository)({...cloudStoreOptions,allowMemory:!config.isProduction&&!config.databaseUrl}), files:cloudFiles, accounts:authRepository, supportAdminUsername:config.adminUsername, systemNotifications:notifications });
+authService.onCustomerCreated = user => social.provisionSupport(user);
+const publicWeb = new PublicWebService();
+const marketing = new (require("./services/marketingService").MarketingService)({
+  pool:social.repo.pool, runner:new (require("./services/marketingRunner").MarketingRunner)(), web:publicWeb,
+});
 notifications.socialVisibility = (userId, sourceId) => social.notifications.systemNotificationVisible(userId, sourceId);
 const mediaStudio = new MediaStudioService({ files: cloudFiles, providers: sentinel.providers, gateway: sentinel.gateway, audit, jobSecret: config.jwtSecret });
 const creativeStudio = new CreativeStudioService({
@@ -256,7 +261,7 @@ const workAssistant = new (require('./services/workAssistantService').WorkAssist
   files: cloudFiles, gateway: sentinel.gateway, studio: creativeStudio, memory: agentMemory, reminders, authService, cloudApps, audit });
 agentMemory.workAssistant = workAssistant;
 require('./services/workAssistantTools').registerWorkAssistantTools(toolRegistry, { service: workAssistant });
-registerPublicWebTools(toolRegistry, { service: new PublicWebService() });
+registerPublicWebTools(toolRegistry, { service: publicWeb });
 registerPersonalFunctionTools(toolRegistry, { memory: agentMemory, reminders, files: cloudFiles, knowledge: agentKnowledge });
 registerNotificationTools(toolRegistry, { notifications });
 require('./services/remoteWorkspaceTools').registerRemoteWorkspaceTools(toolRegistry,{service:remoteWorkspaces});
@@ -365,6 +370,7 @@ app.use("/api/billing", require("./routes/billing").createBillingRouter(authServ
 app.use("/api/files", createFilesRouter(authService, cloudFiles));
 app.use("/api/remote",require("./routes/remoteWorkspace").createRemoteWorkspaceRouter(authService,remoteWorkspaces));
 app.use("/api/media", createMediaStudioRouter(authService, mediaStudio));
+app.use('/api/marketing',require('./routes/marketing').createMarketingRouter(authService,marketing,social));
 app.use('/api/social',require('./routes/social').createSocialRouter(authService,social));
 app.use('/api/studio', createCreativeStudioRouter(authService, creativeStudio));
 app.use('/api/work', require('./routes/workAssistant').createWorkAssistantRouter(authService, workAssistant));
@@ -403,7 +409,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-voice-catalog.js", "creative-voice-ui.js", "creative-editors-ui.js", "creative-studio-ui.js", "work-assistant-ui.js", "social-rtc.js", "social-media-source.js", "social-ui.js", "screen-voice-catalog.js", "screen-voice-client.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "credit-alert-client.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js", "personal-chat-ui.js"];
+const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-voice-catalog.js", "creative-voice-ui.js", "creative-editors-ui.js", "creative-studio-ui.js", "work-assistant-ui.js", "social-rtc.js", "social-media-source.js", "marketing-ui.js", "social-ui.js", "screen-voice-catalog.js", "screen-voice-client.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "credit-alert-client.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js", "personal-chat-ui.js"];
 app.get("/vendor/hls.min.js", (req, res) => res.type("application/javascript").sendFile(require.resolve("hls.js/dist/hls.min.js")));
 
 for (const script of [...shellScripts, "panthorium-window-base.js", "personal-chat-ui.css", "workspace-ui.css", "social-player.html", "social-player.js", "payment-return.html", "payment-return.css"]) {
@@ -587,6 +593,7 @@ async function start() {
   await audit.init();
   await securityResponse.init();
   await authService.init();
+  await marketing.init();
   await localInsights.init();
   if (mcpOAuthRepository) await mcpOAuthRepository.init();
   await organizationRepository.init();
@@ -654,6 +661,10 @@ async function start() {
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== "1" && process.env.PANTHORIUM_LOCAL_PROFILE !== "1") sentinelTraining.start();
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== "1") { autonomousGovernance.start(); sentinelOrchestrator.start(); }
   server.on('close', stopBackgroundWorkers);
+  if (process.env.PANTHORIUM_DEPLOY_PROBE !== "1") {
+    social.backfillSupport().catch(()=>console.warn("[SOCIAL] official inbox backfill deferred"));
+    marketing.start();
+  }
   if(process.env.PANTHORIUM_DEPLOY_PROBE!=='1'&&process.env.PANTHORIUM_STUDIO_WORKER_ENABLED==='1'&&process.env.PANTHORIUM_OBJECT_ROOT) creativeWorker.start();
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== '1' && process.env.PANTHORIUM_LOCAL_PROFILE !== '1') localInsights.start();
   if (liveGateway) server.on('close', () => liveGateway.close());
@@ -661,6 +672,7 @@ async function start() {
 }
 
 function stopBackgroundWorkers() {
+  marketing.stop();
   creativeWorker.stop();
   localInsights.stop();
   if (localPushTimer) { clearInterval(localPushTimer); localPushTimer = null; }
@@ -700,4 +712,4 @@ if (require.main === module) {
   }).catch((error) => { console.error("[BOOT]", error); process.exit(1); });
 }
 
-module.exports = { app, remoteWorkspaces, workloadCapacity, localInsights, notifications, notificationRepository, social, creativeStudio, organizationRepository, organizations, organizationResources, organizationGovernance, privacyRequests, actionLedger, voiceSessions, usageLedger, cloudApps, liveEntitlements, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };
+module.exports = { app, marketing, remoteWorkspaces, workloadCapacity, localInsights, notifications, notificationRepository, social, creativeStudio, organizationRepository, organizations, organizationResources, organizationGovernance, privacyRequests, actionLedger, voiceSessions, usageLedger, cloudApps, liveEntitlements, sentinel, sentinelTraining, sentinelTrainingRepository, sentinelLearning, sentinelLearningRepository, sentinelLearningPolicy, sentinelRecovery, sentinelBenchmark, sentinelActiveLearning, sentinelReleaseGate, autonomousGovernance, sentinelOrchestrator, authService, biometrics, reminders, reminderRepository, securityResponse, conversations, aiOperations, toolRegistry, agentPolicy, agentService, agentFunctionCalling, agentPlanner, agentWorkflow, agentRuns, agentPending, agentJobs, agentAutomationRepository, agentAutomationPolicy, agentAutomation, agentMemoryRepository, agentMemory, agentKnowledgeRepository, agentKnowledge, agentScheduler, multiAgentRuns, multiAgentPlanner, multiAgent, integrationRepository, integrationExecutions, integrations, productionIntelligence, start };

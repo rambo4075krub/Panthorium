@@ -69,6 +69,32 @@ class SocialService {
     try { const result = await this.retentionBusy; this.retentionAt = Date.now(); return result; }
     finally { this.retentionBusy = null; }
   }
+  async provisionSupport(user) {
+    if (!this.supportAdminUsername || !user.permissions?.includes("chat") || user.roles?.includes("guest")) return;
+    try { await this.support({ user: { sub: user.id, roles: user.roles } }); }
+    catch (error) {
+      // Registration is durable first. A later inbox read or restart retries a transient failure.
+      if (!["social_support_blocked", "social_not_found"].includes(error.code))
+        console.warn("[SOCIAL] official conversation provisioning deferred");
+    }
+  }
+  async backfillSupport() {
+    if (!this.supportAdminUsername || !this.repo.pool) return;
+    const admin = await this.accounts.findUserByUsername(this.supportAdminUsername);
+    if (!admin?.roles?.includes("administrator") || !admin.permissions?.includes("chat")) return;
+    let after = "00000000-0000-0000-0000-000000000000";
+    for (;;) {
+      const { rows } = await this.repo.pool.query(`SELECT u.id FROM panthorium_users u WHERE u.id > $1
+        AND u.id <> $2::uuid AND u.permissions ? 'chat' AND NOT (u.roles ? 'guest')
+        AND NOT EXISTS (SELECT 1 FROM panthorium_social_records s WHERE s.owner_id=u.id::text AND s.kind='thread'
+          AND s.data->>'context'='support' AND s.data->>'supportAdminId'=$2::text)
+        ORDER BY u.id LIMIT 64`, [after, admin.id]);
+      if (!rows.length) return;
+      for (const {id} of rows) await this.provisionSupport({id, permissions:["chat"]});
+      after = rows[rows.length - 1].id;
+      if (rows.length < 64) return;
+    }
+  }
   async support({ user }) {
     const uid = account(user);
     const admin = this.supportAdminUsername && await this.accounts?.findUserByUsername(this.supportAdminUsername);
@@ -81,10 +107,11 @@ class SocialService {
       const existing = await repo.get(rid);
       if (existing) {
         if (!await this.allowed(repo, uid, existing)) fail("social_not_found", 404);
+        if (existing.title !== "Panthorium") { existing.title = "Panthorium"; await repo.put(existing); }
         return { ok: true, record: existing };
       }
       const record = row("thread", uid, {
-        id: rid, title: "ติดต่อ Panthorium", context: "support", status: "accepted", supportAdminId: admin.id,
+        id: rid, title: "Panthorium", context: "support", status: "accepted", supportAdminId: admin.id,
       }, "", [uid, admin.id]);
       await repo.put(record);
       return { ok: true, record };
@@ -280,6 +307,11 @@ class SocialService {
     )
       return { ok: true, items: [], optInRequired: true };
     const threads = module === "talk" || connectChats;
+    if (module === "talk" && !before && this.supportAdminUsername) {
+      const admin = await this.accounts.findUserByUsername(this.supportAdminUsername);
+      if (admin && admin.id !== uid && !await this.repo.get("thread:" + key(uid, admin.id, "support")))
+        await this.provisionSupport({id:uid, roles:user.roles, permissions:["chat"]});
+    }
     const candidates = threads ? await this.repo.threadPage({ member: uid, connect: connectChats, before }) : await this.repo.list({
       ...(["feed", "watch", "short"].includes(module) ? { kinds: module === "watch" ? ["video"] : ["feed", "watch", "short", "community"] } : { kind }),
       ...(module === "talk" || connectChats ? { member: uid } : {}),
@@ -360,6 +392,7 @@ class SocialService {
     if (r.kind === "thread" && r.context === "support") {
       out.author = (await this.messageView({ ownerId: r.ownerId }, r)).author;
       if (uid === r.supportAdminId) out.title = "ติดต่อสอบถาม · " + out.author.name;
+      else { out.title = "Panthorium"; out.peer.name = "Panthorium"; }
     }
     if (r.kind === "connect") {
       out.author = { name: r.name };
@@ -407,7 +440,7 @@ class SocialService {
   }
   async messageView(message, thread, names = new Map()) {
     if (thread?.context === "support" && message.ownerId === thread.supportAdminId)
-      return { ...message, author: { name: "แอดมิน Panthorium" } };
+      return { ...message, author: { name: message.officialBot ? "Panthorium · ตอบอัตโนมัติ" : "แอดมิน Panthorium" } };
     if (!names.has(message.ownerId)) {
       const connect = thread?.context === "connect";
       const profile = await this.repo.get((connect ? "connect:" : "profile:") + message.ownerId);
@@ -822,6 +855,13 @@ class SocialService {
       if (record.ownerId === uid || record.status !== "pending")
         fail("social_invitation_not_pending");
       record.status = a.accept === false ? "declined" : "accepted";
+    } else if (action === "support-answer") {
+      const thread = await this.requireRecord(repo, uid, a.recordId, "thread");
+      if (thread.context !== "support" || thread.ownerId !== uid) fail("social_forbidden", 403);
+      await this.threadAllowed(repo, uid, thread);
+      const text = require("./marketingCatalog").botAnswer(a.topic);
+      record = row("message", thread.supportAdminId, { text, files:[], officialBot:true }, thread.id);
+      record.expiresAt = expiresAt(record);
     } else if (action === "message") {
       const thread = await this.requireRecord(repo, uid, a.recordId, "thread");
       await this.threadAllowed(repo, uid, thread);
@@ -829,6 +869,18 @@ class SocialService {
       if (!text && !files.length) fail("social_empty_post");
       record = row("message", uid, { text, files }, thread.id);
       if (thread.context !== "connect") record.expiresAt = expiresAt(record);
+      if (thread.context === "support") {
+        const {questionTopic,botAnswer}=require("./marketingCatalog");
+        const topic=questionTopic(text);
+        if (uid===thread.supportAdminId || topic==="staff") {
+          thread.staffUntil=new Date(Date.now()+3*86400000).toISOString(); await repo.put(thread);
+        } else if (topic && !(Date.parse(thread.staffUntil)>Date.now())) {
+          const answer=row("message",thread.supportAdminId,{text:botAnswer(topic),files:[],officialBot:true},thread.id);
+          // The deterministic suffix orders the response after the question even in the same millisecond.
+          answer.id=record.id+"-answer"; answer.createdAt=record.createdAt; answer.expiresAt=expiresAt(answer);
+          await repo.put(answer);
+        }
+      }
     } else if (action === "order") {
       const product = await this.requireRecord(
         repo,
