@@ -117,8 +117,13 @@ async function verify({page, hub, owner, other, fixture: {film, calls}, service,
   const b = (name) => hub.getByRole('button', {name, exact: true});
   const user = {sub: owner, roles: ['user'], permissions: ['chat']};
   const otherUser = {...user, sub: other};
-  await hub.locator('[data-tool="video"]').click();
-  await b('สร้างหนังและซีรีส์').click();
+  const studio = page.locator('[data-studio]');
+  await studio.locator('[data-studio-section="video"]').click();
+  await studio.locator('[data-studio-mode-id="film"]').click();
+  assert.equal(
+    await page.locator('.window[data-id="creative-studio"]').getAttribute('data-studio-active'),
+    'video'
+  );
   await b('สร้างโปรเจกต์ใหม่').click();
   await hub.getByLabel('ชื่อโปรเจกต์', {exact: true}).fill('รถไฟสายสุดท้าย');
   await hub.getByLabel('ประเภท', {exact: true}).selectOption('series');
@@ -265,7 +270,9 @@ async function verify({page, hub, owner, other, fixture: {film, calls}, service,
   await page.setViewportSize({width: 390, height: 844});
   assert(await hub.evaluate((n) => n.scrollWidth <= n.clientWidth + 1));
   await hub.getByText('ส่งออกภาพยนตร์ทั้งเรื่องแล้ว', {exact: true}).waitFor();
-  await page.goto(new URL('/#film-studio', page.url()).href);
+  const filmLink = new URL('/#film-studio', page.url()).href;
+  await page.goto('about:blank');
+  await page.goto(filmLink);
   await page.getByRole('button', {name: 'รถไฟสายสุดท้าย', exact: true}).waitFor();
   console.log(
     'Film studio: one-click Thai series, shared references, WebP conversion, real 8-second vertical episodes and 16-second MP4 master, selective retakes, replay, privacy and phone layout passed.'

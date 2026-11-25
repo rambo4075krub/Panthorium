@@ -16,6 +16,10 @@
   const el = (tag, text, attrs = {}) => { const node = document.createElement(tag); if (text != null) node.textContent = text; for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value); return node; };
   const button = (text, handler, attrs = {}) => { const node = el('button', text, { type: 'button', ...attrs }); node.onclick = handler; return node; };
   const plugin = id => PLUGINS.find(item => item.id === id);
+  const onlineTools = () => window.PanthoriumOnlineTools?.tools || [];
+  const sections = () => [...PLUGINS, ...onlineTools().filter(item => !item.parent)];
+  const nativeModes = {image:'แก้ไขรูปภาพ',video:'ไทม์ไลน์วิดีโอ'};
+  const searchWords = {image:'ภาพถ่าย เลเยอร์',video:'วีดีโอ ตัดต่อ ไทม์ไลน์ MP4',document:'Word DOCX เวิร์ด',spreadsheet:'Excel XLSX เอ็กเซล',presentation:'PowerPoint PPTX สไลด์'};
   const sourceLimit = id => id === 'video' ? 1 : id === 'image' ? 3 : 6;
   const promptLimit = id => id === 'video' ? 1600 : id === 'image' ? 12000 : 8000;
   function editable(file) { return /\.(docx|xlsx|pptx|png|jpe?g|webp|mp4|webm|mov|mkv)$/i.test(file.name || ''); }
@@ -151,6 +155,7 @@
       <nav class="cs-tabs" role="tablist" aria-label="เครื่องมือสร้างสรรค์" data-studio-tabs></nav>
       <div class="cs-head-actions"><button type="button" data-toggle-create aria-expanded="false">สร้างด้วย AI</button><button type="button" data-toggle-history aria-expanded="false">ผลงาน</button><button type="button" data-open-sentinel>Sentinel AI</button><button type="button" data-open-files>ไฟล์ของฉัน</button></div>
     </div>
+    <div data-studio-modes class="cs-modes" role="group" aria-label="เครื่องมือในหมวดนี้" hidden></div>
     <div data-inline-workspace role="tabpanel" id="studio-editor-panel" aria-labelledby="studio-tab-image"></div><div class="cs-layout" hidden><section class="cs-panel" data-create-panel>
       <h2 data-studio-title>รูปภาพ</h2><p class="cs-muted" data-studio-output></p><div class="cs-capability" data-studio-capability>กำลังตรวจความพร้อมของปลั๊กอิน…</div>
       <div class="cs-open-file"><label>เปิดงานที่มีอยู่<select data-editor-files aria-label="ไฟล์ที่จะแก้ไข"></select></label><button type="button" data-editor-open>เปิดในพื้นที่ทำงาน</button><button type="button" data-editor-blank>เริ่มเอกสารเปล่า</button></div>
@@ -169,6 +174,7 @@
     for(const [key,item]of v.workspaces){item.host.hidden=key!==id;if(key!==id)item.editor?.pause?.();}
     if(v.workspaces.has(id))return;
     const host=el('div',null,{'data-workspace-kind':id,class:'cs-workspace'});area.append(host);const item={host};v.workspaces.set(id,item);
+    if(onlineTools().some(tool=>tool.id===id)){item.editor=window.PanthoriumOnlineTools.mount(id,host,jobId=>trackJob(v,jobId));return;}
     if(['image','video'].includes(id)&&window.PanthoriumCreativeEditors){item.editor=window.PanthoriumCreativeEditors.mount(id,host,{valid:()=>current(v),request:(...args)=>api(v,...args),files:()=>v.files,onSaved:file=>{if(!current(v))return;v.files.unshift(file);renderFiles(v);}});return;}
     const welcome=el('div',null,{class:'cs-welcome'});welcome.append(el('small','PANTHORIUM / '+id.toUpperCase()),el('h2',{document:'เริ่มเขียนเรื่องถัดไป',spreadsheet:'จากข้อมูล สู่คำตอบ',presentation:'เล่าเรื่องให้ชัดเจน'}[id]||'เริ่มสร้างผลงาน'),el('p',{document:'กระดาษ · ย่อหน้า · ตาราง · ตรวจทาน',spreadsheet:'เซลล์ · สูตรคำนวณ · กราฟ · Pivot Table',presentation:'สไลด์ · กล่องข้อความ · จัดวาง · นำเสนอ'}[id]||''));
     welcome.append(button('＋ สร้าง'+plugin(id).title+'ใหม่',()=>v.root.querySelector('[data-editor-blank]').click(),{class:'cs-primary'}),button('เปิดไฟล์ของฉัน',()=>v.root.querySelector('[data-editor-files]').focus()));host.append(welcome);
@@ -176,13 +182,13 @@
   async function openFile(v,fileId,kind){
     if(!fileId||!current(v))return false;if(v.busy||v.modeBusy){status(v,'รอคำขอปัจจุบันเสร็จก่อนเปิดไฟล์',true);return false;}const file=v.files.find(f=>f.id===fileId)||v.jobs.flatMap(j=>j.files||[]).find(f=>f.id===fileId);
     kind=kind||(/\.docx$/i.test(file?.name)?'document':/\.xlsx$/i.test(file?.name)?'spreadsheet':/\.pptx$/i.test(file?.name)?'presentation':/\.(mp4|webm|mov|mkv)$/i.test(file?.name)?'video':/\.(png|jpe?g|webp)$/i.test(file?.name)?'image':v.active);
-    v.selectedFiles[kind]=fileId;if(file&&!v.files.some(f=>f.id===fileId))v.files.unshift(file);selectPlugin(v,kind);showWorkspace(v,kind);const item=v.workspaces.get(kind);if(!item)return false;
+    v.selectedFiles[kind]=fileId;if(file&&!v.files.some(f=>f.id===fileId))v.files.unshift(file);if(!selectPlugin(v,kind))return false;const item=v.workspaces.get(kind);if(!item)return false;
     v.root.querySelector('.cs-layout').hidden=true;for(const n of v.root.querySelectorAll('[data-toggle-create],[data-toggle-history]'))n.setAttribute('aria-expanded','false');
     if(item.editor)return item.editor.openFile(fileId);
     return window.PanthoriumStudioEditor?.open(fileId,{container:item.host,onAdopt:file=>{if(current(v)){v.selectedFiles[kind]=file.id;renderFiles(v);}},onClose:()=>{v.workspaces.delete(kind);item.host.remove();showWorkspace(v,v.active);},onSaved:job=>{if(current(v)){putJob(v,job);renderJobs(v);for(const f of job.files||[])if(!v.files.some(x=>x.id===f.id))v.files.unshift(f);renderFiles(v);}}});
   }
   async function editFile(fileId){
-    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fileId||'')||!open(view?.active||'document'))return false;
+    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fileId||'')||!open(view?.section||'document'))return false;
     const v=view;if(!v.files.some(file=>file.id===fileId))await loadFiles(v);if(!current(v))return false;
     const file=v.files.find(file=>file.id===fileId)||v.jobs.flatMap(job=>job.files||[]).find(file=>file.id===fileId);
     if(!file||!editable(file)){status(v,file?'ไฟล์ชนิดนี้ยังเปิดแก้ไขไม่ได้':'ไม่พบไฟล์ในบัญชีนี้ กรุณาโหลดรายการไฟล์ใหม่',true);return false;}
@@ -205,13 +211,44 @@
     for (const node of v.root.querySelectorAll('[data-studio-form] input,[data-studio-form] textarea,[data-studio-next],[data-studio-aspect],[data-studio-duration]')) node.disabled = v.busy;
     for (const node of v.root.querySelectorAll('[data-studio-tabs] button')) node.disabled = v.busy || v.modeBusy;
   }
-  function selectPlugin(v, id, sourceIds) {
-    if (!current(v) || !plugin(id) || v.busy || v.modeBusy) return;
-    saveDraft(v); v.active = id; v.root.dataset.studioActive = id;
-    const shell = v.root.closest('.window'); if (shell) shell.dataset.studioActive = id;
-    const selected = plugin(id), draft = v.drafts[id] || {}, q = name => v.root.querySelector('[data-studio-' + name + ']');
-    v.root.querySelector('[role=tabpanel]').setAttribute('aria-labelledby', 'studio-tab-' + id);
-    for (const tab of v.root.querySelectorAll('[data-studio-tabs] button')) { tab.setAttribute('aria-selected', String(tab.dataset.pluginId === id)); tab.tabIndex = tab.dataset.pluginId === id ? 0 : -1; }
+  function selectPlugin(v, id, sourceIds, requestedMode) {
+    const section=sections().find(item=>item.id===id);
+    if (!current(v) || !section || v.busy || v.modeBusy) return false;
+    const modes=onlineTools().filter(item=>item.parent===id);
+    const mode=modes.find(item=>item.id===requestedMode)?.id || id;
+    const native=mode===id && !!plugin(id);
+    if (v.mode !== mode) {
+      clearVoicePending(v);
+      v.root.querySelector('[data-creative-voice-help]').hidden=true;
+    }
+    v.section=id;v.mode=mode;
+    v.root.dataset.studioActive=id;
+    const shell=v.root.closest('.window');
+    if(shell){shell.dataset.studioActive=id;shell.dataset.studioMode=mode;}
+    const bar=v.root.querySelector('[data-studio-modes]');
+    bar.replaceChildren();bar.hidden=!modes.length;
+    if(modes.length) for(const item of [{id,title:nativeModes[id]},...modes]) {
+      const control=button(item.title,()=>selectPlugin(v,id,undefined,item.id),{'data-studio-mode-id':item.id,'aria-pressed':String(mode===item.id)});
+      bar.append(control);
+    }
+    for (const tab of v.root.querySelectorAll('[data-studio-tabs] button')) {
+      const selected=tab.dataset.studioSection===id;
+      tab.setAttribute('aria-selected',String(selected));
+      tab.tabIndex=selected?0:-1;
+      if(selected) tab.scrollIntoView?.({block:'nearest',inline:'nearest'});
+    }
+    v.root.querySelector('[data-inline-workspace]').setAttribute('aria-labelledby','studio-tab-'+id);
+    v.root.querySelector('.cs-open-file').hidden=!native;
+    v.root.querySelector('.cs-head-actions').hidden=!native;
+    if (!native) {
+      v.root.querySelector('.cs-layout').hidden=true;
+      for(const toggle of v.root.querySelectorAll('[data-toggle-create],[data-toggle-history]'))toggle.setAttribute('aria-expanded','false');
+      status(v,'');
+      showWorkspace(v,mode);
+      return true;
+    }
+    saveDraft(v); v.active=id;
+    const selected=plugin(id), draft=v.drafts[id]||{}, q=name=>v.root.querySelector('[data-studio-'+name+']');
     q('title').textContent = selected.title; q('output').textContent = selected.output + (['document', 'presentation'].includes(id) ? ' · ภาพแนบใช้เป็นภาพประกอบ โดยยังไม่วิเคราะห์เนื้อหาในภาพ' : '');
     q('name').value = draft.name || ''; q('prompt').value = draft.prompt || ''; q('prompt').placeholder = selected.example;
     const starters = {
@@ -241,7 +278,7 @@
     if (Array.isArray(sourceIds) && sourceIds.length) v.root.querySelector('.cs-options').open = true;
     if (Array.isArray(sourceIds)) v.sources = new Set(sourceIds.slice(0, sourceLimit(id)));
     v.sources = new Set([...v.sources].filter(fileId => { const file = v.files.find(item => item.id === fileId); return !file || sourceCompatible(file, id); }).slice(0, sourceLimit(id)));
-    renderFiles(v); renderCapability(v); controls(v); showWorkspace(v,id);
+    renderFiles(v); renderCapability(v); controls(v); showWorkspace(v,id); return true;
   }
   function renderCapability(v) {
     if (!current(v)) return;
@@ -375,6 +412,14 @@
       list.append(article);
     }
   }
+  async function trackJob(v, id) {
+    if (!current(v) || v.jobs.some(job=>job.id===id)) return;
+    const result=await api(v,'/api/studio/jobs/'+encodeURIComponent(id));
+    if (!current(v)) return;
+    putJob(v,result.job);
+    renderJobs(v);
+    if (!v.timer && !v.advancing.size) schedule(v,1000);
+  }
   function schedule(v, delay = 8000) {
     clearTimeout(v.timer); v.timer = null;
     if (!current(v) || !v.jobs.some(job => !terminal(job))) return;
@@ -458,11 +503,12 @@
     if(['open','new','help','open_file'].includes(c.action)&&!view)open(c.kind||'image');
     const v=view;if(!v||!current(v))return ui.fail('เปิดหมวดสร้างสรรค์และเอกสารก่อนสั่งแก้ไข');
     const shell=v.root.closest('.window');
-    if(c.action==='open') {if(v.voicePending)return ui.fail('มีคำสั่งรอยืนยัน พูด ยืนยัน หรือ ยกเลิก ก่อน');open(c.kind);return v.active===c.kind?ui.ok('เปิด'+plugin(c.kind).title+'แล้ว'):ui.fail('รอคำขอปัจจุบันให้เสร็จก่อนเปลี่ยนหมวด');}
+    if(c.action==='open') {if(v.voicePending)return ui.fail('มีคำสั่งรอยืนยัน พูด ยืนยัน หรือ ยกเลิก ก่อน');open(c.kind);return v.mode===c.kind?ui.ok('เปิด'+plugin(c.kind).title+'แล้ว'):ui.fail('รอคำขอปัจจุบันให้เสร็จก่อนเปลี่ยนหมวด');}
     if(shell&&(shell.hidden||getComputedStyle(shell).display==='none'))return ui.fail('เปิดหน้าต่างสร้างสรรค์ที่ย่อไว้ก่อนสั่งแก้ไข');
     if(c.action==='help'){v.root.querySelector('[data-creative-voice-help]').hidden=false;return ui.ok('แสดงตัวอย่างคำสั่งเสียงแล้ว เลือกเปิดไฟล์และชิ้นงานก่อนสั่งแก้ไข');}
     if(c.action==='help_close'){v.root.querySelector('[data-creative-voice-help]').hidden=true;return ui.ok('ปิดตัวอย่างคำสั่งเสียงแล้ว');}
     if(c.action==='cancel'){if(!v.voicePending)return ui.fail('ไม่มีคำสั่งสร้างสรรค์รอยืนยัน');clearVoicePending(v);return ui.ok('ยกเลิกคำสั่งแล้ว');}
+    if(v.mode!==v.active && !['new','open_file'].includes(c.action))return ui.fail('เลือกเครื่องมือแก้ไขที่ต้องการก่อนสั่งงานด้วยเสียง');
     if(v.voiceBusy||v.busy||v.modeBusy)return ui.fail('กำลังดำเนินงานก่อนหน้า รอให้เสร็จก่อนสั่งอีกครั้ง');
     if(c.action==='confirm'){
       const activeHost=v.workspaces.get(v.active)?.host;if(activeHost?.contains(document.activeElement))document.activeElement.blur();
@@ -471,7 +517,7 @@
       return voiceBackground(v,pending.run,'กำลัง'+pending.label+' · ติดตามผลในพื้นที่งาน');
     }
     if(v.voicePending)return {ok:true,confirmationRequired:true,text:'มีคำสั่งรอยืนยัน พูด ยืนยัน หรือ ยกเลิก ก่อนสั่งงานถัดไป'};
-    if(c.action==='new') {open(c.kind);if(v.active!==c.kind)return ui.fail('ยังเปลี่ยนหมวดไม่ได้');}
+    if(c.action==='new') {open(c.kind);if(v.mode!==c.kind)return ui.fail('ยังเปลี่ยนหมวดไม่ได้');}
     const item=v.workspaces.get(v.active);if(!item)return ui.fail('พื้นที่งานยังไม่พร้อม');
     if(item.host.contains(document.activeElement))document.activeElement.blur();
     if(c.action==='open_selected'){
@@ -515,14 +561,14 @@
   }
   function open(id = 'image', options = {}) {
     if (!allowed()) { window.PanthoriumAccounts?.openLogin?.(); return false; }
-    if (!plugin(id)) id = 'image';
-    if (view && current(view)) { window.PanthoriumWindowManager?.restore?.(ID); if (typeof focusWindow === 'function') focusWindow(ID); selectPlugin(view, id, options.sourceFileIds); return view.root; }
+    if (!sections().some(item=>item.id===id)) id = 'image';
+    if (view && current(view)) { window.PanthoriumWindowManager?.restore?.(ID); if (typeof focusWindow === 'function') focusWindow(ID); return selectPlugin(view,id,options.sourceFileIds,options.mode) ? view.root : false; }
     if (view) cleanup(view);
     if (typeof createWindow !== 'function') return false;
     createWindow(ID, 'สร้างสรรค์และเอกสาร', markup(), { width: 1440, height: 820, onClose: () => cleanup(view) });
     const root = document.querySelector('.window[data-id="creative-studio"] [data-studio]'); if (!root) return false;
     const v = view = { root, owner: principal(), generation, active: 'image', drafts: {}, catalog: [], files: [], jobs: [], sources: new Set(), urls: new Set(), urlTimers: new Set(), advancing: new Set(), approvals: new Map(), workspaces:new Map(), selectedFiles:{}, controller: new AbortController(), busy: false, modeBusy: false, timer: null };
-    root.closest('.window')?.addEventListener('panthorium:before-window-close',event=>{if(hasUnsaved(v)&&!window.confirm('มีงานที่ยังไม่ได้บันทึกหรือเก็บโปรเจกต์ ต้องการปิดหรือไม่?'))event.preventDefault();});
+    root.closest('.window')?.addEventListener('panthorium:before-window-close',event=>{if([...v.workspaces.values()].some(item=>item.editor?.isBusy?.()) || (hasUnsaved(v)&&!window.confirm('มีงานที่ยังไม่ได้บันทึกหรือเก็บโปรเจกต์ ต้องการปิดหรือไม่?')))event.preventDefault();});
     const workspace=root.querySelector('[data-inline-workspace]'),filebar=root.querySelector('.cs-open-file');workspace.before(filebar);workspace.after(root.querySelector('[data-studio-status]'));
     filebar.prepend(el('span','ไฟล์',{class:'cs-file-label'}));
     const voiceHelp=el('section',null,{'data-creative-voice-help':'',hidden:'','aria-label':'คำสั่งเสียงสร้างสรรค์'});
@@ -545,11 +591,11 @@
     importInput.onchange=async()=>{const file=importInput.files?.[0];if(!file)return;if(file.size>20*1024*1024)return status(v,'รองรับไฟล์ไม่เกิน 20 MB',true);try{const data=await api(v,'/api/files',{method:'POST',body:file,headers:{'Content-Type':'application/octet-stream','x-file-name':encodeURIComponent(file.name),'x-file-content-type':file.type||'application/octet-stream'}});if(!current(v))return;v.files.unshift(data.file);renderFiles(v);await openFile(v,data.file.id);}catch(e){status(v,friendly(e),true);}finally{importInput.value='';}};
     const drawer=which=>{const layout=root.querySelector('.cs-layout'),panel=root.querySelector('[data-'+which+'-panel]'),same=!layout.hidden&&!panel.hidden;layout.hidden=same;for(const key of ['create','history']){root.querySelector('[data-'+key+'-panel]').hidden=key!==which;root.querySelector('[data-toggle-'+key+']').setAttribute('aria-expanded',String(!same&&key===which));}};
     root.querySelector('[data-toggle-create]').onclick=()=>drawer('create');root.querySelector('[data-toggle-history]').onclick=()=>drawer('history');
-    const tabs = root.querySelector('[data-studio-tabs]');
-    for (const item of PLUGINS) {
-      const tab = button('', () => selectPlugin(v, item.id), { id: 'studio-tab-' + item.id, role: 'tab', 'aria-selected': 'false', 'aria-controls': 'studio-editor-panel', 'data-plugin-id': item.id });
+    const tabs = root.querySelector('[data-studio-tabs]'), entries=sections();
+    for (const item of entries) {
+      const tab = button('', () => selectPlugin(v, item.id), { id: 'studio-tab-' + item.id, role: 'tab', 'aria-selected': 'false', 'aria-controls': 'studio-editor-panel', 'data-studio-section':item.id, ...(plugin(item.id)?{'data-plugin-id':item.id}:{}) });
       const icon = window.PanthoriumStartMenuUI?.icon?.(item.icon); if (icon) tab.append(icon); tab.append(el('span', item.title)); tabs.append(tab);
-      tab.onkeydown = event => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return; event.preventDefault(); const i = PLUGINS.findIndex(p => p.id === v.active), target = event.key === 'Home' ? 0 : event.key === 'End' ? PLUGINS.length - 1 : (i + (event.key === 'ArrowRight' ? 1 : -1) + PLUGINS.length) % PLUGINS.length; selectPlugin(v, PLUGINS[target].id); tabs.children[target].focus(); tabs.children[target].scrollIntoView?.({block:'nearest',inline:'nearest'}); };
+      tab.onkeydown = event => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return; event.preventDefault(); const i = entries.findIndex(p => p.id === v.section), target = event.key === 'Home' ? 0 : event.key === 'End' ? entries.length - 1 : (i + (event.key === 'ArrowRight' ? 1 : -1) + entries.length) % entries.length; selectPlugin(v, entries[target].id); tabs.children[target].focus(); tabs.children[target].scrollIntoView?.({block:'nearest',inline:'nearest'}); };
     }
     root.querySelector('[data-preview-close]').onclick = () => { clearPreview(v); root.querySelector('[data-preview-body]').append(el('p', 'เลือกเปิดดูจากไฟล์ผลงานด้านล่าง')); root.querySelector('[data-preview-name]').textContent = 'ภาพ วิดีโอ และเอกสาร'; root.querySelector('[data-preview-note]').textContent = ''; root.querySelector('[data-preview-close]').hidden = true; };
     root.querySelector('[data-studio-form]').onsubmit = event => submit(v, event);
@@ -571,16 +617,17 @@
       catch (error) { status(v, friendly(error), true); }
       finally { if (current(v)) { v.modeBusy = false; renderCapability(v); controls(v); } }
     };
-    selectPlugin(v, id, options.sourceFileIds); refresh(v); return root;
+    selectPlugin(v,id,options.sourceFileIds,options.mode); refresh(v); return root;
   }
   function installMenu() {
     const menu = document.getElementById('sm-apps'); if (!menu) return;
     if (!allowed()) { menu.querySelector('[data-start-group="creative"]')?.remove(); return; }
     const group = window.PanthoriumStartMenuUI?.group?.('creative', 'สร้างสรรค์และเอกสาร', menu); if (!group) return;
     const target = window.PanthoriumStartMenuUI.groupItems(group);
-    for (const item of PLUGINS) {
+    group.dataset.searchText='สร้างสรรค์และเอกสาร เครื่องมือออนไลน์ Creative Studio';
+    for (const item of sections()) {
       if (group.querySelector('[data-app-id="studio-' + item.id + '"]')) continue;
-      const launch = button('', () => { open(item.id); if (typeof closeStartMenu === 'function') closeStartMenu(); else document.getElementById('start-menu')?.classList.remove('open'); }, { class: 'sm-app', 'data-app-id': 'studio-' + item.id, 'data-search-text': 'สร้างสรรค์ เอกสาร สตูดิโอ studio ' + item.id + ' ' + item.title });
+      const launch = button('', () => { open(item.id); if (typeof closeStartMenu === 'function') closeStartMenu(); else document.getElementById('start-menu')?.classList.remove('open'); }, { class: 'sm-app', 'data-app-id': 'studio-' + item.id, 'data-search-text': [item.title,item.id,searchWords[item.id],item.search,...onlineTools().filter(t=>t.parent===item.id).map(t=>t.title+' '+t.search)].filter(Boolean).join(' ') });
       const graphic = el('span', null, { class: 'sm-pack-icon' }), icon = window.PanthoriumStartMenuUI.icon(item.icon); graphic.append(icon); launch.append(graphic, el('span', item.title)); target.append(launch);
     }
     window.PanthoriumStartMenuUI.keepPinnedLast(menu);

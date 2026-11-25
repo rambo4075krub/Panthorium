@@ -4,19 +4,28 @@
     P = window.PanthoriumToolProjects,
     F = window.PanthoriumToolFiles;
   const {el, button, field, input, row, download, fileName, defaults, friendly} = U;
-  const id = 'online-tools',
-    rootApi = '/api/online-tools';
-  const catalogue = [
-    ['office', 'เอกสาร ตาราง และสไลด์', 'Word · Excel · PowerPoint', 'document'],
-    ['form', 'แบบฟอร์ม', 'ลิงก์รับคำตอบ · CSV', 'chart'],
-    ['design', 'ออกแบบสื่อร้านค้า', 'โปสเตอร์ · เมนู · แค็ตตาล็อก', 'pen'],
-    ['cutout', 'ลบพื้นหลัง', 'รูปสินค้าพื้นโปร่งใส · PNG', 'image'],
-    ['video', 'ตัดต่อวิดีโอ', 'สร้างหนังและซีรีส์ · ไทม์ไลน์ · MP4', 'video'],
-    ['pdf', 'จัดการ PDF', 'เลือกหน้า · จัดลำดับ · รวมไฟล์', 'document'],
-    ['page', 'หน้าจดงานและแม่แบบ', 'เช็กลิสต์ · แผนคอนเทนต์ · แชร์สำเนา', 'work'],
-    ['flow', 'งานอัตโนมัติ', 'รับฟอร์ม · ติดตาม · แจ้งทีม', 'settings']
+  const rootApi = '/api/online-tools';
+  const tools = [
+    {id: 'form', title: 'แบบฟอร์ม', icon: 'chart', search: 'สร้างฟอร์ม รับคำตอบ CSV'},
+    {id: 'pdf', title: 'จัดการ PDF', icon: 'document', search: 'แยกหน้า รวมไฟล์ เรียงหน้า พีดีเอฟ'},
+    {
+      id: 'page',
+      title: 'หน้าจดงานและแม่แบบ',
+      icon: 'work',
+      search: 'เช็กลิสต์ แผนคอนเทนต์ เทมเพลต แชร์สำเนา'
+    },
+    {id: 'flow', title: 'งานอัตโนมัติ', icon: 'settings', search: 'เวิร์กโฟลว์ รับฟอร์ม ติดตาม แจ้งทีม'},
+    {id: 'design', parent: 'image', title: 'ออกแบบสื่อร้านค้า', search: 'โปสเตอร์ เมนู แค็ตตาล็อก'},
+    {id: 'cutout', parent: 'image', title: 'ลบพื้นหลัง', search: 'รูปสินค้า โปร่งใส PNG'},
+    {
+      id: 'film',
+      parent: 'video',
+      title: 'สร้างหนังและซีรีส์',
+      search: 'ซีรี่ ซีรีส์ ภาพยนตร์ หนังสั้น สตอรีบอร์ด'
+    }
   ];
-  const kinds = new Set(['form', 'design', 'page', 'flow']);
+  const byId = new Map(tools.map((tool) => [tool.id, tool]));
+  const views = new Map();
   const apps = () => (typeof OS === 'undefined' ? null : OS);
   const principal = () => String(apps()?.state?.user?.sub || apps()?.state?.user?.id || '');
   const allowed = () =>
@@ -25,42 +34,26 @@
     !apps()?.state?.user?.roles?.includes('guest') &&
     apps()?.state?.user?.permissions?.includes('chat');
   const backend = () => String(apps()?.config?.backendUrl || '').replace(/\/$/, '');
-  let view,
-    pending = '',
+  let pending = null,
     loginLink = '';
-  function close() {
-    if (view) {
-      view.page?.abort();
-      view.controller.abort();
-      view = null;
+  function dispose(v) {
+    v.page?.abort();
+    v.controller.abort();
+    if (views.get(v.kind) === v) views.delete(v.kind);
+    if (v.ticket && pending === v.ticket) {
+      pending.controller.abort();
+      pending = null;
     }
-    if (typeof closeWindow === 'function') closeWindow(id);
   }
-  function open() {
-    if (!allowed()) {
-      window.PanthoriumAccounts?.openLogin?.();
-      return null;
-    }
-    if (view && view.owner === principal() && view.root.isConnected) {
-      window.PanthoriumWindowManager?.restore?.(id);
-      if (typeof focusWindow === 'function') focusWindow(id);
-      return view;
-    }
-    if (typeof createWindow !== 'function') return null;
-    createWindow(id, 'เครื่องมือออนไลน์', '<div class="ot ot-shell" data-online-tools></div>', {
-      width: 1080,
-      height: 760,
-      onClose: () => {
-        if (view) {
-          view.page?.abort();
-          view.controller.abort();
-          view = null;
-        }
-      }
-    });
-    const root = document.querySelector('.window[data-id="online-tools"] [data-online-tools]');
-    if (!root) return null;
+  function mount(kind, root, trackJob) {
+    if (!allowed() || !byId.has(kind)) return null;
+    const previous = views.get(kind);
+    if (previous) dispose(previous);
+    root.dataset.onlineTools = kind;
+    root.classList.add('ot', 'ot-embedded');
     const v = {
+      kind,
+      trackJob,
       owner: principal(),
       root,
       controller: new AbortController(),
@@ -68,34 +61,32 @@
       dirty: false,
       busy: false
     };
-    view = v;
-    v.nav = el('nav', null, {'aria-label': 'เครื่องมือออนไลน์'});
+    views.set(kind, v);
     v.heading = el('h2');
-    v.panel = el('section', null, {class: 'ot-panel'});
     v.status = el('div', '', {role: 'status', class: 'ot-status'});
-    const content = el('div', null, {class: 'ot-content'});
-    content.append(v.heading, v.status, v.panel);
-    root.append(v.nav, content);
-    for (const [kind, name, , icon] of catalogue) {
-      const b = button('', () => navigate(v, kind));
-      b.dataset.tool = kind;
-      const svg = window.PanthoriumStartMenuUI?.icon(icon);
-      if (svg) b.append(svg);
-      b.append(el('span', name));
-      v.nav.append(b);
-    }
-    root.closest('.window')?.addEventListener('panthorium:before-window-close', (e) => {
-      if (
-        v.owner === principal() &&
-        (v.busy || (v.dirty && !confirm('ออกจากงานที่ยังไม่ได้บันทึกหรือไม่?')))
-      )
-        e.preventDefault();
-    });
-    navigate(v, 'home');
-    return v;
+    v.panel = el('section', null, {class: 'ot-panel'});
+    root.append(v.heading, v.status, v.panel);
+    navigate(v, kind);
+    return {
+      isDirty: () => v.dirty,
+      isBusy: () => v.busy,
+      pause: () => {
+        for (const media of root.querySelectorAll('audio,video')) media.pause();
+      },
+      destroy: () => dispose(v)
+    };
+  }
+  function open(kind) {
+    const tool = byId.get(kind);
+    return window.PanthoriumCreativeStudio?.open(tool?.parent || tool?.id || 'image', {mode: tool?.id});
   }
   function valid(v) {
-    return view === v && v.owner === principal() && allowed() && v.root.isConnected;
+    return (
+      v.owner === principal() &&
+      allowed() &&
+      !v.controller.signal.aborted &&
+      (v.hash ? pending === v && location.hash === v.hash : views.get(v.kind) === v && v.root.isConnected)
+    );
   }
   async function request(v, path, options = {}, raw = false) {
     const send = () => {
@@ -158,7 +149,9 @@
     };
     return {
       panel: v.panel,
-      request: (path,opts,raw) => live() ? request(v,path,opts,raw) : Promise.reject(Error('auth_required')),
+      trackJob: v.trackJob,
+      request: (path, opts, raw) =>
+        live() ? request(v, path, opts, raw) : Promise.reject(Error('auth_required')),
       signal: v.page.signal,
       live,
       report,
@@ -204,33 +197,8 @@
   }
   function navigate(v, kind) {
     if (!valid(v) || !leave(v)) return;
-    const tool = catalogue.find((t) => t[0] === kind),
-      ctx = reset(v, tool?.[1] || 'เครื่องมือออนไลน์');
-    for (const b of v.nav.children) b.setAttribute('aria-current', String(b.dataset.tool === kind));
-    if (kind === 'home') {
-      const grid = el('div', null, {class: 'ot-grid'});
-      for (const [key, title, hint] of catalogue) {
-        const b = button('', () => navigate(v, key));
-        b.append(el('strong', title), el('span', hint));
-        grid.append(b);
-      }
-      ctx.panel.append(grid);
-      return;
-    }
-    if (kind === 'office' || kind === 'video') {
-      if (kind === 'video') ctx.panel.append(ctx.act('สร้างหนังและซีรีส์', () => navigateFilm(v)));
-      const items =
-        kind === 'video'
-          ? [['video', 'เปิดไทม์ไลน์วิดีโอ']]
-          : [
-              ['document', 'เปิดเอกสาร Word'],
-              ['spreadsheet', 'เปิดตาราง Excel'],
-              ['presentation', 'เปิดงานนำเสนอ PowerPoint']
-            ];
-      for (const [key, title] of items)
-        ctx.panel.append(ctx.act(title, () => window.PanthoriumCreativeStudio.open(key)));
-      return;
-    }
+    const ctx = reset(v, byId.get(kind).title);
+    if (kind === 'film') return window.PanthoriumFilmStudio.mount(ctx);
     if (kind === 'cutout') return F.cutout(ctx);
     if (kind === 'pdf') return F.pdfDesk(ctx);
     projectList(v, kind, ctx).catch((e) => ctx.report(friendly(e)));
@@ -240,10 +208,6 @@
       edit(v, {id: crypto.randomUUID(), kind, title: '', body: defaults(kind), owner: true}, true)
     );
     ctx.panel.append(createBtn);
-    if (kind === 'design')
-      ctx.panel.append(
-        ctx.act('เปิดตัวออกแบบเลเยอร์', () => window.PanthoriumCreativeStudio.open('image'))
-      );
     if (kind === 'page') {
       const samples = [
         ['เช็กลิสต์เปิดร้าน', ['เปิดหน้าร้าน', 'ตรวจสินค้า', 'ตรวจคิวลูกค้า']],
@@ -379,8 +343,7 @@
         const block = el('article');
         block.append(el('small', new Date(item.created_at).toLocaleString('th-TH')));
         if (isForm) {
-          for (const f of item.fields)
-            block.append(el('p', f.label + ' · ' + (item.answers[f.id] || '—')));
+          for (const f of item.fields) block.append(el('p', f.label + ' · ' + (item.answers[f.id] || '—')));
         } else {
           block.append(
             el('p', item.label),
@@ -413,7 +376,7 @@
   }
   async function edit(v, p, isNew = false) {
     if (!valid(v)) return;
-    const ctx = reset(v, catalogue.find((t) => t[0] === p.kind)[1]),
+    const ctx = reset(v, byId.get(p.kind).title),
       readonly = p.kind === 'flow' && !p.owner;
     const back = button('กลับไปรายการ', () => navigate(v, p.kind)),
       title = input(p.title, 120);
@@ -489,17 +452,16 @@
         );
     }
   }
-  function navigateFilm(v) {
-    const ctx = reset(v, 'สตูดิโอหนังและซีรีส์');
-    for (const b of v.nav.children) b.setAttribute('aria-current',String(b.dataset.tool === 'video'));
-    window.PanthoriumFilmStudio.mount(ctx);
-  }
   function handleLink() {
-    const film = location.hash === '#film-studio';
-    const direct = film || location.hash === '#online-tools';
-    const m = location.hash.match(/^#online-(copy|join)=([a-f\d-]{36})$/i);
+    const hash = location.hash;
+    const film = hash === '#film-studio';
+    const direct = film || hash === '#online-tools' || hash === '#creative-studio';
+    const m = hash.match(/^#online-(copy|join)=([a-f\d-]{36})$/i);
+    if (pending && (!valid(pending) || !m)) {
+      pending.controller.abort();
+      pending = null;
+    }
     if (!m && !direct) {
-      pending = '';
       loginLink = '';
       return;
     }
@@ -532,22 +494,28 @@
     }
     loginLink = '';
     if (direct) {
-      const v = open();
-      if (v && (!film || leave(v))) {
-        if (film) navigateFilm(v);
+      if (open(film ? 'film' : undefined))
         history.replaceState(null, '', location.pathname + location.search);
-      }
       return;
     }
-    if (pending === location.hash) return;
-    const v = open();
-    if (!v || !leave(v)) return;
-    pending = location.hash;
-    const ctx = reset(v, m[1] === 'join' ? 'เข้าร่วมทีม' : 'ทำสำเนาแม่แบบ');
+    if (pending) return;
+    const ticket = (pending = {owner: principal(), controller: new AbortController(), hash});
     (async () => {
-      const join = m[1] === 'join',
-        info = await ctx.api((join ? '/join/' : '/shared/') + m[2]);
+      const join = m[1] === 'join';
+      const info = await request(ticket, rootApi + (join ? '/join/' : '/shared/') + m[2]);
+      if (!valid(ticket)) return;
       const p = info.invite || info.project;
+      if (!byId.has(p.kind) || !open(p.kind)) {
+        pending = null;
+        return;
+      }
+      const v = views.get(p.kind);
+      if (!v || !leave(v)) {
+        pending = null;
+        return;
+      }
+      v.ticket = ticket;
+      const ctx = reset(v, join ? 'เข้าร่วมทีม' : 'ทำสำเนาแม่แบบ');
       ctx.panel.append(
         el('h3', p.title),
         ctx.act(
@@ -557,59 +525,28 @@
               : 'เข้าร่วมแก้ไขต้นฉบับ'
             : 'สร้างสำเนาในบัญชีของฉัน',
           async () => {
-            const result = await ctx.api(
-              (join ? '/join/' : '/copy/') + m[2],
-              json('POST', {id: copyId})
-            );
+            const result = await ctx.api((join ? '/join/' : '/copy/') + m[2], json('POST', {id: copyId}));
             history.replaceState(null, '', location.pathname + location.search);
-            pending = '';
+            pending = null;
             await edit(v, result.project);
           }
         )
       );
       const copyId = crypto.randomUUID();
-    })().catch((e) => ctx.report(friendly(e)));
-  }
-  let observedMenu, menuObserver;
-  function installMenu() {
-    const menu = document.getElementById('sm-apps');
-    if (!menu) return;
-    if (observedMenu !== menu && window.MutationObserver) {
-      menuObserver?.disconnect();
-      observedMenu = menu;
-      menuObserver = new MutationObserver(installMenu);
-      menuObserver.observe(menu, {childList: true});
-    }
-    const existing = menu.querySelector('[data-app-id="online-tools"]');
-    if (!allowed()) {
-      existing?.remove();
-      return;
-    }
-    if (existing) return;
-    const launch = button('', () => {
-      open();
-      if (typeof closeStartMenu === 'function') closeStartMenu();
+    })().catch((error) => {
+      if (!valid(ticket)) return;
+      if (open('page')) {
+        const target = views.get('page');
+        if (target) target.status.textContent = friendly(error);
+      }
+      pending = null;
     });
-    launch.className = 'sm-app';
-    launch.dataset.appId = id;
-    launch.dataset.searchText =
-      'เครื่องมือออนไลน์ แบบฟอร์ม เอกสาร ตาราง สไลด์ ออกแบบ ลบพื้นหลัง วิดีโอ หนัง ซีรีส์ หนังสั้น สตอรีบอร์ด PDF แม่แบบ อัตโนมัติ';
-    const graphic = el('span', null, {class: 'sm-pack-icon'}),
-      icon = window.PanthoriumStartMenuUI?.icon('work');
-    if (icon) graphic.append(icon);
-    launch.append(graphic, el('span', 'เครื่องมือออนไลน์'));
-    menu.append(launch);
-    window.PanthoriumStartMenuUI?.keepPinnedLast(menu);
   }
   function onAuth() {
-    installMenu();
-    if (view && (!allowed() || view.owner !== principal())) {
-      pending = '';
-      close();
-    }
-    handleLink();
+    for (const v of views.values()) if (v.owner !== principal() || !allowed()) dispose(v);
+    queueMicrotask(handleLink);
   }
-  window.PanthoriumOnlineTools = {open};
+  window.PanthoriumOnlineTools = {tools, open, mount};
   for (const name of [
     'panthorium:auth-changed',
     'panthorium:boot-complete',
@@ -617,13 +554,6 @@
     'hashchange'
   ])
     window.addEventListener(name, onAuth);
-  window.addEventListener('beforeunload', (e) => {
-    if (view?.dirty) {
-      e.preventDefault();
-      e.returnValue = '';
-    }
-  });
-  if (document.readyState === 'loading')
-    document.addEventListener('DOMContentLoaded', onAuth, {once: true});
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', onAuth, {once: true});
   else onAuth();
 })();

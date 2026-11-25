@@ -185,11 +185,9 @@
           queuePoll();
           return;
         }
-        const projectKey = p.id,
-          ticket = job.id;
+        const projectKey = p.id;
         pollBusy = true;
         try {
-          await ctx.request('/api/studio/jobs/' + ticket + '/advance', json('POST', {}));
           if (ctx.live() && projectKey === p?.id && !requestBusy) await refresh();
         } catch (e) {
           if (ctx.live() && projectKey === p?.id) ctx.report(detail(e));
@@ -206,6 +204,8 @@
       if (!ctx.live() || projectKey !== p?.id || part !== epId) return;
       assets = data.assets;
       job = data.job;
+      if (active()) await ctx.trackJob(job.id);
+      if (!ctx.live() || projectKey !== p?.id || part !== epId) return;
       if (!dirty) draw();
       queuePoll();
     }
