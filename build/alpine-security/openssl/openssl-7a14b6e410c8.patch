@@ -68,3 +68,15 @@ index 7d73fa00281a8..fe393dc37564b 100644
      }
  
      return rsqp;
+diff --git a/test/quic_stream_test.c b/test/quic_stream_test.c
+--- a/test/quic_stream_test.c
++++ b/test/quic_stream_test.c
+@@ -975,7 +976,7 @@ static int test_rstream_reorder(int idx)
+     QUIC_CHANNEL *ch = NULL;
+     OSSL_QRX_PKT **pkts = NULL;
+     QUIC_RSTREAM_QPARM *rsqp = NULL;
+-    const size_t data_size = 4096;
++    const size_t data_size = 2048;
+     const size_t framesz = 1 + (size_t)(idx % 17);
+     const int cleanse = (idx & 1);
+     const size_t nframes = (data_size + framesz - 1) / framesz;

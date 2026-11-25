@@ -207,7 +207,7 @@
       "commit": "7a14b6e410c881365881596231ea6f88e7d27c6e",
       "url": "https://github.com/openssl/openssl/commit/7a14b6e410c881365881596231ea6f88e7d27c6e",
       "file": "openssl-7a14b6e410c8.patch",
-      "sha256": "7b6bdb5946612d7a0f6e6a920a92af3fab3ba625c91f205dacd55aa6e3233298",
+      "sha256": "9a514184a3bce19ea0ee879e03278dd65c4fd46541dcc17865d26fbd20a405b8",
       "patchedFiles": [
         {
           "path": "include/internal/quic_strm_reas.h",
@@ -216,6 +216,10 @@
         {
           "path": "ssl/quic/quic_strm_reas.c",
           "sha256": "fc45e1dd59584c73b3b6cb27bae9939238d821f3fc13150984fdd674774b2d7d"
+        },
+        {
+          "path": "test/quic_stream_test.c",
+          "sha256": "e9ab3520db18ac0e2e1a017a50fceeb540a01d0f124ebc14aa5df830691c3357"
         }
       ]
     },
@@ -237,7 +241,7 @@
     }
   ],
   "buildRecipe": {
-    "sha256": "3f15569a9358417fe08185d9774e852ac907a17c7d05929a533702a0efd63413",
+    "sha256": "f3ab3324b42592eccb7ee4e911ae927c44a09827b7d8fba47d1717ba439f21ea",
     "sourceDateEpoch": 1790690700,
     "tests": [
       "make -j2 test",
