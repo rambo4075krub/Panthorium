@@ -50,7 +50,7 @@ if not HOST:
         assert binary.read_bytes().startswith(b"\x7fELF")
         assert sha256(binary) == manifest["binaries"][name]["sha256"]
         version = command([str(binary), "-version"]).stdout
-        assert re.search(r"version 9\.0\.2(?:\s|$)", version), version
+        assert version.split()[2] == lock["version"], version
         linked = command((["/lib64/ld-linux-x86-64.so.2", "--list"] if NOBLE else ["ldd"]) + [str(binary)]).stdout
         assert not re.search(r"not found|libcjson|librist|libasound|libpulse|libSDL|libvulkan|libcuda|libxml|libtiff|libsndfile", linked, re.I), linked
         # Static FFmpeg internals, only glibc's libc/libm and loader are needed.

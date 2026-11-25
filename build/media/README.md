@@ -1,20 +1,12 @@
 # Reviewed FFmpeg build
 
-The backend builds FFmpeg 9.0.2 from the upstream release commit, plus the
-upstream fix for CVE-2026-107696. The source archive, patch and patched source
-file have SHA256 pins in `ffmpeg-source.lock.json`. The release's signed tag
-object is recorded there; its official GitHub tag API reported a valid signature
-when the pin was reviewed on 2026-10-23. The release commit is
-`946fcce07b6dcd0331c8cc609192aeff5e1924f8`.
-
-`build-ffmpeg.mjs` checks source and patch bytes before executing configure or
-make, applies the patch with zero fuzz, and checks the resulting RTSP source
-hash. It records the real upstream version **9.0.2**, configuration and final
-executable hashes in `/usr/local/share/panthorium/ffmpeg-source.json`. Source
-identity, the patch and its license are retained in the image. Syft's binary
-classifier can identify FFmpeg directly; CI also merges the independently
-verified source identity into the complete image SBOM. No version inflation,
-scanner exclusion or vulnerability exception is part of this build.
+The backend and speaker decoder build FFmpeg 9.1 from the signed upstream
+`n9.1` release at `74e4393595cf2b5857f0da925c4e0dd74ea306e5`.
+Each source lock pins the archive SHA256, signed tag object, source commit and
+configure flags. This release uses the upstream sources directly. Its build
+records source identity, native configuration, codec archive contents and
+executable hashes for independent comparison with the reviewed profile.
+CI retains both the full image inventory and the unfiltered scan.
 
 The runtime uses native CPU codecs and filters, with only libx264, libopus,
 libass and zlib enabled as external media libraries. Network protocols, capture

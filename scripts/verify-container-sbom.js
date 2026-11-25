@@ -28,7 +28,7 @@ function enrichSbom(sbom, manifest, lock, binaries, image, profile = 'backend') 
   }
   assert.equal(manifest.schemaVersion, 1);
   assert.equal(manifest.name, 'ffmpeg');
-  assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
+  assert.match(manifest.version, /^\d+\.\d+(?:\.\d+)?$/);
   assert.equal(manifest.purl, `pkg:generic/ffmpeg@${manifest.version}`);
   assert.equal(manifest.cpe, `cpe:2.3:a:ffmpeg:ffmpeg:${manifest.version}:*:*:*:*:*:*:*`);
   assert.match(manifest.source.sha256, /^[a-f0-9]{64}$/);

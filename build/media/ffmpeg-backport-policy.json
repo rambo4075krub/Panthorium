@@ -1,41 +1,40 @@
 {
   "schemaVersion": 2,
-  "sourceCommit": "946fcce07b6dcd0331c8cc609192aeff5e1924f8",
+  "sourceCommit": "74e4393595cf2b5857f0da925c4e0dd74ea306e5",
   "profiles": {
     "backend": {
       "os": "linux",
       "architecture": "amd64",
-      "sourceLockSha256": "b82be883ed674a9a20b3b622c419d6c8a88fb706daa3f7925729076082748588",
+      "sourceLockSha256": "02e2508cfaaeeb1617b32dbd38ae15ea689d406c8de43296edec63c85ccf040a",
       "binaries": {
-        "ffmpeg": "892f4fb44ae4888b43ba5d2e9760c82602c21d3629e428a9669b5af674a4c506",
-        "ffprobe": "56784df4956847ceb8e58bac5af819506bed6da13bbbf10e8b02b3859129fd6f"
+        "ffmpeg": "UNREVIEWED",
+        "ffprobe": "UNREVIEWED"
       },
-      "evidenceRun": "https://github.com/rambo4075krub/Panthorium/actions/runs/44436667614",
-      "compilationSha256": "fd688a4b78f08a6e75cda07afb997ad4a06e4e92130d7ab9168ddf6f35fbeda4",
-      "reviewedAt": "2026-11-19"
+      "evidenceRun": "Pending independent review of the 9.1 candidate",
+      "compilationSha256": "UNREVIEWED"
     },
     "speaker": {
       "os": "linux",
       "architecture": "amd64",
-      "sourceLockSha256": "4fb1b3bb29e0a868a3640a0dfb3c1c07ad01c051eeb6332cb94ded24dfefea80",
+      "sourceLockSha256": "d31cc2418d0c5117d2984ecc9cabdb21d1980ce8b0fc9674dbdafe32d8adc324",
       "binaries": {
-        "ffmpeg": "e8d5094a1fee2d25fc9a66a9415ae595dab44eccf066c91278f301ad3bedc1b7",
-        "ffprobe": "505f63fef04aa79c09d3de5c895ae7d4e3fc58bebc52ccabb407108148548e86"
+        "ffmpeg": "UNREVIEWED",
+        "ffprobe": "UNREVIEWED"
       },
       "compilationSha256": "UNREVIEWED",
-      "evidenceRun": "Pending independent candidate review; this profile cannot authorize a release"
+      "evidenceRun": "Pending independent review of the 9.1 candidate"
     },
     "speaker-candidate-noble": {
       "os": "linux",
       "architecture": "amd64",
-      "sourceLockSha256": "4fb1b3bb29e0a868a3640a0dfb3c1c07ad01c051eeb6332cb94ded24dfefea80",
-      "evidenceRun": "https://github.com/rambo4075krub/Panthorium/actions/runs/44436058699",
+      "sourceLockSha256": "d31cc2418d0c5117d2984ecc9cabdb21d1980ce8b0fc9674dbdafe32d8adc324",
+      "evidenceRun": "Pending independent review of the 9.1 candidate",
       "binaries": {
-        "ffmpeg": "0c0dd9abe94c34f092976a90257c325f4d61a76d4cb1efce02285c12751eb761",
-        "ffprobe": "e70e94edee3bca35a750338ebfd6fccb152484de144a606cd5181ee2eeb5087d"
+        "ffmpeg": "UNREVIEWED",
+        "ffprobe": "UNREVIEWED"
       },
-      "compilationSha256": "6c33f0678e18b49731fb9e59d4c00a654279e3f4009e619d5ca47f7dce06a752",
-      "reviewedAt": "2026-11-19"
+      "compilationSha256": "UNREVIEWED"
     }
-  }
+  },
+  "version": "9.1"
 }

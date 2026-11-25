@@ -42,7 +42,7 @@ async function main() {
     for (const binary of [ffmpeg, ffprobe]) {
       assert.equal(digest(fs.readFileSync(binary)), manifest.binaries[path.basename(binary)].sha256);
       const version = command(binary, ['-version'], { encoding: 'utf8' });
-      assert.match(version, /version 9\.0\.2(?:\s|$)/);
+      assert.equal(version.split(/\s+/)[2], lock.version);
       const links = command('ldd', [binary], { encoding: 'utf8' });
       assert.doesNotMatch(links, /not found|libcjson|librist|libasound|libpulse|libSDL|libvulkan|libcuda/i);
       console.log(version.split('\n')[0]);
