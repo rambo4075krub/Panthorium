@@ -21,7 +21,7 @@ FROM node:24.22.3-alpine AS runtime
 # Only the libraries used by the reviewed CPU/local-file build, plus captions.
 COPY --from=native-security-build /out/keys/ /etc/apk/keys/
 COPY --from=native-security-build /out/packages/ /tmp/panthorium-security-packages/
-RUN apk add --no-cache /tmp/panthorium-security-packages/*.apk x264-libs opus libass 'zlib>=1.4-r0' font-dejavu font-noto-thai \
+RUN apk add --no-cache /tmp/panthorium-security-packages/*.apk x264-libs opus libass 'libfontenc>=1.1.10-r0' 'zlib>=1.4-r0' font-dejavu font-noto-thai \
     && rm -rf /tmp/panthorium-security-packages
 COPY build/alpine-security/sources.json /usr/local/share/panthorium/native-security-sources.json
 COPY --from=native-security-build /out/share/panthorium/ /usr/local/share/panthorium/

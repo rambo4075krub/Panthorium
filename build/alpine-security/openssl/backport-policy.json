@@ -1,15 +1,19 @@
 {
   "schemaVersion": 1,
-  "sourceLockSha256": "6a05a6ec30a29b5443ba4ae7a343c1b378d104884e6e96315a1e65c9bc8c7186",
+  "sourceLockSha256": "f2bf70347102d4e938f362a640d7c3529ab671dff9ae536cfa7265e4b90857ef",
   "binaries": {
     "libcrypto.so.3": "15af8b5686389770ea7a911fd8292cda0d1e698e5ce4f33cadf81f8a38dd0f70",
     "libssl.so.3": "6f786873192d8185f55be57c12ee26c882cb5ddf6a7e8f6dd5327f8295961995"
   },
   "vulnerabilities": [
     "CVE-2026-107493",
+    "CVE-2026-107494",
     "CVE-2026-107496",
+    "CVE-2026-121482",
     "CVE-2026-124709",
     "CVE-2026-35190",
+    "CVE-2026-84785",
+    "CVE-2026-84786",
     "CVE-2026-88822",
     "CVE-2026-88823",
     "CVE-2026-95691",

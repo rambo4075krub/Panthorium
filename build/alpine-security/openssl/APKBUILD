@@ -5,7 +5,7 @@
 pkgname=openssl
 pkgver=3.5.9
 _abiver=${pkgver%.*.*}
-pkgrel=1
+pkgrel=2
 # Fix the upstream release timestamp for independently reproducible ELF hashes.
 export SOURCE_DATE_EPOCH=1790690700
 pkgdesc="Toolkit for Transport Layer Security (TLS)"
@@ -37,10 +37,28 @@ source="https://github.com/openssl/openssl/releases/download/openssl-$pkgver/ope
 	openssl-c8f6d04f8e6d.patch
 	openssl-9491b0d9cc79.patch
 	openssl-f3acb0a33280.patch
+	openssl-468c287cf451.patch
+	openssl-734c6cd7444b.patch
+	openssl-7a14b6e410c8.patch
+	openssl-1ad851363d5b.patch
 	"
 builddir="$srcdir/openssl-$pkgver"
 
 # secfixes:
+#   3.5.9-r2:
+#     - CVE-2026-121482
+#     - CVE-2026-107494
+#     - CVE-2026-84785
+#     - CVE-2026-84786
+#   3.5.9-r1:
+#     - CVE-2026-107493
+#     - CVE-2026-107496
+#     - CVE-2026-124709
+#     - CVE-2026-35190
+#     - CVE-2026-88822
+#     - CVE-2026-88823
+#     - CVE-2026-95691
+#     - CVE-2026-95692
 #   3.5.8-r0:
 #     - CVE-2026-14456
 #     - CVE-2026-14457
@@ -342,4 +360,8 @@ bcfeb2b8f59e4e30f38f1a0d1f03ed76e6a2efc3cedaf25886a589b61de6b2cd2830543689c024b8
 341a8ff7f7c3b4fe1f0ec65a5ad726dec1b44c005a624417a031dfd6ca6e3be01eba0595cbbb7e6144b0180dcb57fbceac0e56af828a2fba7c928b16d335ae3e  openssl-c8f6d04f8e6d.patch
 9689f05e6acaba461a9cc669b922a39f294dcdacebcf44884598d6eab3e1fa0135fc967813ef57f846a16c1340b17ef3ee0471904678baf889a4aa2f4eca6552  openssl-9491b0d9cc79.patch
 e30da5d50ea17bb912f012d852a8ef0f372165240aa45e3bbb6457a73c4af4bfe66f0fa09265717637457d43273b9c5fba1889a64088f7e16ce50f66482022cd  openssl-f3acb0a33280.patch
+fb063d45b9dce1100af7fafb585be760c907d6de42f66aeb09106ae78fa4b10e5b9cd85fec3f922f650ab8bee0a6f1169452a1df62f197e6d174c828b30bb6b2  openssl-468c287cf451.patch
+31fcd70edcbe0be1a46579b78ad632ad57799e605f186f19be8ea97776e260055661dbdb0cbd44fb122b6ce5335176c4c999d73857e20091f2378c4a4cce4757  openssl-734c6cd7444b.patch
+8995645ea8b1d2bc9a25d8ac23962530196bc864d0c3ef540bce3e6e0fea447c3b3bc91b17c162e5037026f6949bcdbcbee990b1be077ecfabfbc6b8e3460b89  openssl-7a14b6e410c8.patch
+c3c6eb987e69882f828c613bae4db6c36892242111a10d009953c2b7a17c496e9fb02b974282154c2b34eaec8c3fecf1b2d429fa8b7f6cad7ca8697a90b20e32  openssl-1ad851363d5b.patch
 "

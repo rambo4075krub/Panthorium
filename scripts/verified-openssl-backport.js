@@ -22,7 +22,7 @@ function verifyOpenSsl({ rawSbom, manifest, lock, binaries, image, patches, test
   assert.equal(rawSbom.distro?.id, 'alpine');
   assert.equal(jsonHash(lock), policy.sourceLockSha256, 'OpenSSL source lock requires independent review');
   assert.equal(lock.version, '3.5.9');
-  assert.equal(lock.packageVersion, '3.5.9-r1');
+  assert.equal(lock.packageVersion, '3.5.9-r2');
   for (const key of Object.keys(lock)) assert.deepEqual(manifest[key], lock[key], `Unreviewed OpenSSL ${key}`);
   assert.match(manifest.runtimeVersion || '', /^OpenSSL 3\.5\.9 /);
   for (const name of ['openssl-tests.log', 'openssl-security-tests.log']) {
