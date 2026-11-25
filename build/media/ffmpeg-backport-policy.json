@@ -7,11 +7,12 @@
       "architecture": "amd64",
       "sourceLockSha256": "02e2508cfaaeeb1617b32dbd38ae15ea689d406c8de43296edec63c85ccf040a",
       "binaries": {
-        "ffmpeg": "UNREVIEWED",
-        "ffprobe": "UNREVIEWED"
+        "ffmpeg": "e2c19cef13733d8f8e6878deedae43d0ff911dfbcaad66b3e74de384f1773207",
+        "ffprobe": "2946a26b9e86058fbbf0ea2b9fdd65a8da7d464d1a1a1b6247685f510140186e"
       },
-      "evidenceRun": "Pending independent review of the 9.1 candidate",
-      "compilationSha256": "UNREVIEWED"
+      "evidenceRun": "https://github.com/rambo4075krub/Panthorium/actions/runs/45632328316",
+      "compilationSha256": "04f61c7b5a700bbbe60121ffc43df2e33c46b36178af805de174eb20ee2c048e",
+      "reviewedAt": "2026-11-25"
     },
     "speaker": {
       "os": "linux",
@@ -28,12 +29,13 @@
       "os": "linux",
       "architecture": "amd64",
       "sourceLockSha256": "d31cc2418d0c5117d2984ecc9cabdb21d1980ce8b0fc9674dbdafe32d8adc324",
-      "evidenceRun": "Pending independent review of the 9.1 candidate",
+      "evidenceRun": "https://github.com/rambo4075krub/Panthorium/actions/runs/45632328316",
       "binaries": {
-        "ffmpeg": "UNREVIEWED",
-        "ffprobe": "UNREVIEWED"
+        "ffmpeg": "35916684fe0937b54f060f0bf22d9c74d2278d5892c9753bb1cc907175576410",
+        "ffprobe": "8ee04e643e04cbeb6095c0d0454a17067a26d5dbb089116eca7ff0d3c524038a"
       },
-      "compilationSha256": "UNREVIEWED"
+      "compilationSha256": "08208bb024bd973f7ff6ff9bd536a7961c567792e0d2dc9a1946407772d4b304",
+      "reviewedAt": "2026-11-25"
     }
   },
   "version": "9.1"

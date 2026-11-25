@@ -30,16 +30,16 @@ methods. Its small fixtures are synthetic and contain no user data. Host-only
 functional preflight is `node test/container-media-smoke.js --allow-host-ffmpeg`;
 that mode cannot pass in CI and does not validate the target image.
 
-Any future source/patch/configuration change must refresh reviewed pins and run
-the image tests and full image scan again. If a generic CPE match still flags the
-backported RTSP fix, preserve the finding and prepare image-digest-specific
-evidence for review; do not change the version or suppress other findings.
+When the source, patches or build flags change, CI builds both image profiles.
+Review the extracted executables, compiled configuration and package inventory
+before updating their digest pins. The independent verification run must pass
+the existing High/Critical severity threshold with the full scanner database.
 
 The speaker image uses `ffmpeg-speaker-source.lock.json`, with the same release,
-source hashes, upstream patch and unchanged FFmpeg CPE. Its Debian/glibc builder
+source hashes and release CPE. Its Ubuntu/glibc builder
 produces executables that need only libc and libm. It retains native input codecs,
 allows only pipe I/O, disables network/devices/hardware acceleration and emits
-only float PCM audio. It does not copy the backend's musl executables into Debian.
+only float PCM audio. The backend and speaker build their own executables for their respective C libraries.
 The speaker profile is LGPL-2.1-or-later; no GPL external codec library is enabled.
 
 Build the speaker image from the repository root:
@@ -57,12 +57,11 @@ downloading or executing the speaker model. It also checks the eighteen-second
 decoded-audio bound, exact executable/source provenance and pipe-only access.
 The full runtime adds the hash-verified model download and remains subject to a
 separate full-image scan. SoundFile uses its hash-pinned official pure-Python
-wheel and the explicitly installed Debian `libsndfile1`, so the native library
-remains visible to the distro scanner. Existing unresolved libsndfile/base-image
-advisories are not removed or treated as fixed by the FFmpeg replacement.
+wheel and the pinned native libsndfile build, whose source identity is included in the
+complete service inventory. The build also scans the base image and model runtime.
 
-Upstream evidence:
+Upstream release evidence
 
-- https://api.github.com/repos/FFmpeg/FFmpeg/git/tags/ce8f11b9fac4cd7ccfb41ca7c01bc17f5cda8cc3
-- https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24902
-- https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/f5d4fd186c68913240c4f6e9cda98443e1518b34
+- https://ffmpeg.org/download.html
+- https://api.github.com/repos/FFmpeg/FFmpeg/git/tags/9d106a4c5a139fac2a62c349817017191217a9d8
+- https://github.com/FFmpeg/FFmpeg/commit/74e4393595cf2b5857f0da925c4e0dd74ea306e5
