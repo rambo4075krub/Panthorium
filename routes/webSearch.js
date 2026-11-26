@@ -6,21 +6,31 @@ const directory = require('../search/directory');
 function createWebSearchRouter(service) {
   const router = express.Router();
   const root = path.join(__dirname, '..', 'search');
-  router.get('/search', (_req, res) => {
+  router.get(['/search', '/search/view'], (_req, res) => {
     res.set({
       'Cache-Control': 'no-store',
       'Referrer-Policy': 'no-referrer',
-      'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+      'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'self'"
     });
     res.sendFile(path.join(root, 'index.html'));
   });
-  for (const file of ['app.js', 'directory.js', 'style.css', 'great-wave.webp', 'gloock.ttf', 'Gloock-OFL.txt', 'opensearch.xml']) {
+  for (const file of ['app.js', 'voice.js', 'directory.js', 'style.css', 'great-wave.webp', 'gloock.ttf', 'Gloock-OFL.txt', 'opensearch.xml']) {
     router.get('/search/' + file, (_req, res) => {
       res.set('Cache-Control', 'no-cache');
       if (file === 'opensearch.xml') res.type('application/opensearchdescription+xml');
       res.sendFile(path.join(root, file));
     });
   }
+  router.post('/api/search/read', express.json({ limit: '4kb' }), async (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    if (typeof req.body?.url !== 'string' || req.body.url.length > 2048) return res.status(400).json({ error: 'invalid_url' });
+    try {
+      const page = await service.execute('web.read', { url: req.body.url }, 'public-search:' + req.ip);
+      res.status(page.available ? 200 : page.error === 'web_rate_limited' ? 429 : 422).json(page.available
+        ? { title: page.title, url: page.url, content: page.content, truncated: page.truncated }
+        : { error: page.error, message: page.message });
+    } catch (error) { next(error); }
+  });
   router.post('/api/search', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();

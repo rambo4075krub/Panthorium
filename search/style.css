@@ -125,3 +125,6 @@ dialog::backdrop{background:#132c26a8}
   .dialog-actions{gap:4px}
 }
 @media(max-width:370px){.lens{display:none}.compare-trigger{padding-inline:10px}.wordmark{font-size:20px}.frame{width:calc(100% - 22px)}}
+
+#reader-content{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.75}
+#reader-source{display:inline-block;padding:12px 0;color:var(--green)}

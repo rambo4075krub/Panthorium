@@ -36,7 +36,8 @@ async function main() {
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.goto(origin + '/browser-download.html');
-    await page.getByRole('link', {name:'เปิด Panthorium Search'}).click();
+    assert.equal(await page.getByRole('link', {name:'เปิด Panthorium Search'}).getAttribute('href'), '/#search');
+    await page.goto(origin + '/search');
     await page.locator('.artwork img').waitFor();
     for (const width of [1280, 768, 360]) {
       await page.setViewportSize({width, height:820});
