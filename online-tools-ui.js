@@ -149,6 +149,7 @@
     };
     return {
       panel: v.panel,
+      origin: origins,
       trackJob: v.trackJob,
       request: (path, opts, raw) =>
         live() ? request(v, path, opts, raw) : Promise.reject(Error('auth_required')),

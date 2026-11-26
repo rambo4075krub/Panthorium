@@ -6,6 +6,7 @@
   const formats = [
     ['short', 'หนังสั้น'],
     ['movie', 'ภาพยนตร์'],
+    ['feature', 'หนังยาว 2–3 ชั่วโมง'],
     ['series', 'ซีรีส์']
   ];
   const stages = [
@@ -17,7 +18,17 @@
   ];
   const labels = Object.fromEntries([...stages, ['episode', 'รวม MP4']]);
   const episode = (title) => ({id: uuid(), title, story: '', shots: []});
+  const Feature = window.PanthoriumFeatureFilm;
   const messages = {
+    manual: 'พักตามคำสั่ง',
+    feature_footage_selected: 'ลำดับนี้ใช้ฟุตเทจอยู่ ถอดฟุตเทจก่อนวางช็อตใหม่',
+    film_duration_exceeded: 'เวลาของหนังเกิน 180 นาที ปรับช่วงฟุตเทจหรือความยาวช็อต',
+    invalid_feature_sequence: 'ตรวจองก์และเวลาที่กำหนดให้ลำดับฉาก',
+    invalid_feature_footage: 'กำหนดช่วงฟุตเทจตั้งแต่ 0 ถึง 120 วินาทีต่อหนึ่งลำดับ',
+    feature_export_unavailable: 'ไฟล์ดาวน์โหลดหมดอายุหรือบทเปลี่ยนแล้ว กรุณารวมไฟล์อีกครั้ง',
+    feature_review_required: 'ตรวจผลคำสั่งก่อนหน้ากับผู้ให้บริการก่อนยืนยันใหม่',
+    feature_no_work: 'ยังไม่มีลำดับที่ต้องสร้าง เพิ่มบทหรือฟุตเทจก่อน',
+    film_project_too_large: 'ข้อมูลโปรเจกต์เกินขนาดที่จัดเก็บได้',
     film_unfinished_parts: 'สร้าง MP4 ของทุกตอนหรือลำดับฉากให้ครบก่อนดาวน์โหลดทั้งเรื่อง',
     film_export_space: 'พื้นที่ชั่วคราวบนเซิร์ฟเวอร์ไม่พอสำหรับรวมทั้งเรื่อง',
     media_worker_busy: 'เครื่องส่งออกกำลังทำงานอื่น ลองอีกครั้งเมื่อเสร็จ',
@@ -57,6 +68,16 @@
     let pollBusy = false,
       pending = null,
       requestBusy = false;
+    let info = null,
+      out = null,
+      baseline = new Map(),
+      actFilter = 'all';
+    const feature = () => p?.body.format === 'feature';
+    const remember = () => {
+      baseline = new Map((p?.body.episodes || []).map((e) => [e.id, JSON.stringify(e)]));
+    };
+    const featureBusy = () =>
+      feature() && (info?.run?.status === 'running' || ['queued', 'running'].includes(out?.status));
     const urls = new Set();
     let observer;
     function release() {
@@ -111,33 +132,43 @@
       clearTimeout(timer);
       clean();
       p = null;
+      info = null;
+      out = null;
+      baseline.clear();
+      actFilter = 'all';
       assets = {};
       job = null;
       clearPanel();
       ctx.report('');
       const holder = el('div', null, {class: 'ot-cards'});
       ctx.panel.append(
-        act('สร้างโปรเจกต์ใหม่', () => {
-          const first = episode('ตอนที่ 1');
-          p = {
-            id: uuid(),
-            kind: 'film',
-            title: '',
-            body: {
-              format: 'short',
-              aspect: '16:9',
-              style: '',
-              characters: [],
-              locations: [],
-              episodes: [first]
-            }
-          };
-          epId = first.id;
-          stage = 'story';
-          pending = null;
-          changed();
-          draw();
-        }),
+        ...[
+          ['สร้างโปรเจกต์ใหม่', 'short'],
+          ['สร้างหนังยาว 2–3 ชั่วโมง', 'feature']
+        ].map(([label, format]) =>
+          act(label, () => {
+            const first = episode(format === 'feature' ? 'ลำดับฉากที่ 1' : 'ตอนที่ 1');
+            p = {
+              id: uuid(),
+              kind: 'film',
+              title: '',
+              body: {
+                format,
+                ...(format === 'feature' ? {feature: Feature.defaults()} : {}),
+                aspect: '16:9',
+                style: '',
+                characters: [],
+                locations: [],
+                episodes: [first]
+              }
+            };
+            epId = first.id;
+            stage = feature() ? 'feature' : 'story';
+            pending = null;
+            changed();
+            draw();
+          })
+        ),
         holder
       );
       const data = await ctx.api('/projects');
@@ -148,8 +179,9 @@
             const d = await ctx.api('/projects/' + item.id);
             if (!ctx.live()) return;
             p = d.project;
+            remember();
             epId = p.body.episodes[0].id;
-            stage = 'story';
+            stage = feature() ? 'feature' : 'story';
             pending = null;
             clean();
             draw();
@@ -161,6 +193,29 @@
     async function save() {
       if (!dirty && p.revision) return;
       if (!p.title.trim()) throw Error('ใส่ชื่อโปรเจกต์ก่อนบันทึก');
+      if (feature()) {
+        const {episodes, ...meta} = p.body;
+        const payload = p.revision
+          ? {
+              title: p.title,
+              revision: p.revision,
+              meta,
+              order: episodes.map((e) => e.id),
+              changes: episodes.filter((e) => baseline.get(e.id) !== JSON.stringify(e))
+            }
+          : {id: p.id, title: p.title, body: p.body};
+        const reply = await ctx.api(p.revision ? endpoint('draft') : '/film/feature-drafts', {
+          ...json(p.revision ? 'PUT' : 'POST', payload),
+          headers: {'Content-Type': 'application/vnd.panthorium.film+json'}
+        });
+        if (!ctx.live()) throw Error('auth_required');
+        if (reply.project) p = reply.project;
+        else p.revision = reply.revision;
+        remember();
+        clean();
+        pending = null;
+        return;
+      }
       const data = await ctx.api(
         '/projects' + (p.revision ? '/' + p.id : ''),
         json(p.revision ? 'PUT' : 'POST', {
@@ -178,9 +233,9 @@
     }
     function queuePoll() {
       clearTimeout(timer);
-      if (!active() || !ctx.live()) return;
+      if (!(active() || featureBusy()) || !ctx.live()) return;
       timer = setTimeout(async () => {
-        if (!ctx.live() || !p || !active()) return;
+        if (!ctx.live() || !p || !(active() || featureBusy())) return;
         if (pollBusy || requestBusy || dirty) {
           queuePoll();
           return;
@@ -200,8 +255,14 @@
     async function refresh() {
       const projectKey = p.id,
         part = epId;
-      const data = await ctx.api(endpoint(part));
+      const [data, overview, exportState] = await Promise.all([
+        ctx.api(endpoint(part)),
+        feature() ? ctx.api(endpoint('feature/overview')) : null,
+        feature() ? ctx.api(endpoint('feature/export')) : null
+      ]);
       if (!ctx.live() || projectKey !== p?.id || part !== epId) return;
+      info = overview;
+      out = exportState;
       assets = data.assets;
       job = data.job;
       if (active()) await ctx.trackJob(job.id);
@@ -211,11 +272,24 @@
     }
     function stageButton(key, label) {
       const b = act(label, () => {
+        if (feature() && key === 'story' && stage === 'feature')
+          count = Math.max(1, Math.min(8, Math.ceil((current().plannedSeconds || 16) / 8)));
         stage = key;
         draw();
       });
       b.setAttribute('aria-pressed', String(stage === key));
       return b;
+    }
+    async function go(part) {
+      const ep = p.body.episodes.find((e) => e.id === part);
+      if (!ep) return;
+      epId = part;
+      assets = {};
+      stage = 'story';
+      actFilter = 'all';
+      if (feature()) count = Math.max(1, Math.min(8, Math.ceil((ep.plannedSeconds || 16) / 8)));
+      draw();
+      if (p.revision && !dirty) await refresh();
     }
     const partName = () => (p.body.format === 'series' ? 'ตอน' : 'ลำดับฉาก');
     function draw() {
@@ -231,15 +305,20 @@
         })
       );
       top.classList.add('film-toolbar');
-      const tabs = row(...stages.map(([key, name]) => stageButton(key, name)));
+      const choices = feature() ? [['feature', 'ภาพรวมหนังยาว'], ...stages] : stages;
+      const tabs = row(...choices.map(([key, name]) => stageButton(key, name)));
       tabs.classList.add('film-tabs');
       const ep = current();
+      if (feature() && actFilter !== 'all' && Number(actFilter) !== (ep.act || 1)) actFilter = 'all';
       const parts = select(
-        p.body.episodes.map((e) => [e.id, e.title]),
+        p.body.episodes
+          .filter((e) => !feature() || actFilter === 'all' || (e.act || 1) === Number(actFilter))
+          .map((e) => [e.id, e.title]),
         ep.id
       );
       parts.onchange = ctx.handle(async () => {
         epId = parts.value;
+        if (feature()) count = Math.max(1, Math.min(8, Math.ceil((current().plannedSeconds || 16) / 8)));
         assets = {};
         draw();
         if (p.revision) await refresh();
@@ -249,8 +328,10 @@
         const group = row(
           field('เลือก' + partName(), parts),
           act('เพิ่ม' + partName(), () => {
-            if (p.body.episodes.length >= 40) throw Error('โปรเจกต์นี้มีครบ 40 ลำดับแล้ว');
+            if (p.body.episodes.length >= (feature() ? 360 : 40))
+              throw Error('โปรเจกต์นี้มีลำดับฉากครบแล้ว');
             const next = episode(partName() + 'ที่ ' + (p.body.episodes.length + 1));
+            if (feature()) next.act = Number(actFilter) || ep.act || 1;
             p.body.episodes.push(next);
             epId = next.id;
             stage = 'story';
@@ -259,6 +340,46 @@
             draw();
           })
         );
+        if (feature()) {
+          const choose = select(
+            [['all', 'ทุกองก์'], ...['1', '2', '3'].map((n) => [n, 'องก์ ' + n])],
+            actFilter
+          );
+          choose.onchange = ctx.handle(async () => {
+            const first = p.body.episodes.find(
+              (e) => choose.value === 'all' || (e.act || 1) === Number(choose.value)
+            );
+            if (!first) {
+              choose.value = actFilter;
+              return ctx.report('ยังไม่มีลำดับฉากในองก์นี้');
+            }
+            await go(first.id);
+            actFilter = choose.value;
+            draw();
+          });
+          group.prepend(field('กรองตามองก์', choose));
+          const list = p.body.episodes,
+            index = list.indexOf(ep);
+          const move = (offset) => {
+            list.splice(index + offset, 0, ...list.splice(index, 1));
+            changed();
+            draw();
+          };
+          const up = act('เลื่อนลำดับก่อนหน้า', () => move(-1)),
+            down = act('เลื่อนลำดับถัดไป', () => move(1));
+          up.disabled = index === 0;
+          down.disabled = index === list.length - 1;
+          const remove = act('นำลำดับนี้ออก', () => {
+            if (!confirm('นำ ' + ep.title + ' ออกจากฉบับตัดต่อนี้หรือไม่?')) return;
+            list.splice(index, 1);
+            epId = list[Math.min(index, list.length - 1)].id;
+            assets = {};
+            changed();
+            draw();
+          });
+          remove.disabled = list.length <= 1;
+          group.append(up, down, remove);
+        }
         ctx.panel.append(group);
       }
       ctx.panel.append(tabs);
@@ -288,8 +409,44 @@
         if (job.error) note.append(el('span', detail(job.error)));
         ctx.panel.append(note);
       }
-      if (stage === 'story') story(ep);
-      else if (stage === 'character' || stage === 'location') references(stage);
+      const view = {
+        p,
+        ep,
+        act,
+        change: changed,
+        redraw: draw,
+        edit: editField,
+        info: dirty ? null : info,
+        out: dirty ? null : out,
+        save,
+        refresh,
+        endpoint,
+        ctx,
+        go,
+        detail,
+        json
+      };
+      if (stage === 'feature' && feature()) {
+        ctx.panel.append(editField('ชื่อโปรเจกต์', input(p.title), p, 'title'));
+        Feature.workspace(view);
+      } else if (stage === 'story') {
+        story(ep);
+        if (feature()) {
+          ctx.panel.append(
+            editField(
+              'องก์ของลำดับฉาก',
+              select(
+                [1, 2, 3].map((n) => [String(n), 'องก์ ' + n]),
+                String(ep.act || 1)
+              ),
+              ep,
+              'act',
+              (c) => Number(c.value)
+            )
+          );
+          Feature.footage(view);
+        }
+      } else if (stage === 'character' || stage === 'location') references(stage);
       else shots(ep, stage === 'clip');
     }
     function story(ep) {
@@ -300,7 +457,24 @@
           ctx.report(messages.invalid_film_episodes);
           return;
         }
+        if (
+          feature() &&
+          format.value !== 'feature' &&
+          (p.revision ||
+            p.body.episodes.length > 1 ||
+            p.body.feature.screenplay ||
+            p.body.feature.synopsis ||
+            ep.footage)
+        ) {
+          format.value = 'feature';
+          ctx.report('โปรเจกต์หนังยาวนี้มีบทหรือฉากที่บันทึกอยู่แล้ว');
+          return;
+        }
         p.body.format = format.value;
+        if (feature()) {
+          p.body.feature ||= Feature.defaults();
+          stage = 'feature';
+        }
         changed();
         draw();
       };
@@ -337,12 +511,20 @@
         row(
           field('จำนวนช็อตที่ให้ Gemini วางแผน', n),
           act('ให้ Gemini วางแผนฉาก', () => plan(false)),
-          act('สร้างจากเรื่องจนจบเป็น MP4', () => plan(true))
+          ...(feature() ? [] : [act('สร้างจากเรื่องจนจบเป็น MP4', () => plan(true))])
         )
       );
     }
     async function plan(auto) {
-      if (!current().story.trim()) throw Error('film_story_required');
+      if (feature() && current().footage)
+        throw Error('ลำดับนี้ใช้ฟุตเทจของคุณ ถอดฟุตเทจก่อนวางสตอรีบอร์ดใหม่');
+      if (
+        !(
+          current().story.trim() ||
+          (feature() && (p.body.feature.synopsis.trim() || p.body.feature.screenplay.trim()))
+        )
+      )
+        throw Error('film_story_required');
       if (active()) throw Error('film_job_active');
       const replace = current().shots.length ? ' ระบบจะแทนที่รายการช็อตในตอนนี้' : '';
       if (auto) {
@@ -362,6 +544,7 @@
       );
       if (!ctx.live()) return;
       p = result.project;
+      remember();
       clean();
       stage = auto ? 'clip' : 'frame';
       draw();
@@ -393,6 +576,7 @@
               q.videos +
               ' คลิป' +
               (q.assemble ? ' และรวมเป็น MP4' : '') +
+              (q.outputUSD != null ? ' ค่าสื่อขาออกประมาณ US$' + q.outputUSD.toFixed(2) : '') +
               '? งานสร้างภาพและคลิปอาจมีค่าใช้จ่ายตามบริการที่เชื่อมไว้'
           )
         )
@@ -544,7 +728,14 @@
         output.append(act('สร้างและรวมช็อตเป็น MP4', () => produce('episode:' + ep.id)));
         asset(output, 'episode:' + ep.id, true);
         ctx.panel.append(output);
-        if (p.body.episodes.length > 1)
+        if (feature())
+          ctx.panel.append(
+            act('ภาพรวมและส่งออกหนังยาว', () => {
+              stage = 'feature';
+              draw();
+            })
+          );
+        if (!feature() && p.body.episodes.length > 1)
           ctx.panel.append(
             act('ดาวน์โหลดทั้งเรื่องเป็น MP4', async () => {
               const name = window.PanthoriumToolsUI.fileName(p.title, '.mp4');
@@ -562,7 +753,11 @@
               }
               await save();
               ctx.report('กำลังรวมตอนตามลำดับ…');
-              const response = await ctx.api(endpoint('master'), json('POST', {revision: p.revision}), true);
+              const response = await ctx.api(
+                endpoint('master'),
+                json('POST', {revision: p.revision}),
+                true
+              );
               if (handle && response.body)
                 await response.body.pipeTo(await handle.createWritable(), {signal: ctx.signal});
               else {

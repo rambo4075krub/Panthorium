@@ -262,7 +262,9 @@ async function verify({accounts: [owner, collaborator], service, pool}) {
     await page.evaluate(() => (location.hash = 'online-tools'));
     await shell.locator('[data-studio-section="image"][aria-selected="true"]').waitFor();
     assert.equal(await page.locator('.window[data-id="online-tools"]').count(), 0);
-    await filmTest.verify({page, hub, owner, other: collaborator, fixture: filmFixture, service, pool, dir});
+    const filmContext={page,hub,owner,other:collaborator,fixture:filmFixture,service,pool,dir};
+    await filmTest.verify(filmContext);
+    await require('./feature-film-browser').verify(filmContext);
     await page.setViewportSize({width: 390, height: 844});
     await tool('design');
     assert(await hub.evaluate((n) => n.scrollWidth <= n.clientWidth + 1));

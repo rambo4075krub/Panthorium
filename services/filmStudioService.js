@@ -3,7 +3,7 @@
 const {createHash, randomUUID} = require('node:crypto');
 const {id, fail} = require('./onlineToolModel');
 const {extractJsonObject} = require('./mediaStudioService');
-const {applyPlan, filmGraph} = require('./filmStudioModel');
+const {applyPlan, filmGraph, sequenceSeconds} = require('./filmStudioModel');
 const {LIMITS} = require('./creativeStudioRepository');
 
 function jobInfo(job) {
@@ -31,6 +31,20 @@ class FilmStudioService {
   constructor(projects, studio) {
     this.projects = projects;
     this.studio = studio;
+    this.production = new (require('./featureProduction').FeatureProduction)(this);
+    this.exports = new (require('./featureExports').FeatureExports)(this);
+  }
+  async advanceProduction() {
+    if (this.dispatching || !this.projects.pool) return;
+    this.dispatching = true;
+    try {
+      await this.production.tick();
+    } finally {
+      this.dispatching = false;
+    }
+  }
+  wakeProduction() {
+    void this.advanceProduction().catch(() => {});
   }
   async project(user, key, revision) {
     const owner = this.studio.requireAccount(user);
@@ -45,7 +59,9 @@ class FilmStudioService {
     if (!Number.isInteger(input.revision) || ![1, 2, 3, 4, 5, 6, 7, 8].includes(input.count))
       fail('invalid_film_plan');
     const e = p.body.episodes.find((row) => row.id === id(input.episode));
-    if (!e?.story) fail('film_story_required');
+    if (!e || !(e.story || p.body.feature?.synopsis || p.body.feature?.screenplay))
+      fail('film_story_required');
+    if (e.footage) fail('feature_footage_selected');
     if (input.auto === true) {
       for (const plugin of ['image', 'video']) {
         await this.studio.assertAllowed(current, plugin);
@@ -53,13 +69,35 @@ class FilmStudioService {
         if (reason) fail(reason, 503);
       }
     }
+    const feature = p.body.feature;
+    const position = p.body.episodes.findIndex((row) => row.id === e.id);
+    const screenplay = feature?.screenplay || '';
+    const offset = Math.max(
+      0,
+      Math.round((position / Math.max(1, p.body.episodes.length - 1)) * (screenplay.length - 3500))
+    );
+    const continuity = feature
+      ? {
+          act: e.act,
+          targetMinutes: feature.minutes,
+          sequenceNumber: position + 1,
+          synopsis: feature.synopsis,
+          screenplayExcerpt: screenplay.slice(offset, offset + 3500),
+          precedingSequence: p.body.episodes[position - 1]?.story.slice(-1000) || '',
+          followingSequence: p.body.episodes[position + 1]?.story.slice(0, 500) || '',
+          plannedSeconds: e.plannedSeconds
+        }
+      : null;
     const reference = (group) => p.body[group].map(({name, description}) => ({name, description}));
     const result = await this.studio.gateway.complete({
       userId: current.sub,
       sessionId: 'film-plan:' + randomUUID(),
       preferredProvider: 'gemini-live',
       lockedProvider: 'gemini-live',
-      systemPrompt: prompt,
+      systemPrompt: feature
+        ? prompt +
+          ' If the sequence story is blank, derive its events from the screenplay excerpt, synopsis, act and position. Return sequenceStory as a short summary of this sequence.'
+        : prompt,
       workload: 'background',
       history: [
         {
@@ -72,13 +110,36 @@ class FilmStudioService {
             locations: reference('locations'),
             episode: e.title,
             story: e.story,
+            ...(continuity ? {continuity} : {}),
             shotCount: input.count
           })
         }
       ]
     });
-    if (!result?.ok) fail(result?.error === 'system_busy' ? 'system_busy' : 'film_planner_unavailable', 503);
-    const body = applyPlan(p.body, e.id, extractJsonObject(result.text), input.count);
+    if (!result?.ok)
+      fail(result?.error === 'system_busy' ? 'system_busy' : 'film_planner_unavailable', 503);
+    const plan = extractJsonObject(result.text);
+    // A template fixes screen time even if the director suggests a different rhythm.
+    if (
+      feature &&
+      e.plannedSeconds &&
+      input.count === Math.ceil(e.plannedSeconds / 8) &&
+      Array.isArray(plan?.shots)
+    ) {
+      const tail = e.plannedSeconds - 8 * (input.count - 1);
+      if ([4, 6, 8].includes(tail))
+        plan.shots.forEach((shot, i) => {
+          shot.seconds = i === input.count - 1 ? tail : 8;
+        });
+    }
+    const body = applyPlan(p.body, e.id, plan, input.count);
+    if (feature && !e.story) {
+      const planned = body.episodes.find((x) => x.id === e.id);
+      planned.story = (
+        (typeof plan.sequenceStory === 'string' && plan.sequenceStory.trim()) ||
+        planned.shots.map((s) => s.action).join(' ')
+      ).slice(0, 8000);
+    }
     return {
       project: await this.projects.update(current.sub, p.id, {title: p.title, revision: p.revision, body})
     };
@@ -93,13 +154,8 @@ class FilmStudioService {
     const current = await this.studio.principal(user);
     if (!Number.isInteger(revision)) fail('revision_conflict', 409);
     const p = await this.project(current, key, revision);
-    this.studio.requireStorage();
-    const {assets} = await this.studio.repository.filmState(current.sub, p.id);
-    const parts = p.body.episodes.map((ep) => {
-      const part = filmGraph(p, ep.id, assets, '').status['episode:' + ep.id];
-      if (!part.ready) fail('film_unfinished_parts', 409);
-      return part.file;
-    });
+    if (p.body.format === 'feature') fail('feature_export_required', 409);
+    const parts = await this.parts(current, p);
     await require('./filmMaster').downloadMaster({
       media: this.studio.mediaStudio,
       files: this.studio.files,
@@ -108,6 +164,18 @@ class FilmStudioService {
       title: p.title,
       send,
       signal
+    });
+  }
+  async parts(current, p) {
+    this.studio.requireStorage();
+    const {assets} =
+      p.body.format === 'feature'
+        ? await this.production.assets(current, p)
+        : await this.studio.repository.filmState(current.sub, p.id);
+    return p.body.episodes.map((ep) => {
+      const part = filmGraph(p, ep.id, assets, '').status['episode:' + ep.id];
+      if (!part.ready) fail('film_unfinished_parts', 409);
+      return {...part.file, seconds: sequenceSeconds(ep)};
     });
   }
   async produce(user, key, input, confirmed) {
@@ -166,9 +234,26 @@ class FilmStudioService {
       assemble: graph.steps.some((s) => s.pluginId === 'film-assemble'),
       limit: LIMITS.dailyMediaSteps
     };
+    if (p.body.format === 'feature') {
+      const price = require('./featureProduction').rates(this.studio);
+      const seconds = graph.steps.reduce(
+        (sum, step) => sum + (step.pluginId === 'video' ? step.input.durationSeconds : 0),
+        0
+      );
+      quote.outputUSD =
+        (images && price.imageUSD == null) || (videos && price.videoUSD == null)
+          ? null
+          : images * (price.imageUSD || 0) + seconds * (price.videoUSD || 0);
+    }
     if (!confirmed || !graph.steps.length) return {quote, token: this.quoteToken(graph), job: null};
     if (images + videos > LIMITS.dailyMediaSteps) fail('film_over_daily_limit', 429);
-    const film = {project: p.id, episode, revision: p.revision, target: input.target, targets: graph.targets};
+    const film = {
+      project: p.id,
+      episode,
+      revision: p.revision,
+      target: input.target,
+      targets: graph.targets
+    };
     // A quote binds approval to exact visual inputs and their versions. The one-click path instead
     // explicitly authorizes a capped batch before the outline exists.
     const fingerprint = this.quoteToken(graph);

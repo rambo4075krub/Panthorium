@@ -25,6 +25,16 @@ class OnlineToolsService {
         kind TEXT NOT NULL, title TEXT NOT NULL, body JSONB NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
         share UUID UNIQUE, invite UUID UNIQUE, trigger_form UUID REFERENCES panthorium_tool_projects(id) ON DELETE SET NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+      CREATE TABLE IF NOT EXISTS panthorium_feature_runs(
+        project UUID PRIMARY KEY REFERENCES panthorium_tool_projects(id) ON DELETE CASCADE, owner_id UUID NOT NULL,
+        revision INTEGER NOT NULL,run_id UUID NOT NULL,principal JSONB NOT NULL,budget JSONB NOT NULL,
+        batch INTEGER NOT NULL DEFAULT 0,job_id UUID,status TEXT NOT NULL,reason TEXT,next_at TIMESTAMPTZ NOT NULL DEFAULT now());
+      CREATE INDEX IF NOT EXISTS feature_runs_due ON panthorium_feature_runs(next_at) WHERE status IN ('running','waiting_quota');
+      CREATE TABLE IF NOT EXISTS panthorium_feature_exports(
+        project UUID PRIMARY KEY REFERENCES panthorium_tool_projects(id) ON DELETE CASCADE, owner_id UUID NOT NULL,
+        revision INTEGER NOT NULL,artifact UUID NOT NULL,principal JSONB NOT NULL,status TEXT NOT NULL,
+        reason TEXT,size BIGINT,source_key TEXT NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+      CREATE INDEX IF NOT EXISTS feature_exports_due ON panthorium_feature_exports(updated_at) WHERE status IN ('queued','running');
       CREATE INDEX IF NOT EXISTS tool_project_owner ON panthorium_tool_projects(owner_id);
       CREATE INDEX IF NOT EXISTS tool_flow_trigger ON panthorium_tool_projects(trigger_form) WHERE trigger_form IS NOT NULL;
       CREATE TABLE IF NOT EXISTS panthorium_tool_members(

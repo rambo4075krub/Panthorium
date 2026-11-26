@@ -221,7 +221,7 @@ class CreativeStudioService {
           return this.repository.save(job, { release: true, delayMs: 15000 });
         }
         if (assemble) {
-          const clips = ids.map((fileId,i) => ({fileId,start:0,end:step.input.durations[i],speed:1,volume:1,fade:false}));
+          const clips = ids.map((fileId,i) => ({fileId,start:step.input.startSeconds || 0,end:(step.input.startSeconds || 0)+step.input.durations[i],speed:1,volume:1,fade:false}));
           const output = await this.mediaStudio.renderTimeline({user,clips,requestId:job.id,name:step.input.name,
             aspect:step.input.aspectRatio === '9:16' ? 'vertical' : 'widescreen'});
           result = {files:[output.file],summary:'รวมช็อตเป็นไฟล์ MP4 แล้ว'};
@@ -256,9 +256,9 @@ class CreativeStudioService {
       return this.repository.save(job, { release: true });
     }
   }
-  async tick() {
+  async tick({featureOnly=false}={}) {
     if (!this.repository?.available) return { processed: 0, reason: 'studio_storage_unconfigured' };
-    const jobs = await this.repository.due(1); let processed = 0;
+    const jobs = await this.repository.due(1,featureOnly); let processed = 0;
     for (const item of jobs) { const job = await this.repository.claim(item.ownerId,item.id); if (job) { await this.executeClaim(job); processed += 1; } }
     return { processed };
   }
