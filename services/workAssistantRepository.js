@@ -34,6 +34,19 @@ class WorkAssistantRepository {
     if (!this.pool) return [...this.memory.values()].filter(row => row.ownerId === ownerId).sort((a,b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).map(copy);
     return (await this.pool.query(`SELECT ${COLUMNS} FROM panthorium_work_projects WHERE owner_id=$1 ORDER BY updated_at DESC LIMIT 40`, [ownerId])).rows;
   }
+  async listBriefQuotes(ownerId) {
+    this.requireReady();
+    if (this.pool) {
+      const result = await this.pool.query(`SELECT p.id AS "projectId", p.data->>'title' AS title, r->>'id' AS "reviewId", left(r->'rows'->0->>'text',160) AS request,
+        r->'quote'->>'status' AS status, (r->'quote'->>'totalSatang')::bigint AS "totalSatang", r->'quote'->>'updatedAt' AS "updatedAt"
+        FROM panthorium_work_projects p CROSS JOIN LATERAL jsonb_array_elements(p.data->'briefReviews') r
+        WHERE p.owner_id=$1 AND r ? 'quote'`, [ownerId]);
+      return result.rows.map(row => ({ ...row, totalSatang: Number(row.totalSatang) }));
+    }
+    return [...this.memory.values()].filter(p => p.ownerId === ownerId).flatMap(p =>
+      (p.data.briefReviews || []).filter(r => r.quote).map(r => ({ projectId: p.id, title: p.data.title, reviewId: r.id, request: Array.from(r.rows[0].text).slice(0, 160).join(''),
+        status: r.quote.status, totalSatang: r.quote.totalSatang, updatedAt: r.quote.updatedAt })));
+  }
   // One transaction protects the project, its calendar entries and email outbox.
   // Memory mode is only for tests/development, serialized and rolled back together.
   async mutate({ ownerId, id, version, operationId, input, create = false, resources = [] }, change) {

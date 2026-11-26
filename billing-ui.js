@@ -112,6 +112,30 @@
         const list = node('ul');
         catalog.displayDetails(product).forEach(detail => list.appendChild(node('li', detail)));
         card.appendChild(list);
+        const brief = window.PanthoriumBrief;
+        if (brief && Object.hasOwn(brief.plans, product.id)) {
+          const example = node('details', null, 'pb-example');
+          example.append(node('summary', 'ดูตัวอย่างงานของ ' + product.name));
+          const examples = {
+            free: 'ลูกค้าขอเพิ่มคลิปแนวตั้ง 3 ชิ้น เทียบกับบรีฟวิดีโอแนวนอนเดิม ตรวจหลักฐานแล้วเตรียมคำตอบได้',
+            life: 'ก่อนส่งเวร รวมข้อตกลง กำหนดส่ง ผู้รับผิดชอบ และข้อที่ยังรอคำตอบไว้ในข้อความเดียว',
+            work: 'เสนอทางเลือกเดิม หรือเพิ่ม 3 คลิป ราคาตัวอย่างคลิปละ 600 บาท รวมงานเพิ่ม 1,800 บาท',
+            'work-pro': 'ดูว่าแฟ้มไหนรอลูกค้าตอบและยอดที่ตกลงแล้วเท่าไร กดกลับไปดูข้อเสนอและบรีฟต้นทางได้'
+          };
+          if (product.id === 'free') {
+            const preview = node('div', null), show = button('ลองเทียบตัวอย่าง', () => {
+              preview.replaceChildren(node('p', 'ข้อตกลงตัวอย่าง'), node('pre', brief.sample.baseline));
+              const list = node('ol', null);
+              for (const row of brief.suggest(brief.sample.baseline, brief.sample.request)) {
+                list.append(node('li', row.text + ' · ' + brief.categories[row.category]));
+              }
+              preview.append(node('p', 'ผลเบื้องต้นสำหรับเจ้าของงานตรวจ'), list); show.disabled = true;
+            }, 'pb-back');
+            preview.setAttribute('aria-live', 'polite'); example.append(show, preview);
+          }
+          example.append(node('p', examples[product.id]), button('เปิดในผู้ช่วยงาน', () => window.PanthoriumWorkAssistant?.open?.({ brief: product.id }), 'pb-back'));
+          card.append(node('p', brief.plans[product.id].title), example);
+        }
         if (product.kind === 'free') card.appendChild(node('p', 'ไม่ต้องชำระเงิน · สิทธิ์จริงขึ้นกับบัญชี', 'pb-muted'));
         else {
           const select = button(product.purchasePaused ? pausedLabel : 'ดูรายละเอียดและยอดชำระ', () => checkout(product), 'pb-primary');

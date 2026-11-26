@@ -34,10 +34,14 @@ async function scenario(native,checkoutPath='c'){
     if(url.endsWith('/orders/order_fixture'))return response({order:{id:'order_fixture',status:'pending',checkoutUrl:invalidUrl?'javascript:alert(1)':'https://checkout.stripe.com/'+checkoutPath+'/pay/cs_fixture'}});
     throw Error('unexpected request '+url);
   };
-  for(const name of ['privacy-notice.js','billing-catalog.js','billing-ui.js'])w.eval(fs.readFileSync(require.resolve('../'+name),'utf8'));
+  for(const name of ['privacy-notice.js','billing-catalog.js','work-brief.js','billing-ui.js'])w.eval(fs.readFileSync(require.resolve('../'+name),'utf8'));
   try{
     w.PanthoriumBilling.open();const root=w.document.querySelector('[data-billing-root]');
     if(native)await until(()=>productCalls===1&&!root.querySelector('[data-product-id="life"]').disabled);
+    const preview = root.querySelector('.pb-example');
+    assert.equal(root.querySelectorAll('.pb-example').length, 4);
+    preview.querySelector('button').click();
+    assert.equal(preview.querySelectorAll('li').length, 4); assert.equal(created, 0);
     root.querySelectorAll('.pb-tab')[2].click();
     for (const id of ['storage-20','storage-50','storage-100']) {
       const button = root.querySelector('[data-product-id="'+id+'"]');

@@ -264,6 +264,12 @@ def verify_readiness(stage,state,front=False):
    with urllib.request.urlopen(req,timeout=5) as r:status=r.status
   except urllib.error.HTTPError as e:status=e.code
   if status!=expected:raise RuntimeError('http_smoke_failed_'+route)
+ if h.get('probesVersion',0)>=1:
+  # Old releases retain the original smoke checks during a rollback.
+  for route,status in [('/health/live','alive'),('/health/ready','ready')]:
+   with urllib.request.urlopen('http://127.0.0.1:'+str(port)+route,timeout=8) as r:
+    result=json.load(r)
+    if result.get('ok') is not True or result.get('status')!=status:raise RuntimeError('release_probe_failed_'+route)
  if front:
   try:urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:'+str(port)+'/__notebook/shutdown',data=b'{}'),timeout=3);raise RuntimeError('control_endpoint_exposed')
   except urllib.error.HTTPError as e:

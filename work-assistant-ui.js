@@ -11,6 +11,16 @@
   const current = v => view === v && v.root.isConnected && v.owner === owner() && allowed();
   const q = (v, selector) => v.root.querySelector(selector);
   const messages = {
+    brief_file_not_attached: 'เลือกไฟล์ที่แนบอยู่กับแฟ้มนี้ก่อน',
+    brief_invalid_text: 'กรอกข้อความให้ครบและตรวจความยาว', brief_invalid_request: 'ตรวจข้อมูลแล้วลองอีกครั้ง', brief_too_many_lines: 'บรีฟใส่ได้ 80 บรรทัด คำขอใส่ได้ 16 บรรทัด',
+    brief_invalid_decisions: 'เลือกประเภทและบรรทัดอ้างอิงให้ครบสำหรับข้อที่อยู่ในข้อตกลง', brief_same_baseline: 'ข้อความนี้ตรงกับบรีฟที่ตรึงอยู่แล้ว',
+    brief_baseline_changed: 'บรีฟบนระบบเปลี่ยนแล้ว โหลดล่าสุดและเทียบอีกครั้ง', brief_review_not_found: 'ไม่พบรายการที่ตรวจแล้วในแฟ้มนี้',
+    brief_invalid_items: 'ใส่รายการราคา 1 ถึง 15 รายการ', brief_invalid_price: 'ใส่จำนวนเต็ม 1–999 และราคาต่อหน่วย 0–9,999,999.99 บาท โดยพิมพ์ตัวเลขที่ไม่มีจุลภาค',
+    brief_total_too_large: 'ยอดรวมต้องไม่เกิน 999,999,999.99 บาท', brief_quote_locked: 'ข้อเสนอนี้พ้นสถานะร่างแล้ว',
+    brief_invalid_transition: 'สถานะข้อเสนอเปลี่ยนแล้ว กรุณาโหลดล่าสุด', brief_membership_unavailable: 'ยังตรวจสอบสิทธิ์สมาชิกไม่ได้ กรุณาลองอีกครั้ง',
+    brief_plan_required: 'สิทธิ์ปัจจุบันยังไม่ครอบคลุมเครื่องมือนี้ ตรวจแพ็กเกจได้ที่หน้าเลือกแพ็กเกจ', brief_plan_required_work: 'เครื่องมือเสนอราคาใช้ได้ตั้งแต่แพ็กเกจ Work',
+    brief_nothing_to_handover: 'ยืนยันบรีฟหรือเพิ่มงานที่มีกำหนดส่งก่อนทำบัตรส่งต่อ', brief_rate_limited: 'ส่งคำขอหลายครั้งในหนึ่งนาที กรุณารอสักครู่',
+    work_project_too_large: 'แฟ้มนี้เต็มแล้ว กรุณาสร้างแฟ้มใหม่สำหรับงานถัดไป',
     account_required: 'กรุณาเข้าสู่ระบบ', account_changed: 'บัญชีเปลี่ยนแล้ว กรุณาเปิดผู้ช่วยงานใหม่', session_expired: 'กรุณาเข้าสู่ระบบอีกครั้ง',
     work_version_conflict: 'งานบนระบบมีฉบับใหม่กว่า ร่างของคุณยังอยู่ เลือกเก็บเป็นงานใหม่หรือโหลดฉบับบนระบบ',
     work_source_required: 'เลือกไฟล์หรือใส่ข้อความต้นทางก่อน', work_scanned_pdf_requires_ocr: 'PDF นี้เป็นภาพสแกน กรุณาใช้ PDF ที่เลือกข้อความได้ หรือวางข้อความที่อ่านแล้ว',
@@ -66,6 +76,7 @@
   }
   async function save(v) {
     if (!current(v) || !v.project) throw Error('account_changed');
+    if (v.briefWrite) await v.briefWrite;
     if (v.conflict) throw Error('work_version_conflict');
     if (v.saving) { await v.saving; if (v.dirty) return save(v); return; }
     if (!v.dirty) return;
@@ -102,12 +113,18 @@
     [data-work] details{padding:8px 0;overflow-wrap:anywhere}[data-work] summary{cursor:pointer}[data-work] pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}
     [data-work] dialog{color:inherit;background:#121b29;border:1px solid #697c93;border-radius:14px;width:min(560px,94vw);max-height:88vh;overflow:auto}[data-work] dialog::backdrop{background:#0009}
     [data-work] [hidden]{display:none!important}@media(max-width:760px){[data-work]{padding:12px}[data-work] .wa-grid{grid-template-columns:1fr}[data-work] h1{font-size:22px}[data-work] section{padding:12px}}
+    [data-work-brief] fieldset{border:0;padding:0;min-width:0}[data-work-brief] legend{margin-top:12px}[data-work-brief] [data-b-pinned]{white-space:pre-wrap;overflow-wrap:anywhere}
+    [data-work-brief] summary{min-height:44px;align-content:center}[data-work-brief] [data-b-status]:empty{display:none}[data-work-brief] [data-b-status]{padding:8px;border-inline-start:3px solid #e9aa6c}
+    [data-work-brief] .wb-item{display:grid;grid-template-columns:minmax(0,2fr) minmax(6em,.6fr) minmax(8em,1fr) auto;gap:8px;align-items:end;margin:10px 0}
+    [data-work-brief] [data-b-detail] button,[data-work-brief] [data-b-board-list] button{margin:4px 5px 4px 0}[data-work-brief] textarea{min-height:85px}
+    @media(max-width:760px){[data-work-brief] .wb-item{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}[data-work-brief] .wb-item label:first-child{grid-column:1/-1}}
     </style>
     <header><div><h1 title="อ่านไฟล์ ร่างเอกสาร และติดตามกำหนดส่ง">ผู้ช่วยงาน</h1></div><div class="wa-actions"><button data-work-new type="button">งานใหม่</button><button data-work-voice type="button">สั่งด้วยเสียง</button><button data-work-refresh type="button">โหลดล่าสุด</button></div></header>
     <div class="wa-row"><label style="flex:1">ค้นหาแฟ้มงาน<input data-work-search placeholder="ชื่อโครงการ ลูกค้า หรือข้อความในงาน"></label><label style="flex:1">แฟ้มงาน<select data-work-projects aria-label="เลือกแฟ้มงาน"></select></label></div>
     <p data-work-status class="wa-status" role="status" aria-live="polite">กำลังโหลดแฟ้มงาน</p>
     <div data-work-conflict hidden class="wa-card"><p>ร่างบนหน้าจอยังอยู่ การบันทึกอัตโนมัติหยุดจนกว่าจะจัดการฉบับที่ต่างกัน</p><div class="wa-actions"><button data-work-copy type="button">เก็บร่างนี้เป็นงานใหม่</button><button data-work-reload type="button">โหลดฉบับบนระบบ</button></div></div>
     <div data-work-approvals></div><div class="wa-grid" data-work-editor hidden>
+      <section class="wa-wide" data-work-brief aria-label="บรีฟ งานเพิ่ม และข้อเสนอ" hidden></section>
       <section class="wa-wide"><h2>เริ่มจากงานของคุณ</h2><div class="wa-row"><label style="flex:1">กลุ่มงาน<select data-work-audience></select></label><label style="flex:1">งานที่ต้องการ<select data-work-workflow></select></label></div><p data-work-needs class="wa-muted"></p><button type="button" data-work-prepare>เตรียมคำสั่งจากงานที่เลือก</button><small>ตรวจและปรับคำสั่งด้านล่างก่อนเริ่มใช้ AI</small></section>
       <section><h2>1. ข้อมูลต้นทาง</h2><label>ชื่อแฟ้มงาน<input data-work-title maxlength="160" required></label><label>รูปแบบงาน<select data-work-template><option value="report">รายงานประจำสัปดาห์</option><option value="minutes">สรุปประชุม</option><option value="letter">หนังสือหรืออีเมลธุรกิจ</option><option value="proposal">ข้อเสนองาน</option></select></label>
       <label>เลือกไฟล์จากบัญชี (สูงสุด 6 ไฟล์)</label><div data-work-files></div><label>เพิ่มไฟล์ต้นทาง<input data-work-upload type="file" accept=".pdf,.docx,.xlsx,.pptx,.txt,.csv,.tsv,.md,.json" multiple></label><small>ไฟล์ละไม่เกิน 6 MB · PDF ต้องมีข้อความที่เลือกได้</small>
@@ -153,9 +170,10 @@
     const root = q(v, '[data-work-files]'); root.replaceChildren();
     for (const file of v.files.filter(f => /\.(pdf|docx|xlsx|pptx|txt|csv|tsv|md|json)$/i.test(f.name))) {
       const line = el('label', null, { class: 'wa-file' }), input = el('input', null, { type: 'checkbox', value: file.id }); input.checked = v.selected.has(file.id);
-      input.onchange = () => { if (input.checked && v.selected.size >= 6) { input.checked = false; return report(v, 'เลือกได้ไม่เกิน 6 ไฟล์', true); } input.checked ? v.selected.add(file.id) : v.selected.delete(file.id); changed(v); };
+      input.onchange = () => { if (input.checked && v.selected.size >= 6) { input.checked = false; return report(v, 'เลือกได้ไม่เกิน 6 ไฟล์', true); } input.checked ? v.selected.add(file.id) : v.selected.delete(file.id); changed(v); v.brief?.sources(); };
       line.append(input, el('span', file.name)); root.append(line);
     }
+    v.brief?.sources();
     if (!root.children.length) root.append(el('p', 'ยังไม่มีไฟล์ที่รองรับ เพิ่มไฟล์หรือวางข้อความได้'));
   }
   function renderHistory(v) {
@@ -182,6 +200,7 @@
         changed(v); card.remove();
       }), button('ใช้ฉบับบนระบบ', () => { clearRecovery(v); card.remove(); })); q(v, '[data-work-evidence]').append(card);
     } else if (stored) clearRecovery(v);
+    v.brief?.refresh();
     report(v, 'เปิดแฟ้มงานแล้ว · ฉบับ ' + project.version);
   }
   async function load(v, id) {
@@ -321,11 +340,33 @@
   }
   function open(options = {}) {
     if (!allowed()) { window.PanthoriumAccounts?.openLogin?.(); return false; }
-    if (view && current(view)) { window.PanthoriumWindowManager?.restore?.(ID); if (typeof focusWindow === 'function') focusWindow(ID); return view.root; }
+    if (view && current(view)) { window.PanthoriumWindowManager?.restore?.(ID); if (typeof focusWindow === 'function') focusWindow(ID); if (options.brief) view.ready?.then(() => view?.brief?.open(options.brief)).catch(() => {}); return view.root; }
     if (view) cleanup(view); if (typeof createWindow !== 'function') return false;
     createWindow(ID, 'ผู้ช่วยงาน', markup(), { width: 1160, height: 820, onClose: () => cleanup(view) });
     const root = document.querySelector('.window[data-id="work-assistant"] [data-work]'); if (!root) return false;
     const v = view = { root, owner: owner(), controller: new AbortController(), urls: new Set(), files: [], projects: [], project: null, selected: new Set(), editSeq: 0, loadSeq: 0, dirty: false, busy: false, approvals: new Set() };
+    if (window.PanthoriumBriefUI) {
+      const slot = q(v, '[data-work-brief]'); slot.hidden = false;
+      v.brief = window.PanthoriumBriefUI.create({ slot, project: () => v.project, files: () => v.files.filter(file => v.selected.has(file.id)), navigate: id => load(v, id), friendly,
+        read: path => api(v, '/api/work/briefs/' + path),
+        mutate: async (action, input, operationId) => {
+          if (v.busy) throw Error('work_busy');
+          const id = v.project.id; await save(v);
+          if (!current(v) || id !== v.project.id || v.busy) throw Error('work_busy');
+          busy(v, true);
+          const path = '/api/work/briefs/' + id + '/' + action;
+          v.briefWrite = post(v, path, { expectedVersion: v.project.version, operationId, input }).then(result => {
+            if (!current(v) || id !== v.project.id) throw Error('account_changed');
+            v.project = result.project; updateList(v); return result;
+          });
+          try { return await v.briefWrite; }
+          catch (e) {
+            if (current(v) && e.message === 'work_version_conflict') { v.conflict = true; q(v, '[data-work-conflict]').hidden = false; }
+            throw e;
+          } finally { v.briefWrite = null; if (current(v)) busy(v, false); }
+        }
+      });
+    }
     const guard = fn => async () => { try { await fn(); } catch (failure) { report(v, friendly(failure), true); } };
     for (const key of ['title', 'template', 'text', 'draft']) q(v, '[data-work-' + key + ']').addEventListener('input', () => changed(v));
     q(v, '[data-work-local]').onchange = () => { if (q(v, '[data-work-local]').checked) recovery(v); else clearRecovery(v); };
@@ -355,7 +396,7 @@
       } finally { input.value = ''; if (current(v)) busy(v, false); }
     });
     v.ready = refresh(v, { createIfEmpty: options.deferCreate !== true });
-    v.ready.catch(failure => report(v, friendly(failure), true)); return root;
+    v.ready.then(() => { if (options.brief && current(v)) v.brief?.open(options.brief); }).catch(failure => report(v, friendly(failure), true)); return root;
   }
   function installMenu() {
     const menu = document.getElementById('sm-apps'); if (!menu) return;

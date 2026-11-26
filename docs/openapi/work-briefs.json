@@ -1,0 +1,1044 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Panthorium work briefs and health probes",
+    "version": "1.0.0"
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/health/live": {
+      "get": {
+        "operationId": "Liveness",
+        "summary": "Event loop can serve HTTP. No dependency calls.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Probe succeeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Probe"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "Readiness",
+        "summary": "Dependency readiness and shutdown state.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Probe succeeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Probe"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependencies unavailable, timeout or draining",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Probe"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "LegacyReadiness",
+        "summary": "Compatibility alias for readiness.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Probe succeeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Probe"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependencies unavailable, timeout or draining",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Probe"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/work/briefs/access": {
+      "get": {
+        "operationId": "getAccess",
+        "summary": "Read the authenticated account’s membership.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Access"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Validation, authentication, entitlement, conflict, rate limit or service error. The HTTP status equals status in the body.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/work/briefs/board": {
+      "get": {
+        "operationId": "getBoard",
+        "summary": "List the owner’s quotes and totals in satang. Requires Work Pro.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Board"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Validation, authentication, entitlement, conflict, rate limit or service error. The HTTP status equals status in the body.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/work/briefs/{id}/handover": {
+      "get": {
+        "operationId": "getHandover",
+        "summary": "Compose a handover from agreed terms, active tasks and open questions. Requires Life or above.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Handover"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Validation, authentication, entitlement, conflict, rate limit or service error. The HTTP status equals status in the body.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/UUID"
+          }
+        }
+      ]
+    },
+    "/api/work/briefs/{id}/baseline": {
+      "post": {
+        "operationId": "PinBaseline",
+        "summary": "Pin the current agreement and preserve referenced revisions.",
+        "description": "Retry the same operationId and input after a lost response. A stale version or reuse with different input returns HTTP 409.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinBaseline"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Validation, authentication, entitlement, conflict, rate limit or service error. The HTTP status equals status in the body.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/UUID"
+          }
+        }
+      ]
+    },
+    "/api/work/briefs/{id}/reviews": {
+      "post": {
+        "operationId": "SaveReview",
+        "summary": "Save owner-reviewed classifications and zero-based evidence line indices.",
+        "description": "Retry the same operationId and input after a lost response. A stale version or reuse with different input returns HTTP 409.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveReview"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Validation, authentication, entitlement, conflict, rate limit or service error. The HTTP status equals status in the body.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/UUID"
+          }
+        }
+      ]
+    },
+    "/api/work/briefs/{id}/quotes": {
+      "post": {
+        "operationId": "SaveQuote",
+        "summary": "Create or edit a draft in Thai baht. Requires Work or Work Pro.",
+        "description": "Retry the same operationId and input after a lost response. A stale version or reuse with different input returns HTTP 409.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveQuote"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Validation, authentication, entitlement, conflict, rate limit or service error. The HTTP status equals status in the body.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/UUID"
+          }
+        }
+      ]
+    },
+    "/api/work/briefs/{id}/status": {
+      "post": {
+        "operationId": "SetQuoteStatus",
+        "summary": "Record the owner’s decision. Draft to pending. Pending to draft, accepted or declined. Requires Work or Work Pro.",
+        "description": "Retry the same operationId and input after a lost response. A stale version or reuse with different input returns HTTP 409.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetQuoteStatus"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved or replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Validation, authentication, entitlement, conflict, rate limit or service error. The HTTP status equals status in the body.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/UUID"
+          }
+        }
+      ]
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "UUID": {
+        "type": "string",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+      },
+      "Status": {
+        "enum": [
+          "draft",
+          "pending",
+          "accepted",
+          "declined"
+        ]
+      },
+      "Decision": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "enum": [
+              "included",
+              "extra",
+              "schedule",
+              "clarify"
+            ]
+          },
+          "evidence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 79
+          }
+        },
+        "required": [
+          "category",
+          "evidence"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "category": {
+                  "const": "included"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "evidence": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "PriceInput": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 999
+          },
+          "unitPrice": {
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d{0,6})(\\.\\d{1,2})?$",
+            "description": "Thai baht, decimal notation, at most 2 decimal places."
+          }
+        },
+        "required": [
+          "label",
+          "quantity",
+          "unitPrice"
+        ],
+        "additionalProperties": false
+      },
+      "PriceItem": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 999
+          },
+          "unitSatang": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 999999999
+          }
+        },
+        "required": [
+          "label",
+          "quantity",
+          "unitSatang"
+        ],
+        "additionalProperties": false
+      },
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "const": "about:blank"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 400,
+            "maximum": 599
+          },
+          "ok": {
+            "const": false
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "ok",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "Baseline": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/UUID"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8000,
+            "description": "Agreed terms, up to 80 nonempty lines. Each review refers to an immutable revision."
+          },
+          "at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "fileId": {
+                "$ref": "#/components/schemas/UUID"
+              },
+              "name": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "fileId",
+              "name",
+              "revision"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "text",
+          "at"
+        ],
+        "additionalProperties": false
+      },
+      "Quote": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PriceItem"
+            },
+            "minItems": 1,
+            "maxItems": 15
+          },
+          "delivery": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "totalSatang": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99999999999
+          }
+        },
+        "required": [
+          "items",
+          "delivery",
+          "status",
+          "updatedAt",
+          "totalSatang"
+        ],
+        "additionalProperties": false
+      },
+      "Review": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/UUID"
+          },
+          "baselineId": {
+            "$ref": "#/components/schemas/UUID"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "category": {
+                  "enum": [
+                    "included",
+                    "extra",
+                    "schedule",
+                    "clarify"
+                  ]
+                },
+                "evidence": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 79
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                }
+              },
+              "required": [
+                "category",
+                "evidence",
+                "text"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 16
+          },
+          "at": {
+            "type": "string"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/Quote"
+          }
+        },
+        "required": [
+          "id",
+          "baselineId",
+          "rows",
+          "at"
+        ],
+        "additionalProperties": false
+      },
+      "Project": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/UUID"
+          },
+          "title": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "briefBaselines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Baseline"
+            }
+          },
+          "briefReviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Review"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "version"
+        ],
+        "additionalProperties": true
+      },
+      "ChangeResult": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "project": {
+            "$ref": "#/components/schemas/Project"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "project",
+          "replayed"
+        ],
+        "additionalProperties": false
+      },
+      "Access": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "plan": {
+            "enum": [
+              "free",
+              "life",
+              "work",
+              "work-pro"
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "plan"
+        ],
+        "additionalProperties": false
+      },
+      "Handover": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "text": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "ok",
+          "text",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "BoardRow": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "$ref": "#/components/schemas/UUID"
+          },
+          "reviewId": {
+            "$ref": "#/components/schemas/UUID"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "totalSatang": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99999999999
+          },
+          "request": {
+            "type": "string",
+            "maxLength": 160
+          }
+        },
+        "required": [
+          "projectId",
+          "reviewId",
+          "title",
+          "status",
+          "updatedAt",
+          "totalSatang",
+          "request"
+        ],
+        "additionalProperties": false
+      },
+      "Board": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BoardRow"
+            }
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "pending": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "accepted": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "pending",
+              "accepted"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "rows",
+          "totals"
+        ],
+        "additionalProperties": false
+      },
+      "Probe": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "alive",
+              "ready",
+              "not_ready"
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "PinBaseline": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "$ref": "#/components/schemas/UUID"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "input": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8000,
+                    "description": "Agreed terms, up to 80 nonempty lines. Each review refers to an immutable revision."
+                  }
+                },
+                "required": [
+                  "text"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "fileId": {
+                    "$ref": "#/components/schemas/UUID"
+                  }
+                },
+                "required": [
+                  "fileId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "operationId",
+          "expectedVersion",
+          "input"
+        ],
+        "additionalProperties": false
+      },
+      "SaveReview": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "$ref": "#/components/schemas/UUID"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "input": {
+            "type": "object",
+            "properties": {
+              "baselineId": {
+                "$ref": "#/components/schemas/UUID"
+              },
+              "request": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000,
+                "description": "One request per nonempty line, up to 16. Decisions follow the same order."
+              },
+              "decisions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Decision"
+                },
+                "minItems": 1,
+                "maxItems": 16
+              }
+            },
+            "required": [
+              "baselineId",
+              "request",
+              "decisions"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "operationId",
+          "expectedVersion",
+          "input"
+        ],
+        "additionalProperties": false
+      },
+      "SaveQuote": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "$ref": "#/components/schemas/UUID"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "input": {
+            "type": "object",
+            "properties": {
+              "reviewId": {
+                "$ref": "#/components/schemas/UUID"
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PriceInput"
+                },
+                "minItems": 1,
+                "maxItems": 15
+              },
+              "delivery": {
+                "type": "string",
+                "maxLength": 100
+              }
+            },
+            "required": [
+              "reviewId",
+              "items",
+              "delivery"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "operationId",
+          "expectedVersion",
+          "input"
+        ],
+        "additionalProperties": false
+      },
+      "SetQuoteStatus": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "$ref": "#/components/schemas/UUID"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "input": {
+            "type": "object",
+            "properties": {
+              "reviewId": {
+                "$ref": "#/components/schemas/UUID"
+              },
+              "status": {
+                "$ref": "#/components/schemas/Status"
+              }
+            },
+            "required": [
+              "reviewId",
+              "status"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "operationId",
+          "expectedVersion",
+          "input"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}
