@@ -14,6 +14,9 @@ const { app } = require("../server");
   try {
     const searchPage = await fetch(base + '/search');
     if (searchPage.status !== 200 || !(await searchPage.text()).includes('Panthorium Search')) throw Error('public search unavailable');
+    const embeddedSearch = await fetch(base + '/search/view');
+    if (embeddedSearch.status !== 200 || !(await embeddedSearch.text()).includes('id="search-form"') ||
+        !embeddedSearch.headers.get('content-security-policy')?.includes("frame-ancestors 'self'")) throw Error('internal search surface unavailable');
     const selected = await fetch(base + '/api/search', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({query:'โรงแรมริมเจ้าพระยา', scope:'selected'})});
     if (selected.status !== 200 || (await selected.json()).selected.length !== 3) throw Error('public search directory unavailable');
     for (const route of ['/privacy', '/account-deletion']) {
