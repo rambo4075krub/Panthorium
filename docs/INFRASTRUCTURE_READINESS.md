@@ -8,10 +8,12 @@ Panthorium remains a cloud-backed web workspace served through Panthorium Browse
 
 - Production readiness fails when PostgreSQL is unavailable or absent; development may still use its in-memory test mode.
 - Production readiness checks that the configured Cloud Storage bucket is reachable with the runtime identity. The check lists only a reserved health-check prefix and returns no object names.
-- Production readiness verifies that Sentinel V4 is configured through Vertex AI.
-- `/health` reports only pass/fail component checks and safe error codes. Cloud Run reserves some paths ending in `z`, so Cloud Run checks must use `/health`.
+- Production readiness checks storage, database and the capacity service when configured. The AI check follows the selected profile in `ProductionIntelligenceService.readiness()`. The notebook production profile checks Gemini Live configuration.
+- `/health/live` checks HTTP process liveness. `/health/ready` and the existing `/health` return the aggregate readiness state with no dependency details. Readiness returns 503 while draining. Notebook releases advertising probes version 1 are checked on the candidate and at the front door.
 - Staging checks `/health` after deployment. Production deploys a tagged Cloud Run candidate without traffic, checks `/health` and Voice Identity, then routes production traffic; a post-routing health failure restores the prior revision.
 - Regression tests cover missing dependencies and healthy/unhealthy states.
+
+The notebook backup verifier also checks that restored work reviews reference a retained baseline, evidence positions are valid, and stored quote totals match their line items. It returns aggregate counts.
 
 ## Remaining cloud work
 

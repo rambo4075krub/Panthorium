@@ -1,4 +1,4 @@
-"""Restore one notebook backup to a private disposable database and check billing."""
+"""Restore one notebook backup to a private disposable database and check billing and linked work records."""
 import argparse
 import json
 import sqlite3
@@ -58,6 +58,13 @@ def verify(backup, stage):
         """, env=dict(env, PGOPTIONS='-c default_transaction_read_only=on')))
         if result['grantErrors'] or result['incomeErrors']:
             raise ValueError('restored_billing_mismatch ' + json.dumps(result))
+        readonly = dict(env, PGOPTIONS='-c default_transaction_read_only=on')
+        if sql("SELECT to_regclass('panthorium_work_projects') IS NOT NULL", env=readonly) == 't':
+            checks = Path(__file__).with_name('verify-work-briefs.sql').read_text(encoding='utf-8')
+            work = json.loads(sql(checks, env=readonly))
+            if work['missingBaselines'] or work['invalidEvidence'] or work['invalidQuoteTotals']:
+                raise ValueError('restored_work_mismatch ' + json.dumps(work))
+            result['workBriefs'] = work
         return dict(result, stage=stage, objects=object_count, pendingHttpEvents=pending,
                     backupTime=manifest['createdAt'], restoreSeconds=round(time.monotonic() - started, 1))
     finally:

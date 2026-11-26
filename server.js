@@ -341,14 +341,8 @@ app.use('/internal/jobs', createInternalJobsRouter({ scheduler: { tick: async ()
   return { ...scheduled, studio, socialRetention, push };
 } } }));
 
-app.get("/health", async (req, res) => {
-  try {
-    const result = await productionIntelligence.readiness();
-    res.status(result.ok ? 200 : 503).json({ ok: result.ok, status: result.status });
-  } catch (error) {
-    res.status(503).json({ ok: false, status: "not_ready" });
-  }
-});
+const healthProbes = require('./routes/healthProbes').createHealthProbes(() => productionIntelligence.readiness());
+app.use(healthProbes.router);
 
 require('./middleware/guestAccess').installGuestAccess(app, authService);
 app.use("/api/training/release-gate", createReleaseGateRouter(authService, sentinelReleaseGate));
@@ -376,6 +370,10 @@ app.use('/api/online-tools', require('./routes/onlineTools').createOnlineToolsRo
 app.use('/api/marketing',require('./routes/marketing').createMarketingRouter(authService,marketing,social));
 app.use('/api/social',require('./routes/social').createSocialRouter(authService,social));
 app.use('/api/studio', createCreativeStudioRouter(authService, creativeStudio));
+const workBrief = new (require('./services/workBriefService').WorkBriefService)(workAssistant, liveEntitlements);
+app.get('/api/spec/work-briefs.json', (_req, res) => res.json(require('./docs/openapi/work-briefs.json')));
+const { createWorkBriefRouter, bodyProblem } = require('./routes/workBrief');
+app.use('/api/work/briefs', bodyProblem, createWorkBriefRouter(authService, workBrief));
 app.use('/api/work', require('./routes/workAssistant').createWorkAssistantRouter(authService, workAssistant));
 app.use("/api/reminders", createReminderRouter(authService, reminders));
 app.use('/api/notifications', createNotificationRouter(authService, notifications));
@@ -412,7 +410,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-voice-catalog.js", "creative-voice-ui.js", "creative-editors-ui.js", "creative-studio-ui.js", "online-tools-common.js", "online-tools-files.js", "online-tools-projects.js", "feature-film-ui.js", "film-studio-ui.js", "online-tools-ui.js", "work-assistant-ui.js", "social-rtc.js", "social-media-source.js", "marketing-ui.js", "social-ui.js", "screen-voice-catalog.js", "screen-voice-client.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "credit-alert-client.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js", "personal-chat-ui.js"];
+const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-voice-catalog.js", "creative-voice-ui.js", "creative-editors-ui.js", "creative-studio-ui.js", "online-tools-common.js", "online-tools-files.js", "online-tools-projects.js", "feature-film-ui.js", "film-studio-ui.js", "online-tools-ui.js", "work-brief.js", "work-brief-ui.js", "work-assistant-ui.js", "social-rtc.js", "social-media-source.js", "marketing-ui.js", "social-ui.js", "screen-voice-catalog.js", "screen-voice-client.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "credit-alert-client.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js", "personal-chat-ui.js"];
 app.get('/online-share', (_req, res) => {
   res.set('Cache-Control','no-store');
   res.set('Referrer-Policy','no-referrer');
@@ -723,6 +721,7 @@ if (require.main === module) {
     const shutdown = () => {
       if (stopping) return;
       stopping = true;
+      healthProbes.drain();
       stopBackgroundWorkers();
       // Leave time for the platform to terminate the process if a request hangs.
       const deadline = setTimeout(() => process.exit(1), 9000);

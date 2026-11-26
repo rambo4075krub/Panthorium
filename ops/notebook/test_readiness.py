@@ -37,6 +37,14 @@ class HttpReadinessTests(unittest.TestCase):
  def test_live_only_release_does_not_require_disabled_qwen(self):
   self.assertNotIn('/qwen-local.js',self.responses)
   self.assertTrue(runtime.verify_readiness('production',self.state))
+ def test_advertised_probes_must_be_ready_before_promotion(self):
+  self.health['probesVersion']=1
+  self.responses['/health/live']=(200,{'ok':True,'status':'alive'},{})
+  self.responses['/health/ready']=(200,{'ok':True,'status':'ready'},{})
+  self.assertTrue(runtime.verify_readiness('production',self.state))
+  self.responses['/health/ready']=(200,{'ok':False,'status':'not_ready'},{})
+  with self.assertRaisesRegex(RuntimeError,'release_probe_failed_'):
+   runtime.verify_readiness('production',self.state)
  def test_missing_required_shell_asset_blocks_release(self):
   for path in ['/live-voice-client.js','/billing-catalog.js']:
    with self.subTest(path=path):
