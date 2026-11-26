@@ -87,6 +87,16 @@ async function main() {
   const official = await entity.service.execute('web.search', {query:'NASA'}, 'u2');
   assert.equal(official.results[0].url, 'https://www.nasa.gov/');
   assert.equal(official.results[0].recordUrl, 'https://www.wikidata.org/wiki/Q23548');
+  const multilingual = fixture(url => {
+    if (url.hostname === 'api.mwmbl.org') return response({results:[
+      {title:'Uncreated page',url:'https://km.wikipedia.org/wiki/Museum?action=edit&redlink=1'},
+      {title:'Museum',url:'https://en.wikipedia.org/wiki/Museum'}
+    ]});
+    if (url.hostname === 'th.wikipedia.org') return response({query:{pages:[{title:'พิพิธภัณฑ์',fullurl:'https://th.wikipedia.org/wiki/พิพิธภัณฑ์'}]}});
+    return response({});
+  });
+  const thai = await multilingual.service.execute('web.search', {query:'พิพิธภัณฑ์'}, 'u3');
+  assert.deepEqual(thai.results.map(item => new URL(item.url).hostname), ['th.wikipedia.org','en.wikipedia.org']);
   const empty=fixture(url=>response(url.hostname==='api.mwmbl.org'?{results:[]}:url.hostname==='api.duckduckgo.com'?{}:{query:{pages:[]}}));
   assert.equal((await empty.service.execute('web.search',{query:'no match'},'u1')).error,'web_no_results');
   const weather=fixture(url=>url.hostname.endsWith('wikipedia.org')?response(wiki):response({properties:{meta:{updated_at:'2026-10-24T04:00:00Z',units:{air_temperature:'celsius'}},timeseries:[{time:'2026-10-24T06:00:00Z',data:{instant:{details:{air_temperature:30,wind_speed:2}},next_1_hours:{details:{precipitation_amount:1},summary:{symbol_code:'rain'}}}}]}}));

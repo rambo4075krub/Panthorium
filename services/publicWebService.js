@@ -215,8 +215,13 @@ class PublicWebService {
           if (/^(?:utm_.*|fbclid|gclid)$/i.test(key)) url.searchParams.delete(key);
         }
         const domain = url.hostname.replace(/^www\./, '');
+        const wikiLanguage = /^([^.]+)(?:\.m)?\.wikipedia\.org$/.exec(domain)?.[1];
+        if (wikiLanguage && (url.searchParams.get('redlink') === '1' ||
+            (url.searchParams.has('action') && url.searchParams.get('action') !== 'view'))) continue;
         const exactSite = domain === brand || domain.split('.').includes(brand);
-        const rank = position * stride + offset - (exactSite ? 4 : 0);
+        const exactTitle = entry.title.trim().toLowerCase() === query.trim().toLowerCase();
+        const languagePenalty = wikiLanguage && wikiLanguage !== language ? 8 : 0;
+        const rank = position * stride + offset + languagePenalty - (exactSite ? 4 : 0) - (exactTitle ? 1 : 0);
         ranked.push({ rank, domain, result: {
           title: clean(entry.title, 160), url: url.href, excerpt: clean(entry.excerpt, 400), source,
           retrievedAt: entry.retrievedAt, ...(entry.license ? { license: entry.license } : {}),
