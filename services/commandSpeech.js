@@ -19,14 +19,14 @@ function validAudio(wav) {
     wav.readUInt16LE(32) === 2 && wav.readUInt16LE(34) === 16 &&
     wav.toString('ascii', 36, 40) === 'data' && wav.readUInt32LE(40) === wav.length - 44 && wav.length % 2 === 0;
 }
-async function transcribe(wav, language, signal) {
+async function transcribe(wav, language, signal, purpose = 'command', hasSuggestion = false) {
   if (!available()) throw Error('speech_unavailable');
   if (active) throw Error('speech_busy');
   if (signal.aborted) throw Error('cancelled');
   active = true;
   try {
     return await new Promise((resolve, reject) => {
-      const child = spawn(python, ['-I', path.join(__dirname, 'command_speech.py'), model, language], {
+      const child = spawn(python, ['-I', path.join(__dirname, 'command_speech.py'), model, language, purpose, hasSuggestion ? '1' : '0'], {
         windowsHide: true, stdio: ['pipe', 'pipe', 'ignore']
       });
       let output = '';

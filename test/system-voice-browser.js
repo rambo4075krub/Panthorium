@@ -7,12 +7,14 @@ async function speechRoute() {
   wav.write('RIFF'); wav.writeUInt32LE(wav.length-8,4); wav.write('WAVEfmt ',8); wav.writeUInt32LE(16,16);
   wav.writeUInt16LE(1,20); wav.writeUInt16LE(1,22); wav.writeUInt32LE(16000,24); wav.writeUInt32LE(32000,28);
   wav.writeUInt16LE(2,32); wav.writeUInt16LE(16,34); wav.write('data',36); wav.writeUInt32LE(wav.length-44,40);
-  let verified = false, calls = 0;
+  let verified = false, calls = 0, lastTurn;
   const app = express();
   app.use('/input', createCommandSpeechRouter({
     authService:{verifyAccessToken:() => ({sub:'reader', permissions:['chat']})},
     biometrics:{gateEnabled:true, list:async () => ['enrolled'], verify:async () => ({matched:verified})},
-    speech:{available:() => true, transcribe:async () => { calls++; return 'เปิดหน้าค้นหา'; }}
+    speech:{available:() => true, transcribe:async (_audio, lang, _signal, purpose, hasSuggestion) => {
+      calls++; lastTurn = [lang, purpose, hasSuggestion]; return 'เปิดหน้าค้นหา';
+    }}
   }));
   const server = app.listen(0,'127.0.0.1'); await new Promise(r=>server.once('listening',r));
   const post = (route, body, token) => fetch('http://127.0.0.1:' + server.address().port + '/input/' + route,
@@ -23,7 +25,11 @@ async function speechRoute() {
     assert.equal((await post('search',Buffer.alloc(384046))).status,413);
     assert.equal(calls,0);
     assert.equal((await (await post('search',wav)).json()).commands,false);
+    assert.deepEqual(lastTurn,['th','search',false]);
+    assert.equal((await (await post('search?purpose=command&lang=en&spelling=1',wav)).json()).commands,false);
+    assert.deepEqual(lastTurn,['en','command',true]);
     assert.equal((await (await post('commands',wav,true)).json()).commands,false);
+    assert.deepEqual(lastTurn,['th','command',false]);
     verified = true;
     assert.equal((await (await post('commands',wav,true)).json()).commands,true);
   } finally { server.closeAllConnections(); await new Promise(r=>server.close(r)); }
@@ -67,7 +73,13 @@ module.exports = async function systemVoice(browser, origin) {
     assert.equal(new URL(page.url()).pathname,'/');
     await page.locator('#panthorium-browser-dashboard .win-btn.close').click();
     await say('เปิดหน้าเสิร์ช');
-    await frame.locator('#query').waitFor(); await page.locator('#panthorium-browser-dashboard .win-btn.close').click();
+    await frame.locator('#query').waitFor();
+    await say('คนเว็บ รุงแรม ริมแน้น้ำเจ้าพยา');
+    await frame.locator('#spelling-query').waitFor();
+    await say('ใช้คำที่แนะนำ');
+    await frame.locator('#spelling').waitFor({state:'hidden'});
+    assert.equal(await frame.locator('#query').inputValue(),'โรงแรมริมแม่น้ำเจ้าพระยา');
+    await page.locator('#panthorium-browser-dashboard .win-btn.close').click();
     await page.goto(origin+'/search?q=Mozilla'); await ready();
     await frame.locator('.item-title').first().waitFor();
     await frame.locator('.item-title').first().click();
@@ -85,6 +97,15 @@ module.exports = async function systemVoice(browser, origin) {
     assert.equal(await frame.locator('#query').inputValue(),'โรงแรมริมเจ้าพระยา');
     assert(queries.includes('โรงแรมริมเจ้าพระยา'));
     assert(!sockets.some(url=>url.includes('/api/live')));
+    await say('คนเว็บ รุงแรม ริมแน้น้ำเจ้าพยา');
+    await frame.locator('#spelling-query').waitFor();
+    await frame.getByRole('link',{name:'Mozilla',exact:true}).waitFor();
+    assert.equal(await frame.locator('#query').inputValue(),'รุงแรม ริมแน้น้ำเจ้าพยา');
+    await say('กดปุ่ม โรงแรมริมแม่น้ำเจ้าพระยา');
+    assert(await page.evaluate(()=>PanthoriumScreenVoice.hasPending()));
+    await say('ยืนยัน');
+    await frame.locator('#spelling').waitFor({state:'hidden'});
+    assert.equal(await frame.locator('#query').inputValue(),'โรงแรมริมแม่น้ำเจ้าพระยา');
     await page.locator('#panthorium-browser-dashboard .win-btn.close').click();
     await page.evaluate(()=>{
       const app=document.createElement('button'); app.type='button'; app.className='sm-app';
