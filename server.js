@@ -326,6 +326,8 @@ const adminMailbox = new (require('./services/adminMailboxService').AdminMailbox
 app.post('/api/webhooks/resend', express.raw({type:'application/json',limit:'2mb'}), require('./routes/adminMailbox').mailboxWebhook(adminMailbox));
 // Stripe verifies the exact bytes sent by the provider. Keep this before JSON parsing.
 app.post('/api/billing/stripe/webhook', express.raw({type:'application/json',limit:'256kb'}), require('./routes/stripeBilling').stripeWebhook(stripeBilling));
+// Guest search has its own request slots and shares upstream cache and provider cooldowns with Sentinel.
+app.use(require('./routes/webSearch').createWebSearchRouter(new PublicWebService({ upstream: publicWeb })));
 app.use(express.json({ limit: "2mb", type: "application/json" }));
 app.use(cookieParser());
 

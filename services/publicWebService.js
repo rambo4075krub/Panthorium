@@ -58,9 +58,10 @@ function extractHtml(html) {
     restrictionReason, publishedAt: scripts.find(item => item.publishedAt)?.publishedAt || null };
 }
 class PublicWebService {
-  constructor({ http = new PublicWebHttp(), now = Date.now, enabled = process.env.PANTHORIUM_PUBLIC_WEB_ENABLED !== 'false' } = {}) {
+  constructor({ http = new PublicWebHttp(), now = Date.now, enabled = process.env.PANTHORIUM_PUBLIC_WEB_ENABLED !== 'false', upstream = {} } = {}) {
     this.http = http; this.now = now; this.enabled = enabled;
-    this.cache = new Map(); this.inflight = new Map(); this.limits = new Map(); this.hosts = new Map(); this.active = 0;
+    this.cache = upstream.cache || new Map(); this.inflight = upstream.inflight || new Map(); this.hosts = upstream.hosts || new Map();
+    this.limits = new Map(); this.active = 0;
   }
   boundedSet(map, key, value, max = 128) {
     if (!map.has(key) && map.size >= max) map.delete(map.keys().next().value);
@@ -143,39 +144,106 @@ class PublicWebService {
     }
     throw new Error('web_unavailable');
   }
-  async wikipedia(query, language, context) {
+  async wikipedia(query, language, context, includeEntity = false) {
     const params = new URLSearchParams({ action:'query', format:'json', formatversion:'2', generator:'search', gsrsearch:query,
       gsrlimit:'5', gsrnamespace:'0', prop:'extracts|info|coordinates', exintro:'1', explaintext:'1', exsentences:'2', exlimit:'5', inprop:'url', redirects:'1' });
+    if (includeEntity) { params.set('prop', 'extracts|info|pageprops'); params.set('ppprop', 'wikibase_item'); }
     const { data, response } = await this.json(`https://${language}.wikipedia.org/w/api.php?${params}`, context);
     if (data.error) throw new Error(['ratelimited','maxlag'].includes(data.error.code) ? 'web_rate_limited' : 'web_unavailable');
     return { response, pages: (data.query?.pages || []).sort((a,b) => (a.index || 0) - (b.index || 0)) };
   }
-  async search({ query, language }, context) {
+  async searchIndex(query, context) {
+    const params = new URLSearchParams({ q: query });
+    const { data, response } = await this.json(`https://api.mwmbl.org/api/v2/search/?${params}`, context);
+    if (!Array.isArray(data.results)) throw new Error('web_unavailable');
+    return data.results.slice(0, 40).map(entry => ({
+      title: entry?.title, url: entry?.url, excerpt: entry?.content, retrievedAt: response.retrievedAt
+    }));
+  }
+  async instantAnswers(query, context) {
+    const params = new URLSearchParams({ q:query, format:'json', no_html:'1', no_redirect:'1', skip_disambig:'1' });
+    const { data, response } = await this.json(`https://api.duckduckgo.com/?${params}`, context);
+    const entries = [{ Text: data.AbstractText, FirstURL: data.AbstractURL, title: data.Heading }, ...(data.Results || [])];
+    for (const topic of data.RelatedTopics || []) entries.push(...(topic.Topics || [topic]));
+    return entries.filter(entry => entry.Text && entry.FirstURL).slice(0, 8).map(entry => ({
+      title: entry.title || entry.Text, url: entry.FirstURL, excerpt: entry.Text, retrievedAt: response.retrievedAt
+    }));
+  }
+  async officialWebsites(query, pages, context) {
+    const normalizeTitle = value => value.normalize('NFKC').trim().toLowerCase();
+    const entity = pages.find(page => typeof page.title === 'string' && normalizeTitle(page.title) === normalizeTitle(query)
+      && /^Q[1-9]\d{0,12}$/.test(page.pageprops?.wikibase_item));
+    if (!entity) return [];
+    const id = entity.pageprops.wikibase_item;
+    const params = new URLSearchParams({ action:'wbgetclaims', entity:id, property:'P856', format:'json' });
+    const { data, response } = await this.json(`https://www.wikidata.org/w/api.php?${params}`, context);
+    if (data.error) throw new Error('web_unavailable');
+    const claims = (data.claims?.P856 || []).filter(claim => claim.rank !== 'deprecated' && !claim.qualifiers?.P582 &&
+      claim.mainsnak?.snaktype === 'value' && typeof claim.mainsnak.datavalue?.value === 'string');
+    claims.sort((a, b) => Number(b.rank === 'preferred') - Number(a.rank === 'preferred'));
+    return claims.slice(0, 2).map(claim => ({
+      title:entity.title, url:claim.mainsnak.datavalue.value, excerpt:`เว็บไซต์ที่ Wikidata ระบุสำหรับ ${entity.title}`,
+      recordUrl:`https://www.wikidata.org/wiki/${id}`, retrievedAt:response.retrievedAt
+    }));
+  }
+  async search({ query, language, limit = 6 }, context) {
     language ||= /[\u0e00-\u0e7f]/.test(query) ? 'th' : 'en';
-    const results = [], issues = [];
-    try {
-      const { data, response } = await this.json(`https://api.duckduckgo.com/?${new URLSearchParams({ q:query, format:'json', no_html:'1', no_redirect:'1', skip_disambig:'1' })}`, context);
-      const entries = [{ Text:data.AbstractText, FirstURL:data.AbstractURL, title:data.Heading }, ...(data.Results || [])];
-      for (const topic of data.RelatedTopics || []) entries.push(...(topic.Topics || [topic]));
-      for (const entry of entries) {
-        if (!entry.Text || !entry.FirstURL) continue;
-        try { const url = publicUrl(entry.FirstURL).href;
-          if (!results.some(item => item.url === url)) results.push({ title:clean(entry.title || entry.Text, 160), url,
-            excerpt:clean(entry.Text, 400), source:'DuckDuckGo Instant Answers', retrievedAt:response.retrievedAt });
-        } catch { /* Drop unsafe/non-HTTPS source links. */ }
-        if (results.length >= 4) break;
+    const wiki = this.wikipedia(query, language, context, true);
+    const providers = [
+      { name:'Mwmbl', offset:0, stride:1, request:this.searchIndex(query, context) },
+      { name:'DuckDuckGo Instant Answers', offset:1.5, stride:3, request:this.instantAnswers(query, context) },
+      { name:'Wikipedia', offset:2.5, stride:3, request:wiki.then(({pages, response}) => pages.map(page => ({
+        title: page.title, url: page.fullurl || `https://${language}.wikipedia.org/?curid=${Number(page.pageid)}`,
+        excerpt: page.extract, license: 'https://creativecommons.org/licenses/by-sa/4.0/', retrievedAt: response.retrievedAt
+      }))) },
+      { name:'Wikidata', offset:-1, stride:3, request:wiki.then(({pages}) => this.officialWebsites(query, pages, context), () => []) }
+    ];
+    const replies = await Promise.allSettled(providers.map(provider => provider.request));
+    const issues = [], ranked = [];
+    const brand = query.toLowerCase().trim().replace(/^www\./, '');
+    for (const [provider, reply] of replies.entries()) {
+      const { name:source, offset, stride } = providers[provider];
+      if (reply.status === 'rejected') {
+        issues.push({ ...unavailable(reply.reason), source });
+        continue;
       }
-    } catch (error) { issues.push(unavailable(error)); }
-    try {
-      const { pages, response } = await this.wikipedia(query, language, context);
-      for (const page of pages.slice(0, Math.max(0, 6 - results.length))) {
-        const url = publicUrl(page.fullurl || `https://${language}.wikipedia.org/?curid=${Number(page.pageid)}`).href;
-        if (!results.some(item => item.url === url)) results.push({ title:clean(page.title, 160), url, excerpt:clean(page.extract, 400), source:'Wikipedia',
-          license:'https://creativecommons.org/licenses/by-sa/4.0/', retrievedAt:response.retrievedAt });
+      for (const [position, entry] of reply.value.entries()) {
+        let url;
+        try { url = publicUrl(entry.url); } catch { continue; }
+        if (typeof entry.title !== 'string' || !entry.title.trim()) continue;
+        for (const key of [...url.searchParams.keys()]) {
+          if (/^(?:utm_.*|fbclid|gclid)$/i.test(key)) url.searchParams.delete(key);
+        }
+        const domain = url.hostname.replace(/^www\./, '');
+        const wikiLanguage = /^([^.]+)(?:\.m)?\.wikipedia\.org$/.exec(domain)?.[1];
+        if (wikiLanguage && (url.searchParams.get('redlink') === '1' ||
+            (url.searchParams.has('action') && url.searchParams.get('action') !== 'view'))) continue;
+        const exactSite = domain === brand || domain.split('.').includes(brand);
+        const exactTitle = entry.title.trim().toLowerCase() === query.trim().toLowerCase();
+        const languagePenalty = wikiLanguage && wikiLanguage !== language ? 8 : 0;
+        const rank = position * stride + offset + languagePenalty - (exactSite ? 4 : 0) - (exactTitle ? 1 : 0);
+        ranked.push({ rank, domain, result: {
+          title: clean(entry.title, 160), url: url.href, excerpt: clean(entry.excerpt, 400), source,
+          retrievedAt: entry.retrievedAt, ...(entry.license ? { license: entry.license } : {}),
+          ...(entry.recordUrl ? { recordUrl: entry.recordUrl } : {})
+        } });
       }
-    } catch (error) { issues.push(unavailable(error)); }
+    }
+    const results = [], seen = new Map(), domains = new Map();
+    for (const { domain, result } of ranked.sort((a, b) => a.rank - b.rank)) {
+      const previous = seen.get(result.url);
+      if (previous) {
+        if (result.license) Object.assign(previous, result);
+        continue;
+      }
+      if (results.length >= limit || (domains.get(domain) || 0) >= 3) continue;
+      seen.set(result.url, result);
+      domains.set(domain, (domains.get(domain) || 0) + 1);
+      results.push(result);
+    }
     if (!results.length) return { ...unavailable(issues[0]?.error || 'web_no_results'), coverage:'limited_free_sources', issues };
-    return { available:true, coverage:'limited_free_sources', message:'ค้นจากแหล่งฟรีที่รองรับ ไม่ใช่ผลค้นหาทั่วเว็บหรือ Google', results, sources:results.map(({excerpt,...source}) => source), issues };
+    return { available:true, coverage:'limited_free_sources', message:'ผลจากดัชนีเว็บ Mwmbl และแหล่งอ้างอิงสาธารณะ',
+      results, sources:results.map(({excerpt,...source}) => source), issues };
   }
   async robots(url, context) {
     const robotsUrl = `${url.origin}/robots.txt`;

@@ -12,6 +12,10 @@ const { app } = require("../server");
   const port = server.address().port;
   const base = `http://127.0.0.1:${port}`;
   try {
+    const searchPage = await fetch(base + '/search');
+    if (searchPage.status !== 200 || !(await searchPage.text()).includes('Panthorium Search')) throw Error('public search unavailable');
+    const selected = await fetch(base + '/api/search', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({query:'โรงแรมริมเจ้าพระยา', scope:'selected'})});
+    if (selected.status !== 200 || (await selected.json()).selected.length !== 3) throw Error('public search directory unavailable');
     for (const route of ['/privacy', '/account-deletion']) {
       const publicResponse = await fetch(base + route);
       if (publicResponse.status !== 200 || !(await publicResponse.text()).includes('Panthorium Browser')) throw new Error('public policy unavailable: ' + route);
@@ -19,6 +23,7 @@ const { app } = require("../server");
     }
     const shellResponse = await fetch(base + '/');
     const shell = await shellResponse.text();
+    if (shell.includes('/search/app.js') || shell.includes('/search/style.css')) throw Error('standalone search loaded in desktop shell');
     if (!shellResponse.headers.get('content-security-policy')?.includes("media-src 'self' blob:;")) throw new Error('desktop media policy widened');
     const player = await fetch(base + '/social-player.html');
     if (player.status !== 200 || !player.headers.get('content-security-policy')?.includes("frame-ancestors 'self'")) throw new Error('isolated player cannot be embedded by Panthorium');

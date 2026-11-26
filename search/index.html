@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#143b34">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="ค้นเว็บไซต์ภาษาไทยและอังกฤษ เลือกเว็บต้นทาง แล้วเปรียบเทียบแหล่งข้อมูลที่สนใจในหน้าเดียว">
+  <title>Panthorium Search</title>
+  <link rel="icon" href="/panthorium-logo-mark.svg">
+  <link rel="search" type="application/opensearchdescription+xml" title="Panthorium" href="/search/opensearch.xml">
+  <link rel="stylesheet" href="/search/style.css">
+  <script src="/search/directory.js" defer></script>
+  <script src="/search/app.js" defer></script>
+</head>
+<body>
+  <header class="masthead frame">
+    <a class="wordmark" href="/search" aria-label="หน้าแรก Panthorium Search"><img src="/panthorium-logo-mark.svg" alt="" width="32" height="32">Panthorium</a>
+    <button type="button" id="open-compare" class="compare-trigger" aria-haspopup="dialog">เทียบเว็บไซต์ <span id="count">0</span></button>
+  </header>
+  <main class="frame">
+    <section class="hero" aria-labelledby="title">
+      <div class="search-panel">
+        <h1 id="title" lang="en">Panthorium <em>Search</em></h1>
+        <p class="intro">ค้นเว็บที่ต้องการ แล้วเลือกแหล่งที่ใช่มาเทียบกัน</p>
+        <form id="search-form" role="search" action="/search" method="get">
+          <label for="query" class="sr-only">คำค้นหรือชื่อเว็บไซต์</label>
+          <div class="input-wrap">
+            <span class="lens" aria-hidden="true"></span>
+            <input type="search" id="query" name="q" maxlength="300" required placeholder="ค้นเว็บหรือชื่อแบรนด์" autocomplete="off" enterkeyhint="search">
+            <button type="button" id="mic" hidden aria-label="ค้นหาด้วยเสียง" title="ค้นหาด้วยเสียง"><span class="mic-icon" aria-hidden="true"></span></button>
+          </div>
+          <button class="submit" type="submit">ค้นหา</button>
+        </form>
+        <p id="voice-status" class="voice-status" role="status"></p>
+      </div>
+      <a class="artwork" href="/search#q=The+Great+Wave+Hokusai" aria-label="ค้นหาผลงาน The Great Wave ของโฮกูไซ">
+        <img src="/search/great-wave.webp" alt="" width="600" height="403" fetchpriority="low">
+        <span class="art-caption"><span><em lang="en">The Great Wave</em><small lang="en">Hokusai · The Met</small></span><b aria-hidden="true">↗</b></span>
+      </a>
+    </section>
+    <section id="discovery" aria-labelledby="discover-title">
+      <h2 id="discover-title">ลองค้นจากความสนใจ</h2>
+      <div class="topics">
+        <a href="/search#q=โรงแรมริมเจ้าพระยา"><small>ที่พัก</small><strong>โรงแรมริมเจ้าพระยา</strong><i aria-hidden="true">↗</i></a>
+        <a href="/search#q=ไฟน์ไดนิ่งในกรุงเทพฯ"><small>อาหาร</small><strong>ไฟน์ไดนิ่งในกรุงเทพฯ</strong><i aria-hidden="true">↗</i></a>
+        <a href="/search#q=นิทรรศการศิลปะกรุงเทพฯ"><small>ศิลปะ</small><strong>นิทรรศการในกรุงเทพฯ</strong><i aria-hidden="true">↗</i></a>
+      </div>
+    </section>
+    <section id="results" hidden aria-labelledby="result-title">
+      <div class="result-head"><h2 id="result-title">ผลการค้นหา</h2><button id="listen" class="text-action" type="button" hidden>ฟังผลค้นหา</button></div>
+      <div class="filters" role="group" aria-label="แหล่งค้นหา">
+        <button type="button" data-scope="all" aria-pressed="true">ทุกแหล่ง</button>
+        <button type="button" data-scope="selected" aria-pressed="false">เฉพาะเว็บคัดสรร</button>
+      </div>
+      <p id="search-status" role="status"></p>
+      <div id="result-list"></div>
+      <button type="button" class="text-action" id="retry" hidden>ลองค้นเว็บอีกครั้ง</button>
+    </section>
+    <noscript><p>กรุณาเปิด JavaScript เพื่อแสดงผลการค้นหาและเปรียบเทียบเว็บไซต์</p></noscript>
+  </main>
+  <footer class="frame footer"><span lang="en">Panthorium Search</span><a href="/privacy">ความเป็นส่วนตัว</a></footer>
+  <dialog id="comparison" aria-labelledby="compare-title">
+    <div class="dialog-head"><h2 id="compare-title">เทียบเว็บไซต์</h2><button type="button" id="close-compare" class="close" aria-label="ปิดหน้าต่าง">×</button></div>
+    <p class="dialog-note">เลือกได้สูงสุด 3 เว็บไซต์ รายการเก็บไว้ในแท็บนี้</p>
+    <div id="comparison-list"></div>
+    <div class="dialog-actions"><button type="button" id="copy" class="solid">คัดลอกรายการพร้อมลิงก์</button><button type="button" id="clear" class="text-action">ล้างรายการ</button></div>
+    <p id="copy-status" role="status"></p>
+  </dialog>
+</body>
+</html>
