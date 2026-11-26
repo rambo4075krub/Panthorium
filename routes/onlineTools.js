@@ -29,6 +29,8 @@ function createOnlineToolsRouter(auth, tools, film) {
     limit(35),
     route((q) => tools.submit(q.params.token, body(q)))
   );
+  const grants = require('./featureFilm').downloadGrants();
+  if (film) r.get('/film-exports/:key/file', grants.redeem);
   r.use(
     requireAuth(auth),
     requirePermission('chat'),
@@ -43,6 +45,7 @@ function createOnlineToolsRouter(auth, tools, film) {
     limit(160)
   );
   if (film) {
+    require('./featureFilm').mountFeature(r,film,grants,route,limit);
     r.get('/film/:key/:episode', route(q => film.state(q.user,q.params.key,q.params.episode)));
     r.post('/film/:key/master', limit(3), async (q,res,next) => {
       const controller = new AbortController();

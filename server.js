@@ -412,7 +412,7 @@ app.get("/sw.js", (req, res, next) => {
   }
 });
 
-const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-voice-catalog.js", "creative-voice-ui.js", "creative-editors-ui.js", "creative-studio-ui.js", "online-tools-common.js", "online-tools-files.js", "online-tools-projects.js", "film-studio-ui.js", "online-tools-ui.js", "work-assistant-ui.js", "social-rtc.js", "social-media-source.js", "marketing-ui.js", "social-ui.js", "screen-voice-catalog.js", "screen-voice-client.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "credit-alert-client.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js", "personal-chat-ui.js"];
+const shellScripts = ["app-update-client.js", "boot-recovery.js", "branding.js", "phase2-auth.js", "user-manager.js", "developer-studio-ui.js", "security-dashboard.js", "ui-layout.js", "ai-dashboard.js", "notification-event-catalog.js", "action-presentation.js", "ai-stream-client.js", "agent-ui.js", "agent-automation-ui.js", "agent-memory-ui.js", "multi-agent-ui.js", "integrations-ui.js", "production-intelligence-ui.js", "training-ui.js", "active-learning-ui.js", "release-gate-ui.js", "governance-ui.js", "sentinel-control-ui.js", "voice-identity-ui.js", "voice-window-catalog.js", "window-manager-ui.js", "window-theme-ui.js", "workspace-ui.js", "calculator-expression.js", "calendar-ui.js", "notification-push-client.js", "notifications-ui.js", "reminders-ui.js", "goal-tracker-ui.js", "assistant-preferences-ui.js", "local-insights-ui.js", "external-apps-ui.js", "browser-ui.js", "media-studio-ui.js", "file-preview-ui.js", "office-suite-core.js", "office-suite-ui.js", "studio-editor-ui.js", "creative-voice-catalog.js", "creative-voice-ui.js", "creative-editors-ui.js", "creative-studio-ui.js", "online-tools-common.js", "online-tools-files.js", "online-tools-projects.js", "feature-film-ui.js", "film-studio-ui.js", "online-tools-ui.js", "work-assistant-ui.js", "social-rtc.js", "social-media-source.js", "marketing-ui.js", "social-ui.js", "screen-voice-catalog.js", "screen-voice-client.js", "voice-command-client.js", "staging-admin-desktop.js", "access-shell-ui.js", "start-menu-ui.js", "cloud-apps-ui.js", "organization-catalog.js", "organizations-ui.js", "billing-catalog.js", "billing-ui.js", "credit-alert-client.js", "billing-admin-ui.js", "admin-mailbox-ui.js", "user-mailbox-ui.js", "account-ui.js", "privacy-notice.js", "privacy-policy-ui.js", "contact-ui.js", "speech-buffer.js", "hybrid-voice-client.js", "live-voice-client.js", "personal-chat-ui.js"];
 app.get('/online-share', (_req, res) => {
   res.set('Cache-Control','no-store');
   res.set('Referrer-Policy','no-referrer');
@@ -589,7 +589,15 @@ let onlineNoticeTimer = null;
 let localPushTimer = null;
 let mailboxMaintenanceTimer = null;
 let playBillingTimer = null;
-const creativeWorker = new (require('./services/creativeStudioWorker').CreativeStudioWorker)({studio:creativeStudio,onError:()=>console.error('[STUDIO] background job check deferred')});
+const creativeWorker = new (require('./services/creativeStudioWorker').CreativeStudioWorker)({
+  studio: {async tick() {
+    await creativeStudio.tick({featureOnly:process.env.PANTHORIUM_STUDIO_WORKER_ENABLED !== '1'});
+    await filmStudio.advanceProduction();
+    filmStudio.scripts.wake();
+    filmStudio.exports.wake();
+  }},
+  onError: () => console.error('[STUDIO] background job check deferred')
+});
 
 async function start() {
   await workloadCapacity.init();
@@ -686,7 +694,9 @@ async function start() {
       deliver();
     }
   }
-  if(process.env.PANTHORIUM_DEPLOY_PROBE!=='1'&&process.env.PANTHORIUM_STUDIO_WORKER_ENABLED==='1'&&process.env.PANTHORIUM_OBJECT_ROOT) creativeWorker.start();
+  const featureWorkerEnabled = onlineTools.pool && process.env.PANTHORIUM_LOCAL_PROFILE !== '1';
+  if (process.env.PANTHORIUM_DEPLOY_PROBE !== '1' && process.env.PANTHORIUM_OBJECT_ROOT &&
+      (process.env.PANTHORIUM_STUDIO_WORKER_ENABLED === '1' || featureWorkerEnabled)) creativeWorker.start();
   if (process.env.PANTHORIUM_DEPLOY_PROBE !== '1' && process.env.PANTHORIUM_LOCAL_PROFILE !== '1') localInsights.start();
   if (liveGateway) server.on('close', () => liveGateway.close());
   return server;

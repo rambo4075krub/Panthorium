@@ -12,7 +12,9 @@ class CreativeStudioRepositoryError extends Error {
 function checkLimits(rows, proposed) {
   if (rows.filter(row=>['queued','running'].includes(row.status)).length >= LIMITS.activeJobs) throw new CreativeStudioRepositoryError('studio_active_limit');
   if (proposed.film && rows.some(row => row.film?.project === proposed.film.project && ['queued','running'].includes(row.status))) throw new CreativeStudioRepositoryError('film_job_active');
-  const today=rows.filter(row=>new Date(row.createdAt).getTime()>=dayStart().getTime());
+  const localAssembly=job=>job.idempotencyKey?.startsWith('feature:') && job.steps.every(step=>step.pluginId==='film-assemble');
+  if (localAssembly(proposed)) return; // still limited to one active batch per film, with a single local encoder
+  const today=rows.filter(row=>new Date(row.createdAt).getTime()>=dayStart().getTime()&&!localAssembly(row));
   const media=steps=>(steps||[]).filter(step=>['image','video'].includes(step.pluginId)).length;
   if (today.length >= LIMITS.dailyJobs || today.reduce((sum,row)=>sum+media(row.steps),0)+media(proposed.steps)>LIMITS.dailyMediaSteps) throw new CreativeStudioRepositoryError('studio_daily_limit');
 }
@@ -74,6 +76,10 @@ class PostgresCreativeStudioRepository {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['studio:'+job.ownerId]);
       const existing = await client.query('SELECT * FROM panthorium_studio_jobs WHERE owner_id=$1 AND idempotency_key=$2', [job.ownerId, job.idempotencyKey]);
       if (existing.rows[0]) { await client.query('COMMIT'); return {job:this.map(existing.rows[0]),created:false}; }
+      if (job.film && job.idempotencyKey.startsWith('feature:')) {
+        const project=await client.query('SELECT revision FROM panthorium_tool_projects WHERE owner_id=$1 AND id=$2 FOR SHARE',[job.ownerId,job.film.project]);
+        if (project.rows[0]?.revision!==job.film.revision) throw Object.assign(Error('revision_conflict'),{status:409});
+      }
       const rows=await client.query("SELECT * FROM panthorium_studio_jobs WHERE owner_id=$1 AND (created_at >= $2 OR status IN ('queued','running'))",[job.ownerId,dayStart()]);
       checkLimits(rows.rows.map(row=>this.map(row)),job);
       const result = await client.query(`INSERT INTO panthorium_studio_jobs(id,owner_id,idempotency_key,fingerprint,status,data)
@@ -115,8 +121,8 @@ class PostgresCreativeStudioRepository {
     if (!result.rows[0]) throw Object.assign(new Error('studio_lease_lost'), { code: 'studio_lease_lost', status: 409 });
     return this.map(result.rows[0]);
   }
-  async due(limit = 4) { return (await this.pool.query(`SELECT owner_id,id FROM panthorium_studio_jobs WHERE status IN ('queued','running')
-    AND next_run_at<=NOW() AND (lease_until IS NULL OR lease_until<NOW()) ORDER BY next_run_at ASC LIMIT $1`, [Math.min(4, Math.max(1, Number(limit) || 1))])).rows.map(row => ({ ownerId: row.owner_id, id: row.id })); }
+  async due(limit = 4, featureOnly = false) { return (await this.pool.query(`SELECT owner_id,id FROM panthorium_studio_jobs WHERE status IN ('queued','running') AND (NOT $2::boolean OR idempotency_key LIKE 'feature:%')
+    AND next_run_at<=NOW() AND (lease_until IS NULL OR lease_until<NOW()) ORDER BY next_run_at ASC LIMIT $1`, [Math.min(4, Math.max(1, Number(limit) || 1)),featureOnly])).rows.map(row => ({ ownerId: row.owner_id, id: row.id })); }
 }
 
 class MemoryCreativeStudioRepository {
@@ -164,7 +170,7 @@ class MemoryCreativeStudioRepository {
     const saved = { ...copy(job), updatedAt: new Date().toISOString(), nextRunAt: Date.now()+delayMs, leaseUntil: release ? 0 : row.leaseUntil, leaseToken: release ? null : row.leaseToken };
     this.jobs.set(job.id,saved); return copy(saved);
   }
-  async due(limit = 4) { return [...this.jobs.values()].filter(row => ['queued','running'].includes(row.status) && row.nextRunAt<=Date.now() && row.leaseUntil<=Date.now()).slice(0,limit).map(row=>({ownerId:row.ownerId,id:row.id})); }
+  async due(limit = 4, featureOnly = false) { return [...this.jobs.values()].filter(row => (!featureOnly || row.idempotencyKey.startsWith('feature:')) && ['queued','running'].includes(row.status) && row.nextRunAt<=Date.now() && row.leaseUntil<=Date.now()).slice(0,limit).map(row=>({ownerId:row.ownerId,id:row.id})); }
 }
 
 function createCreativeStudioRepository({ databaseUrl, databaseSslMode, allowMemory = false } = {}) {
@@ -172,4 +178,4 @@ function createCreativeStudioRepository({ databaseUrl, databaseSslMode, allowMem
   if (allowMemory && process.env.NODE_ENV !== 'production') return new MemoryCreativeStudioRepository();
   return new PostgresCreativeStudioRepository();
 }
-module.exports = { PostgresCreativeStudioRepository, MemoryCreativeStudioRepository, createCreativeStudioRepository, CreativeStudioRepositoryError, LIMITS };
+module.exports = { PostgresCreativeStudioRepository, MemoryCreativeStudioRepository, createCreativeStudioRepository, CreativeStudioRepositoryError, LIMITS, dayStart };

@@ -75,6 +75,21 @@ async function fixture({studio, service, pool, dir}) {
       assert.equal(input.lockedProvider, 'gemini-live');
       if (input.sessionId.startsWith('film-plan:')) {
         calls.plans++;
+        const request = JSON.parse(input.history[0].content);
+        if (request.format === 'feature') {
+          assert(request.continuity && request.continuity.synopsis);
+          return {
+            ok: true,
+            text: JSON.stringify({
+              ...script,
+              sequenceStory: 'ลำดับฉากที่ ' + request.continuity.sequenceNumber,
+              shots: Array.from({length: request.shotCount}, (_, i) => ({
+                ...script.shots[i % 2],
+                action: 'เหตุการณ์ ' + request.continuity.sequenceNumber + ' ช็อต ' + (i + 1)
+              }))
+            })
+          };
+        }
         return {ok: true, text: JSON.stringify(script)};
       }
       return {ok: true, text: 'Animate the supplied image with the requested camera direction.'};
@@ -147,12 +162,14 @@ async function verify({page, hub, owner, other, fixture: {film, calls}, service,
   );
   // Close the browser workspace, then drive the same durable worker as production.
   await b('โปรเจกต์ทั้งหมด').click();
-  for (let attempt = 0; attempt < 20; attempt++) {
+  for (let attempt = 0; attempt < 100; attempt++) {
     await pool.query('UPDATE panthorium_studio_jobs SET next_run_at=now() WHERE id=$1', [first.job.id]);
     await film.studio.tick();
     const state = await film.state(user, p.id, ep.id);
     if (state.job.status === 'completed') break;
     assert(['queued', 'running'].includes(state.job.status), JSON.stringify(state.job));
+    // A concurrent browser poll may still own the active worker lease.
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
   const completed = await film.state(user, p.id, ep.id);
   assert.equal(completed.job.status, 'completed');
@@ -235,10 +252,11 @@ async function verify({page, hub, owner, other, fixture: {film, calls}, service,
   const next = (await service.get(owner, p.id)).body.episodes[1];
   const batch = (await film.state(user, p.id, next.id)).job;
   assert.equal(batch.total, 5, 'two shared references skip generation for episode two');
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 100; i++) {
     await pool.query('UPDATE panthorium_studio_jobs SET next_run_at=now() WHERE id=$1', [batch.id]);
     await film.studio.tick();
     if ((await film.state(user, p.id, next.id)).job.status === 'completed') break;
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
   await page.evaluate(() => {
     window.showSaveFilePicker = undefined;

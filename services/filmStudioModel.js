@@ -3,6 +3,48 @@
 const {createHash, randomUUID} = require('node:crypto');
 const {fail, id, text} = require('./onlineToolModel');
 
+const FEATURE_SECONDS = 180 * 60;
+const FEATURE_SEQUENCES = 360;
+function sequenceSeconds(ep) {
+  return ep.footage ? ep.footage.end - ep.footage.start : ep.shots.reduce((n, s) => n + s.seconds, 0);
+}
+function featureSequence(e) {
+  if (!e || typeof e !== 'object') fail('invalid_feature_sequence');
+  const act = e.act ?? 1;
+  const plannedSeconds = e.plannedSeconds ?? 0;
+  if (
+    ![1, 2, 3].includes(act) ||
+    !Number.isInteger(plannedSeconds) ||
+    plannedSeconds < 0 ||
+    plannedSeconds > 120
+  )
+    fail('invalid_feature_sequence');
+  let footage = null;
+  if (e.footage != null) {
+    const {start, end, fileId} = e.footage;
+    if (
+      ![start, end].every(Number.isFinite) ||
+      start < 0 ||
+      end > 86400 ||
+      end - start < 0.05 ||
+      end - start > 120
+    )
+      fail('invalid_feature_footage');
+    footage = {fileId: id(fileId), start, end};
+  }
+  return {act, plannedSeconds, footage};
+}
+function featureSettings(value = {}) {
+  if (!value || typeof value !== 'object') fail('invalid_feature_duration');
+  const minutes = value.minutes ?? 120;
+  if (![120, 150, 180].includes(minutes)) fail('invalid_feature_duration');
+  return {
+    minutes,
+    synopsis: text(value.synopsis ?? '', 6000, true),
+    screenplay: text(value.screenplay ?? '', 120000, true)
+  };
+}
+
 function items(value, limit, map) {
   if (!Array.isArray(value) || value.length > limit) fail('invalid_film_plan');
   return value.map(map);
@@ -20,11 +62,16 @@ function entity(raw) {
   };
 }
 function normalizeFilm(raw) {
-  if (!['movie', 'series', 'short'].includes(raw.format) || !['16:9', '9:16'].includes(raw.aspect))
+  if (
+    !['movie', 'series', 'short', 'feature'].includes(raw.format) ||
+    !['16:9', '9:16'].includes(raw.aspect)
+  )
     fail('invalid_film_format');
   const characters = items(raw.characters, 40, entity);
   const locations = items(raw.locations, 40, entity);
-  const episodes = items(raw.episodes, 40, (e) => ({
+  const feature = raw.format === 'feature';
+  const episodes = items(raw.episodes, feature ? FEATURE_SEQUENCES : 40, (e) => ({
+    ...(feature ? featureSequence(e) : {}),
     id: id(e?.id),
     title: text(e?.title, 90),
     story: text(e.story, 8000, true),
@@ -52,6 +99,7 @@ function normalizeFilm(raw) {
   if (!episodes.length || (raw.format === 'short' && episodes.length !== 1)) fail('invalid_film_episodes');
   unique([...characters, ...locations, ...episodes, ...episodes.flatMap((e) => e.shots)].map((x) => x.id));
   const body = {
+    ...(feature ? {feature: featureSettings(raw.feature)} : {}),
     format: raw.format,
     aspect: raw.aspect,
     style: text(raw.style, 200, true),
@@ -59,7 +107,10 @@ function normalizeFilm(raw) {
     locations,
     episodes
   };
-  if (Buffer.byteLength(JSON.stringify(body)) > 380000) fail('film_project_too_large', 413);
+  if (feature && episodes.reduce((n, e) => n + sequenceSeconds(e), 0) > FEATURE_SECONDS + 0.001)
+    fail('film_duration_exceeded');
+  if (Buffer.byteLength(JSON.stringify(body)) > (feature ? 20 * 1024 * 1024 : 380000))
+    fail('film_project_too_large', 413);
   return body;
 }
 
@@ -153,7 +204,7 @@ function filmGraph(project, episodeId, assets, requestId, target = '') {
       [],
       l.referenceId
     );
-  ep.shots.forEach((s, i) => {
+  (ep.footage ? [] : ep.shots).forEach((s, i) => {
     const cast = s.characterIds.map((k) => b.characters.find((c) => c.id === k));
     const place = b.locations.find((l) => l.id === s.locationId);
     const frame = 'frame:' + s.id;
@@ -200,19 +251,45 @@ function filmGraph(project, episodeId, assets, requestId, target = '') {
     );
   });
   const final = 'episode:' + ep.id;
-  add(
-    final,
-    'film-assemble',
-    {aspectRatio: b.aspect, durations: ep.shots.map((s) => s.seconds), name: ep.title},
-    ep.shots.map((s) => 'clip:' + s.id)
-  );
+  if (ep.footage) {
+    add(
+      final,
+      'film-assemble',
+      {
+        aspectRatio: b.aspect,
+        startSeconds: ep.footage.start,
+        durations: [sequenceSeconds(ep)],
+        name: ep.title
+      },
+      [],
+      ep.footage.fileId
+    );
+  } else
+    add(
+      final,
+      'film-assemble',
+      {aspectRatio: b.aspect, durations: ep.shots.map((s) => s.seconds), name: ep.title},
+      ep.shots.map((s) => 'clip:' + s.id)
+    );
 
   function signature(node, versions) {
     const {name, ...visualInput} = node.input;
     return digest([node.pluginId, visualInput, node.deps, node.referenceId, versions]);
   }
+  // Identical trims of an owned, immutable source share the same normalized sequence file.
+  // This also permits reuse across acts without creating another intermediate MP4.
+  let reused;
+  if (ep.footage) {
+    const sig = signature(nodes.get(final), []);
+    reused = Object.values(assets).find(
+      (asset) => asset.key?.startsWith('episode:') && asset.signature === sig
+    );
+  }
+  function existing(key) {
+    return key === final && reused ? reused : assets[key];
+  }
   for (const node of nodes.values()) {
-    const old = assets[node.key];
+    const old = existing(node.key);
     const ready =
       !!old &&
       node.deps.every((k) => status[k]?.ready) &&
@@ -227,13 +304,14 @@ function filmGraph(project, episodeId, assets, requestId, target = '') {
   function schedule(key) {
     if (resolved.has(key)) return resolved.get(key);
     const node = nodes.get(key);
-    if (!node || (node.pluginId === 'film-assemble' && !node.deps.length)) fail('film_shots_required');
+    if (!node || (node.pluginId === 'film-assemble' && !node.deps.length && !node.referenceId))
+      fail('film_shots_required');
     const deps = node.deps.map(schedule);
     const sig = signature(
       node,
       deps.map((d) => d.version)
     );
-    const old = assets[key];
+    const old = existing(key);
     let ref;
     if (old && old.signature === sig && !(target === key && key !== final))
       ref = {fileId: old.file.id, version: old.version};
@@ -258,4 +336,4 @@ function filmGraph(project, episodeId, assets, requestId, target = '') {
   }
   return {steps, targets, status};
 }
-module.exports = {normalizeFilm, applyPlan, filmGraph};
+module.exports = {normalizeFilm, applyPlan, filmGraph, sequenceSeconds, FEATURE_SECONDS, FEATURE_SEQUENCES};
