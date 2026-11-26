@@ -31,10 +31,22 @@ async function main() {
     assert.equal((await (await post({query:'Bangkok riverside hotels',scope:'selected'})).json()).selected.length, 3);
     assert.deepEqual(calls, []);
     assert.deepEqual(directory.match('hotels in London'), []);
+    assert.equal(directory.match('นิทรรศการ ศิลปะ กรุงเทพ').length, 3);
+    assert.equal(directory.suggest('พิภิธภัณศิลปะ ไทย ร้องสมัย'), 'พิพิธภัณฑ์ศิลปะไทยร่วมสมัย');
+    for (const exactOrUnrelated of ['โรงแรมริมแม่น้ำเจ้าพระยา','โรงแรมริมแม่น้ำเจ้าพระยาราคาถูก','โรงแรมริมแม่น้ำเชียงราย','นิทรรศการศิลปะกรุงโซล','ไฟน์ไดนิ่งในกรุงธนบุรี','โรงแรม Kyoto','ตารางรถไฟไปขอนแก่น','อย่าเปิดไฟล์']) {
+      assert.equal(directory.suggest(exactOrUnrelated), '');
+    }
     browser = await chromium.launch({ headless:true, executablePath:process.env.PANTHORIUM_TEST_BROWSER_PATH || undefined });
     const page = await browser.newPage({viewport:{width:1280,height:820}});
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
+    await page.addInitScript(() => {
+      window.SpeechRecognition = class {
+        start() { window.testRecognizer = this; }
+        abort() { window.testRecognizer = null; }
+        stop() { this.onend?.(); }
+      };
+    });
     await page.goto(origin + '/browser-download.html');
     assert.equal(await page.getByRole('link', {name:'เปิด Panthorium Search'}).getAttribute('href'), '/#search');
     await page.goto(origin + '/search');
@@ -78,8 +90,48 @@ async function main() {
     await page.goBack(); await page.getByRole('link',{name:'Source Mozilla'}).waitFor();
     await page.locator('#open-compare').click(); await page.locator('#clear').click();
     assert.equal(await page.locator('#count').textContent(),'0');
+    await page.keyboard.press('Escape');
+    const dictate = async (text, language) => {
+      await page.locator('#mic').click();
+      await page.waitForFunction(() => !!window.testRecognizer);
+      assert.equal(await page.evaluate(() => window.testRecognizer.lang), language);
+      assert(await page.locator('#voice-language').isDisabled());
+      await page.evaluate(transcript => window.testRecognizer.onresult({resultIndex:0,results:[[{transcript}]]}),text);
+    };
+    const original = 'รุงแรม ริมแน้น้ำเจ้าพยา', corrected = 'โรงแรมริมแม่น้ำเจ้าพระยา';
+    const start = calls.length;
+    await dictate('ค้นเว็บ ' + original, 'th-TH');
+    await page.getByRole('link',{name:'Source ' + original,exact:true}).waitFor();
+    assert.equal(await page.locator('#query').inputValue(),original);
+    assert.deepEqual(calls.slice(start),[original]);
+    await dictate('ใช้คำที่แนะนำ', 'th-TH');
+    await page.getByRole('link',{name:'Source ' + corrected,exact:true}).waitFor();
+    assert.deepEqual(calls.slice(start),[original,corrected]);
+    assert(await page.locator('#spelling').isHidden());
+    await page.goBack();
+    await page.locator('#spelling-query').waitFor();
+    await page.getByRole('button',{name:'เฉพาะเว็บคัดสรร'}).click();
+    await page.waitForFunction(() => document.getElementById('spelling-query').hash.includes('scope=selected'));
+    const beforeSelected = calls.length;
+    await page.locator('#spelling-query').click();
+    await page.getByRole('link',{name:'Capella Bangkok',exact:true}).waitFor();
+    assert.equal(calls.length,beforeSelected);
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.getByRole('button',{name:'ทุกแหล่ง'}).click();
+    await page.locator('#voice-language').selectOption('en-US');
+    await page.reload();
+    assert.equal(await page.locator('#voice-language').inputValue(),'en-US');
+    await dictate('search the web for Kyoto hotels','en-US');
+    await page.getByRole('link',{name:'Source Kyoto hotels',exact:true}).waitFor();
+    assert(await page.locator('#spelling').isHidden());
+    await page.locator('#mic').click();
+    await page.waitForFunction(() => !!window.testRecognizer);
+    await page.locator('#query').fill('คำค้นที่แก้เอง');
+    assert.equal(await page.evaluate(() => window.testRecognizer),null);
+    assert.equal(await page.locator('#voice-language').isEnabled(),true);
+    assert.equal(await page.locator('#query').inputValue(),'คำค้นที่แก้เอง');
     assert.deepEqual(errors,[]);
-    console.log('Public search: guest entry, input limits, responsive layout, source filters, comparison, stale replies, quota and navigation passed');
+    console.log('Public search passed, including Thai and English voice selection, opt-in spelling, original queries, history and attribution');
   } finally {
     releaseSlow?.();
     await browser?.close(); server.closeAllConnections(); server.close();

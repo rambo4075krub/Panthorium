@@ -112,6 +112,7 @@ jobs:
           PANTHORIUM_TEST_LOCAL_ONLY=1 node test/hybrid-voice-browser.js
           node test/speech-buffer-browser.js
           node test/guest-start-menu-browser.js
+          node test/web-search-browser.js
           node test/social-experience-browser.js
           node test/social-rtc-browser.js
           node test/social-messages-browser.js

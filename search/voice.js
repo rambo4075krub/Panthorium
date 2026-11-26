@@ -91,7 +91,13 @@
       catch { finish('', 'speech_unavailable'); }
     });
   }
-  async function listen({ commands = false, requireIdentity = false, localOnly = false, lang = 'th-TH', notify = () => {} } = {}) {
+  function webSearchTerms(text) {
+    const spoken = text.trim();
+    const prefix = /^(?:(?:ค้น(?:หา)?|คน|คล้น)(?:ใน|บน)?(?:เว็บไซต์|เว็บ|อินเทอร์เน็ต)(?:เรื่อง|ว่า|คำว่า|ให้)?|(?:เสิร์ช|เซิร์ช|เสิร์จ|เซิร์จ)\s*(?:หา|เว็บ)?|(?:search(?: the web)? for|web search)\b)/iu.exec(spoken);
+    return prefix ? spoken.slice(prefix[0].length).trim().slice(0, 300) : '';
+  }
+  const acceptsSpelling = text => /^(?:ใช้คำ(?:ค้น)?ที่แนะนำ|ค้นด้วยคำที่แนะนำ|use (?:the )?suggested (?:query|spelling))(?:\s*(?:ครับ|ค่ะ))?[.!?]*$/iu.test(text.trim());
+  async function listen({ commands = false, requireIdentity = false, localOnly = false, hasSuggestion = false, lang = 'th-TH', notify = () => {} } = {}) {
     if (current) throw error('speech_busy');
     const turn = { controller:new AbortController(), submit:null }; current = turn;
     const signal = turn.controller.signal;
@@ -118,7 +124,10 @@
       notify('กำลังถอดเสียง', 'processing');
       const token = commands && window.PanthoriumAuth?.getAccessToken?.();
       const route = token ? 'commands' : 'search';
-      const response = await fetch('/api/voice-input/' + route + '?lang=' + (lang === 'en-US' ? 'en' : 'th'), {
+      const params = new URLSearchParams({lang:lang === 'en-US' ? 'en' : 'th'});
+      if (commands && !token) params.set('purpose', 'command');
+      if (hasSuggestion) params.set('spelling', '1');
+      const response = await fetch('/api/voice-input/' + route + '?' + params, {
         method:'POST', signal:AbortSignal.any([signal, AbortSignal.timeout(42000)]), cache:'no-store',
         headers:{ 'Content-Type':'audio/wav', ...(token ? {Authorization:'Bearer ' + token} : {}) }, body:audio
       });
@@ -133,7 +142,7 @@
     } finally { if (current === turn) current = null; }
   }
   const stop = () => { current?.controller.abort(); };
-  window.PanthoriumSpeechInput = { listen, stop, active:() => !!current,
+  window.PanthoriumSpeechInput = { listen, stop, webSearchTerms, acceptsSpelling, active:() => !!current,
     submit:() => current?.submit ? current.submit() : stop(), describe:e => labels[e?.code] || labels.speech_unavailable };
   window.addEventListener('pagehide', stop);
 })();

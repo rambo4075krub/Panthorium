@@ -33,7 +33,11 @@
           </div>
           <button class="submit" type="submit">ค้นหา</button>
         </form>
-        <p id="voice-status" class="voice-status" role="status"></p>
+        <div class="voice-options">
+          <label for="voice-language">ภาษาไมค์ค้นหา</label>
+          <select id="voice-language"><option value="th-TH" lang="th">ไทย</option><option value="en-US" lang="en">English</option></select>
+          <p id="voice-status" role="status"></p>
+        </div>
       </div>
       <a class="artwork" href="/search/view#q=The+Great+Wave+Hokusai" aria-label="ค้นหาผลงาน The Great Wave ของโฮกูไซ">
         <img src="/search/great-wave.webp" alt="" width="600" height="403" fetchpriority="low">
@@ -54,6 +58,7 @@
         <button type="button" data-scope="all" aria-pressed="true">ทุกแหล่ง</button>
         <button type="button" data-scope="selected" aria-pressed="false">เฉพาะเว็บคัดสรร</button>
       </div>
+      <p id="spelling" hidden>คุณหมายถึง <a id="spelling-query"></a> ใช่ไหม <small>หรือพูด “ใช้คำที่แนะนำ”</small></p>
       <p id="search-status" role="status"></p>
       <div id="result-list"></div>
       <button type="button" class="text-action" id="retry" hidden>ลองค้นเว็บอีกครั้ง</button>

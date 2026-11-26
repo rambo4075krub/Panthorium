@@ -262,7 +262,18 @@
     try {const page=await capturePage(root);return {ok:true,appId:'browser',title:page.title,url:page.url,text:page.text,controls:[]};}
     catch {return {ok:false,error:'page_not_ready',text:'ยังอ่านหน้าเว็บไม่ได้ กรุณารอให้หน้าเว็บโหลดเสร็จแล้วสั่งอีกครั้ง'};}
   }
+  function visibleSearchPage() {
+    const root = document.getElementById('panthorium-browser-dashboard');
+    if (!root || root.dataset.browserOwner !== accountId()) return null;
+    const frame = root.querySelector('[data-browser-search]');
+    if (!frame || frame.hidden || frame.contentDocument?.location.pathname !== '/search/view') return null;
+    const bounds = frame.getBoundingClientRect();
+    if (!bounds.width || document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2) !== frame) return null;
+    return frame.contentWindow.PanthoriumSearchPage;
+  }
   window.PanthoriumBrowser = { open, openSearch: (query = '') => open(query), installLauncher,
+    searchSuggestion:() => visibleSearchPage()?.currentSuggestion() || '',
+    applySearchSuggestion:expected => visibleSearchPage()?.applySuggestion(expected) || '',
     openResult(source, url) {
       const root = document.getElementById('panthorium-browser-dashboard');
       if (!root || root.dataset.browserOwner !== accountId() || root.querySelector('[data-browser-search]').contentWindow !== source ||

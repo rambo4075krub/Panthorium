@@ -5,9 +5,11 @@
   const list = byId('result-list'), status = byId('search-status');
   const host = window.frameElement?.closest('#panthorium-browser-dashboard');
   const storeKey = 'panthorium.search.comparison.v1' + (host ? '.' + host.dataset.browserOwner : '');
+  const voiceLanguage = byId('voice-language');
+  const languageKey = 'panthorium.search.voiceLanguage' + (host ? '.' + host.dataset.browserOwner : '');
   const scopes = document.querySelectorAll('[data-scope]');
   let query = '', scope = 'all', selected = [], web = [], phase = 'idle', errorCode = '', pending;
-  let recording = false, speaking, comparison = [], reading;
+  let recording, speaking, comparison = [], reading, suggested = '';
   const reader = byId('reader');
   function element(tag, text, css) {
     const node = document.createElement(tag);
@@ -49,7 +51,16 @@
       if (reading === request && !request.signal.aborted) byId('reader-content').textContent = 'ยังอ่านหน้าเว็บไม่ได้ กรุณาลองอีกครั้ง';
     }
   }
-  window.PanthoriumSearchPage = {read};
+  function currentSuggestion() {
+    return !byId('spelling').hidden && input.value.trim() === query && !document.querySelector('dialog[open]') ? suggested : '';
+  }
+  function applySuggestion(expected) {
+    const next = currentSuggestion();
+    if (!next || (expected !== undefined && expected !== next)) return '';
+    navigate(next, scope);
+    return next;
+  }
+  window.PanthoriumSearchPage = {read, currentSuggestion, applySuggestion};
   byId('close-reader').onclick = () => reader.close();
   reader.addEventListener('close', () => { reading?.abort(); reading = null; });
   document.addEventListener('click', event => {
@@ -72,6 +83,12 @@
     const saved = JSON.parse(sessionStorage.getItem(storeKey) || '[]');
     if (Array.isArray(saved)) comparison = saved.filter(validItem).slice(0, 3);
   } catch { /* Comparison remains usable in memory when storage is unavailable. */ }
+  try {
+    if (sessionStorage.getItem(languageKey) === 'en-US') voiceLanguage.value = 'en-US';
+  } catch { /* The visible language selection still works without storage. */ }
+  voiceLanguage.onchange = () => {
+    try { sessionStorage.setItem(languageKey, voiceLanguage.value); } catch {}
+  };
   function saveComparison() {
     try {
       if (comparison.length) sessionStorage.setItem(storeKey, JSON.stringify(comparison));
@@ -199,8 +216,13 @@
   };
   function stopRecognition() {
     if (recording) window.PanthoriumSpeechInput?.stop();
-    recording = false;
+    recording = null; voiceLanguage.disabled = false;
     byId('mic').setAttribute('aria-pressed', 'false'); byId('voice-status').textContent = '';
+  }
+  function searchHash(value, nextScope) {
+    const params = new URLSearchParams({ q:value });
+    if (nextScope === 'selected') params.set('scope', 'selected');
+    return '#' + params.toString();
   }
   function syncLocation() {
     const params = new URLSearchParams(location.hash.slice(1));
@@ -210,7 +232,14 @@
     if (query !== next) {
       pending?.abort(); pending = null; web = []; phase = 'idle'; errorCode = '';
       query = next; selected = query ? PanthoriumSearchDirectory.match(query) : [];
+      suggested = query && !selected.length ? PanthoriumSearchDirectory.suggest(query) : '';
     }
+    byId('spelling').hidden = !suggested;
+    const spellingLink = byId('spelling-query');
+    if (suggested) {
+      spellingLink.textContent = suggested;
+      spellingLink.href = searchHash(suggested, scope);
+    } else { spellingLink.textContent = ''; spellingLink.removeAttribute('href'); }
     input.value = query; document.title = query ? query + ' · Panthorium Search' : 'Panthorium Search';
     document.body.classList.toggle('has-query', Boolean(query));
     byId('discovery').hidden = Boolean(query); byId('results').hidden = !query;
@@ -220,9 +249,8 @@
   function navigate(value, nextScope) {
     const q = value.trim();
     if (!q) { input.focus(); return; }
-    const params = new URLSearchParams({ q });
-    if (nextScope === 'selected') params.set('scope', 'selected');
-    if (location.hash.slice(1) !== params.toString()) location.hash = params.toString();
+    const hash = searchHash(q, nextScope);
+    if (location.hash !== hash) location.hash = hash;
     else syncLocation();
   }
   form.onsubmit = event => { event.preventDefault(); navigate(input.value, scope); };
@@ -231,18 +259,28 @@
   byId('mic').onclick = async () => {
     const voice = window.PanthoriumSpeechInput, mic = byId('mic'), info = byId('voice-status');
     if (recording) { voice.submit(); return; }
-    stopSpeaking(); recording = true; mic.setAttribute('aria-pressed', 'true');
+    stopSpeaking();
+    const turn = {suggestion:currentSuggestion()}; recording = turn; voiceLanguage.disabled = true; mic.setAttribute('aria-pressed', 'true');
     try {
       const speech = await voice.listen({
-        lang:/[a-z]/i.test(input.value) && !/[ก-๙]/.test(input.value) ? 'en-US' : 'th-TH',
+        lang:voiceLanguage.value, hasSuggestion:!!turn.suggestion,
         localOnly:window.parent !== window && window.parent.document.body.dataset.aiMode === 'local-only',
-        notify:label => { info.textContent = label; }
+        notify:label => { if (recording === turn) info.textContent = label; }
       });
-      if (recording && speech.text) navigate(speech.text.slice(0, 300), scope);
+      if (recording !== turn || !speech.text) return;
+      if (voice.acceptsSpelling(speech.text)) {
+        if (!applySuggestion(turn.suggestion)) info.textContent = 'ยังไม่มีคำแนะนำสำหรับผลค้นหานี้';
+      } else navigate(voice.webSearchTerms(speech.text) || speech.text.slice(0, 300), scope);
     } catch (error) {
-      if (error.code !== 'cancelled') { info.textContent = voice.describe(error); input.focus(); }
-    } finally { recording = false; mic.setAttribute('aria-pressed', 'false'); }
+      if (recording === turn && error.code !== 'cancelled') { info.textContent = voice.describe(error); input.focus(); }
+    } finally {
+      if (recording === turn) { recording = null; voiceLanguage.disabled = false; mic.setAttribute('aria-pressed', 'false'); }
+    }
   };
+  input.addEventListener('input', () => {
+    if (recording) stopRecognition();
+    byId('spelling').hidden = !suggested || input.value.trim() !== query;
+  });
   window.addEventListener('hashchange', syncLocation);
   window.addEventListener('pagehide', () => { stopRecognition(); stopSpeaking(); });
   const initialQuery = new URLSearchParams(location.search).get('q');

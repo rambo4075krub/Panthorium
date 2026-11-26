@@ -16,7 +16,9 @@ function createCommandSpeechRouter({ authService, biometrics, speech = backend }
     const controller = new AbortController();
     res.on('close', () => { if (!res.writableEnded) controller.abort(); });
     try {
-      const text = await speech.transcribe(req.body, req.query.lang === 'en' ? 'en' : 'th', controller.signal);
+      // An unsigned command turn may request command vocabulary, never command access.
+      const purpose = req.path === '/commands' || req.query.purpose === 'command' ? 'command' : 'search';
+      const text = await speech.transcribe(req.body, req.query.lang === 'en' ? 'en' : 'th', controller.signal, purpose, req.query.spelling === '1');
       // Public dictation can only dispatch search. Authenticated command access
       // observes the existing voice identity policy, including for future apps.
       let commands = req.path === '/commands';

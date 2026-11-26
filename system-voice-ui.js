@@ -12,8 +12,8 @@
     const spoken = clean(text);
     const name = norm(spoken).replace(/^(เปิด|เรียก|เข้า|ไปที่|open|launch|show)/u, '').replace(/^(หน้าต่าง|หน้า|ระบบ|แอป)/u, '');
     if (searchNames.has(name)) return {query:''};
-    const explicit = /^(?:(?:ค้น(?:หา)?|คน)(?:ใน|บน)?(?:เว็บไซต์|เว็บ|อินเทอร์เน็ต)(?:เรื่อง|ว่า|คำว่า|ให้)?\s*|(?:เสิร์ช|เซิร์ช|เสิร์จ|เซิร์จ)\s*(?:หา|เว็บ)?\s*|(?:search(?: the web)? for|web search)\s+)(.+)$/iu.exec(spoken);
-    if (explicit) return {query:explicit[1].trim().slice(0,300)};
+    const query = window.PanthoriumSpeechInput?.webSearchTerms?.(spoken);
+    if (query) return {query};
     const ordinary = /^ค้นหา\s*(.+)$/u.exec(spoken);
     if (ordinary && !/^(?:ไฟล์|บันทึก|โน้ต|อีเมล|แชท|แชต|ข้อความ|รายชื่อ|ความรู้|ในระบบ|ในแอป|ในเครื่อง)/u.test(ordinary[1].trim())) return {query:ordinary[1].trim().slice(0,300)};
     return null;
@@ -40,6 +40,7 @@
   }
   function resolveLocal(text) {
     if (window.PanthoriumCloudApps?.voiceContext?.()) return null;
+    if (window.PanthoriumSpeechInput?.acceptsSpelling?.(clean(text))) return {kind:'search-spelling'};
     const search = searchIntent(text);
     if (search) return {kind:'search', ...search};
     const target = /^(?:เปิด|เรียก|เข้า|launch\s+|open\s+)\s*(?:แอป|แอพ|ระบบ|หน้าต่าง)?\s*(.+)$/iu.exec(clean(text));
@@ -48,7 +49,11 @@
     if (matches.length) return {kind:'launcher', matches};
     return null;
   }
-  function dispatch(intent) {
+  function dispatch(intent, expectedSuggestion) {
+    if (intent.kind === 'search-spelling') {
+      const query = window.PanthoriumBrowser?.applySearchSuggestion?.(expectedSuggestion);
+      return {ok:!!query, text:query ? 'ค้นเว็บ “' + query + '”' : 'ยังไม่มีคำแนะนำในหน้าค้นหาที่เปิดอยู่'};
+    }
     if (intent.kind === 'search') {
       const ok = window.PanthoriumBrowser?.openSearch(intent.query) === true;
       return {ok, text:ok ? (intent.query ? 'ค้นเว็บ “' + intent.query + '”' : 'เปิด Panthorium Search แล้ว') : 'เบราว์เซอร์ยังไม่พร้อม'};
@@ -70,13 +75,14 @@
     };
     listening = true;
     try {
-      const speech = await window.PanthoriumSpeechInput.listen({ commands:true,
+      const suggestion = window.PanthoriumBrowser?.searchSuggestion?.() || '';
+      const speech = await window.PanthoriumSpeechInput.listen({ commands:true, hasSuggestion:!!suggestion,
         requireIdentity:document.body.dataset.voiceIdentityRequired === 'true', localOnly:document.body.dataset.aiMode === 'local-only', notify:report });
       if (!current() || window.PanthoriumCloudApps?.voiceContext?.()) return;
       const text = speech.text, commands = window.PanthoriumVoiceCommands;
       const local = commands?.hasPending?.() ? null : resolveLocal(text);
       let result;
-      if (local?.kind === 'search') result = dispatch(local);
+      if (local?.kind === 'search' || local?.kind === 'search-spelling') result = dispatch(local, suggestion);
       else if (!speech.commands) result = {ok:false,text:'บัญชีนี้ใช้เสียงค้นเว็บได้ กรุณายืนยันตัวตนเพื่อสั่งงานส่วนอื่น'};
       else if (local) result = dispatch(local);
       else if (catalog()?.parse(text) || catalog()?.parseFunction(text) || window.PanthoriumScreenVoiceCatalog?.parse(text) ||

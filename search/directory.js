@@ -33,11 +33,12 @@ const PanthoriumSearchDirectory = (() => {
   const normalize = text => text.normalize('NFKC').toLowerCase().replace(/[’']/g, '').replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ').trim();
   const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter('th', { granularity: 'word' }) : null;
   const stop = new Set(['a', 'an', 'the', 'in', 'of', 'at', 'for', 'and', 'official', 'website', 'เว็บไซต์', 'ทางการ', 'ที่', 'ใน', 'ของ', 'และ', 'ย่าน', 'หา', 'ค้นหา', 'ฯ']);
-  const places = new Set(['กรุงเทพ', 'กรุงเทพมหานคร', 'bangkok']);
+  const places = new Set(['กรุงเทพ', 'bangkok']);
   function words(text) {
     const normalized = normalize(text);
     const parts = segmenter ? Array.from(segmenter.segment(normalized), part => part.isWordLike ? part.segment : '') : normalized.split(/\s+/);
-    return parts.filter(word => word && !stop.has(word));
+    return parts.filter(word => word && !stop.has(word))
+      .map(word => word === 'กรุงเทพฯ' || word === 'กรุงเทพมหานคร' ? 'กรุงเทพ' : word);
   }
   const index = entries.map(([group, title, url, place, excerpt, aliases]) => {
     const [category, tags] = collections[group] || ['ศิลปะ', ''];
@@ -52,6 +53,42 @@ const PanthoriumSearchDirectory = (() => {
       .sort((a, b) => tokens.filter(token => b.names.has(token)).length - tokens.filter(token => a.names.has(token)).length)
       .map(site => site.result);
   }
-  return { match };
+  // Offer whole search phrases only. A spelling suggestion never changes the provider query.
+  const topics = ['โรงแรมริมแม่น้ำเจ้าพระยา', 'โรงแรมริมเจ้าพระยา', 'ไฟน์ไดนิ่งในกรุงเทพฯ', 'นิทรรศการศิลปะกรุงเทพฯ'];
+  const spellingKey = text => text.normalize('NFC').replace(/\s+/gu, '').replace(/[ฯ.!?。]+$/u, '');
+  const phrases = [...new Set([...topics, ...entries.flatMap(entry => entry[5].split(' '))])]
+    .filter(text => /^[ก-๙]{9,64}$/u.test(text))
+    .map(text => ({ text, key:spellingKey(text) }));
+  function editDistance(a, b) {
+    let row = Array.from({length:b.length + 1}, (_, i) => i);
+    for (let i = 0; i < a.length; i++) {
+      const next = [i + 1];
+      for (let j = 0; j < b.length; j++) {
+        next.push(Math.min(next[j] + 1, row[j + 1] + 1, row[j] + Number(a[i] !== b[j])));
+      }
+      row = next;
+    }
+    return row[b.length];
+  }
+  function suggest(query) {
+    const key = spellingKey(query);
+    if (!/^[ก-๙]{8,64}$/u.test(key)) return '';
+    const matches = [];
+    for (const phrase of phrases) {
+      const limit = Math.min(6, Math.floor(Math.max(key.length, phrase.key.length) / 4));
+      if (Math.abs(key.length - phrase.key.length) > limit) continue;
+      // Keep additional qualifiers, even when a known name forms most of the query.
+      if (key !== phrase.key && key.includes(phrase.key)) continue;
+      // A shared category must not outweigh a different place at the end of a query.
+      if (key.slice(-2) !== phrase.key.slice(-2) && editDistance(key.slice(-4), phrase.key.slice(-4)) > 1) continue;
+      const distance = editDistance(key, phrase.key);
+      if (distance <= limit) matches.push({text:phrase.text, distance});
+    }
+    matches.sort((a, b) => a.distance - b.distance);
+    if (!matches.length || (matches[1] && matches[1].distance <= matches[0].distance + 1)) return '';
+    const candidate = matches[0].text;
+    return candidate !== query && match(candidate).length ? candidate : '';
+  }
+  return { match, suggest };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = PanthoriumSearchDirectory;
