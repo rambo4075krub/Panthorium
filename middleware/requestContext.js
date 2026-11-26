@@ -9,7 +9,7 @@ function requestContext(audit) {
       audit.record("http.request", {
         requestId: req.requestId,
         method: req.method,
-        path: req.originalUrl,
+        path: /^\/search\/?(?:\?|$)/i.test(req.originalUrl) ? req.originalUrl.split("?")[0] : req.originalUrl,
         status: res.statusCode,
         durationMs: Date.now() - started,
         userId: req.user?.sub || null,

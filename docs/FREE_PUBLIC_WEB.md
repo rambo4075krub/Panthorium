@@ -8,7 +8,7 @@ apply; “free-only” describes external information retrieval.
 
 | Tool | Source and coverage |
 | --- | --- |
-| `web.search` | DuckDuckGo Instant Answers plus Thai/English Wikipedia. Limited public-source search, **not** a full web/Google results index. Up to six source links/excerpts. No HTML SERP scraping. |
+| `web.search` | Mwmbl's web index, DuckDuckGo Instant Answers and Thai/English Wikipedia queried concurrently. Up to six source links/excerpts for Sentinel. |
 | `web.read` | Public HTTPS HTML, text and JSON, subject to robots.txt and access restrictions. No cookies, credentials, login, browser execution, paywall bypass or files/PDF. |
 | `weather.get` | Wikipedia place coordinates and MET Norway Locationforecast. A forecast, not a current station observation. Place ambiguity is returned for clarification; unavailable dates are reported explicitly. |
 
@@ -22,6 +22,30 @@ The model resolves relative dates using the existing current-time context and
 passes an explicit local date to the weather tool. The default timezone is
 Asia/Bangkok; another IANA timezone can be supplied for a requested location.
 A date without returned forecast periods is unavailable, not invented.
+
+## Panthorium Search
+
+Open `/search` directly or from the public Browser download page. Search and
+comparison work without signing in. The standalone page immediately matches its
+small Thai/English directory of first-party sources, then requests up to twelve
+external results. Changing to the curated-only scope can run entirely on the
+page. For an exact Wikipedia title match with an entity ID, Wikidata's P856
+statements can supply additional official site links and their source record.
+Source type and partial availability are visible. Mwmbl's anonymous
+endpoint has a provider quota of 1,000 requests per month per IP and 1 request
+per second. No provider key or paid combined-search endpoint is used.
+
+`POST /api/search` accepts JSON with `query` (1–300 characters) and optional
+`scope` (`all` or `selected`). It returns `selected`, `results` and `status`.
+The public endpoint has a separate admission budget and shares upstream
+cooldowns, in-flight requests and cached public responses with Sentinel.
+Regular searches use a URL fragment. OpenSearch clients can use `/search?q=…`.
+The app keeps the comparison of up to three links in the tab's session storage.
+Speech input and spoken excerpts depend on browser support.
+
+The artwork links to The Met, object 45434, *Under the Wave off Kanagawa*
+(public domain). The bundled Gloock typeface includes its OFL in the search
+assets.
 
 ## Free-only behavior
 
@@ -66,6 +90,7 @@ model argument can enable paid fallback.
 
 ## Provider references
 
+- Mwmbl anonymous index and limits: https://developer.mwmbl.org/
 - Wikimedia API: https://www.mediawiki.org/wiki/API:Search
 - Wikimedia access etiquette: https://www.mediawiki.org/wiki/API:Etiquette
 - Wikipedia text attribution: https://creativecommons.org/licenses/by-sa/4.0/

@@ -61,7 +61,33 @@ async function main() {
   const paid=await paying.service.execute('web.read',{url:'https://example.org'},'u1');assert.equal(paid.available,false);assert.equal(paid.content,undefined);
   const search=fixture(url=>url.hostname==='api.duckduckgo.com'?response({AbstractText:'Bangkok facts',AbstractURL:'https://en.wikipedia.org/wiki/Bangkok',Heading:'Bangkok'}):response(wiki));
   const found=await search.service.execute('web.search',{query:'Bangkok'},'u1');assert.equal(found.available,true);assert.equal(found.coverage,'limited_free_sources');assert(found.sources.length);assert(search.requests.every(item=>!item.url.includes('key=')));
-  const empty=fixture(url=>response(url.hostname==='api.duckduckgo.com'?{}:{query:{pages:[]}}));
+  const indexed = fixture(url => {
+    if (url.hostname === 'api.mwmbl.org') {
+      assert.equal(url.pathname, '/api/v2/search/'); assert.equal(url.searchParams.get('q'), 'Mozilla');
+      return response({ results: [
+        { title:'Encyclopedia', url:'https://en.wikipedia.org/wiki/Mozilla', content:'An organization' },
+        { title:'Mozilla', url:'https://www.mozilla.org/?utm_medium=ref', content:'Internet for people' },
+        { title:'Mozilla again', url:'https://www.mozilla.org/', content:'Duplicate' }
+      ] });
+    }
+    return url.hostname === 'api.duckduckgo.com' ? response({}, 429) : response({query:{pages:[{title:'Mozilla', fullurl:'https://en.wikipedia.org/wiki/Mozilla', extract:'Community'}]}});
+  });
+  const mixed = await indexed.service.execute('web.search', {query:'Mozilla'}, 'u2');
+  assert.deepEqual(mixed.results.map(item => item.url), ['https://www.mozilla.org/', 'https://en.wikipedia.org/wiki/Mozilla']);
+  assert.equal(mixed.results[0].source, 'Mwmbl'); assert(mixed.results[1].license);
+  assert.deepEqual(mixed.issues.map(issue => issue.source), ['DuckDuckGo Instant Answers']);
+  const entity = fixture(url => {
+    if (url.hostname.endsWith('wikipedia.org')) return response({query:{pages:[{title:'NASA',fullurl:'https://en.wikipedia.org/wiki/NASA',pageprops:{wikibase_item:'Q23548'}}]}});
+    if (url.hostname === 'www.wikidata.org') {
+      assert.equal(url.searchParams.get('property'),'P856');
+      return response({claims:{P856:[{rank:'normal',mainsnak:{snaktype:'value',datavalue:{value:'https://www.nasa.gov/'}}}]}});
+    }
+    return response({results:[]});
+  });
+  const official = await entity.service.execute('web.search', {query:'NASA'}, 'u2');
+  assert.equal(official.results[0].url, 'https://www.nasa.gov/');
+  assert.equal(official.results[0].recordUrl, 'https://www.wikidata.org/wiki/Q23548');
+  const empty=fixture(url=>response(url.hostname==='api.mwmbl.org'?{results:[]}:url.hostname==='api.duckduckgo.com'?{}:{query:{pages:[]}}));
   assert.equal((await empty.service.execute('web.search',{query:'no match'},'u1')).error,'web_no_results');
   const weather=fixture(url=>url.hostname.endsWith('wikipedia.org')?response(wiki):response({properties:{meta:{updated_at:'2026-10-24T04:00:00Z',units:{air_temperature:'celsius'}},timeseries:[{time:'2026-10-24T06:00:00Z',data:{instant:{details:{air_temperature:30,wind_speed:2}},next_1_hours:{details:{precipitation_amount:1},summary:{symbol_code:'rain'}}}}]}}));
   const forecast=await weather.service.execute('weather.get',{location:'Bangkok'},'u1');assert.equal(forecast.available,true);assert.equal(forecast.kind,'forecast_not_observation');assert.equal(forecast.periods[0].temperatureC,30);assert(forecast.sources[0].license);assert(weather.requests[1].url.includes('lat=13.7563&lon=100.5018'));
@@ -70,7 +96,7 @@ async function main() {
   assert.equal((await weather.service.execute('weather.get',{location:'Bangkok',date:'2099-01-01'},'u1')).error,'weather_date_unavailable');
   const disabled=new PublicWebService({enabled:false,http:{get(){throw Error('must not call');}}});assert.equal((await disabled.execute('web.search',{query:'x'},'u1')).available,false);
   const quota=fixture(()=>response({},429,'application/json',{'retry-after':'120'}));
-  await quota.service.execute('web.search',{query:'a'},'u1');await quota.service.execute('web.search',{query:'b'},'u1');assert.equal(quota.requests.length,2,'backoff for both free hosts, no paid fallback');
+  await quota.service.execute('web.search',{query:'a'},'u1');await quota.service.execute('web.search',{query:'b'},'u1');assert.equal(quota.requests.length,3,'backoff for each free host, no paid fallback');
   for(let i=0;i<12;i++)await empty.service.execute('web.search',{query:'no match'},'u1');
   assert.equal((await empty.service.execute('web.search',{query:'no match'},'u1')).error,'web_rate_limited');
   const registry=new ToolRegistry();registerPublicWebTools(registry,{service:free.service});
