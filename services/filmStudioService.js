@@ -33,6 +33,7 @@ class FilmStudioService {
     this.studio = studio;
     this.production = new (require('./featureProduction').FeatureProduction)(this);
     this.exports = new (require('./featureExports').FeatureExports)(this);
+    this.scripts = new (require('./featureScriptQueue').FeatureScriptQueue)(this);
   }
   async advanceProduction() {
     if (this.dispatching || !this.projects.pool) return;

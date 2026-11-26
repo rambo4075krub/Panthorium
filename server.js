@@ -593,6 +593,7 @@ const creativeWorker = new (require('./services/creativeStudioWorker').CreativeS
   studio: {async tick() {
     await creativeStudio.tick({featureOnly:process.env.PANTHORIUM_STUDIO_WORKER_ENABLED !== '1'});
     await filmStudio.advanceProduction();
+    filmStudio.scripts.wake();
     filmStudio.exports.wake();
   }},
   onError: () => console.error('[STUDIO] background job check deferred')

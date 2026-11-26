@@ -91,6 +91,11 @@ function mountFeature(r, film, grants, route, limit) {
       return {revision: saved.revision};
     })
   );
+  r.post(
+    '/film/:key/feature/script',
+    limit(12),
+    route(async (q) => ({script: await film.scripts.control(q.user, q.params.key, q.body || {})}))
+  );
   r.get(
     '/film/:key/feature/overview',
     route((q) => film.production.inspect(q.user, q.params.key))

@@ -30,6 +30,11 @@ class OnlineToolsService {
         revision INTEGER NOT NULL,run_id UUID NOT NULL,principal JSONB NOT NULL,budget JSONB NOT NULL,
         batch INTEGER NOT NULL DEFAULT 0,job_id UUID,status TEXT NOT NULL,reason TEXT,next_at TIMESTAMPTZ NOT NULL DEFAULT now());
       CREATE INDEX IF NOT EXISTS feature_runs_due ON panthorium_feature_runs(next_at) WHERE status IN ('running','waiting_quota');
+      CREATE TABLE IF NOT EXISTS panthorium_feature_scripts(
+        project UUID PRIMARY KEY REFERENCES panthorium_tool_projects(id) ON DELETE CASCADE,owner_id UUID NOT NULL,
+        revision INTEGER NOT NULL,principal JSONB NOT NULL,status TEXT NOT NULL,remaining INTEGER NOT NULL,episode UUID,reason TEXT,
+        next_at TIMESTAMPTZ NOT NULL DEFAULT now());
+      CREATE INDEX IF NOT EXISTS feature_scripts_due ON panthorium_feature_scripts(next_at) WHERE status IN ('running','generating') OR episode IS NOT NULL;
       CREATE TABLE IF NOT EXISTS panthorium_feature_exports(
         project UUID PRIMARY KEY REFERENCES panthorium_tool_projects(id) ON DELETE CASCADE, owner_id UUID NOT NULL,
         revision INTEGER NOT NULL,artifact UUID NOT NULL,principal JSONB NOT NULL,status TEXT NOT NULL,

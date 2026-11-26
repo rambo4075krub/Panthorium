@@ -148,6 +148,63 @@
           rel: 'noreferrer'
         })
       );
+      const script = info.script,
+        scripting = script && ['running', 'generating'].includes(script.status);
+      if (script) {
+        const text = {
+          running: 'กำลังวางช็อต',
+          generating: 'Gemini กำลังเขียนลำดับฉาก',
+          paused: 'พักการวางช็อตแล้ว',
+          complete: 'วางช็อตที่อนุมัติครบแล้ว'
+        };
+        setup.append(
+          el(
+            'p',
+            (text[script.status] || script.status) +
+              ' · เหลือ ' +
+              script.remaining +
+              ' คำสั่ง' +
+              (script.reason ? ' · ' + v.detail(script.reason) : '')
+          )
+        );
+      }
+      if (scripting) {
+        setup.append(
+          act('พักการวางช็อต', async () => {
+            await ctx.api(endpoint('feature/script'), v.json('POST', {action: 'pause'}));
+            await refresh();
+          })
+        );
+      } else if (s.empty && !['running', 'waiting_quota'].includes(run?.status)) {
+        setup.append(
+          act('ให้ Gemini วางช็อตทั้งเรื่อง', async () => {
+            await save();
+            const fresh = await ctx.api(endpoint('feature/overview'));
+            if (!ctx.live() || !fresh.summary.empty) return;
+            const reviewed = fresh.script?.reason === 'feature_script_review';
+            if (
+              !confirm(
+                (reviewed ? 'ตรวจประวัติ Gemini ก่อนเริ่มซ้ำในลำดับที่ยังยืนยันผลไม่ได้\n' : '') +
+                  'วางสตอรีบอร์ดจากบทหลักตามลำดับ สูงสุด ' +
+                  fresh.summary.empty +
+                  ' คำสั่งข้อความ Gemini ค่าร่างบทคิดตามโทเค็น สร้างเฉพาะลำดับที่ยังว่าง เมื่อบทพร้อมคุณจะเห็นงบภาพและคลิปก่อนสั่งผลิต'
+              )
+            )
+              return;
+            await ctx.api(
+              endpoint('feature/script'),
+              v.json('POST', {
+                action: 'start',
+                confirmed: true,
+                reviewed,
+                maxCalls: fresh.summary.empty,
+                revision: fresh.revision
+              })
+            );
+            await refresh();
+          })
+        );
+      }
       if (run)
         panel.append(
           el('p', (states[run.status] || run.status) + (run.reason ? ' · ' + v.detail(run.reason) : ''))
@@ -159,7 +216,7 @@
             await refresh();
           })
         );
-      } else if (s.next) {
+      } else if (s.next && !scripting) {
         panel.append(
           act('เริ่มหรือทำต่อจากฉากค้าง', async () => {
             await save();

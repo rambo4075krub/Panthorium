@@ -143,13 +143,14 @@ class FeatureProduction {
       summary.videoSeconds,
       summary.price
     ]);
+    const script = await this.film.scripts.status(user.sub, key);
     const progress = describe(run.rows[0]);
     if (progress && progress.revision !== p.revision) {
       progress.status = 'paused';
       progress.reason = 'revision_conflict';
     }
     const uncertainJob = state.last?.status === 'needs_review' ? state.last.id : null;
-    return {summary, quota, token, run: progress, uncertainJob};
+    return {summary, quota, token, run: progress, uncertainJob, script, revision: p.revision};
   }
   async control(user, key, input) {
     const current = await this.studio.principal(user);
@@ -185,6 +186,11 @@ class FeatureProduction {
     };
     return this.projects.tx(async (c) => {
       await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', ['feature-run:' + key]);
+      const script = (
+        await c.query('SELECT status,episode FROM panthorium_feature_scripts WHERE project=$1', [key])
+      ).rows[0];
+      if (script && (['running', 'generating'].includes(script.status) || script.episode))
+        fail('film_job_active', 409);
       const old = (
         await c.query('SELECT * FROM panthorium_feature_runs WHERE project=$1 FOR UPDATE', [key])
       ).rows[0];

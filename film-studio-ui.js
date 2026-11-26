@@ -21,6 +21,8 @@
   const Feature = window.PanthoriumFeatureFilm;
   const messages = {
     manual: 'พักตามคำสั่ง',
+    feature_script_review: 'ตรวจประวัติ Gemini ก่อนสั่งวางลำดับนี้อีกครั้ง',
+    feature_script_recovered: 'พบลำดับที่บันทึกแล้ว ตรวจบทและยืนยันก่อนทำต่อ',
     feature_footage_selected: 'ลำดับนี้ใช้ฟุตเทจอยู่ ถอดฟุตเทจก่อนวางช็อตใหม่',
     film_duration_exceeded: 'เวลาของหนังเกิน 180 นาที ปรับช่วงฟุตเทจหรือความยาวช็อต',
     invalid_feature_sequence: 'ตรวจองก์และเวลาที่กำหนดให้ลำดับฉาก',
@@ -77,7 +79,10 @@
       baseline = new Map((p?.body.episodes || []).map((e) => [e.id, JSON.stringify(e)]));
     };
     const featureBusy = () =>
-      feature() && (info?.run?.status === 'running' || ['queued', 'running'].includes(out?.status));
+      feature() &&
+      (info?.run?.status === 'running' ||
+        ['running', 'generating'].includes(info?.script?.status) ||
+        ['queued', 'running'].includes(out?.status));
     const urls = new Set();
     let observer;
     function release() {
@@ -261,6 +266,16 @@
         feature() ? ctx.api(endpoint('feature/export')) : null
       ]);
       if (!ctx.live() || projectKey !== p?.id || part !== epId) return;
+      if (overview && overview.revision !== p.revision && !dirty) {
+        const latest = await ctx.api('/projects/' + projectKey);
+        if (!ctx.live() || projectKey !== p?.id || part !== epId || dirty) return;
+        p = latest.project;
+        remember();
+        if (!current()) {
+          epId = p.body.episodes[0].id;
+          return refresh();
+        }
+      }
       info = overview;
       out = exportState;
       assets = data.assets;

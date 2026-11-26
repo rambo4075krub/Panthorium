@@ -325,5 +325,43 @@ async function verify({page, hub, owner, other, fixture: {film, calls}, service,
   console.log(
     'Verified quota deferral, changed-script approval and resumed AI shot without duplicate provider calls'
   );
+  const scripted = await service.create(owner, {
+    id: randomUUID(),
+    title: 'บทสามองก์ต่อเนื่อง',
+    kind: 'film',
+    body: outline.body
+  });
+  const beforePlanning = calls.plans;
+  const beforeImages = calls.images.length,
+    beforeVideos = calls.video.length;
+  await page.reload();
+  await button(scripted.title).click();
+  const plan = button('ให้ Gemini วางช็อตทั้งเรื่อง');
+  await plan.waitFor();
+  page.once('dialog', (d) => d.accept());
+  await plan.click();
+  await button('โปรเจกต์ทั้งหมด').click();
+  for (let i = 0; i < 190; i++) {
+    await pool.query('UPDATE panthorium_feature_scripts SET next_at=now() WHERE project=$1', [scripted.id]);
+    await restarted.scripts.tick();
+    if ((await restarted.scripts.status(owner, scripted.id)).status === 'complete') break;
+  }
+  const storyboard = await service.get(owner, scripted.id);
+  assert.equal(storyboard.body.episodes.length, 169);
+  assert.equal(
+    storyboard.body.episodes.reduce((n, e) => n + e.shots.length, 0),
+    1350
+  );
+  assert.equal(
+    storyboard.body.episodes.reduce((n, e) => n + sequenceSeconds(e), 0),
+    10800
+  );
+  assert.equal(calls.plans - beforePlanning, 169);
+  assert.equal(storyboard.body.characters.length, 1);
+  assert.equal(storyboard.body.locations.length, 1);
+  assert.deepEqual([calls.images.length, calls.video.length], [beforeImages, beforeVideos]);
+  console.log(
+    'Verified 169 background storyboard sequences, 1,350 shots and exactly 180 minutes from one screenplay with fixture Gemini; media waits for separate approval.'
+  );
 }
 module.exports = {verify};
