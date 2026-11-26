@@ -334,7 +334,8 @@ async function verify({page, hub, owner, other, fixture: {film, calls}, service,
   const beforePlanning = calls.plans;
   const beforeImages = calls.images.length,
     beforeVideos = calls.video.length;
-  await page.reload();
+  await button(title).click();
+  await button('โปรเจกต์ทั้งหมด').click();
   await button(scripted.title).click();
   const plan = button('ให้ Gemini วางช็อตทั้งเรื่อง');
   await plan.waitFor();
