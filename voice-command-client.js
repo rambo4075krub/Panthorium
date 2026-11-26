@@ -268,6 +268,8 @@
         document.getElementById('sentinel-command-result')?.remove();
         return { ok: true, text: 'ปิดผลคำสั่ง' };
       }
+      const local = !pending && !window.PanthoriumScreenVoice?.hasPending?.() && window.PanthoriumSystemVoice?.resolveLocal(command);
+      if (local) return window.PanthoriumSystemVoice.dispatch(local);
       if (window.PanthoriumAuth?.ensureSession && !(await window.PanthoriumAuth.ensureSession())) return failure('authentication_required');
       const userId = system()?.state?.user?.id || system()?.state?.user?.sub;
       if (!userId) return failure('authentication_required');
@@ -326,5 +328,5 @@
     catalog.apps.forEach(dismiss);
     pending = null; applied.clear(); studioActions.clear(); document.getElementById('sentinel-command-result')?.remove();
   });
-  window.PanthoriumVoiceCommands = { execute, windowAction, functionAction, hasPending:()=>!!pending || !!window.PanthoriumScreenVoice?.hasPending?.() };
+  window.PanthoriumVoiceCommands = { execute, executeSystem:execute, windowAction, functionAction, hasPending:()=>!!pending || !!window.PanthoriumScreenVoice?.hasPending?.() };
 })();

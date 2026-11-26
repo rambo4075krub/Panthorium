@@ -31,6 +31,11 @@
       row('user',transcription.text);
       const phrase=transcription.text.normalize('NFC').replace(/[\s\p{P}\p{S}]+/gu,'').toLowerCase();
       if(/^(หยุดฟัง|ปิดไมค์|ปิดไมโครโฟน|หยุดรับคำสั่ง|stoplistening|stopmicrophone)$/.test(phrase)){stop();return;}
+      const localIntent = window.PanthoriumSystemVoice?.resolveLocal(transcription.text);
+      if (localIntent && !window.PanthoriumVoiceCommands?.hasPending?.()) {
+        const result = window.PanthoriumSystemVoice.dispatch(localIntent);
+        stop(); status(result.text, result.ok ? 'idle' : 'error'); return;
+      }
       const creative=window.PanthoriumCreativeVoiceCatalog?.parse(transcription.text);
       const localCommand=window.PanthoriumVoiceCommands?.hasPending?.() || window.PanthoriumScreenVoiceCatalog?.parse(transcription.text) || window.PanthoriumWindowCatalog?.classifyVoiceInput(transcription.text)?.kind==='command' || creative&&(!['confirm','cancel'].includes(creative.action)||window.PanthoriumCreativeStudio?.hasVoicePending?.());
       if(!localCommand&&window.PanthoriumChats){personalRef=await window.PanthoriumChats.begin(transcription.text,'voice');sessionId=window.PanthoriumChats.getSessionId();}
@@ -115,7 +120,14 @@
   if(document.body?.dataset.aiMode==='local-only'){
     window.PanthoriumLiveVoice={toggle:start,stop:()=>{stop();stopReader();},stopPlayback:()=>{stop();stopReader();},
       isActive:()=>active,isBusy:()=>active||!!reader,state:()=>({active,busy:active||!!reader,mode}),stopChatSession:stop};
-    document.getElementById('desktop-voice')?.addEventListener('click',()=>start());
+    document.getElementById('desktop-voice')?.addEventListener('click', async () => {
+      if (window.PanthoriumSystemVoice?.active()) { window.PanthoriumSpeechInput.submit(); return; }
+      if (active || window.PanthoriumCloudApps?.voiceContext?.()) { await start(); return; }
+      const before=account(), access=await policy();
+      if(before!==account()) return;
+      if(access?.local?.ready || !window.PanthoriumSystemVoice) await start();
+      else await window.PanthoriumSystemVoice.listen(status);
+    });
   }
   window.addEventListener('panthorium:auth-changed',stopReader);
   window.addEventListener('pagehide',stopReader);

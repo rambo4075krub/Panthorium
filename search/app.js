@@ -3,10 +3,12 @@
   const byId = id => document.getElementById(id);
   const input = byId('query'), form = byId('search-form'), dialog = byId('comparison');
   const list = byId('result-list'), status = byId('search-status');
-  const storeKey = 'panthorium.search.comparison.v1';
+  const host = window.frameElement?.closest('#panthorium-browser-dashboard');
+  const storeKey = 'panthorium.search.comparison.v1' + (host ? '.' + host.dataset.browserOwner : '');
   const scopes = document.querySelectorAll('[data-scope]');
   let query = '', scope = 'all', selected = [], web = [], phase = 'idle', errorCode = '', pending;
-  let recognition, speaking, comparison = [];
+  let recording = false, speaking, comparison = [], reading;
+  const reader = byId('reader');
   function element(tag, text, css) {
     const node = document.createElement(tag);
     if (text) node.textContent = text;
@@ -27,6 +29,35 @@
     anchor.rel = 'noopener noreferrer';
     return anchor;
   }
+  async function read(href) {
+    if (!validItem({title:'',url:href})) return;
+    reading?.abort();
+    const request = new AbortController(); reading = request;
+    byId('reader-title').textContent = 'อ่านหน้าเว็บ';
+    byId('reader-host').textContent = new URL(href).hostname;
+    byId('reader-source').href = href;
+    byId('reader-content').textContent = 'กำลังอ่านจากเว็บไซต์ต้นทาง…';
+    if (!reader.open) reader.showModal();
+    try {
+      const response = await fetch('/api/search/read', {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({url:href}), signal:request.signal});
+      const page = await response.json();
+      if (reading !== request) return;
+      byId('reader-title').textContent = page.title || 'อ่านหน้าเว็บ';
+      byId('reader-content').textContent = response.ok ? page.content : page.message || 'อ่านเว็บไซต์นี้ไม่ได้ในขณะนี้';
+    } catch {
+      if (reading === request && !request.signal.aborted) byId('reader-content').textContent = 'ยังอ่านหน้าเว็บไม่ได้ กรุณาลองอีกครั้ง';
+    }
+  }
+  window.PanthoriumSearchPage = {read};
+  byId('close-reader').onclick = () => reader.close();
+  reader.addEventListener('close', () => { reading?.abort(); reading = null; });
+  document.addEventListener('click', event => {
+    const result = event.target.closest?.('a.item-title');
+    if (!result || window.parent === window || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (!window.parent.PanthoriumBrowser?.openResult(window, result.href)) read(result.href);
+  });
   function sourceLine(item) {
     const node = element('p', item.kind === 'selected' ? 'เว็บต้นทางที่คัดไว้โดย Panthorium' : item.source, 'source');
     if (item.retrievedAt && Number.isFinite(Date.parse(item.retrievedAt))) {
@@ -167,7 +198,8 @@
     window.speechSynthesis.speak(utterance);
   };
   function stopRecognition() {
-    if (recognition) { const previous = recognition; recognition = null; previous.abort(); }
+    if (recording) window.PanthoriumSpeechInput?.stop();
+    recording = false;
     byId('mic').setAttribute('aria-pressed', 'false'); byId('voice-status').textContent = '';
   }
   function syncLocation() {
@@ -196,33 +228,24 @@
   form.onsubmit = event => { event.preventDefault(); navigate(input.value, scope); };
   for (const button of scopes) button.onclick = () => navigate(query, button.dataset.scope);
   byId('retry').onclick = loadWeb;
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (Recognition) {
-    byId('mic').hidden = false;
-    byId('mic').onclick = () => {
-      if (recognition) { stopRecognition(); return; }
-      stopSpeaking();
-      const rec = new Recognition();
-      recognition = rec; rec.lang = /[a-z]/i.test(input.value) && !/[ก-๙]/.test(input.value) ? 'en-US' : 'th-TH';
-      const info = byId('voice-status');
-      rec.onresult = event => {
-        if (recognition !== rec) return;
-        const spoken = event.results[event.resultIndex]?.[0]?.transcript?.trim().slice(0, 300);
-        if (spoken) { input.value = spoken; navigate(spoken, scope); }
-      };
-      rec.onerror = event => { if (recognition === rec) info.textContent = event.error === 'not-allowed' ? 'เบราว์เซอร์ยังไม่อนุญาตให้ใช้ไมโครโฟน พิมพ์เพื่อค้นหาได้เลย' : 'ยังรับเสียงไม่ได้ ลองใหม่หรือพิมพ์คำค้น'; };
-      rec.onend = () => {
-        if (recognition !== rec) return;
-        recognition = null; byId('mic').setAttribute('aria-pressed', 'false');
-        if (info.textContent === 'กำลังฟัง…') info.textContent = '';
-      };
-      try { rec.start(); info.textContent = 'กำลังฟัง…'; byId('mic').setAttribute('aria-pressed', 'true'); }
-      catch { recognition = null; info.textContent = 'เริ่มรับเสียงไม่ได้ พิมพ์คำค้นได้เลย'; }
-    };
-  }
+  byId('mic').onclick = async () => {
+    const voice = window.PanthoriumSpeechInput, mic = byId('mic'), info = byId('voice-status');
+    if (recording) { voice.submit(); return; }
+    stopSpeaking(); recording = true; mic.setAttribute('aria-pressed', 'true');
+    try {
+      const speech = await voice.listen({
+        lang:/[a-z]/i.test(input.value) && !/[ก-๙]/.test(input.value) ? 'en-US' : 'th-TH',
+        localOnly:window.parent !== window && window.parent.document.body.dataset.aiMode === 'local-only',
+        notify:label => { info.textContent = label; }
+      });
+      if (recording && speech.text) navigate(speech.text.slice(0, 300), scope);
+    } catch (error) {
+      if (error.code !== 'cancelled') { info.textContent = voice.describe(error); input.focus(); }
+    } finally { recording = false; mic.setAttribute('aria-pressed', 'false'); }
+  };
   window.addEventListener('hashchange', syncLocation);
   window.addEventListener('pagehide', () => { stopRecognition(); stopSpeaking(); });
   const initialQuery = new URLSearchParams(location.search).get('q');
-  if (initialQuery && !location.hash) history.replaceState(null, '', '/search#' + new URLSearchParams({ q: initialQuery.slice(0, 300) }));
+  if (initialQuery && !location.hash) history.replaceState(null, '', location.pathname + '#' + new URLSearchParams({ q: initialQuery.slice(0, 300) }));
   syncLocation();
 })();

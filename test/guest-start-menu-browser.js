@@ -7,6 +7,8 @@ const path = require('node:path');
 const { chromium } = require('playwright');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'panthorium-guest-menu-'));
 process.env.NODE_ENV = 'test';
+process.env.GEMINI_LIVE_ENABLED = '1';
+process.env.PANTHORIUM_AI_MODE = 'gemini-live-only';
 process.env.JWT_SECRET = 'local-guest-menu-browser-test-only';
 process.env.DATA_FILE = path.join(temporary, 'data.json');
 process.env.AUDIT_FILE = path.join(temporary, 'audit.log');
@@ -77,6 +79,7 @@ const deadline = setTimeout(() => { console.error('Guest shell stopped respondin
       console.log('Guest full shell ' + mode + ': idle observers, repeated Start, search, login inputs and password recovery navigation passed');
       await context.close();
     }
+    await require('./system-voice-browser')(browser, 'http://127.0.0.1:' + server.address().port);
   } finally {
     if (browser) await browser.close();
     server.closeAllConnections();

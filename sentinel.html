@@ -367,7 +367,8 @@
         }
         .sm-user { font-size: 14px; font-weight: 500; }
         .sm-status { font-size: 11px; color: var(--text-dim); }
-        .sm-search { padding: 12px 12px 8px; flex: 0 0 auto; }
+        .sm-search { padding: 12px 12px 8px; flex: 0 0 auto; display:flex; align-items:center; gap:6px; }
+        #start-command-mic { flex:none; min-height:42px; padding:0 10px; border:1px solid #315166; border-radius:12px; background:#102332; color:var(--text); font:inherit; cursor:pointer; }
         .sr-only {
             position: absolute; width: 1px; height: 1px;
             padding: 0; margin: -1px; overflow: hidden;
@@ -929,6 +930,7 @@
             <div class="sm-search">
                 <label class="sr-only" for="start-search">ค้นหาแอปและเครื่องมือ</label>
                 <input id="start-search" type="search" placeholder="ค้นหาแอปหรือเครื่องมือ..." autocomplete="off" enterkeyhint="search">
+                <button type="button" id="start-command-mic">สั่งด้วยเสียง</button>
             </div>
             <div class="sm-apps" id="sm-apps" data-start-layout="curated" aria-label="แอปและหน้าต่าง"></div>
             <div id="sm-empty" hidden>ไม่พบแอปที่ตรงกับคำค้นหา</div>
@@ -3306,6 +3308,7 @@
             el.className = "sm-app";
             el.dataset.appId = app.id;
             el.dataset.baseLabel = label;
+            el.dataset.voiceLauncher = String(app.id !== "account-logout");
             el.dataset.searchText = `${app.id} ${label}`;
             el.innerHTML = `<div class="ico" aria-hidden="true">${app.icon}</div><span>${label}</span>`;
             el.onclick = () => {
@@ -3318,6 +3321,7 @@
             target.appendChild(el);
         });
         // Rebuild extension launchers after replacing the base menu on every Start click.
+        window.PanthoriumBrowser?.installLauncher?.();
         window.PanthoriumSocial?.renderMenu?.();
         window.PanthoriumStartMenuUI?.pinLast?.("privacy-policy", sm);
         window.PanthoriumStartMenuUI?.keepPinnedLast?.(sm);

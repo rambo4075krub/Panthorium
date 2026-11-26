@@ -34,12 +34,31 @@
       for(let el=root;el;el=el.parentElement) level=Math.max(level,parseInt(getComputedStyle(el).zIndex,10)||0);
       return [{app,root,level}];
     });
+    // Standard managed windows inherit voice controls from their authorized launcher.
+    const listed = new Set(roots.map(item => item.root));
+    for (const launcher of window.PanthoriumSystemVoice?.launchers() || []) {
+      if (apps?.apps.some(app => app.id === launcher.id)) continue;
+      const record = window.PanthoriumWindowManager?.findByAppId?.(launcher.id);
+      if (!record || !visible(record.el) || listed.has(record.el)) continue;
+      listed.add(record.el);
+      roots.push({ app:{id:launcher.id,label:launcher.label,selector:''}, root:record.el,
+        level:parseInt(getComputedStyle(record.el).zIndex,10) || 0 });
+    }
     // A tab-specific catalog entry wins over its generic container.
-    return roots.sort((a,b)=>b.level-a.level || Number(b.root.classList.contains('is-focused'))-Number(a.root.classList.contains('is-focused')) || b.app.selector.length-a.app.selector.length)[0] || null;
+    const current = roots.sort((a,b)=>b.level-a.level || Number(b.root.classList.contains('is-focused'))-Number(a.root.classList.contains('is-focused')) || b.app.selector.length-a.app.selector.length)[0];
+    if (current?.app.id === 'browser') {
+      const frame = current.root.querySelector('iframe[data-browser-search]');
+      const doc = frame?.contentDocument;
+      if (visible(frame) && doc?.location.pathname === '/search/view' && doc.body) {
+        current.root = doc.querySelector('dialog[open]') || doc.body;
+        current.search = true;
+      }
+    }
+    return current || null;
   }
   function label(el) {
     const labelText=node=>{const copy=node.cloneNode(true);copy.querySelectorAll(fields+','+blocked).forEach(child=>child.remove());return copy.textContent;};
-    const labelled=(el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).map(id=>document.getElementById(id)?.textContent || '').join(' ');
+    const labelled=(el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).map(id=>el.ownerDocument.getElementById(id)?.textContent || '').join(' ');
     return (el.getAttribute('aria-label') || labelled || Array.from(el.labels || []).map(labelText).join(' ') || el.getAttribute('placeholder') || el.getAttribute('title') || (el.matches('button,a,summary,[role]') ? el.textContent : el.name) || '').replace(/\s+/g,' ').trim().slice(0,160);
   }
   const checked = el => el.matches('input[type="checkbox"],input[type="radio"]') ? el.checked : el.getAttribute('aria-checked') === 'true';
@@ -48,7 +67,7 @@
     return Array.from(root.querySelectorAll(controlSelector)).filter(el=>visible(el)&&!sensitive(el)&&!el.matches(':disabled')&&el.getAttribute('aria-disabled')!=='true').map(el=>({el,label:label(el),kind:switchLike(el)?'switch':el.matches('[role="tab"]')?'tab':el.matches(fields)?'field':'button'})).filter(item=>item.label);
   }
   function textOf(root) {
-    const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
+    const walker=root.ownerDocument.createTreeWalker(root,NodeFilter.SHOW_TEXT);
     const pieces=[];let node,total=0;
     while((node=walker.nextNode())&&total<6000) {
       const el=node.parentElement;
@@ -69,7 +88,7 @@
     if(!current) return failure('active_window_unavailable','ไม่พบหน้าต่างที่บัญชีนี้อ่านได้ กรุณาเปิดหน้าต่างใน Panthorium ก่อน');
     const {app,root}=current,owner=identity();
     if(app.external) return failure('external_page_unavailable','หน้านี้เปิดในแท็บหรือแอปภายนอก จึงยังอ่านหรือควบคุมเนื้อหาจาก Panthorium ไม่ได้');
-    if(app.id==='browser'&&external) {
+    if(app.id==='browser'&&external&&!current.search) {
       const result=await window.PanthoriumBrowser?.readCurrentPage?.();
       if(owner!==identity()||active()?.root!==root) return failure('screen_changed','หน้าต่างหรือบัญชีเปลี่ยนแล้ว กรุณาสั่งใหม่');
       return result || failure('external_page_unavailable','อ่านได้เมื่อเปิดเว็บภายใน Panthorium Browser Desktop');
@@ -128,7 +147,7 @@
     if(intent.action==='help') {
       if(!account()||window.PanthoriumCloudApps?.voiceContext?.()) return failure('active_window_unavailable','เข้าสู่บัญชีและออกจากแอปเฉพาะก่อนดูคำสั่งระบบ');
       const apps=(window.PanthoriumWindowCatalog?.apps||[]).filter(app=>!app.native&&!app.virtual&&!app.external&&window.PanthoriumWindowCatalog.allowed(app,user()));
-      return {ok:true,text:'พูด เปิด ตามด้วยชื่อหน้าต่าง แล้วสั่ง อ่านหน้านี้, แสดงปุ่ม, เลื่อนลง, กดปุ่ม ตามด้วยชื่อหรือหมายเลข, เลือกแท็บ ตามด้วยชื่อ, เปิดสวิตช์ หรือ ปิดสวิตช์ ตามด้วยชื่อ, กรอกช่อง ชื่อช่อง ว่า ข้อความ, เลือกค่า ตัวเลือก ในช่อง ชื่อช่อง หรือ ล้างช่อง ชื่อช่อง\nคำสั่งที่เปลี่ยนข้อมูลจะแสดงรายละเอียดให้พูด ยืนยัน หรือ ยกเลิก\nหน้าต่างที่บัญชีนี้ใช้ได้: '+apps.map(app=>app.label).join(', ')};
+      return {ok:true,text:'พูด เปิด ตามด้วยชื่อหน้าต่าง แล้วสั่ง อ่านหน้านี้, แสดงปุ่ม, เลื่อนลง, กดปุ่ม ตามด้วยชื่อหรือหมายเลข, เลือกแท็บ ตามด้วยชื่อ, เปิดสวิตช์ หรือ ปิดสวิตช์ ตามด้วยชื่อ, กรอกช่อง ชื่อช่อง ว่า ข้อความ, เลือกค่า ตัวเลือก ในช่อง ชื่อช่อง หรือ ล้างช่อง ชื่อช่อง\nคำสั่งที่เปลี่ยนข้อมูลจะแสดงรายละเอียดให้พูด ยืนยัน หรือ ยกเลิก\nหน้าต่างที่บัญชีนี้ใช้ได้: '+[...new Set(['Panthorium Search',...apps.map(app=>app.label),...(window.PanthoriumSystemVoice?.launchers() || []).map(app=>app.label)])].join(', ')};
     }
     const current=active();
     if(!current) return failure('active_window_unavailable','ไม่พบหน้าต่างที่บัญชีนี้สั่งงานได้');
@@ -143,6 +162,7 @@
     if(intent.action==='scroll') {
       const candidates=[root,...root.querySelectorAll('*')].filter(el=>visible(el)&&!el.closest('iframe,webview')&&/(auto|scroll)/.test(getComputedStyle(el).overflowY)&&el.scrollHeight>el.clientHeight+1);
       const el=candidates.sort((a,b)=>b.clientHeight-a.clientHeight)[0];
+      if(!el && current.search) { const scroll=root.ownerDocument.scrollingElement; const before=scroll.scrollTop; scroll.scrollTop=intent.direction==='top'?0:intent.direction==='bottom'?scroll.scrollHeight:before+(intent.direction==='up'?-1:1)*scroll.clientHeight*.8; return {ok:scroll.scrollTop!==before,text:scroll.scrollTop!==before?'เลื่อนหน้าแล้ว':'อยู่สุดหน้าแล้ว'}; }
       if(!el) return failure('screen_scroll_unavailable','หน้าต่างนี้ไม่มีพื้นที่ที่เลื่อนได้');
       const previous=el.scrollTop;
       el.scrollTop=intent.direction==='top'?0:intent.direction==='bottom'?el.scrollHeight:previous+(intent.direction==='up'?-1:1)*Math.max(100,el.clientHeight*.8);

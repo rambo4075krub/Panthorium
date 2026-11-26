@@ -297,6 +297,14 @@
     if (input?.text) { outputSuppressed = false; inputTranscript += input.text; updateChatTranscript("user", inputTranscript); window.PanthoriumOrb?.setTranscript?.(inputTranscript, 0); }
     if (output?.text) { outputTranscript += output.text; updateChatTranscript("ai", outputTranscript); window.PanthoriumOrb?.setTranscript?.(outputTranscript, 0); }
     if (input?.finished===true||content.turnComplete||content.turn_complete) {
+      if (sessionOwner === 'desktop' && !approvalDialogs.size && !window.PanthoriumVoiceCommands?.hasPending?.() && !window.PanthoriumCreativeStudio?.hasVoicePending?.()) {
+        const intent = window.PanthoriumSystemVoice?.resolveLocal(inputTranscript);
+        if (intent) {
+          cleanup();
+          const result = window.PanthoriumSystemVoice.dispatch(intent);
+          setStatus(result.text, result.ok ? 'idle' : 'error'); return;
+        }
+      }
       const phrase=inputTranscript.normalize('NFC').replace(/[\s\p{P}\p{S}]+/gu,'').toLowerCase();
       if(/^(หยุดฟัง|ปิดไมค์|ปิดไมโครโฟน|หยุดรับคำสั่ง|stoplistening|stopmicrophone)$/.test(phrase)){cleanup();return;}
     }
@@ -437,6 +445,10 @@
     mutedOutput.connect(audioContext.destination);
   }
 
+  function commandMicrophone() {
+    return sessionOwner === 'desktop' && !window.PanthoriumCloudApps?.voiceContext?.() && window.PanthoriumSystemVoice;
+  }
+
   async function useLocalAfterQuota() {
     const identity = accountKey();
     cleanup();
@@ -450,6 +462,7 @@
         await window.PanthoriumHybridVoice.start();
         return;
       }
+      if (commandMicrophone()) { await commandMicrophone().listen(setStatus); return; }
       setStatus('เครดิต Sentinel AI ไม่เพียงพอ กรุณาตรวจแพ็กเกจหรือเพิ่มเครดิต', 'error');
     } catch (_) {
       if (generation === sessionGeneration && identity === accountKey()) setStatus('ตรวจสถานะบริการไม่สำเร็จ กรุณาลองใหม่', 'error');
@@ -463,6 +476,7 @@
       window.PanthoriumChats?.recordVoice?.(savedInput, savedOutput).catch(error => window.PanthoriumChats?.notify(error));
     }
     sessionGeneration++;
+    window.PanthoriumSystemVoice?.stop();
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     if (!preserveResume) { resumeSessionId = null; resumeEnabled = false; reconnectAttempts = 0; activeAccountKey = null; }
     cancelConnection?.(); cancelConnection = null;
@@ -488,15 +502,20 @@
   async function toggle(owner = "chat") {
     if (window.PanthoriumHybridVoice?.isActive()) { await window.PanthoriumHybridVoice.start(); return; }
     if(window.PanthoriumSocialRTC?.isActive?.()){setStatus("กำลังโทรหรือไลฟ์อยู่ กรุณาวางสายก่อนเปิดไมค์ Sentinel");return;}
+    if (window.PanthoriumSystemVoice?.active()) { window.PanthoriumSpeechInput?.submit(); return; }
     if (starting || reconnectTimer) { cleanup(); return; }
     if (socket && socket.readyState < WebSocket.CLOSING) { cleanup(); return; }
     starting = true;
     sessionOwner = owner;
     try {
       const generation = sessionGeneration;
+      if (commandMicrophone() && (window.PanthoriumAuth?.isGuest?.() || !accountKey() || accountKey().startsWith('guest:'))) {
+        await commandMicrophone().listen(setStatus); return;
+      }
       const policy = await window.PanthoriumHybridVoice?.policy();
       if (generation !== sessionGeneration) return;
       if (policy && !policy.geminiAllowed) {
+        if (commandMicrophone() && !policy.local?.ready) { await commandMicrophone().listen(setStatus); return; }
         if (policy.local.enabled) { await window.PanthoriumHybridVoice.start(); return; }
         throw new Error('เครดิต Sentinel AI ไม่เพียงพอ กรุณาตรวจแพ็กเกจหรือเพิ่มเครดิต');
       }
@@ -511,7 +530,7 @@
     toggle, stop:() => { cleanup(); window.PanthoriumHybridVoice?.stop(); },
     sendText:text => { if (activeAccountKey !== null && activeAccountKey !== accountKey()) { cleanup(); return false; } if (!serverReady || socket?.readyState !== WebSocket.OPEN || typeof text !== 'string' || !text.trim() || text.length > 2000) return false; socket.send(JSON.stringify({clientContent:{turns:[{role:'user',parts:[{text}]}],turnComplete:true}})); return true; },
     stopPlayback:() => { if(window.PanthoriumHybridVoice?.isActive())window.PanthoriumHybridVoice.stop(); outputSuppressed = true; stopPlayback(); if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'stopPlayback' })); },
-    isActive:() => serverReady || !!window.PanthoriumHybridVoice?.isActive(),
+    isActive:() => serverReady || !!window.PanthoriumSystemVoice?.active() || !!window.PanthoriumHybridVoice?.isActive(),
     isBusy:() => !!(serverReady || starting || reconnectTimer || microphone || activeSources.size || window.PanthoriumHybridVoice?.isActive()),
     state:() => ({ active: serverReady, busy: !!(serverReady || starting || reconnectTimer || microphone || activeSources.size || window.PanthoriumHybridVoice?.isActive()), mode: currentStatus.mode }),
     syncChatButton,

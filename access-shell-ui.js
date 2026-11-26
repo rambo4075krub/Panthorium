@@ -138,6 +138,7 @@
       if (!catalog.allowed(app, user())) {
         const node = document.querySelector(app.selector);
         if (node) {
+          if (app.id === 'browser' && node.dataset.member === 'false') continue;
           if (app.windowId && typeof closeWindow === 'function') closeWindow(app.windowId);
           else if (app.closeButton && node.querySelector(app.closeButton)) node.querySelector(app.closeButton).click();
           else node.remove();
@@ -167,7 +168,7 @@
         if (id === 'voice-identity' || el.id === 'voice-identity-launcher') return false;
         if (!id || restrictedLaunchers.includes(el.id) || el.dataset.productionIntelligence === '1') return false;
         if (!isGuest && ['account-register', 'account-login'].includes(id)) return false;
-        if (guest() && id !== 'cloud-group-settings' && id !== 'contact' && id !== 'privacy-policy' && id !== 'sentinel' && id !== 'voice-identity' && id !== 'billing' && id !== 'account-register' && id !== 'account-login') return false;
+        if (guest() && id !== 'cloud-group-settings' && id !== 'contact' && id !== 'privacy-policy' && id !== 'sentinel' && id !== 'browser' && id !== 'voice-identity' && id !== 'billing' && id !== 'account-register' && id !== 'account-login') return false;
         if ((id === 'notes' || id === 'files' || id === 'calendar') && !account?.permissions?.includes('chat')) return false;
         return true;
       });
