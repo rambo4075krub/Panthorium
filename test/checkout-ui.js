@@ -34,7 +34,15 @@ async function scenario(native,checkoutPath='c'){
     if(url.endsWith('/orders/order_fixture'))return response({order:{id:'order_fixture',status:'pending',checkoutUrl:invalidUrl?'javascript:alert(1)':'https://checkout.stripe.com/'+checkoutPath+'/pay/cs_fixture'}});
     throw Error('unexpected request '+url);
   };
-  for(const name of ['privacy-notice.js','billing-catalog.js','work-brief.js','billing-ui.js'])w.eval(fs.readFileSync(require.resolve('../'+name),'utf8'));
+  // Exercise the order of the actual initial HTML. A slow later script must never
+  // make the first membership render omit its examples.
+  const dependencies = ['privacy-notice.js', 'billing-catalog.js', 'work-brief.js', 'billing-ui.js'];
+  const shell = fs.readFileSync(require.resolve('../sentinel.html'), 'utf8');
+  const scripts = [...shell.matchAll(/<script\s+src="\/([^"?]+)(?:\?[^"]*)?"/g)].map(match => match[1]);
+  const initial = scripts.filter(name => dependencies.includes(name));
+  assert(initial.includes('work-brief.js') && initial.indexOf('work-brief.js') < initial.indexOf('billing-ui.js'));
+  for (const name of dependencies.filter(name => !initial.includes(name))) w.eval(fs.readFileSync(require.resolve('../' + name), 'utf8'));
+  for (const name of initial) w.eval(fs.readFileSync(require.resolve('../' + name), 'utf8'));
   try{
     w.PanthoriumBilling.open();const root=w.document.querySelector('[data-billing-root]');
     if(native)await until(()=>productCalls===1&&!root.querySelector('[data-product-id="life"]').disabled);
