@@ -39,6 +39,23 @@ module.exports = async function externalWebSearch(fixture, response) {
 
   let time = Date.now();
   const liveClock = () => (time += 1200);
+  const places = fixture(url => {
+    if (url.hostname === 'puri.li') return response({results:[
+      {title:'ประสบการณ์ ร้านหนังสือ มาดริด',url:'https://traveler.example.com/madrid'},
+      {title:'ร้านหนังสือออนไลน์',url:'https://download.example.com/app'}
+    ]});
+    if (url.searchParams.get('prop') === 'coordinates|langlinks') return response({query:{pages:[{coordinates:[{lat:40,lon:-3}],langlinks:[{title:'Madrid'}]}]}});
+    if (url.hostname === 'en.wikivoyage.org') {
+      if (url.searchParams.get('page') === 'Madrid') return response({parse:{pageid:72,revid:43,sections:[{index:'8',line:'Buy'}]}});
+      assert.equal(url.searchParams.get('oldid'),'43');
+      return response({parse:{text:'<div class="vcard"><span class="listing-name"><a class="external" href="https://books.example.org/">La Librería</a></span><span class="listing-content">An independent bookstore.</span></div><div class="vcard"><span class="listing-name"><a class="external" href="https://cafe.example.org/">Coffee shop</a></span></div><a class="external" href="https://other.example.org/">Advertising</a>'}});
+    }
+    return response({results:[],query:{pages:[]}});
+  },liveClock);
+  const madrid = await places.service.execute('web.search',{query:'ร้านหนังสือ มาดริด'},'visitor');
+  assert.deepEqual(madrid.results.map(x=>x.url),['https://books.example.org/','https://traveler.example.com/madrid']);
+  assert.equal(madrid.results[0].recordUrl,'https://en.wikivoyage.org/?curid=72#Buy');
+  assert(places.requests.length <= 8);
   const official = fixture(url => {
     if (url.host === 'en.wikipedia.org') {
       if (url.searchParams.has('generator')) return response({query:{pages:[{pageid:1,ns:0,title:'Public Radio Network'}]}});

@@ -15,6 +15,9 @@ function searchUrl(value, keepFragment = false) {
   const original = new URL(value);
   if (original.protocol === 'http:' && !original.port) original.protocol = 'https:';
   const url = publicUrl(original.href);
+  if (!keepFragment) {
+    for (const key of [...url.searchParams.keys()]) if (/^(?:utm_.*|fbclid|gclid|mibextid)$/iu.test(key)) url.searchParams.delete(key);
+  }
   if (keepFragment && original.hash) {
     if (/(?:token|secret|signature|password|credential|authorization|api[_-]?key)\s*=/i.test(original.hash)) throw Error('web_credentials_not_allowed');
     url.hash = original.hash;
@@ -67,7 +70,7 @@ function matchesSite(url, site) {
     (site.pathname === '/' || url.pathname === site.pathname || url.pathname.startsWith(site.pathname.replace(/\/$/, '') + '/'));
 }
 function siteGroup(host) { return getDomain(host, suffixOptions) || host; }
-function relevance(intent, url, entry) {
+function relevance(intent, url, entry, local) {
   const domain = siteGroup(url.hostname);
   const title = compact(entry.title || '');
   let path = url.pathname;
@@ -76,6 +79,7 @@ function relevance(intent, url, entry) {
   const body = heading + ' ' + compact(entry.excerpt || '');
   const terms = intent.words;
   const present = terms.filter(word => body.includes(compact(word))).length;
+  if (local && (!body.includes(compact(local.place)) || !body.includes(compact(local.word)))) return null;
   // For a Thai topic and place, matching just the place produces unrelated businesses and articles.
   if (intent.groups.length > 1 && intent.groups.length <= 3 && !intent.groups.every(group => body.includes(group))) return null;
   if (terms.length > 1 && present < Math.ceil(terms.length / 2)) return null;

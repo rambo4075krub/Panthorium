@@ -36,7 +36,9 @@ A `site:` restriction matches the named domain, subdomains and optional path.
 For sparse matches it can also consult the public site's permitted sitemap.
 Exact organization names and redirects can supply an official address from
 Wikidata or a labelled Wikipedia infobox. Each such result links to its record.
-The curated-only view remains available. The system reports upstream outages
+For sparse Thai place searches, a verified place name and the guide's matching
+section can supply additional business websites from Wikivoyage listings. Each
+listing includes the guide and license. The curated-only view remains available. The system reports upstream outages
 and presents additional result pages when the index has them.
 
 `POST /api/search` accepts a `query` (up to 300 characters for terms, 2048 for
@@ -99,6 +101,7 @@ model argument can enable paid fallback.
 - Mwmbl anonymous index and limits: https://developer.mwmbl.org/
 - Purili search, operators and pagination: https://puri.li/developer/documentation
 - Wikimedia API: https://www.mediawiki.org/wiki/API:Search
+- Wikivoyage listings and attribution: https://en.wikivoyage.org/wiki/Wikivoyage:Listings
 - Wikimedia access etiquette: https://www.mediawiki.org/wiki/API:Etiquette
 - Wikipedia text attribution: https://creativecommons.org/licenses/by-sa/4.0/
 - DuckDuckGo public JSON endpoint: https://api.duckduckgo.com/?q=Bangkok&format=json&no_html=1

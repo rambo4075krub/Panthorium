@@ -77,7 +77,7 @@
       time.dateTime = item.retrievedAt; node.append(' · ดึงข้อมูลเมื่อ ', time);
     }
     if (item.license === 'https://creativecommons.org/licenses/by-sa/4.0/') node.append(link('CC BY-SA 4.0', item.license));
-    if (/^https:\/\/(?:www\.wikidata\.org\/wiki\/Q\d+|(?:th|en)\.wikipedia\.org\/\?curid=\d+)$/.test(item.recordUrl || '')) node.append(link('ดูรายการต้นทาง', item.recordUrl));
+    if (/^https:\/\/(?:www\.wikidata\.org\/wiki\/Q\d+|(?:th|en)\.wikipedia\.org\/\?curid=\d+|en\.wikivoyage\.org\/\?curid=\d+#(?:Buy|See|Eat|Drink|Sleep))$/.test(item.recordUrl || '')) node.append(link('ดูรายการต้นทาง', item.recordUrl));
     return node;
   }
   try {

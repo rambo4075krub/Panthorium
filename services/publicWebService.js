@@ -4,6 +4,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const robotsParser = require('robots-parser');
 const { PublicWebHttp, publicUrl } = require('./publicWebHttp');
 const { parseQuery, addressResult, searchUrl, matchesSite, siteGroup, relevance } = require('./webSearchQuery');
+const { placeQuery, placeWebsites } = require('./webSearchPlaces');
 const { findSitePages } = require('./webSearchSitemap');
 const BOT = 'PanthoriumPublicWeb';
 const MESSAGES = {
@@ -258,6 +259,7 @@ class PublicWebService {
   async search({query, language, limit = 6, page = 1}, context, intent = parseQuery(query)) {
     language ||= /[\u0e00-\u0e7f]/.test(query) ? 'th' : 'en';
     // Mwmbl accepts ordinary terms. Apply site operators ourselves to every returned URL.
+    const local = !intent.sites.length && placeQuery(intent.terms);
     const indexQuery = intent.sites.length ? [intent.terms, ...intent.sites.map(site => site.hostname)].join(' ') : query;
     const providers = [];
     if (page === 1) providers.push({name:'Mwmbl',offset:0,stride:1.5,request:this.searchIndex(indexQuery,context)});
@@ -290,13 +292,10 @@ class PublicWebService {
         try { url = searchUrl(entry.url); } catch { continue; }
         if (typeof entry.title !== 'string' || !entry.title.trim()) continue;
         if (intent.sites.length && !intent.sites.some(site => matchesSite(url,site))) continue;
-        for (const key of [...url.searchParams.keys()]) {
-          if (/^(?:utm_.*|fbclid|gclid)$/i.test(key)) url.searchParams.delete(key);
-        }
         const wikiLanguage = /^([^.]+)(?:\.m)?\.wikipedia\.org$/.exec(url.hostname)?.[1];
         if (wikiLanguage && (url.searchParams.get('redlink') === '1' ||
             (url.searchParams.has('action') && url.searchParams.get('action') !== 'view'))) continue;
-        const score = entry.official ? 0 : relevance(intent,url,entry);
+        const score = entry.official ? 0 : relevance(intent,url,entry,local);
         if (score === null) continue;
         ranked.push({rank:offset + position * stride + score + (wikiLanguage && wikiLanguage !== language ? 8 : 0),
           domain:siteGroup(url.hostname), result:{
@@ -326,6 +325,14 @@ class PublicWebService {
           seen.set(result.url,result); results.push(result);
         }
       } catch { /* Independently indexed links are still usable if the site has no readable map. */ }
+    }
+    if (page === 1 && local && results.length < Math.min(5,limit) && context.requests <= 5) {
+      try {
+        const listings = await placeWebsites(this,local,context);
+        const placesFirst = new Map();
+        for (const entry of [...listings,...results]) if (!placesFirst.has(entry.url)) placesFirst.set(entry.url,entry);
+        results.splice(0,results.length,...Array.from(placesFirst.values()).slice(0,limit));
+      } catch (error) { issues.push({...unavailable(error),source:'Wikivoyage'}); }
     }
     if (!results.length) {
       const indexAvailable = replies.some((reply,i) => reply.status === 'fulfilled' && providers[i].name !== 'Wikidata');
