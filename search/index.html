@@ -60,7 +60,9 @@
       </div>
       <p id="spelling" hidden>คุณหมายถึง <a id="spelling-query"></a> ใช่ไหม <small>หรือพูด “ใช้คำที่แนะนำ”</small></p>
       <p id="search-status" role="status"></p>
-      <div id="result-list"></div>
+      <a id="all-web" class="text-action" hidden></a>
+      <p id="result-voice-hint" hidden>แตะไมค์แล้วพูด “เปิดผลที่หนึ่ง” หรือ “อ่านผลที่หนึ่งให้ฟัง”</p>
+      <ol id="result-list" role="list"></ol>
       <button type="button" class="text-action" id="more-results" hidden>แสดงผลเพิ่มเติม</button>
       <button type="button" class="text-action" id="retry" hidden>ลองค้นเว็บอีกครั้ง</button>
     </section>
@@ -69,7 +71,13 @@
   <footer class="frame footer"><span lang="en">Panthorium Search</span><a href="/privacy">ความเป็นส่วนตัว</a></footer>
   <dialog id="reader" aria-labelledby="reader-title">
     <div class="dialog-head"><h2 id="reader-title">อ่านหน้าเว็บ</h2><button type="button" id="close-reader" class="close" aria-label="กลับไปผลค้นหา">×</button></div>
-    <p id="reader-host" class="host"></p><p id="reader-content" role="status"></p>
+    <p id="reader-host" class="host"></p>
+    <div class="reader-actions">
+      <button type="button" class="text-action" id="reader-listen" hidden>ฟังหน้านี้</button>
+      <button type="button" class="text-action" id="reader-mic" aria-pressed="false" title="พูดว่า กลับไปผลค้นหา">สั่งด้วยเสียง</button>
+    </div>
+    <p id="reader-voice-status" role="status"></p>
+    <p id="reader-content" role="status"></p>
     <a id="reader-source" target="_blank" rel="noopener noreferrer">เปิดเว็บไซต์ต้นฉบับ ↗</a>
   </dialog>
   <dialog id="comparison" aria-labelledby="compare-title">

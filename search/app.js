@@ -10,8 +10,10 @@
   const scopes = document.querySelectorAll('[data-scope]');
   let query = '', scope = 'all', selected = [], web = [], phase = 'idle', errorCode = '', pending;
   let recording, speaking, comparison = [], reading, suggested = '', visibleCount = 12, problem = '';
-  let nextPage = null, moreRequest, moreNotice = '';
+  let nextPage = null, moreRequest, moreNotice = '', readerText = '', broaderQuery = '';
   const more = byId('more-results'), reader = byId('reader');
+  const readerListen = byId('reader-listen'), readerStatus = byId('reader-voice-status');
+  const canSpeak = () => Boolean(window.speechSynthesis && window.SpeechSynthesisUtterance);
   function element(tag, text, css) {
     const node = document.createElement(tag);
     if (text) node.textContent = text;
@@ -32,9 +34,11 @@
     anchor.rel = 'noopener noreferrer';
     return anchor;
   }
-  async function read(href) {
+  async function read(href, aloud = false) {
     if (!validItem({title:'',url:href})) return;
     reading?.abort();
+    stopSpeaking();
+    readerText = ''; readerListen.hidden = true; readerStatus.textContent = '';
     const request = new AbortController(); reading = request;
     byId('reader-title').textContent = 'อ่านหน้าเว็บ';
     byId('reader-host').textContent = new URL(href).hostname;
@@ -45,12 +49,15 @@
       const response = await fetch('/api/search/read', {method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify({url:href}), signal:request.signal});
       const page = await response.json();
-      if (reading !== request) return;
+      if (reading !== request || !reader.open) return;
       byId('reader-title').textContent = page.title || 'อ่านหน้าเว็บ';
-      byId('reader-content').textContent = response.ok ? page.content : page.message || 'อ่านเว็บไซต์นี้ไม่ได้ในขณะนี้';
+      readerText = response.ok && typeof page.content === 'string' ? page.content.trim() : '';
+      byId('reader-content').textContent = readerText || page.message || 'อ่านเว็บไซต์นี้ไม่ได้ในขณะนี้';
+      readerListen.hidden = !readerText || !canSpeak();
+      if (aloud && readerText && !speak(readerText,readerListen)) readerStatus.textContent = 'เบราว์เซอร์นี้ยังอ่านออกเสียงไม่ได้';
     } catch {
       if (reading === request && !request.signal.aborted) byId('reader-content').textContent = 'ยังอ่านหน้าเว็บไม่ได้ กรุณาลองอีกครั้ง';
-    }
+    } finally { if (reading === request) reading = null; }
   }
   function currentSuggestion() {
     return !byId('spelling').hidden && input.value.trim() === query && !document.querySelector('dialog[open]') ? suggested : '';
@@ -61,17 +68,68 @@
     navigate(next, scope);
     return next;
   }
-  window.PanthoriumSearchPage = {read, currentSuggestion, applySuggestion};
+  function openWebsite(href) {
+    if (!host || !window.parent.PanthoriumBrowser?.openResult(window,href)) read(href);
+  }
+  function voiceContext() {
+    if (reader.open) return JSON.stringify(['reader',byId('reader-source').href]);
+    if (dialog.open) return null;
+    return JSON.stringify([query,scope,input.value,broaderQuery,scope === 'all' && phase === 'loading',visibleItems().slice(0,visibleCount).map(item => item.url)]);
+  }
+  function runVoiceCommand(command, expected) {
+    const context = voiceContext();
+    const reply = (ok,text) => ({ok,text});
+    if (!context || (expected !== undefined && expected !== context)) return reply(false,'หน้าที่เปิดอยู่เปลี่ยนแล้ว กรุณาสั่งอีกครั้ง');
+    if (command.action === 'stop') { stopSpeaking(); return reply(true,'หยุดอ่านแล้ว'); }
+    if (reader.open) {
+      if (command.action === 'back') { reader.close(); return reply(true,'กลับไปผลค้นหาแล้ว'); }
+      if (command.action === 'listen-page') {
+        if (!readerText) return reply(false,reading ? 'กำลังโหลดข้อความจากเว็บไซต์' : 'ไม่มีข้อความจากหน้านี้ให้อ่าน');
+        return speak(readerText,readerListen) ? reply(true,'กำลังอ่านหน้าเว็บให้ฟัง') : reply(false,'เบราว์เซอร์นี้ยังอ่านออกเสียงไม่ได้');
+      }
+      return reply(false,'พูด “กลับไปผลค้นหา” เพื่อเลือกเว็บไซต์อื่น');
+    }
+    if (input.value.trim() !== query || (scope === 'all' && phase === 'loading')) return reply(false,'รอให้ผลของคำค้นปัจจุบันพร้อมก่อน');
+    if (command.action === 'back') return reply(true,'อยู่ที่หน้าผลค้นหาแล้ว');
+    if (command.action === 'all-sources') {
+      if (broaderQuery) navigate(broaderQuery,'all');
+      else if (scope === 'selected') navigate(query,'all');
+      else return reply(true,'กำลังใช้ผลจากทุกเว็บไซต์อยู่แล้ว');
+      return reply(true,'ค้นจากทุกเว็บไซต์');
+    }
+    if (command.action === 'more') {
+      if (more.hidden || more.disabled) return reply(false,more.disabled ? 'กำลังโหลดผลเพิ่มเติม' : 'ไม่มีผลเพิ่มเติมสำหรับคำค้นนี้');
+      more.click(); return reply(true,'แสดงผลเพิ่มเติม');
+    }
+    if (command.action === 'listen-results') {
+      if (!visibleItems().length) return reply(false,'ยังไม่มีผลค้นหาให้อ่าน');
+      return speakResults() ? reply(true,'กำลังอ่านผลค้นหา') : reply(false,'เบราว์เซอร์นี้ยังอ่านออกเสียงไม่ได้');
+    }
+    if (command.action !== 'open' && command.action !== 'read') return reply(false,'เลือกผลที่ต้องการก่อน เช่น “อ่านผลที่หนึ่งให้ฟัง”');
+    const links = list.querySelectorAll('.item-title');
+    const target = links[command.index-1];
+    if (!target) return reply(false,links.length ? 'ตอนนี้มีผลที่แสดง 1 ถึง ' + links.length : 'ยังไม่มีผลค้นหาให้เปิด');
+    target.focus({preventScroll:true});
+    if (command.action === 'read') read(target.href,true);
+    else openWebsite(target.href);
+    return reply(true,'เปิดผลที่ ' + command.index + ' ' + target.textContent);
+  }
+  window.PanthoriumSearchPage = {read, currentSuggestion, applySuggestion, voiceContext, runVoiceCommand};
   byId('close-reader').onclick = () => reader.close();
-  reader.addEventListener('close', () => { reading?.abort(); reading = null; });
+  reader.addEventListener('close', () => {
+    if (reader.open) return;
+    reading?.abort(); reading = null; readerText = '';
+    stopRecognition(); stopSpeaking();
+  });
   document.addEventListener('click', event => {
     const result = event.target.closest?.('a.item-title');
     if (!result || window.parent === window || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    if (!window.parent.PanthoriumBrowser?.openResult(window, result.href)) read(result.href);
+    openWebsite(result.href);
   });
   function sourceLine(item) {
-    const node = element('p', item.kind === 'selected' ? 'เว็บต้นทางที่คัดไว้โดย Panthorium' : item.source, 'source');
+    const label = item.kind === 'official' && item.recordUrl ? 'เว็บไซต์ทางการตามข้อมูลจาก ' + item.source : item.source;
+    const node = element('p', item.kind === 'selected' ? 'เว็บต้นทางที่คัดไว้โดย Panthorium' : label, 'source');
     if (item.retrievedAt && Number.isFinite(Date.parse(item.retrievedAt))) {
       const time = element('time', new Date(item.retrievedAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }));
       time.dateTime = item.retrievedAt; node.append(' · ดึงข้อมูลเมื่อ ', time);
@@ -152,11 +210,13 @@
   function render() {
     const items = visibleItems();
     const focusUrl = document.activeElement?.dataset.pick;
-    const rows = items.slice(0, visibleCount).map(item => {
-      const row = element('article', '', 'result-item'), content = element('div');
+    const rows = items.slice(0, visibleCount).map((item,index) => {
+      const row = element('li', '', 'result-item'), content = element('div');
       const heading = element('h3');
       heading.append(link(item.title, item.url, 'item-title'));
-      content.append(element('p', new URL(item.url).hostname, 'host'), heading);
+      const domain = element('p', '', 'host'), position = element('span',String(index+1) + '.','result-position');
+      position.setAttribute('aria-hidden','true'); domain.append(position,new URL(item.url).hostname);
+      content.append(domain,heading);
       if (item.excerpt) content.append(element('p', item.excerpt, 'excerpt'));
       content.append(sourceLine(item));
       const pick = element('button', '', 'pick');
@@ -170,13 +230,20 @@
       return row;
     });
     list.replaceChildren(...rows);
+    const allWeb = byId('all-web');
+    allWeb.hidden = !broaderQuery || scope !== 'all';
+    if (!allWeb.hidden) {
+      allWeb.textContent = 'ค้น “' + broaderQuery + '” จากทุกเว็บไซต์';
+      allWeb.href = searchHash(broaderQuery,'all');
+    } else allWeb.removeAttribute('href');
+    byId('result-voice-hint').hidden = !rows.length;
     more.hidden = items.length <= visibleCount && !(scope === 'all' && nextPage);
     more.disabled = Boolean(moreRequest);
     more.setAttribute('aria-busy', String(Boolean(moreRequest)));
     updatePicks();
     if (focusUrl) Array.from(list.querySelectorAll('[data-pick]')).find(button => button.dataset.pick === focusUrl)?.focus({ preventScroll: true });
     for (const button of scopes) button.setAttribute('aria-pressed', String(button.dataset.scope === scope));
-    byId('listen').hidden = !items.length || !window.speechSynthesis || !window.SpeechSynthesisUtterance;
+    byId('listen').hidden = !items.length || !canSpeak();
     byId('retry').hidden = scope !== 'all' || !['partial', 'unavailable'].includes(phase);
     const count = items.length ? items.length + ' ผลลัพธ์' : '';
     if (scope === 'selected') status.textContent = count || 'ยังไม่มีเว็บคัดสรรตรงคำนี้ ลองเลือก “ทุกแหล่ง” เพื่อค้นเว็บภายนอก';
@@ -210,6 +277,7 @@
       if (!['ok', 'partial', 'empty', 'unavailable', 'invalid'].includes(data.status)) throw Error('invalid_response');
       nextPage = data.nextPage === 2 ? 2 : null;
       web = (data.results || []).filter(validItem);
+      broaderQuery = typeof data.broaderQuery === 'string' ? data.broaderQuery : '';
       selected = (data.selected || []).filter(validItem);
       phase = data.status; errorCode = data.error || ''; problem = data.message || 'กรุณาตรวจคำค้นหรือที่อยู่เว็บไซต์';
     } catch {
@@ -219,22 +287,51 @@
     if (pending === controller) { pending = null; render(); }
   }
   function stopSpeaking() {
-    if (speaking) { speaking = null; window.speechSynthesis.cancel(); }
+    if (speaking) { speaking = null; window.speechSynthesis?.cancel(); }
     byId('listen').textContent = 'ฟังผลค้นหา';
+    readerListen.textContent = 'ฟังหน้านี้';
   }
-  byId('listen').onclick = () => {
-    if (speaking) { stopSpeaking(); return; }
-    const words = visibleItems().slice(0, 3).map(item => [item.title, item.excerpt, 'ที่มา ' + item.source].filter(Boolean).join(' '));
-    const utterance = new SpeechSynthesisUtterance(words.join('. '));
-    utterance.lang = /[ก-๙]/.test(utterance.text) ? 'th-TH' : 'en-US';
-    utterance.onend = utterance.onerror = () => { if (speaking === utterance) { speaking = null; byId('listen').textContent = 'ฟังผลค้นหา'; } };
-    speaking = utterance; byId('listen').textContent = 'หยุดอ่าน';
-    window.speechSynthesis.speak(utterance);
-  };
+  function speak(text,button) {
+    stopSpeaking();
+    if (!text || !canSpeak()) return false;
+    const lang = /[ก-๙]/u.test(text) ? 'th-TH' : 'en-US';
+    const words = typeof Intl.Segmenter === 'function' ? Array.from(new Intl.Segmenter(lang,{granularity:'word'}).segment(text),p => p.segment) : text.split(/(\s+)/u);
+    const parts = [''];
+    for (const word of words) {
+      for (const piece of word.match(/[\s\S]{1,160}/gu) || []) {
+        if (parts.at(-1).length + piece.length > 160) parts.push('');
+        parts[parts.length-1] += piece;
+      }
+    }
+    const turn = {utterance:null};
+    speaking = turn; button.textContent = 'หยุดอ่าน';
+    function next() {
+      if (speaking !== turn) return;
+      const part = parts.shift();
+      if (part === undefined) { stopSpeaking(); return; }
+      const utterance = new SpeechSynthesisUtterance(part); turn.utterance = utterance;
+      utterance.lang = lang; utterance.onend = next;
+      utterance.onerror = () => {
+        if (speaking !== turn) return;
+        stopSpeaking();
+        (reader.open ? readerStatus : byId('voice-status')).textContent = 'เครื่องนี้ยังอ่านออกเสียงไม่ได้';
+      };
+      window.speechSynthesis.speak(utterance);
+    }
+    next(); return true;
+  }
+  function speakResults() {
+    const words = visibleItems().slice(0,3).map((item,index) =>
+      ['ผลที่ ' + (index+1),item.title,item.excerpt,'ที่มา ' + item.source].filter(Boolean).join(' '));
+    return speak(words.join('. '),byId('listen'));
+  }
+  byId('listen').onclick = () => speaking ? stopSpeaking() : speakResults();
+  readerListen.onclick = () => speaking ? stopSpeaking() : speak(readerText,readerListen);
   function stopRecognition() {
     if (recording) window.PanthoriumSpeechInput?.stop();
     recording = null; voiceLanguage.disabled = false;
     byId('mic').setAttribute('aria-pressed', 'false'); byId('voice-status').textContent = '';
+    byId('reader-mic').setAttribute('aria-pressed','false'); readerStatus.textContent = '';
   }
   function searchHash(value, nextScope) {
     const params = new URLSearchParams({ q:value });
@@ -248,7 +345,8 @@
     if (scope === 'selected') stopMore();
     stopSpeaking(); stopRecognition();
     if (query !== next) {
-      pending?.abort(); pending = null; stopMore(); nextPage = null; web = []; phase = 'idle'; errorCode = ''; visibleCount = 12;
+      if (reader.open) reader.close();
+      pending?.abort(); pending = null; stopMore(); nextPage = null; web = []; broaderQuery = ''; phase = 'idle'; errorCode = ''; visibleCount = 12;
       query = next; selected = query ? PanthoriumSearchDirectory.match(query) : [];
       suggested = query && !selected.length ? PanthoriumSearchDirectory.suggest(query) : '';
     }
@@ -307,11 +405,11 @@
     render();
     Array.from(list.querySelectorAll('.item-title')).find(node => !displayed.has(node.href))?.focus();
   };
-  byId('mic').onclick = async () => {
-    const voice = window.PanthoriumSpeechInput, mic = byId('mic'), info = byId('voice-status');
+  async function listenCommand(mic,info) {
+    const voice = window.PanthoriumSpeechInput;
     if (recording) { voice.submit(); return; }
     stopSpeaking();
-    const turn = {suggestion:currentSuggestion()}; recording = turn; voiceLanguage.disabled = true; mic.setAttribute('aria-pressed', 'true');
+    const turn = {suggestion:currentSuggestion(),context:voiceContext()}; recording = turn; voiceLanguage.disabled = true; mic.setAttribute('aria-pressed', 'true');
     try {
       const speech = await voice.listen({
         lang:voiceLanguage.value, hasSuggestion:!!turn.suggestion,
@@ -319,15 +417,24 @@
         notify:label => { if (recording === turn) info.textContent = label; }
       });
       if (recording !== turn || !speech.text) return;
-      if (voice.acceptsSpelling(speech.text)) {
+      const command = voice.resultCommand(speech.text);
+      if (command) {
+        const result = runVoiceCommand(command,turn.context);
+        (reader.open ? readerStatus : byId('voice-status')).textContent = result.text;
+      } else if (voice.acceptsSpelling(speech.text)) {
         if (!applySuggestion(turn.suggestion)) info.textContent = 'ยังไม่มีคำแนะนำสำหรับผลค้นหานี้';
-      } else navigate(voice.webSearchTerms(speech.text) || speech.text.slice(0, 300), scope);
+      } else {
+        if (reader.open) reader.close();
+        navigate(voice.webSearchTerms(speech.text) || speech.text.slice(0,300),scope);
+      }
     } catch (error) {
-      if (recording === turn && error.code !== 'cancelled') { info.textContent = voice.describe(error); input.focus(); }
+      if (recording === turn && error.code !== 'cancelled') { info.textContent = voice.describe(error); (reader.open ? mic : input).focus(); }
     } finally {
       if (recording === turn) { recording = null; voiceLanguage.disabled = false; mic.setAttribute('aria-pressed', 'false'); }
     }
-  };
+  }
+  byId('mic').onclick = () => listenCommand(byId('mic'),byId('voice-status'));
+  byId('reader-mic').onclick = () => listenCommand(byId('reader-mic'),readerStatus);
   input.addEventListener('input', () => {
     if (recording) stopRecognition();
     byId('spelling').hidden = !suggested || input.value.trim() !== query;

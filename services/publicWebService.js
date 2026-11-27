@@ -257,27 +257,37 @@ class PublicWebService {
       retrievedAt:response.retrievedAt}] : [];
   }
   async search({query, language, limit = 6, page = 1}, context, intent = parseQuery(query)) {
+    query = intent.officialName || query;
     language ||= /[\u0e00-\u0e7f]/.test(query) ? 'th' : 'en';
     // Mwmbl accepts ordinary terms. Apply site operators ourselves to every returned URL.
     const local = !intent.sites.length && placeQuery(intent.terms);
     const indexQuery = intent.sites.length ? [intent.terms, ...intent.sites.map(site => site.hostname)].join(' ') : query;
     const providers = [];
-    if (page === 1) providers.push({name:'Mwmbl',offset:0,stride:1.5,request:this.searchIndex(indexQuery,context)});
-    let nextPage = null;
-    providers.push({name:'Purili',offset:1,stride:1.5,request:this.purili(query,context,page).then(result => {
-      nextPage = result.nextPage;
-      return result.entries;
-    })});
-    if (page === 1 && !intent.sites.length) {
-      const wiki = this.wikipedia(query, language, context, true);
-      providers.push(
-        {name:'DuckDuckGo Instant Answers',offset:3,stride:3,request:this.instantAnswers(query, context)},
-        {name:'Wikipedia',offset:3,stride:4,request:wiki.then(({pages,response}) => pages.map(page => ({
-          title:page.title,url:page.fullurl || 'https://' + language + '.wikipedia.org/?curid=' + Number(page.pageid),
-          excerpt:page.extract,license:'https://creativecommons.org/licenses/by-sa/4.0/',retrievedAt:response.retrievedAt
-        })))},
-        {name:'Wikidata',offset:-20,stride:2,request:wiki.then(({pages}) => this.officialWebsites(query,pages,language,context), () => [])}
-      );
+    let nextPage = null, destinations = [];
+    if (intent.officialName) {
+      // A verified organization record can answer a navigation request before any general index is called.
+      try { destinations = await this.officialWebsites(query,[],language,context); }
+      catch { /* The public indexes can still supply results if the record service is unavailable. */ }
+    }
+    if (destinations.length) {
+      providers.push({name:'Wikidata',offset:-20,stride:2,request:Promise.resolve(destinations)});
+    } else {
+      if (page === 1) providers.push({name:'Mwmbl',offset:0,stride:1.5,request:this.searchIndex(indexQuery,context)});
+      providers.push({name:'Purili',offset:1,stride:1.5,request:this.purili(query,context,page).then(result => {
+        nextPage = result.nextPage;
+        return result.entries;
+      })});
+      if ((page === 1 || intent.officialName) && !intent.sites.length) {
+        const wiki = this.wikipedia(query, language, context, true);
+        if (page === 1) providers.push(
+          {name:'DuckDuckGo Instant Answers',offset:3,stride:3,request:this.instantAnswers(query, context)},
+          {name:'Wikipedia',offset:3,stride:4,request:wiki.then(({pages,response}) => pages.map(page => ({
+            title:page.title,url:page.fullurl || 'https://' + language + '.wikipedia.org/?curid=' + Number(page.pageid),
+            excerpt:page.extract,license:'https://creativecommons.org/licenses/by-sa/4.0/',retrievedAt:response.retrievedAt
+          })))}
+        );
+        providers.push({name:'Wikidata',offset:-20,stride:2,request:wiki.then(({pages}) => this.officialWebsites(query,pages,language,context), () => [])});
+      }
     }
     const replies = await Promise.allSettled(providers.map(provider => provider.request));
     const issues = [], ranked = [];
@@ -303,6 +313,16 @@ class PublicWebService {
             retrievedAt:entry.retrievedAt, ...(entry.official ? {kind:'official'} : {}),
             ...(entry.license ? {license:entry.license} : {}), ...(entry.recordUrl ? {recordUrl:entry.recordUrl} : {})
           }});
+      }
+    }
+    if (intent.officialName) {
+      const official = new Map();
+      for (const {result} of ranked) if (result.kind === 'official') official.set(result.url,result);
+      if (official.size) {
+        if (page > 1) return {...unavailable('web_no_results'),issues:[],nextPage:null};
+        const results = [...official.values()].slice(0,limit);
+        return {available:true,coverage:'official_website',results,sources:results.map(({excerpt,...source}) => source),
+          broaderQuery:intent.officialName,nextPage:null,issues:[]};
       }
     }
     const results = [], seen = new Map(), domains = new Map();

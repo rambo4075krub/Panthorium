@@ -35,6 +35,24 @@ function address(text, explicit) {
   }
   return null;
 }
+function destination(token) {
+  const explicit = /^(?:[a-z][a-z\d+.-]*:|\/\/|www\.|localhost(?:[/:]|$))/iu.test(token);
+  return explicit || /^[^\s:/?#]+\.[^\s./:?#]+(?:[/:?#]|$)/u.test(token) || token.includes('@') ? address(token, explicit) : null;
+}
+// Interpret requests for a named site without changing quoted text, operators or ordinary questions.
+function websiteName(query) {
+  if (/["“”|]/u.test(query) || /\s[-+]\S|(?:^|\s)(?:intitle|inurl|filetype|before|after):/iu.test(query)) return '';
+  const polite = query.replace(/^(?:ช่วย|กรุณา|please\s+)\s*/iu,'').replace(/\s*(?:ให้หน่อย|หน่อย|นะครับ|นะคะ|ครับ|ค่ะ)[.!]*$/u,'');
+  const match = /^(?:(?:ขอ|หา|ค้นหา|เปิด)\s*)?(?:เว็บไซต์|เว็ปไซต์|เว็บ|เว็ป)\s*(?:อย่างเป็นทางการ|ทางการ|หลัก|ของ)\s*(?:ของ\s*)?(.+)$/u.exec(polite) ||
+    /^(?:ขอ|เปิด)\s*(?:เว็บไซต์|เว็ปไซต์|เว็บ|เว็ป)\s*(.+)$/u.exec(polite) ||
+    /^(?:เว็บไซต์|เว็ปไซต์|เว็บ|เว็ป)\s*((?:กรม|กระทรวง|มหาวิทยาลัย|ธนาคาร|สมาคม|บริษัท|การรถไฟ|การบิน)\S.*)$/u.exec(polite) ||
+    /^(.+?)\s+(?:เว็บไซต์|เว็บ)(?:อย่างเป็นทางการ|ทางการ|หลัก)$/u.exec(polite) ||
+    /^(?:(?:find|open|show)\s+(?:me\s+)?)?(?:the\s+)?official\s+(?:website|web\s?site|site)\s+(?:of|for)\s+(.+)$/iu.exec(polite) ||
+    /^(.+?)\s+official\s+(?:website|web\s?site|site)$/iu.exec(polite);
+  const name = match?.[1].trim();
+  if (!name || /^(?:คือ|ที่|อย่างไร|อะไร|ของ$)/u.test(name)) return '';
+  return name;
+}
 function parseQuery(value) {
   const query = String(value || '').trim();
   const sites = [], text = [];
@@ -47,19 +65,21 @@ function parseQuery(value) {
   }
   if (sites.length && !text.length && sites.length === 1) return {address:sites[0]};
   if (!sites.length && text.length === 1) {
-    const token = text[0];
-    const explicit = /^(?:[a-z][a-z\d+.-]*:|\/\/|www\.|localhost(?:[/:]|$))/iu.test(token);
-    if (explicit || /^[^\s:/?#]+\.[^\s./:?#]+(?:[/:?#]|$)/u.test(token) || token.includes('@')) {
-      const url = address(token, explicit);
-      if (url) return {address:url};
-    }
+    const url = destination(text[0]);
+    if (url) return {address:url};
   }
   // Never transmit a pasted private address or credential-bearing URL as part of a keyword query.
   for (const token of text) if (/^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)/iu.test(token)) searchUrl(token.startsWith('//') ? 'https:' + token : token, true);
+  const requestedName = sites.length ? '' : websiteName(query);
+  if (requestedName && !/\s/u.test(requestedName)) {
+    const url = destination(requestedName);
+    if (url) return {address:url};
+  }
   if (query.length > 300 || !query) throw Error('web_invalid_query');
-  const terms = text.join(' ');
-  return {query, terms, sites, words:words(terms), brand:compact(terms),
-    groups:text.filter(s => /^[\p{Script=Thai}]+$/u.test(s) && !stop.has(s)).map(compact)};
+  const officialName = requestedName.length <= 100 ? requestedName : '';
+  const terms = officialName || text.join(' ');
+  return {query, terms, officialName, sites, words:words(terms), brand:compact(terms),
+    groups:terms.split(/\s+/u).filter(s => /^[\p{Script=Thai}]+$/u.test(s) && !stop.has(s)).map(compact)};
 }
 function addressResult(url) {
   return {kind:'address', title:domainToUnicode(url.hostname) + (url.pathname === '/' ? '' : url.pathname),

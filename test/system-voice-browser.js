@@ -50,8 +50,10 @@ module.exports = async function systemVoice(browser, origin) {
     };
   });
   await page.route('**/api/search', route => {
-    queries.push(route.request().postDataJSON().query);
-    return route.fulfill({json:{selected:[],results:[{title:'Mozilla',url:'https://www.mozilla.org/',source:'Mwmbl'}],status:'ok'}});
+    const query = route.request().postDataJSON().query; queries.push(query);
+    const results = [{title:'Mozilla',url:'https://www.mozilla.org/',source:'Mwmbl'}];
+    if (query === 'Mozilla') results.push({title:'Firefox',url:'https://www.firefox.com/',source:'Purili'});
+    return route.fulfill({json:{selected:[],results,status:'ok'}});
   });
   await page.route('**/api/search/read', route => route.fulfill({json:{title:'Mozilla',url:'https://www.mozilla.org/',content:'Website text'}}));
   await page.route('**/api/hybrid/status', route=>route.fulfill({json:{geminiAllowed:false,local:{enabled:false,ready:false}}}));
@@ -82,6 +84,17 @@ module.exports = async function systemVoice(browser, origin) {
     await page.locator('#panthorium-browser-dashboard .win-btn.close').click();
     await page.goto(origin+'/search?q=Mozilla'); await ready();
     await frame.locator('.item-title').first().waitFor();
+    const before = queries.length;
+    await say('เปิดผลที่สอง');
+    await frame.getByText('Website text',{exact:true}).waitFor();
+    assert.equal(await frame.locator('#reader-source').getAttribute('href'),'https://www.firefox.com/');
+    await say('กลับไปผลค้นหา');
+    await frame.locator('#reader').waitFor({state:'hidden'});
+    assert.equal(queries.length,before);
+    assert.equal(await frame.locator('#query').inputValue(),'Mozilla');
+    await say('ขอเว็บกรมสรรพากร');
+    await frame.locator('.item-title').first().waitFor();
+    assert(queries.includes('ขอเว็บกรมสรรพากร'));
     await frame.locator('.item-title').first().click();
     await frame.getByText('Website text',{exact:true}).waitFor();
     assert.equal(context.pages().length,1);

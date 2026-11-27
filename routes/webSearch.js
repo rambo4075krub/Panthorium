@@ -55,7 +55,7 @@ function createWebSearchRouter(service) {
       }
       const page = body.page ?? 1;
       if (page > 1 && (intent.address || body.scope === 'selected')) return res.status(400).json({error:'invalid_page'});
-      const selected = page === 1 && !intent.address && !intent.sites.length ? directory.match(query) : [];
+      const selected = page === 1 && !intent.address && !intent.sites.length ? directory.match(intent.officialName || query) : [];
       if (body.scope === 'selected') return res.json({ selected, results: [], status: 'selected' });
       const web = await service.execute('web.search', { query, limit: 36, page }, 'public-search:' + req.ip);
       const partial = Boolean(web.issues?.length);
@@ -64,7 +64,8 @@ function createWebSearchRouter(service) {
         status = web.error === 'web_no_results' ? (partial ? 'partial' : 'empty') : 'unavailable';
         if (status === 'unavailable') httpStatus = web.error === 'web_rate_limited' ? 429 : 503;
       } else if (partial) status = 'partial';
-      res.status(httpStatus).json({ selected, results: web.results || [], status, error: web.error, nextPage: web.nextPage ?? null,
+      res.status(httpStatus).json({ selected: web.broaderQuery ? [] : selected, results: web.results || [], status, error: web.error, nextPage: web.nextPage ?? null,
+        ...(web.broaderQuery ? {broaderQuery:web.broaderQuery} : {}),
         unavailableSources: (web.issues || []).map(issue => issue.source) });
     } catch (error) { next(error); }
   }, (error, _req, res, next) => {

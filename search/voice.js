@@ -97,6 +97,50 @@
     return prefix ? spoken.slice(prefix[0].length).trim().slice(0, 300) : '';
   }
   const acceptsSpelling = text => /^(?:ใช้คำ(?:ค้น)?ที่แนะนำ|ค้นด้วยคำที่แนะนำ|use (?:the )?suggested (?:query|spelling))(?:\s*(?:ครับ|ค่ะ))?[.!?]*$/iu.test(text.trim());
+  const ordinals = [
+    ['แรก','หนึ่ง','first','one'], ['สอง','second','two'], ['สาม','third','three'], ['สี่','fourth','four'],
+    ['ห้า','fifth','five'], ['หก','sixth','six'], ['เจ็ด','seventh','seven'], ['แปด','eighth','eight'],
+    ['เก้า','ninth','nine'], ['สิบ','tenth','ten'], ['สิบเอ็ด','eleventh','eleven'], ['สิบสอง','twelfth','twelve'],
+    ['สิบสาม','thirteenth','thirteen'], ['สิบสี่','fourteenth','fourteen'], ['สิบห้า','fifteenth','fifteen'],
+    ['สิบหก','sixteenth','sixteen'], ['สิบเจ็ด','seventeenth','seventeen'], ['สิบแปด','eighteenth','eighteen'], ['สิบเก้า','nineteenth','nineteen']
+  ];
+  function resultNumber(value) {
+    const digits = /^(\d+)(?:st|nd|rd|th)?$/u.exec(value);
+    if (digits) return Number(digits[1]);
+    const named = ordinals.findIndex(names => names.includes(value)) + 1;
+    if (named) return named;
+    const thai = /^(ยี่|สาม|สี่|ห้า|หก|เจ็ด|แปด|เก้า)สิบ(เอ็ด|สอง|สาม|สี่|ห้า|หก|เจ็ด|แปด|เก้า)?$/u.exec(value);
+    if (thai) {
+      const tens = thai[1] === 'ยี่' ? 2 : ordinals.findIndex(names => names.includes(thai[1])) + 1;
+      const unit = thai[2] === 'เอ็ด' ? 1 : ordinals.findIndex(names => names.includes(thai[2])) + 1;
+      return tens * 10 + unit;
+    }
+    const [tens,unit] = value.split(/[- ]/u);
+    const tensNames = ['twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
+    const decade = tensNames.indexOf(tens.replace(/ieth$/u,'y'));
+    const unitNumber = unit ? ordinals.slice(0,9).findIndex(names => names.includes(unit)) + 1 : 0;
+    return decade < 0 || (unit && !unitNumber) ? 0 : (decade + 2) * 10 + unitNumber;
+  }
+  function resultCommand(text) {
+    const spoken = text.normalize('NFC').toLowerCase().trim().replace(/^(?:ช่วย|กรุณา|please\s+)\s*/u,'')
+      .replace(/(?:ให้หน่อย|หน่อย|นะครับ|นะคะ|ครับ|ค่ะ|please)?[.!?。]*$/u,'').trim()
+      .replace(/[๐-๙]/gu, digit => String(digit.charCodeAt(0) - 0xe50));
+    const thai = spoken.replace(/\s+/gu,'');
+    if (/^(?:กลับ(?:ไป)?(?:หน้า)?ผล(?:การ)?ค้นหา|กลับ(?:ไป)?(?:หน้า)?ผลลัพธ์)$/u.test(thai) || /^(?:go )?back to (?:the )?(?:search )?results$/u.test(spoken)) return {action:'back'};
+    if (/^(?:แสดง|ดู|โหลด)ผล(?:การค้นหา|ค้นหา|ลัพธ์)?(?:เพิ่มเติม|เพิ่ม|ถัดไป)$/u.test(thai) || /^(?:show|load)(?: me)? more (?:search )?results$/u.test(spoken)) return {action:'more'};
+    if (/^(?:ค้น(?:หา)?|ดูผล)(?:จาก)?ทุกเว็บไซต์$/u.test(thai) || spoken === 'search all websites') return {action:'all-sources'};
+    if (/^(?:ฟัง|อ่าน)ผล(?:การ)?ค้นหา(?:ให้ฟัง)?$/u.test(thai) || /^read (?:the )?(?:search )?results(?: aloud)?$/u.test(spoken)) return {action:'listen-results'};
+    if (/^(?:ฟัง|อ่าน)(?:หน้าเว็บนี้|หน้านี้|บทความนี้)(?:ให้ฟัง)?$/u.test(thai) || /^read (?:this|the) (?:page|article)(?: aloud)?$/u.test(spoken)) return {action:'listen-page'};
+    if (thai === 'หยุดอ่าน' || spoken === 'stop reading') return {action:'stop'};
+    const english = spoken.replace(/\bsearch result\b/u,'result').replace(/ aloud$/u,'');
+    const match = /^(เปิด|อ่าน)(?:ผล(?:การค้นหา|ค้นหา|ลัพธ์(?:การค้นหา)?)?|ลิงก์)(?:หมายเลข|อันดับ(?:ที่)?|ลำดับ(?:ที่)?|ที่)?([ก-๙]+|\d+)$/u.exec(thai.replace(/ให้ฟัง$/u,'')) ||
+      /^(open|read) (?:the )?result (?:number )?([a-z0-9]+(?:[ -][a-z]+)?)$/u.exec(english) ||
+      /^(open|read) (?:the )?([a-z0-9]+(?:[ -][a-z]+)?) result$/u.exec(english);
+    if (!match) return null;
+    const index = resultNumber(match[2]);
+    if (!index || !Number.isSafeInteger(index)) return null;
+    return {action:['อ่าน','read'].includes(match[1]) ? 'read' : 'open', index};
+  }
   async function listen({ commands = false, requireIdentity = false, localOnly = false, hasSuggestion = false, lang = 'th-TH', notify = () => {} } = {}) {
     if (current) throw error('speech_busy');
     const turn = { controller:new AbortController(), submit:null }; current = turn;
@@ -142,7 +186,7 @@
     } finally { if (current === turn) current = null; }
   }
   const stop = () => { current?.controller.abort(); };
-  window.PanthoriumSpeechInput = { listen, stop, webSearchTerms, acceptsSpelling, active:() => !!current,
+  window.PanthoriumSpeechInput = { listen, stop, webSearchTerms, acceptsSpelling, resultCommand, active:() => !!current,
     submit:() => current?.submit ? current.submit() : stop(), describe:e => labels[e?.code] || labels.speech_unavailable };
   window.addEventListener('pagehide', stop);
 })();

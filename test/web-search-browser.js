@@ -8,12 +8,20 @@ const { PublicWebService } = require('../services/publicWebService');
 const { createPublicAssetMiddleware } = require('../middleware/publicAssets');
 
 async function main() {
-  const calls = [], app = express();
+  const calls = [], reads = [], app = express();
   const direct = new PublicWebService({http:{get:() => { throw Error('Unexpected network request for direct navigation'); }}});
   let releaseSlow, startSlow, moreCalls = 0;
   const slowStarted = new Promise(resolve => { startSlow = resolve; });
   app.use(createWebSearchRouter({ async execute(tool, args) {
+    if (tool === 'web.read') {
+      reads.push(args.url);
+      if (args.url === 'https://publisher-3.org/') return {available:false,error:'web_robots_denied',message:'ต้นทางจำกัดการอ่าน'};
+      return {available:true,url:args.url,title:'บทความจากต้นทาง',content:'ข้อความจากต้นทาง '.repeat(50)};
+    }
     assert.equal(tool, 'web.search'); calls.push(args.query);
+    if (args.query === 'เว็บไซต์ทางการของ PRN') return {available:true,broaderQuery:'PRN',results:[{
+      title:'PRN',url:'https://prn.example.org/',source:'Wikidata',kind:'official',recordUrl:'https://www.wikidata.org/wiki/Q123'
+    }]};
     if (/^https?:\/\//u.test(args.query)) return direct.execute(tool,args,'fixture');
     if (args.query === 'open web collection' && args.page === 2) {
       if (++moreCalls === 1) return {available:false,error:'web_rate_limited'};
@@ -59,6 +67,10 @@ async function main() {
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.addInitScript(() => {
+      window.qaSpoken = [];
+      Object.defineProperty(window,'speechSynthesis',{configurable:true,value:{
+        speak(utterance) { window.qaSpoken.push(utterance.text); window.qaUtterance=utterance; }, cancel() {}
+      }});
       window.SpeechRecognition = class {
         start() { window.testRecognizer = this; }
         abort() { window.testRecognizer = null; }
@@ -110,8 +122,8 @@ async function main() {
     await page.locator('#open-compare').click(); await page.locator('#clear').click();
     assert.equal(await page.locator('#count').textContent(),'0');
     await page.keyboard.press('Escape');
-    const dictate = async (text, language) => {
-      await page.locator('#mic').click();
+    const dictate = async (text, language, control = '#mic') => {
+      await page.locator(control).click();
       await page.waitForFunction(() => !!window.testRecognizer);
       assert.equal(await page.evaluate(() => window.testRecognizer.lang), language);
       assert(await page.locator('#voice-language').isDisabled());
@@ -152,9 +164,41 @@ async function main() {
     await submit('open web collection');
     await page.locator('#more-results').waitFor();
     assert.equal(await page.locator('.result-item').count(),12);
-    await page.locator('#more-results').click();
+    const beforeNavigation = calls.length;
+    await page.locator('#voice-language').selectOption('th-TH');
+    await dictate('เปิดผลลัพธ์ที่ ๒','th-TH');
+    await page.locator('#reader[open]').waitFor();
+    assert.equal(await page.locator('#reader-source').getAttribute('href'),'https://publisher-2.org/');
+    await page.locator('#reader-listen').waitFor();
+    await dictate('อ่านหน้านี้ให้ฟัง','th-TH','#reader-mic');
+    await page.waitForFunction(()=>window.qaSpoken.length === 1);
+    assert.match(await page.evaluate(()=>qaSpoken[0]),/ข้อความจากต้นทาง/u);
+    assert((await page.evaluate(()=>qaSpoken[0].length)) <= 160);
+    await dictate('กลับไปผลค้นหา','th-TH','#reader-mic');
+    await page.locator('#reader').waitFor({state:'hidden'});
+    await page.evaluate(()=>qaUtterance.onend());
+    assert.equal(await page.evaluate(()=>qaSpoken.length),1);
+    await dictate('อ่านผลที่สามให้ฟัง','th-TH');
+    await page.getByText('ต้นทางจำกัดการอ่าน',{exact:true}).waitFor();
+    assert(await page.locator('#reader-listen').isHidden());
+    assert.equal(await page.evaluate(()=>qaSpoken.length),1);
+    await page.locator('#close-reader').click();
+    await dictate('เปิดผลที่ 99','th-TH');
+    await page.getByText('ตอนนี้มีผลที่แสดง 1 ถึง 12',{exact:true}).waitFor();
+    assert.deepEqual(reads,['https://publisher-2.org/','https://publisher-3.org/']);
+    assert.equal(calls.length,beforeNavigation);
+    const oldContext = await page.evaluate(()=>PanthoriumSearchPage.voiceContext());
+    await dictate('แสดงผลเพิ่มเติม','th-TH');
     assert.equal(await page.locator('.result-item').count(),24);
+    assert.equal(await page.evaluate(ctx=>PanthoriumSearchPage.runVoiceCommand({action:'open',index:1},ctx).ok,oldContext),false);
     assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Publisher 13');
+    await page.locator('#voice-language').selectOption('en-US');
+    await dictate('open the twenty-first result','en-US');
+    await page.locator('#reader[open]').waitFor();
+    assert.equal(await page.locator('#reader-source').getAttribute('href'),'https://publisher-21.org/');
+    await dictate('back to search results','en-US','#reader-mic');
+    await page.locator('#reader').waitFor({state:'hidden'});
+    await page.locator('#voice-language').selectOption('th-TH');
     await page.locator('#more-results').click();
     assert.equal(await page.locator('.result-item').count(),26);
     await page.locator('#more-results').click();
@@ -165,6 +209,13 @@ async function main() {
     assert.equal(await page.locator('.result-item').count(),27);
     assert.equal(moreCalls,2);
     assert(await page.locator('#more-results').isHidden());
+    await submit('เว็บไซต์ทางการของ PRN');
+    await page.locator('#all-web').waitFor();
+    assert.equal(await page.locator('#query').inputValue(),'เว็บไซต์ทางการของ PRN');
+    assert((await page.locator('#result-list .source').innerText()).includes('Wikidata'));
+    await dictate('ค้นจากทุกเว็บไซต์','th-TH');
+    await page.getByRole('link',{name:'Source PRN',exact:true}).waitFor();
+    assert(await page.locator('#all-web').isHidden());
     const deep = 'https://www.python.org/downloads/?version=' + 'a'.repeat(315) + '#current';
     await submit(deep);
     await page.getByText('ที่อยู่เว็บไซต์ที่คุณระบุ',{exact:true}).waitFor();
