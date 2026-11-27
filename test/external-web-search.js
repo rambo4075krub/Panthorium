@@ -48,6 +48,23 @@ module.exports = async function externalWebSearch(fixture, response) {
 
   let time = Date.now();
   const liveClock = () => (time += 1200);
+  const indexed = fixture(url => {
+    if (url.hostname === 'puri.li') return response({results:[
+      {title:'Blue Skies – site search',url:'https://catalog.example.org/az?s=Blue+Skies',description:'Search for Blue Skies'},
+      {title:'Blue Skies – unrelated promotion',url:'https://offers.example.net/th/abc/4.html'},
+      {title:'Hardware reference',url:'https://parts.example.com/component/10',description:'In the footer: Blue Skies'},
+      {title:'Blue Skies passenger guide',url:'https://travel.example.org/guide/blue-skies',description:'Independent guide to Blue Skies travel'},
+      {title:'Blue Skies route map',url:'https://maps.example.net/routes?q=Blue+Skies',description:'Network served by Blue Skies'}
+    ]});
+    return response({results:[],query:{pages:[]}});
+  },liveClock);
+  const broad = await indexed.service.execute('web.search',{query:'Blue Skies'},'visitor');
+  const hits = broad.results.map(item => item.url);
+  assert.equal(hits[0],'https://travel.example.org/guide/blue-skies');
+  assert(hits.indexOf('https://maps.example.net/routes?q=Blue+Skies') < hits.indexOf('https://offers.example.net/th/abc/4.html'));
+  assert.equal(hits.at(-1),'https://catalog.example.org/az?s=Blue+Skies');
+  const targeted = await indexed.service.execute('web.search',{query:'site:catalog.example.org Blue Skies'},'visitor');
+  assert.equal(targeted.results[0].url,'https://catalog.example.org/az?s=Blue+Skies');
   const places = fixture(url => {
     if (url.hostname === 'puri.li') return response({results:[
       {title:'ประสบการณ์ ร้านหนังสือ มาดริด',url:'https://traveler.example.com/madrid'},

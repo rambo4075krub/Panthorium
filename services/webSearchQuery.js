@@ -95,8 +95,16 @@ function relevance(intent, url, entry, local) {
   const title = compact(entry.title || '');
   let path = url.pathname;
   try { path = decodeURIComponent(path); } catch {}
-  const heading = compact(domainToUnicode(url.hostname) + ' ' + path + ' ' + (entry.title || ''));
-  const body = heading + ' ' + compact(entry.excerpt || '');
+  // Some indexes contain other sites' on-demand search pages. Their titles echo
+  // arbitrary terms even when the site has no corresponding article or product.
+  const isSearchPath = /^\/(?:[a-z]{2}(?:[-_][a-z]{2})?\/?)?$/iu.test(path) ||
+    /(?:^|\/)(?:search|search-results|results)(?:\.[a-z]+)?\/?$/iu.test(path);
+  const searchListing = !intent.sites.length && isSearchPath && [...url.searchParams].some(([key,value]) =>
+    /^(?:s|q|query|search|search_query|keywords?)$/iu.test(key) && /\p{L}/u.test(value));
+  const location = compact(domainToUnicode(url.hostname) + ' ' + path);
+  const heading = location + ' ' + title;
+  const excerpt = compact(entry.excerpt || '');
+  const body = heading + ' ' + excerpt;
   const terms = intent.words;
   const present = terms.filter(word => body.includes(compact(word))).length;
   if (local && (!body.includes(compact(local.place)) || !body.includes(compact(local.word)))) return null;
@@ -105,8 +113,14 @@ function relevance(intent, url, entry, local) {
   if (terms.length > 1 && present < Math.ceil(terms.length / 2)) return null;
   const exactSite = compact(domainToUnicode(parse(domain, suffixOptions).domainWithoutSuffix || '')) === intent.brand;
   const exactTitle = title === intent.brand;
-  return (terms.length ? 9 * (1 - present / terms.length) : 0) -
+  const headingMatches = terms.filter(word => heading.includes(compact(word))).length;
+  let evidencePenalty = 0;
+  if (!intent.sites.length && terms.length && !exactSite && !exactTitle) {
+    if (!headingMatches) evidencePenalty = 8;
+    else if (!excerpt && path !== '/' && !terms.some(word => location.includes(compact(word)))) evidencePenalty = 18;
+  }
+  return (searchListing ? 36 : 0) + evidencePenalty + (terms.length ? 9 * (1 - present / terms.length) : 0) -
     (exactSite ? 6 : 0) - (exactTitle ? 2 : 0) - (exactSite && url.pathname === '/' ? 3 : 0) -
-    (terms.length ? 2 * terms.filter(word => heading.includes(compact(word))).length / terms.length : 0);
+    (terms.length ? 2 * headingMatches / terms.length : 0);
 }
 module.exports = { parseQuery, searchUrl, addressResult, matchesSite, siteGroup, relevance, words };
