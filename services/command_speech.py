@@ -17,17 +17,24 @@ def microphone_samples(wav):
 
 
 def vocabulary(language, purpose, has_suggestion):
-    if language != "th":
-        prompt = ("Web search, websites, places and names." if purpose == "search" else
-                  "Panthorium Search. Open search, search the web, open calendar, list controls.")
-        return prompt + " Use the suggested spelling." if has_suggestion else prompt
-    topics = "โรงแรม ร้านอาหาร นิทรรศการ ศิลปะ กรุงเทพฯ ริมแม่น้ำเจ้าพระยา"
-    if purpose == "search":
-        prompt = f"ค้นเว็บ {topics} พิพิธภัณฑ์ เว็บไซต์"
+    if language == "th":
+        topics = "โรงแรม ร้านอาหาร นิทรรศการ ศิลปะ กรุงเทพฯ ริมแม่น้ำเจ้าพระยา"
+        prompts = {
+            "search": f"ค้นเว็บ {topics} พิพิธภัณฑ์ เว็บไซต์",
+            "command": f"คำสั่งเสียง Panthorium เปิดหน้าค้นหา ค้นเว็บ เปิดปฏิทิน เปิดไฟล์ เปิดเบราว์เซอร์ แสดงปุ่ม เลือกช่อง {topics} เว็บไซต์ พิพิธภัณฑ์",
+            "results": "ค้นเว็บ ขอเว็บไซต์ เปิดผลที่สอง อ่านผลที่หนึ่งให้ฟัง ฟังผลค้นหา แสดงผลเพิ่มเติม ค้นจากทุกเว็บไซต์ หยุดอ่าน",
+            "reader": "อ่านหน้านี้ให้ฟัง กลับไปผลค้นหา หยุดอ่าน ค้นเว็บเรื่องใหม่",
+        }
+        spelling = " ใช้คำที่แนะนำ"
     else:
-        commands = "คำสั่งเสียง Panthorium เปิดหน้าค้นหา ค้นเว็บ เปิดปฏิทิน เปิดไฟล์ เปิดเบราว์เซอร์ แสดงปุ่ม เลือกช่อง"
-        prompt = f"{commands} {topics} เว็บไซต์ พิพิธภัณฑ์"
-    return prompt + " ใช้คำที่แนะนำ" if has_suggestion else prompt
+        prompts = {
+            "search": "Web search, websites, places and names.",
+            "command": "Panthorium Search. Open search, search the web, open calendar, list controls.",
+            "results": "Open the second result. Read the first result aloud. Show more results. Web search.",
+            "reader": "Read this page aloud. Back to search results. Stop reading. Search the web.",
+        }
+        spelling = " Use the suggested spelling."
+    return prompts.get(purpose, prompts["search"]) + (spelling if has_suggestion else "")
 
 
 def main(result):
@@ -37,7 +44,10 @@ def main(result):
     if os.name == "nt":
         psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
     os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["ORT_DISABLE_TELEMETRY"] = "1"
     os.environ["OMP_NUM_THREADS"] = "2"
+    import onnxruntime
+    onnxruntime.disable_telemetry_events()
     from faster_whisper import WhisperModel
     model = WhisperModel(sys.argv[1], device="cpu", compute_type="int8",
                          cpu_threads=2, num_workers=1, local_files_only=True)

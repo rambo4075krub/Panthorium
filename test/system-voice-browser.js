@@ -26,6 +26,10 @@ async function speechRoute() {
     assert.equal(calls,0);
     assert.equal((await (await post('search',wav)).json()).commands,false);
     assert.deepEqual(lastTurn,['th','search',false]);
+    for (const purpose of ['reader','results','unknown']) {
+      assert.equal((await (await post('search?purpose='+purpose,wav)).json()).commands,false);
+      assert.equal(lastTurn[1],purpose==='unknown' ? 'search' : purpose);
+    }
     assert.equal((await (await post('search?purpose=command&lang=en&spelling=1',wav)).json()).commands,false);
     assert.deepEqual(lastTurn,['en','command',true]);
     assert.equal((await (await post('commands',wav,true)).json()).commands,false);

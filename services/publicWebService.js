@@ -356,7 +356,8 @@ class PublicWebService {
     }
     if (!results.length) {
       const indexAvailable = replies.some((reply,i) => reply.status === 'fulfilled' && providers[i].name !== 'Wikidata');
-      return {...unavailable(indexAvailable ? 'web_no_results' : issues[0]?.error),coverage:'limited_free_sources',nextPage,issues};
+      return {...unavailable(indexAvailable ? 'web_no_results' : issues[0]?.error),coverage:'limited_free_sources',nextPage,issues,
+        ...(indexAvailable && intent.officialName ? {broaderQuery:intent.officialName} : {})};
     }
     return {available:true, coverage:'limited_free_sources',message:'ผลจากดัชนีเว็บและแหล่งอ้างอิงสาธารณะ',
       results,sources:results.map(({excerpt,...source}) => source),nextPage,issues};

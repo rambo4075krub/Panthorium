@@ -114,6 +114,12 @@ function relevance(intent, url, entry, local) {
   const exactSite = compact(domainToUnicode(parse(domain, suffixOptions).domainWithoutSuffix || '')) === intent.brand;
   const exactTitle = title === intent.brand;
   const headingMatches = terms.filter(word => heading.includes(compact(word))).length;
+  // A partial word match in an unrelated article cannot establish the named destination.
+  if (intent.officialName) {
+    const namesOrganization = heading.includes(intent.brand) || excerpt.includes(intent.brand) ||
+      (terms.length > 1 && headingMatches === terms.length);
+    if (searchListing || !namesOrganization) return null;
+  }
   let evidencePenalty = 0;
   if (!intent.sites.length && terms.length && !exactSite && !exactTitle) {
     if (!headingMatches) evidencePenalty = 8;

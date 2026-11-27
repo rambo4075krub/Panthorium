@@ -19,6 +19,10 @@ async function main() {
       return {available:true,url:args.url,title:'บทความจากต้นทาง',content:'ข้อความจากต้นทาง '.repeat(50)};
     }
     assert.equal(tool, 'web.search'); calls.push(args.query);
+    if (args.query === 'ขอเว็บกรุงสันภาคอน') return {available:false,error:'web_no_results',broaderQuery:'กรุงสันภาคอน'};
+    if (args.query === 'ขอเว็บกรมสรรพากร') return {available:true,broaderQuery:'กรมสรรพากร',results:[{
+      title:'กรมสรรพากร',url:'https://www.rd.go.th/',kind:'official',source:'Wikipedia'
+    }]};
     if (args.query === 'เว็บไซต์ทางการของ PRN') return {available:true,broaderQuery:'PRN',results:[{
       title:'PRN',url:'https://prn.example.org/',source:'Wikidata',kind:'official',recordUrl:'https://www.wikidata.org/wiki/Q123'
     }]};
@@ -174,11 +178,12 @@ async function main() {
     await page.waitForFunction(()=>window.qaSpoken.length === 1);
     assert.match(await page.evaluate(()=>qaSpoken[0]),/ข้อความจากต้นทาง/u);
     assert((await page.evaluate(()=>qaSpoken[0].length)) <= 160);
-    await dictate('กลับไปผลค้นหา','th-TH','#reader-mic');
+    await dictate('กลับไปผลคนหา','th-TH','#reader-mic');
     await page.locator('#reader').waitFor({state:'hidden'});
     await page.evaluate(()=>qaUtterance.onend());
     assert.equal(await page.evaluate(()=>qaSpoken.length),1);
-    await dictate('อ่านผลที่สามให้ฟัง','th-TH');
+    assert.equal(await page.evaluate(()=>PanthoriumSpeechInput.resultCommand('อานม้าสำหรับเดินทาง')),null);
+    await dictate('อานผลที่สามให้ฟัง','th-TH');
     await page.getByText('ต้นทางจำกัดการอ่าน',{exact:true}).waitFor();
     assert(await page.locator('#reader-listen').isHidden());
     assert.equal(await page.evaluate(()=>qaSpoken.length),1);
@@ -209,7 +214,20 @@ async function main() {
     assert.equal(await page.locator('.result-item').count(),27);
     assert.equal(moreCalls,2);
     assert(await page.locator('#more-results').isHidden());
+    await submit('ขอเว็บกรุงสันภาคอน');
+    await page.getByText('ขอเว็บกรมสรรพากร',{exact:true}).waitFor();
+    assert.equal(await page.locator('#query').inputValue(),'ขอเว็บกรุงสันภาคอน');
+    assert.equal(await page.locator('#result-list li').count(),0);
+    assert(!calls.includes('ขอเว็บกรมสรรพากร'));
+    assert.equal(directory.suggestOrganization('กรมสรรพากร เชียงราย'),'');
+    assert.equal(directory.suggestOrganization('ธนาคารกรุง'),'');
+    await page.locator('#voice-language').selectOption('th-TH');
+    await dictate('ใช้คำที่แนะนำ','th-TH');
+    await page.locator('a.item-title[href="https://www.rd.go.th/"]').waitFor();
+    assert.equal(await page.locator('#query').inputValue(),'ขอเว็บกรมสรรพากร');
+    assert(await page.locator('#spelling').isHidden());
     await submit('เว็บไซต์ทางการของ PRN');
+    await page.locator('a.item-title[href="https://prn.example.org/"]').waitFor();
     await page.locator('#all-web').waitFor();
     assert.equal(await page.locator('#query').inputValue(),'เว็บไซต์ทางการของ PRN');
     assert((await page.locator('#result-list .source').innerText()).includes('Wikidata'));
