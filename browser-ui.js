@@ -133,7 +133,7 @@
     const frame = root.querySelector('[data-browser-search]');
     frame.hidden = false;
     if (query !== undefined) {
-      const target = '/search/view' + (query ? '#' + new URLSearchParams({ q: String(query).slice(0, 300) }) : '');
+      const target = '/search/view' + (query ? '#' + new URLSearchParams({ q: String(query).slice(0, 2048) }) : '');
       // Changing the fragment keeps comparisons and the active search page alive.
       frame.src = target;
     }
@@ -286,7 +286,7 @@
     const params = new URLSearchParams(location.hash.replace(/^#(?:search\??)?/, ''));
     const query = params.get('q') || new URLSearchParams(location.search).get('q') || '';
     history.replaceState(history.state, '', '/');
-    open(query.slice(0,300));
+    open(query.slice(0,2048));
   }
   window.addEventListener('hashchange', openEntry);
   const sync = () => {

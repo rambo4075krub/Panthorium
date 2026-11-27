@@ -9,8 +9,9 @@
   const languageKey = 'panthorium.search.voiceLanguage' + (host ? '.' + host.dataset.browserOwner : '');
   const scopes = document.querySelectorAll('[data-scope]');
   let query = '', scope = 'all', selected = [], web = [], phase = 'idle', errorCode = '', pending;
-  let recording, speaking, comparison = [], reading, suggested = '';
-  const reader = byId('reader');
+  let recording, speaking, comparison = [], reading, suggested = '', visibleCount = 12, problem = '';
+  let nextPage = null, moreRequest, moreNotice = '';
+  const more = byId('more-results'), reader = byId('reader');
   function element(tag, text, css) {
     const node = document.createElement(tag);
     if (text) node.textContent = text;
@@ -76,7 +77,7 @@
       time.dateTime = item.retrievedAt; node.append(' · ดึงข้อมูลเมื่อ ', time);
     }
     if (item.license === 'https://creativecommons.org/licenses/by-sa/4.0/') node.append(link('CC BY-SA 4.0', item.license));
-    if (/^https:\/\/www\.wikidata\.org\/wiki\/Q\d+$/.test(item.recordUrl || '')) node.append(link('ดูรายการต้นทาง', item.recordUrl));
+    if (/^https:\/\/(?:www\.wikidata\.org\/wiki\/Q\d+|(?:th|en)\.wikipedia\.org\/\?curid=\d+)$/.test(item.recordUrl || '')) node.append(link('ดูรายการต้นทาง', item.recordUrl));
     return node;
   }
   try {
@@ -108,8 +109,8 @@
     }
   }
   function visibleItems() {
-    const items = new Map(selected.map(item => [item.url, item]));
-    if (scope === 'all') for (const item of web) if (!items.has(item.url)) items.set(item.url, item);
+    const items = new Map();
+    for (const item of (scope === 'all' ? [...web, ...selected] : selected)) if (!items.has(item.url)) items.set(item.url, item);
     return [...items.values()];
   }
   function renderComparison() {
@@ -151,7 +152,7 @@
   function render() {
     const items = visibleItems();
     const focusUrl = document.activeElement?.dataset.pick;
-    const rows = items.map(item => {
+    const rows = items.slice(0, visibleCount).map(item => {
       const row = element('article', '', 'result-item'), content = element('div');
       const heading = element('h3');
       heading.append(link(item.title, item.url, 'item-title'));
@@ -169,32 +170,48 @@
       return row;
     });
     list.replaceChildren(...rows);
+    more.hidden = items.length <= visibleCount && !(scope === 'all' && nextPage);
+    more.disabled = Boolean(moreRequest);
+    more.setAttribute('aria-busy', String(Boolean(moreRequest)));
     updatePicks();
     if (focusUrl) Array.from(list.querySelectorAll('[data-pick]')).find(button => button.dataset.pick === focusUrl)?.focus({ preventScroll: true });
     for (const button of scopes) button.setAttribute('aria-pressed', String(button.dataset.scope === scope));
     byId('listen').hidden = !items.length || !window.speechSynthesis || !window.SpeechSynthesisUtterance;
     byId('retry').hidden = scope !== 'all' || !['partial', 'unavailable'].includes(phase);
-    const count = items.length ? items.length + ' เว็บไซต์' : '';
+    const count = items.length ? items.length + ' ผลลัพธ์' : '';
     if (scope === 'selected') status.textContent = count || 'ยังไม่มีเว็บคัดสรรตรงคำนี้ ลองเลือก “ทุกแหล่ง” เพื่อค้นเว็บภายนอก';
     else if (phase === 'loading') status.textContent = [count, 'กำลังค้นแหล่งภายนอก…'].filter(Boolean).join(' · ');
-    else if (phase === 'partial') status.textContent = [count, 'บางแหล่งยังไม่ตอบกลับ'].filter(Boolean).join(' · ');
+    else if (phase === 'partial') status.textContent = [count || 'ยังไม่พบเว็บที่ตรง', 'บางแหล่งยังไม่ตอบกลับ'].filter(Boolean).join(' · ');
     else if (phase === 'unavailable') status.textContent = [count, errorCode === 'web_rate_limited' ? 'แหล่งค้นหาถึงขีดจำกัดชั่วคราว' : 'ยังติดต่อแหล่งค้นหาภายนอกไม่ได้'].filter(Boolean).join(' · ');
-    else status.textContent = count || 'ยังไม่พบเว็บที่ตรง ลองใช้ชื่อเว็บไซต์หรือคำที่สั้นลง';
+    else if (phase === 'invalid') status.textContent = problem;
+    else if (web.length === 1 && web[0].kind === 'address') status.textContent = 'ที่อยู่เว็บไซต์ที่คุณระบุ';
+    else status.textContent = count || 'ยังไม่พบเว็บที่ตรง ลองเปลี่ยนคำค้นหรือวาง URL ของเว็บไซต์';
+    if (scope === 'all' && moreNotice) status.textContent += ' · ' + moreNotice;
+  }
+  async function fetchPage(controller, page = 1) {
+    const response = await fetch('/api/search', {
+      method:'POST', credentials:'omit', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(page === 1 ? {query} : {query,page}), signal:controller.signal
+    });
+    return response.json();
+  }
+  function stopMore() {
+    moreRequest?.abort();
+    moreRequest = null; moreNotice = '';
   }
   async function loadWeb() {
+    stopMore();
     const controller = new AbortController();
-    pending = controller; phase = 'loading'; render();
+    pending?.abort();
+    pending = controller; nextPage = null; phase = 'loading'; render();
     try {
-      const response = await fetch('/api/search', {
-        method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query }), signal: controller.signal
-      });
-      const data = await response.json();
+      const data = await fetchPage(controller);
       if (pending !== controller) return;
-      if (!['ok', 'partial', 'empty', 'unavailable'].includes(data.status)) throw Error('invalid_response');
+      if (!['ok', 'partial', 'empty', 'unavailable', 'invalid'].includes(data.status)) throw Error('invalid_response');
+      nextPage = data.nextPage === 2 ? 2 : null;
       web = (data.results || []).filter(validItem);
       selected = (data.selected || []).filter(validItem);
-      phase = data.status; errorCode = data.error || '';
+      phase = data.status; errorCode = data.error || ''; problem = data.message || 'กรุณาตรวจคำค้นหรือที่อยู่เว็บไซต์';
     } catch {
       if (pending !== controller) return;
       phase = 'unavailable';
@@ -226,11 +243,12 @@
   }
   function syncLocation() {
     const params = new URLSearchParams(location.hash.slice(1));
-    const next = (params.get('q') || '').trim().slice(0, 300);
+    const next = (params.get('q') || '').trim().slice(0, 2048);
     scope = params.get('scope') === 'selected' ? 'selected' : 'all';
+    if (scope === 'selected') stopMore();
     stopSpeaking(); stopRecognition();
     if (query !== next) {
-      pending?.abort(); pending = null; web = []; phase = 'idle'; errorCode = '';
+      pending?.abort(); pending = null; stopMore(); nextPage = null; web = []; phase = 'idle'; errorCode = ''; visibleCount = 12;
       query = next; selected = query ? PanthoriumSearchDirectory.match(query) : [];
       suggested = query && !selected.length ? PanthoriumSearchDirectory.suggest(query) : '';
     }
@@ -253,9 +271,42 @@
     if (location.hash !== hash) location.hash = hash;
     else syncLocation();
   }
-  form.onsubmit = event => { event.preventDefault(); navigate(input.value, scope); };
+  form.onsubmit = event => {
+    event.preventDefault();
+    const value = input.value.trim();
+    navigate(value, /^(?:https?:\/\/|[^\s/]+\.[^\s/]+(?:\/|$))/iu.test(value) ? 'all' : scope);
+  };
   for (const button of scopes) button.onclick = () => navigate(query, button.dataset.scope);
   byId('retry').onclick = loadWeb;
+  more.onclick = async () => {
+    const items = visibleItems();
+    const displayed = new Set(items.slice(0,visibleCount).map(item => item.url));
+    if (items.length > visibleCount) visibleCount += 12;
+    else if (scope === 'all' && nextPage && !moreRequest) {
+      const page = nextPage, controller = new AbortController();
+      moreRequest = controller; moreNotice = 'กำลังค้นผลเพิ่มเติม…'; render();
+      try {
+        const data = await fetchPage(controller,page);
+        if (moreRequest !== controller) return;
+        if (!['ok','partial','empty'].includes(data.status)) throw Error('page_unavailable');
+        const known = new Set(web.map(item => item.url));
+        for (const item of (data.results || []).filter(validItem)) {
+          if (!known.has(item.url)) { known.add(item.url); web.push(item); }
+        }
+        nextPage = data.nextPage === page + 1 ? data.nextPage : null;
+        visibleCount = items.length + 12;
+        const added = visibleItems().length - items.length;
+        moreNotice = added ? '' : 'หน้านี้ไม่มีเว็บที่ตรงเพิ่มเติม';
+      } catch {
+        if (moreRequest !== controller) return;
+        moreNotice = 'โหลดผลเพิ่มเติมไม่ได้ กดแสดงผลเพิ่มเติมเพื่อลองอีกครั้ง';
+      } finally {
+        if (moreRequest === controller) { moreRequest = null; render(); }
+      }
+    }
+    render();
+    Array.from(list.querySelectorAll('.item-title')).find(node => !displayed.has(node.href))?.focus();
+  };
   byId('mic').onclick = async () => {
     const voice = window.PanthoriumSpeechInput, mic = byId('mic'), info = byId('voice-status');
     if (recording) { voice.submit(); return; }
@@ -282,8 +333,8 @@
     byId('spelling').hidden = !suggested || input.value.trim() !== query;
   });
   window.addEventListener('hashchange', syncLocation);
-  window.addEventListener('pagehide', () => { stopRecognition(); stopSpeaking(); });
+  window.addEventListener('pagehide', () => { stopRecognition(); stopSpeaking(); stopMore(); });
   const initialQuery = new URLSearchParams(location.search).get('q');
-  if (initialQuery && !location.hash) history.replaceState(null, '', location.pathname + '#' + new URLSearchParams({ q: initialQuery.slice(0, 300) }));
+  if (initialQuery && !location.hash) history.replaceState(null, '', location.pathname + '#' + new URLSearchParams({ q: initialQuery.slice(0, 2048) }));
   syncLocation();
 })();

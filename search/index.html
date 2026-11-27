@@ -23,12 +23,12 @@
     <section class="hero" aria-labelledby="title">
       <div class="search-panel">
         <h1 id="title" lang="en">Panthorium <em>Search</em></h1>
-        <p class="intro">ค้นเว็บที่ต้องการ แล้วเลือกแหล่งที่ใช่มาเทียบกัน</p>
+        <p class="intro">พิมพ์คำค้น ชื่อเว็บไซต์ หรือวาง URL เพื่อเปิดเว็บนั้นโดยตรง</p>
         <form id="search-form" role="search" action="/search/view" method="get">
-          <label for="query" class="sr-only">คำค้นหรือชื่อเว็บไซต์</label>
+          <label for="query" class="sr-only">คำค้น ชื่อเว็บไซต์ หรือ URL</label>
           <div class="input-wrap">
             <span class="lens" aria-hidden="true"></span>
-            <input type="search" id="query" name="q" maxlength="300" required placeholder="ค้นเว็บหรือชื่อแบรนด์" autocomplete="off" enterkeyhint="search">
+            <input type="search" id="query" name="q" maxlength="2048" required placeholder="ค้นเว็บหรือวาง URL" autocomplete="off" enterkeyhint="search">
             <button type="button" id="mic" aria-pressed="false" aria-label="ค้นหาด้วยเสียง" title="ค้นหาด้วยเสียง"><span class="mic-icon" aria-hidden="true"></span></button>
           </div>
           <button class="submit" type="submit">ค้นหา</button>
@@ -61,6 +61,7 @@
       <p id="spelling" hidden>คุณหมายถึง <a id="spelling-query"></a> ใช่ไหม <small>หรือพูด “ใช้คำที่แนะนำ”</small></p>
       <p id="search-status" role="status"></p>
       <div id="result-list"></div>
+      <button type="button" class="text-action" id="more-results" hidden>แสดงผลเพิ่มเติม</button>
       <button type="button" class="text-action" id="retry" hidden>ลองค้นเว็บอีกครั้ง</button>
     </section>
     <noscript><p>กรุณาเปิด JavaScript เพื่อแสดงผลการค้นหาและเปรียบเทียบเว็บไซต์</p></noscript>

@@ -4,14 +4,24 @@ const express = require('express');
 const { chromium } = require('playwright');
 const { createWebSearchRouter } = require('../routes/webSearch');
 const directory = require('../search/directory');
+const { PublicWebService } = require('../services/publicWebService');
 const { createPublicAssetMiddleware } = require('../middleware/publicAssets');
 
 async function main() {
   const calls = [], app = express();
-  let releaseSlow, startSlow;
+  const direct = new PublicWebService({http:{get:() => { throw Error('Unexpected network request for direct navigation'); }}});
+  let releaseSlow, startSlow, moreCalls = 0;
   const slowStarted = new Promise(resolve => { startSlow = resolve; });
   app.use(createWebSearchRouter({ async execute(tool, args) {
     assert.equal(tool, 'web.search'); calls.push(args.query);
+    if (/^https?:\/\//u.test(args.query)) return direct.execute(tool,args,'fixture');
+    if (args.query === 'open web collection' && args.page === 2) {
+      if (++moreCalls === 1) return {available:false,error:'web_rate_limited'};
+      return {available:true,results:[26,27].map(i => ({title:'Publisher ' + i,url:'https://publisher-' + i + '.org/',source:'Purili'}))};
+    }
+    if (args.query === 'open web collection') return {available:true,nextPage:2,results:Array.from({length:26},(_,i)=>({
+      title:'Publisher ' + (i + 1),url:'https://publisher-' + (i + 1) + '.org/',source:'Purili'
+    })),issues:[]};
     if (args.query === 'slow') { startSlow(); await new Promise(resolve => { releaseSlow = resolve; }); }
     if (args.query === 'busy') return {available:false, error:'web_rate_limited'};
     if (args.query === 'absent') return {available:false, error:'web_no_results'};
@@ -24,6 +34,8 @@ async function main() {
   let browser;
   try {
     const post = (body, type = 'application/json') => fetch(origin + '/api/search', { method:'POST', headers:{'Content-Type':type}, body:JSON.stringify(body) });
+    for (const page of [0,2.5,'2',1001]) assert.equal((await post({query:'example',page})).status,400);
+    assert.equal((await post({query:'example.org',page:2})).status,400);
     assert.equal((await post({query:'  '})).status, 400);
     assert.equal((await post({query:'z'.repeat(301)})).status, 400);
     assert.equal((await post({query:'q'.repeat(5000)})).status, 413);
@@ -57,6 +69,7 @@ async function main() {
     }
     await page.getByRole('link', {name:/โรงแรมริมเจ้าพระยา/}).click();
     await page.waitForFunction(() => document.querySelectorAll('.result-item').length === 4);
+    assert((await page.locator('#result-list .item-title').first().innerText()).startsWith('Source '));
     for (const button of (await page.locator('[data-pick]').all()).slice(0,3)) await button.click();
     assert(await page.locator('[data-pick]').last().isDisabled());
     await page.locator('#open-compare').click();
@@ -130,6 +143,30 @@ async function main() {
     assert.equal(await page.evaluate(() => window.testRecognizer),null);
     assert.equal(await page.locator('#voice-language').isEnabled(),true);
     assert.equal(await page.locator('#query').inputValue(),'คำค้นที่แก้เอง');
+    await submit('open web collection');
+    await page.locator('#more-results').waitFor();
+    assert.equal(await page.locator('.result-item').count(),12);
+    await page.locator('#more-results').click();
+    assert.equal(await page.locator('.result-item').count(),24);
+    assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Publisher 13');
+    await page.locator('#more-results').click();
+    assert.equal(await page.locator('.result-item').count(),26);
+    await page.locator('#more-results').click();
+    await page.waitForFunction(()=>document.getElementById('search-status').textContent.includes('เพื่อลองอีกครั้ง'));
+    assert.equal(await page.locator('.result-item').count(),26);
+    await page.locator('#more-results').click();
+    await page.getByRole('link',{name:'Publisher 27',exact:true}).waitFor();
+    assert.equal(await page.locator('.result-item').count(),27);
+    assert.equal(moreCalls,2);
+    assert(await page.locator('#more-results').isHidden());
+    const deep = 'https://www.python.org/downloads/?version=' + 'a'.repeat(315) + '#current';
+    await submit(deep);
+    await page.getByText('ที่อยู่เว็บไซต์ที่คุณระบุ',{exact:true}).waitFor();
+    assert.equal(await page.locator('#result-list .item-title').first().getAttribute('href'),deep);
+    assert.equal(await page.locator('#query').inputValue(),deep);
+    await submit('https://localhost/private');
+    await page.waitForFunction(()=>document.getElementById('search-status').textContent.includes('HTTPS สาธารณะ'));
+    assert.equal(await page.locator('.result-item').count(),0);
     assert.deepEqual(errors,[]);
     console.log('Public search passed, including Thai and English voice selection, opt-in spelling, original queries, history and attribution');
   } finally {
