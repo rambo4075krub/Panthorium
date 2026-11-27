@@ -2,6 +2,8 @@
 const express = require('express');
 const path = require('node:path');
 const directory = require('../search/directory');
+const { parseQuery } = require('../services/webSearchQuery');
+const { unavailable } = require('../services/publicWebService');
 
 function createWebSearchRouter(service) {
   const router = express.Router();
@@ -37,23 +39,32 @@ function createWebSearchRouter(service) {
   }, express.json({ limit: '4kb' }), async (req, res, next) => {
     if (!req.is('application/json')) return res.status(415).json({ error: 'json_required' });
     const body = req.body;
-    if (typeof body?.query !== 'string' || !body.query.trim() || body.query.length > 300 ||
-        /[\u0000-\u001f\u007f]/.test(body.query) || Object.keys(body).some(key => !['query', 'scope'].includes(key)) ||
+    if (typeof body?.query !== 'string' || !body.query.trim() || body.query.length > 2048 ||
+        /[\u0000-\u001f\u007f]/.test(body.query) || Object.keys(body).some(key => !['query', 'scope', 'page'].includes(key)) ||
+        (body.page !== undefined && (!Number.isInteger(body.page) || body.page < 1 || body.page > 1000)) ||
         (body.scope !== undefined && !['all', 'selected'].includes(body.scope))) {
       return res.status(400).json({ error: 'invalid_query' });
     }
     try {
       const query = body.query.trim();
-      const selected = directory.match(query);
+      let intent;
+      try { intent = parseQuery(query); }
+      catch (error) {
+        const problem = unavailable(error);
+        return res.status(400).json({selected:[],results:[],status:'invalid',error:problem.error,message:problem.message});
+      }
+      const page = body.page ?? 1;
+      if (page > 1 && (intent.address || body.scope === 'selected')) return res.status(400).json({error:'invalid_page'});
+      const selected = page === 1 && !intent.address && !intent.sites.length ? directory.match(query) : [];
       if (body.scope === 'selected') return res.json({ selected, results: [], status: 'selected' });
-      const web = await service.execute('web.search', { query, limit: 12 }, 'public-search:' + req.ip);
+      const web = await service.execute('web.search', { query, limit: 36, page }, 'public-search:' + req.ip);
       const partial = Boolean(web.issues?.length);
       let status = 'ok', httpStatus = 200;
       if (!web.available) {
-        status = web.error === 'web_no_results' ? 'empty' : 'unavailable';
+        status = web.error === 'web_no_results' ? (partial ? 'partial' : 'empty') : 'unavailable';
         if (status === 'unavailable') httpStatus = web.error === 'web_rate_limited' ? 429 : 503;
       } else if (partial) status = 'partial';
-      res.status(httpStatus).json({ selected, results: web.results || [], status, error: web.error,
+      res.status(httpStatus).json({ selected, results: web.results || [], status, error: web.error, nextPage: web.nextPage ?? null,
         unavailableSources: (web.issues || []).map(issue => issue.source) });
     } catch (error) { next(error); }
   }, (error, _req, res, next) => {

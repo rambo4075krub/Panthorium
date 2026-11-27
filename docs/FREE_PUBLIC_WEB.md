@@ -8,7 +8,7 @@ apply; “free-only” describes external information retrieval.
 
 | Tool | Source and coverage |
 | --- | --- |
-| `web.search` | Mwmbl's web index, DuckDuckGo Instant Answers and Thai/English Wikipedia queried concurrently. Up to six source links/excerpts for Sentinel. |
+| `web.search` | Mwmbl and Purili search external websites. DuckDuckGo Instant Answers, Wikipedia and verified organization records supplement the indexes. Sentinel receives up to six matches. A pasted domain or public URL produces a navigation result. Call `web.read` for its content. |
 | `web.read` | Public HTTPS HTML, text and JSON, subject to robots.txt and access restrictions. No cookies, credentials, login, browser execution, paywall bypass or files/PDF. |
 | `weather.get` | Wikipedia place coordinates and MET Norway Locationforecast. A forecast, not a current station observation. Place ambiguity is returned for clarification; unavailable dates are reported explicitly. |
 
@@ -25,23 +25,31 @@ A date without returned forecast periods is unavailable, not invented.
 
 ## Panthorium Search
 
-Open `/search` directly or from the public Browser download page. Search and
-comparison work without signing in. The standalone page immediately matches its
-small Thai/English directory of first-party sources, then requests up to twelve
-external results. Changing to the curated-only scope can run entirely on the
-page. For an exact Wikipedia title match with an entity ID, Wikidata's P856
-statements can supply additional official site links and their source record.
-Source type and partial availability are visible. Mwmbl's anonymous
-endpoint has a provider quota of 1,000 requests per month per IP and 1 request
-per second. No provider key or paid combined-search endpoint is used.
+Open Panthorium Browser from Start or ask Sentinel to open Panthorium Search.
+The default view searches external websites and puts matching directory entries
+after the live results. Guests can search by typing or speaking. A domain or
+public web address opens through the Browser's existing result handler. Direct
+addresses do not consume an upstream search request and carry no citation until
+the reader fetches the source. Search does not require AI credits.
 
-`POST /api/search` accepts JSON with `query` (1–300 characters) and optional
-`scope` (`all` or `selected`). It returns `selected`, `results` and `status`.
-The public endpoint has a separate admission budget and shares upstream
+A `site:` restriction matches the named domain, subdomains and optional path.
+For sparse matches it can also consult the public site's permitted sitemap.
+Exact organization names and redirects can supply an official address from
+Wikidata or a labelled Wikipedia infobox. Each such result links to its record.
+For sparse Thai place searches, a verified place name and the guide's matching
+section can supply additional business websites from Wikivoyage listings. Each
+listing includes the guide and license. The curated-only view remains available. The system reports upstream outages
+and presents additional result pages when the index has them.
+
+`POST /api/search` accepts a `query` (up to 300 characters for terms, 2048 for
+addresses), optional `scope` (`all` or `selected`) and optional integer `page`
+(starting at 1). The response includes `selected`, `results`, `status` and
+`nextPage` for indexed results. The first response returns up to 36 external
+matches, shown in groups of 12. Subsequent pages use the index that supports
+pagination. Public search has a separate admission budget and shares upstream
 cooldowns, in-flight requests and cached public responses with Sentinel.
 Regular searches use a URL fragment. OpenSearch clients can use `/search?q=…`.
-The app keeps the comparison of up to three links in the tab's session storage.
-Speech input and spoken excerpts depend on browser support.
+The comparison of up to three links stays in the tab's session storage.
 
 The artwork links to The Met, object 45434, *Under the Wave off Kanagawa*
 (public domain). The bundled Gloock typeface includes its OFL in the search
@@ -91,7 +99,9 @@ model argument can enable paid fallback.
 ## Provider references
 
 - Mwmbl anonymous index and limits: https://developer.mwmbl.org/
+- Purili search, operators and pagination: https://puri.li/developer/documentation
 - Wikimedia API: https://www.mediawiki.org/wiki/API:Search
+- Wikivoyage listings and attribution: https://en.wikivoyage.org/wiki/Wikivoyage:Listings
 - Wikimedia access etiquette: https://www.mediawiki.org/wiki/API:Etiquette
 - Wikipedia text attribution: https://creativecommons.org/licenses/by-sa/4.0/
 - DuckDuckGo public JSON endpoint: https://api.duckduckgo.com/?q=Bangkok&format=json&no_html=1

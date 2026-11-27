@@ -167,8 +167,13 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
     assert(w.document.querySelector('#sm-apps .sm-app[data-app-id="assistant-preferences"]'), 'Sentinel Preferences appears in Start menu for signed-in chat accounts');
     for (const file of ['start-menu-ui.js', 'billing-catalog.js', 'billing-ui.js', 'contact-ui.js', 'user-manager.js', 'developer-studio-ui.js', 'security-dashboard.js', 'ai-dashboard.js', 'ai-stream-client.js', 'agent-ui.js', 'agent-automation-ui.js', 'agent-memory-ui.js', 'multi-agent-ui.js', 'integrations-ui.js', 'production-intelligence-ui.js', 'training-ui.js', 'governance-ui.js', 'sentinel-control-ui.js', 'voice-identity-ui.js', 'calculator-expression.js', 'voice-window-catalog.js', 'window-manager-ui.js', 'calendar-ui.js', 'reminders-ui.js', 'goal-tracker-ui.js', 'assistant-preferences-ui.js', 'local-insights-ui.js', 'cloud-apps-ui.js', 'organization-catalog.js', 'organizations-ui.js', 'external-apps-ui.js', 'browser-ui.js', 'media-studio-ui.js', 'creative-studio-ui.js', 'work-assistant-ui.js', 'social-rtc.js', 'social-ui.js', 'privacy-notice.js', 'privacy-policy-ui.js', 'billing-admin-ui.js', 'admin-mailbox-ui.js', 'user-mailbox-ui.js', 'voice-command-client.js', 'staging-admin-desktop.js']) load(file);
     w.PanthoriumStagingAdminDesktop.render();
-    await new Promise(resolve => setTimeout(resolve, 40));
-    for (const appId of ['media-studio', 'browser']) {
+    const launchers = ['media-studio', 'browser'];
+    // The shell registers launchers on separate render turns. Wait for both before checking uniqueness.
+    const timeout = Date.now() + 3000;
+    while (launchers.some(id => !w.document.querySelector(`#sm-apps [data-app-id="${id}"]`)) && Date.now() < timeout) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    for (const appId of launchers) {
       assert.equal(w.document.querySelectorAll(`#sm-apps [data-app-id="${appId}"]`).length, 1, `${appId} has one launcher in the Admin menu`);
     }
     assert(w.document.querySelector('#desktop-icons [data-app-id="voice-identity"]'), 'administrator desktop must show Voice Identity icon');
