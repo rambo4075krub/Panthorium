@@ -252,6 +252,7 @@
     else if (phase === 'unavailable') status.textContent = [count, errorCode === 'web_rate_limited' ? 'แหล่งค้นหาถึงขีดจำกัดชั่วคราว' : 'ยังติดต่อแหล่งค้นหาภายนอกไม่ได้'].filter(Boolean).join(' · ');
     else if (phase === 'invalid') status.textContent = problem;
     else if (web.length === 1 && web[0].kind === 'address') status.textContent = 'ที่อยู่เว็บไซต์ที่คุณระบุ';
+    else if (!items.length && broaderQuery) status.textContent = 'ยังไม่พบเว็บไซต์ที่ตรงกับชื่อ “' + broaderQuery + '” ลองแก้ชื่อหรือค้นจากทุกเว็บไซต์';
     else status.textContent = count || 'ยังไม่พบเว็บที่ตรง ลองเปลี่ยนคำค้นหรือวาง URL ของเว็บไซต์';
     if (scope === 'all' && moreNotice) status.textContent += ' · ' + moreNotice;
   }
@@ -280,6 +281,7 @@
       broaderQuery = typeof data.broaderQuery === 'string' ? data.broaderQuery : '';
       selected = (data.selected || []).filter(validItem);
       phase = data.status; errorCode = data.error || ''; problem = data.message || 'กรุณาตรวจคำค้นหรือที่อยู่เว็บไซต์';
+      updateSpelling();
     } catch {
       if (pending !== controller) return;
       phase = 'unavailable';
@@ -338,6 +340,16 @@
     if (nextScope === 'selected') params.set('scope', 'selected');
     return '#' + params.toString();
   }
+  function updateSpelling() {
+    const name = scope === 'all' && !web.length && broaderQuery && query.includes(broaderQuery)
+      ? PanthoriumSearchDirectory.suggestOrganization(broaderQuery) : '';
+    suggested = name ? query.replace(broaderQuery,name) : query && !selected.length ? PanthoriumSearchDirectory.suggest(query) : '';
+    byId('spelling').hidden = !suggested || input.value.trim() !== query;
+    const link = byId('spelling-query');
+    link.textContent = suggested;
+    if (suggested) link.href = searchHash(suggested,scope);
+    else link.removeAttribute('href');
+  }
   function syncLocation() {
     const params = new URLSearchParams(location.hash.slice(1));
     const next = (params.get('q') || '').trim().slice(0, 2048);
@@ -348,15 +360,9 @@
       if (reader.open) reader.close();
       pending?.abort(); pending = null; stopMore(); nextPage = null; web = []; broaderQuery = ''; phase = 'idle'; errorCode = ''; visibleCount = 12;
       query = next; selected = query ? PanthoriumSearchDirectory.match(query) : [];
-      suggested = query && !selected.length ? PanthoriumSearchDirectory.suggest(query) : '';
     }
-    byId('spelling').hidden = !suggested;
-    const spellingLink = byId('spelling-query');
-    if (suggested) {
-      spellingLink.textContent = suggested;
-      spellingLink.href = searchHash(suggested, scope);
-    } else { spellingLink.textContent = ''; spellingLink.removeAttribute('href'); }
     input.value = query; document.title = query ? query + ' · Panthorium Search' : 'Panthorium Search';
+    updateSpelling();
     document.body.classList.toggle('has-query', Boolean(query));
     byId('discovery').hidden = Boolean(query); byId('results').hidden = !query;
     if (query && scope === 'all' && phase === 'idle') loadWeb();
@@ -413,6 +419,7 @@
     try {
       const speech = await voice.listen({
         lang:voiceLanguage.value, hasSuggestion:!!turn.suggestion,
+        searchView:reader.open ? 'reader' : visibleItems().length ? 'results' : '',
         localOnly:window.parent !== window && window.parent.document.body.dataset.aiMode === 'local-only',
         notify:label => { if (recording === turn) info.textContent = label; }
       });

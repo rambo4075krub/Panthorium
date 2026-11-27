@@ -106,6 +106,16 @@ module.exports = async function externalWebSearch(fixture, response) {
   assert(!alternative.broaderQuery);
   assert.equal(alternative.results[0].url,'https://independent.example.org/acme');
   assert(!alternative.results[0].kind);
+  const noisy = fixture(url => url.hostname === 'puri.li' ? response({results:[
+    {title:'บทความภาพยนตร์',url:'https://cinema.example.org/review',description:'ภาคต่อของภาพยนตร์ที่ถ่ายในกรุง'},
+    {title:'กรุงสันภาคอน',url:'https://catalog.example.org/search?q=กรุงสันภาคอน'}
+  ]}) : response({results:[],query:{pages:[]}}),liveClock);
+  const heardName = 'กรุงสันภาคอน';
+  const unrelated = await noisy.service.execute('web.search',{query:'ขอเว็บ'+heardName},'visitor');
+  assert.equal(unrelated.error,'web_no_results');
+  assert.equal(unrelated.broaderQuery,heardName);
+  const wider = await noisy.service.execute('web.search',{query:heardName},'visitor');
+  assert(wider.results.some(item => item.url === 'https://cinema.example.org/review'));
   const box = fixture(url => {
     if (url.hostname === 'th.wikipedia.org' && url.searchParams.has('generator')) return response({query:{pages:[{pageid:17,title:'หน่วยงานทดลอง',pageprops:{wikibase_item:'Q18'}}]}});
     if (url.searchParams.get('action') === 'parse') return response({parse:{text:'<a href="https://wrong.example.org/">Sponsor</a><table class="infobox"><tr><th>เว็บไซต์</th><td><a href="http://dept.example.org">ต้นทาง</a></td></tr></table>'}});

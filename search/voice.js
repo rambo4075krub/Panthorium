@@ -125,7 +125,8 @@
     const spoken = text.normalize('NFC').toLowerCase().trim().replace(/^(?:ช่วย|กรุณา|please\s+)\s*/u,'')
       .replace(/(?:ให้หน่อย|หน่อย|นะครับ|นะคะ|ครับ|ค่ะ|please)?[.!?。]*$/u,'').trim()
       .replace(/[๐-๙]/gu, digit => String(digit.charCodeAt(0) - 0xe50));
-    const thai = spoken.replace(/\s+/gu,'');
+    const thai = spoken.replace(/\s+/gu,'').replace(/^อาน(?=ผล|ลิงก์|หน้า|บทความ)/u,'อ่าน')
+      .replace(/ผล(การ)?คนหา/u,'ผล$1ค้นหา');
     if (/^(?:กลับ(?:ไป)?(?:หน้า)?ผล(?:การ)?ค้นหา|กลับ(?:ไป)?(?:หน้า)?ผลลัพธ์)$/u.test(thai) || /^(?:go )?back to (?:the )?(?:search )?results$/u.test(spoken)) return {action:'back'};
     if (/^(?:แสดง|ดู|โหลด)ผล(?:การค้นหา|ค้นหา|ลัพธ์)?(?:เพิ่มเติม|เพิ่ม|ถัดไป)$/u.test(thai) || /^(?:show|load)(?: me)? more (?:search )?results$/u.test(spoken)) return {action:'more'};
     if (/^(?:ค้น(?:หา)?|ดูผล)(?:จาก)?ทุกเว็บไซต์$/u.test(thai) || spoken === 'search all websites') return {action:'all-sources'};
@@ -141,7 +142,7 @@
     if (!index || !Number.isSafeInteger(index)) return null;
     return {action:['อ่าน','read'].includes(match[1]) ? 'read' : 'open', index};
   }
-  async function listen({ commands = false, requireIdentity = false, localOnly = false, hasSuggestion = false, lang = 'th-TH', notify = () => {} } = {}) {
+  async function listen({ commands = false, requireIdentity = false, localOnly = false, hasSuggestion = false, searchView = '', lang = 'th-TH', notify = () => {} } = {}) {
     if (current) throw error('speech_busy');
     const turn = { controller:new AbortController(), submit:null }; current = turn;
     const signal = turn.controller.signal;
@@ -170,6 +171,7 @@
       const route = token ? 'commands' : 'search';
       const params = new URLSearchParams({lang:lang === 'en-US' ? 'en' : 'th'});
       if (commands && !token) params.set('purpose', 'command');
+      if (!commands && (searchView === 'reader' || searchView === 'results')) params.set('purpose', searchView);
       if (hasSuggestion) params.set('spelling', '1');
       const response = await fetch('/api/voice-input/' + route + '?' + params, {
         method:'POST', signal:AbortSignal.any([signal, AbortSignal.timeout(42000)]), cache:'no-store',

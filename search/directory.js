@@ -97,6 +97,25 @@ const PanthoriumSearchDirectory = (() => {
     }
     return '';
   }
+  // Optional spelling help for names with conventional Thai pronunciations.
+  // A correction is offered only after a named website lookup has no matches.
+  const organizationNames = [
+    ['กรมสรรพากร','กรมสันพากอน'], ['กรมสรรพสามิต','กรมสับพะสามิด'], ['กรมศุลกากร','กรมสุนละกากอน'],
+    ['กรมอุตุนิยมวิทยา'], ['กรมการขนส่งทางบก'], ['สำนักงานประกันสังคม'], ['ไปรษณีย์ไทย'],
+    ['ธนาคารแห่งประเทศไทย'], ['ธนาคารกรุงเทพ'], ['ธนาคารกรุงไทย'], ['การบินไทย']
+  ];
+  const spokenKey = text => spellingKey(text).replace(/[่้๊๋]/gu,'').replace(/[ขคฆ]/gu,'ก').replace(/[ผภ]/gu,'พ');
+  function suggestOrganization(name) {
+    if (!/^[ก-๙\s]{7,45}$/u.test(name)) return '';
+    const writtenKey = spellingKey(name), key = spokenKey(name);
+    if (organizationNames.some(([written]) => writtenKey.includes(written))) return '';
+    const candidates = organizationNames.map(forms => ({
+      name:forms[0], distance:Math.min(...forms.map(spokenKey).map(form =>
+        form.slice(0,2) === key.slice(0,2) ? editDistance(key,form) : Infinity))
+    })).sort((a,b) => a.distance-b.distance);
+    const [first,second] = candidates;
+    return first.distance <= Math.min(2,Math.floor(key.length/5)) && second.distance > first.distance+1 ? first.name : '';
+  }
   function suggest(query) {
     const province = provinceSuggestion(query);
     if (province) return province;
@@ -118,6 +137,6 @@ const PanthoriumSearchDirectory = (() => {
     const candidate = matches[0].text;
     return candidate !== query && match(candidate).length ? candidate : '';
   }
-  return { match, suggest };
+  return { match, suggest, suggestOrganization };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = PanthoriumSearchDirectory;

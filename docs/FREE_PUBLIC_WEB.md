@@ -40,6 +40,10 @@ Requests such as “ขอเว็บกรมสรรพากร” and “o
 first look up the named organization. A verified response includes a link to
 search all websites for that name. If a record is missing, the web indexes
 supply regular results with their source labels.
+If the results do not identify the requested name, the search page offers a broader
+lookup. For a close Thai organization spelling it can also offer a correction.
+The original query stays visible until the user selects the suggestion or says
+“ใช้คำที่แนะนำ”. The suggestion supplies a name and the web sources supply the URL.
 For sparse Thai place searches, a verified place name and the guide's matching
 section can supply additional business websites from Wikivoyage listings. Each
 listing includes the guide and license. The curated-only view remains available. The system reports upstream outages

@@ -33,6 +33,12 @@ class CommandSpeechTests(unittest.TestCase):
     def test_native_diagnostics_cannot_replace_the_transcript(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
+            (root / "onnxruntime.py").write_text(textwrap.dedent("""
+                import os
+                def disable_telemetry_events():
+                    assert os.environ["ORT_DISABLE_TELEMETRY"] == "1"
+                    os.environ["VOICE_TEST_TELEMETRY_DISABLED"] = "1"
+            """), encoding="utf-8")
             (root / "psutil.py").write_text(textwrap.dedent("""
                 from types import SimpleNamespace
                 def virtual_memory(): return SimpleNamespace(available=4 * 1024**3)
@@ -47,6 +53,7 @@ class CommandSpeechTests(unittest.TestCase):
 
                 class WhisperModel:
                     def __init__(self, *args, **kwargs):
+                        assert os.environ["VOICE_TEST_TELEMETRY_DISABLED"] == "1"
                         os.write(1, b"speech runtime initialized\\n")
 
                     def transcribe(self, samples, **kwargs):
