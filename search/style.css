@@ -132,5 +132,10 @@ dialog::backdrop{background:#132c26a8}
 }
 @media(max-width:370px){.lens{display:none}.compare-trigger{padding-inline:10px}.wordmark{font-size:20px}.frame{width:calc(100% - 22px)}}
 
+#result-list{list-style:none;margin:0;padding:0}
+#result-voice-hint,#reader-voice-status{color:var(--muted);font-size:13px}
+.result-position{display:inline-block;margin-inline-end:.55em;font-variant-numeric:tabular-nums}
+.reader-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+#reader-mic[aria-pressed=true]{color:#8a3329}
 #reader-content{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.75}
 #reader-source{display:inline-block;padding:12px 0;color:var(--green)}

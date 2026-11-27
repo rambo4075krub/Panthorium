@@ -7,6 +7,8 @@ module.exports = async function externalWebSearch(fixture, response) {
   for (const [input,expected] of [
     ['nhs.uk','https://nhs.uk/'], ['http://www.python.org/downloads/','https://www.python.org/downloads/'],
     ['example.org:443/docs?v=2#usage','https://example.org/docs?v=2#usage'],
+    ['เปิดเว็บ https://example.org/about/#team','https://example.org/about/#team'],
+    ['ขอเว็บ example.org/' + 'p'.repeat(320),'https://example.org/' + 'p'.repeat(320)],
     ['หมอพร้อม.ไทย',new URL('https://หมอพร้อม.ไทย').href], ['site:docs.example.org','https://docs.example.org/']
   ]) {
     const result = await direct.service.execute('web.search',{query:input},'visitor');
@@ -16,12 +18,19 @@ module.exports = async function externalWebSearch(fixture, response) {
   }
   for (const input of ['http://user:pass@example.org','https://portal.example.org/#access_token=private',
     'ดู https://portal.example.org/?access_token=private','ftp://files.example.org','https://127.0.0.1',
+    'ขอเว็บ example.org/?access_token=private','เปิดเว็บไซต์ https://localhost/private',
     'site:localhost query','site:intranet.internal entry','example.org:8080/path']) {
     assert.equal((await direct.service.execute('web.search',{query:input},'visitor')).available,false,input);
   }
   assert.equal(direct.requests.length,0);
   assert.equal(direct.service.limits.size,0);
   assert.equal(parseQuery('Node.js').terms,'Node.js');
+  for (const [query,name] of [['เว็บไซต์ทางการของการบินไทย','การบินไทย'],['ขอเว็บกรมสรรพากร','กรมสรรพากร'],
+    ['ช่วยหาเว็บไซต์ของธนาคารแห่งประเทศไทยให้หน่อย','ธนาคารแห่งประเทศไทย'],['official website of OpenStreetMap','OpenStreetMap'],
+    ['PRN official website','PRN']]) assert.equal(parseQuery(query).officialName,name);
+  for (const query of ['เว็บไซต์คืออะไร','official website design tips','"official website of PRN"','site:example.org official website of PRN']) {
+    assert.equal(parseQuery(query).officialName,'');
+  }
   const topic = fixture(url => {
     if (url.hostname === 'puri.li') {
       assert.equal(url.searchParams.get('exact'),'1');
@@ -39,6 +48,23 @@ module.exports = async function externalWebSearch(fixture, response) {
 
   let time = Date.now();
   const liveClock = () => (time += 1200);
+  const indexed = fixture(url => {
+    if (url.hostname === 'puri.li') return response({results:[
+      {title:'Blue Skies – site search',url:'https://catalog.example.org/az?s=Blue+Skies',description:'Search for Blue Skies'},
+      {title:'Blue Skies – unrelated promotion',url:'https://offers.example.net/th/abc/4.html'},
+      {title:'Hardware reference',url:'https://parts.example.com/component/10',description:'In the footer: Blue Skies'},
+      {title:'Blue Skies passenger guide',url:'https://travel.example.org/guide/blue-skies',description:'Independent guide to Blue Skies travel'},
+      {title:'Blue Skies route map',url:'https://maps.example.net/routes?q=Blue+Skies',description:'Network served by Blue Skies'}
+    ]});
+    return response({results:[],query:{pages:[]}});
+  },liveClock);
+  const broad = await indexed.service.execute('web.search',{query:'Blue Skies'},'visitor');
+  const hits = broad.results.map(item => item.url);
+  assert.equal(hits[0],'https://travel.example.org/guide/blue-skies');
+  assert(hits.indexOf('https://maps.example.net/routes?q=Blue+Skies') < hits.indexOf('https://offers.example.net/th/abc/4.html'));
+  assert.equal(hits.at(-1),'https://catalog.example.org/az?s=Blue+Skies');
+  const targeted = await indexed.service.execute('web.search',{query:'site:catalog.example.org Blue Skies'},'visitor');
+  assert.equal(targeted.results[0].url,'https://catalog.example.org/az?s=Blue+Skies');
   const places = fixture(url => {
     if (url.hostname === 'puri.li') return response({results:[
       {title:'ประสบการณ์ ร้านหนังสือ มาดริด',url:'https://traveler.example.com/madrid'},
@@ -67,10 +93,19 @@ module.exports = async function externalWebSearch(fixture, response) {
     ]}});
     return response({results:[]});
   },liveClock);
+  const named = await official.service.execute('web.search',{query:'เว็บไซต์ทางการของ PRN'},'visitor');
+  assert.equal(named.broaderQuery,'PRN');
+  assert.deepEqual(named.results.map(item=>item.url),['https://prn.example.org/']);
+  assert(official.requests.every(item=>['en.wikipedia.org','www.wikidata.org'].includes(new URL(item.url).hostname)));
   const radio = await official.service.execute('web.search',{query:'PRN'},'visitor');
   assert.equal(radio.results[0].url,'https://prn.example.org/');
   assert.equal(radio.results[0].kind,'official');
   assert(!radio.results.some(item => item.url.includes('old.example.com')));
+  const missing = fixture(url => url.hostname === 'puri.li' ? response({results:[{title:'Review of Acme',url:'https://independent.example.org/acme'}]}) : response({results:[],query:{pages:[]}}),liveClock);
+  const alternative = await missing.service.execute('web.search',{query:'Acme official website'},'visitor');
+  assert(!alternative.broaderQuery);
+  assert.equal(alternative.results[0].url,'https://independent.example.org/acme');
+  assert(!alternative.results[0].kind);
   const box = fixture(url => {
     if (url.hostname === 'th.wikipedia.org' && url.searchParams.has('generator')) return response({query:{pages:[{pageid:17,title:'หน่วยงานทดลอง',pageprops:{wikibase_item:'Q18'}}]}});
     if (url.searchParams.get('action') === 'parse') return response({parse:{text:'<a href="https://wrong.example.org/">Sponsor</a><table class="infobox"><tr><th>เว็บไซต์</th><td><a href="http://dept.example.org">ต้นทาง</a></td></tr></table>'}});

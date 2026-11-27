@@ -271,7 +271,42 @@
     if (!bounds.width || document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2) !== frame) return null;
     return frame.contentWindow.PanthoriumSearchPage;
   }
+  function visibleAddressView() {
+    const root = document.getElementById('panthorium-browser-dashboard');
+    if (!root || root.dataset.browserOwner !== accountId()) return null;
+    const home = root.querySelector('[data-browser-home]');
+    if (!home || home.hidden) return null;
+    const bounds = home.getBoundingClientRect();
+    return bounds.width && home.contains(document.elementFromPoint(bounds.left+bounds.width/2,bounds.top+bounds.height/2)) ? root : null;
+  }
+  function currentViewUrl(root) {
+    try { return root.querySelector('[data-browser-view]')?.getURL?.() || ''; }
+    catch { return ''; }
+  }
+  function searchVoiceContext() {
+    const page = visibleSearchPage();
+    if (page) return page.voiceContext?.() ?? null;
+    const root = visibleAddressView();
+    return root ? JSON.stringify(['address',root.dataset.browserOwner,currentViewUrl(root)]) : null;
+  }
+  function runSearchCommand(command,expected) {
+    const page = visibleSearchPage();
+    if (page?.runVoiceCommand) return page.runVoiceCommand(command,expected);
+    const root = visibleAddressView();
+    if (!root || (expected !== undefined && expected !== searchVoiceContext())) return {ok:false,text:'หน้าค้นหาเปลี่ยนแล้ว กรุณาสั่งอีกครั้ง'};
+    if (command.action === 'back') { showSearch(root); return {ok:true,text:'กลับไปผลค้นหาแล้ว'}; }
+    if (command.action === 'listen-page') {
+      const url = currentViewUrl(root);
+      if (url) {
+        showSearch(root);
+        root.querySelector('[data-browser-search]').contentWindow.PanthoriumSearchPage.read(url,true);
+        return {ok:true,text:'กำลังเปิดข้อความสาธารณะของหน้านี้'};
+      }
+    }
+    return {ok:false,text:'พูด “กลับไปผลค้นหา” เพื่อเลือกเว็บไซต์'};
+  }
   window.PanthoriumBrowser = { open, openSearch: (query = '') => open(query), installLauncher,
+    searchVoiceContext, runSearchCommand,
     searchSuggestion:() => visibleSearchPage()?.currentSuggestion() || '',
     applySearchSuggestion:expected => visibleSearchPage()?.applySuggestion(expected) || '',
     openResult(source, url) {

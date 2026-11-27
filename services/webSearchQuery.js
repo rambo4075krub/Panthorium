@@ -35,6 +35,24 @@ function address(text, explicit) {
   }
   return null;
 }
+function destination(token) {
+  const explicit = /^(?:[a-z][a-z\d+.-]*:|\/\/|www\.|localhost(?:[/:]|$))/iu.test(token);
+  return explicit || /^[^\s:/?#]+\.[^\s./:?#]+(?:[/:?#]|$)/u.test(token) || token.includes('@') ? address(token, explicit) : null;
+}
+// Interpret requests for a named site without changing quoted text, operators or ordinary questions.
+function websiteName(query) {
+  if (/["“”|]/u.test(query) || /\s[-+]\S|(?:^|\s)(?:intitle|inurl|filetype|before|after):/iu.test(query)) return '';
+  const polite = query.replace(/^(?:ช่วย|กรุณา|please\s+)\s*/iu,'').replace(/\s*(?:ให้หน่อย|หน่อย|นะครับ|นะคะ|ครับ|ค่ะ)[.!]*$/u,'');
+  const match = /^(?:(?:ขอ|หา|ค้นหา|เปิด)\s*)?(?:เว็บไซต์|เว็ปไซต์|เว็บ|เว็ป)\s*(?:อย่างเป็นทางการ|ทางการ|หลัก|ของ)\s*(?:ของ\s*)?(.+)$/u.exec(polite) ||
+    /^(?:ขอ|เปิด)\s*(?:เว็บไซต์|เว็ปไซต์|เว็บ|เว็ป)\s*(.+)$/u.exec(polite) ||
+    /^(?:เว็บไซต์|เว็ปไซต์|เว็บ|เว็ป)\s*((?:กรม|กระทรวง|มหาวิทยาลัย|ธนาคาร|สมาคม|บริษัท|การรถไฟ|การบิน)\S.*)$/u.exec(polite) ||
+    /^(.+?)\s+(?:เว็บไซต์|เว็บ)(?:อย่างเป็นทางการ|ทางการ|หลัก)$/u.exec(polite) ||
+    /^(?:(?:find|open|show)\s+(?:me\s+)?)?(?:the\s+)?official\s+(?:website|web\s?site|site)\s+(?:of|for)\s+(.+)$/iu.exec(polite) ||
+    /^(.+?)\s+official\s+(?:website|web\s?site|site)$/iu.exec(polite);
+  const name = match?.[1].trim();
+  if (!name || /^(?:คือ|ที่|อย่างไร|อะไร|ของ$)/u.test(name)) return '';
+  return name;
+}
 function parseQuery(value) {
   const query = String(value || '').trim();
   const sites = [], text = [];
@@ -47,19 +65,21 @@ function parseQuery(value) {
   }
   if (sites.length && !text.length && sites.length === 1) return {address:sites[0]};
   if (!sites.length && text.length === 1) {
-    const token = text[0];
-    const explicit = /^(?:[a-z][a-z\d+.-]*:|\/\/|www\.|localhost(?:[/:]|$))/iu.test(token);
-    if (explicit || /^[^\s:/?#]+\.[^\s./:?#]+(?:[/:?#]|$)/u.test(token) || token.includes('@')) {
-      const url = address(token, explicit);
-      if (url) return {address:url};
-    }
+    const url = destination(text[0]);
+    if (url) return {address:url};
   }
   // Never transmit a pasted private address or credential-bearing URL as part of a keyword query.
   for (const token of text) if (/^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)/iu.test(token)) searchUrl(token.startsWith('//') ? 'https:' + token : token, true);
+  const requestedName = sites.length ? '' : websiteName(query);
+  if (requestedName && !/\s/u.test(requestedName)) {
+    const url = destination(requestedName);
+    if (url) return {address:url};
+  }
   if (query.length > 300 || !query) throw Error('web_invalid_query');
-  const terms = text.join(' ');
-  return {query, terms, sites, words:words(terms), brand:compact(terms),
-    groups:text.filter(s => /^[\p{Script=Thai}]+$/u.test(s) && !stop.has(s)).map(compact)};
+  const officialName = requestedName.length <= 100 ? requestedName : '';
+  const terms = officialName || text.join(' ');
+  return {query, terms, officialName, sites, words:words(terms), brand:compact(terms),
+    groups:terms.split(/\s+/u).filter(s => /^[\p{Script=Thai}]+$/u.test(s) && !stop.has(s)).map(compact)};
 }
 function addressResult(url) {
   return {kind:'address', title:domainToUnicode(url.hostname) + (url.pathname === '/' ? '' : url.pathname),
@@ -75,8 +95,16 @@ function relevance(intent, url, entry, local) {
   const title = compact(entry.title || '');
   let path = url.pathname;
   try { path = decodeURIComponent(path); } catch {}
-  const heading = compact(domainToUnicode(url.hostname) + ' ' + path + ' ' + (entry.title || ''));
-  const body = heading + ' ' + compact(entry.excerpt || '');
+  // Some indexes contain other sites' on-demand search pages. Their titles echo
+  // arbitrary terms even when the site has no corresponding article or product.
+  const isSearchPath = /^\/(?:[a-z]{2}(?:[-_][a-z]{2})?\/?)?$/iu.test(path) ||
+    /(?:^|\/)(?:search|search-results|results)(?:\.[a-z]+)?\/?$/iu.test(path);
+  const searchListing = !intent.sites.length && isSearchPath && [...url.searchParams].some(([key,value]) =>
+    /^(?:s|q|query|search|search_query|keywords?)$/iu.test(key) && /\p{L}/u.test(value));
+  const location = compact(domainToUnicode(url.hostname) + ' ' + path);
+  const heading = location + ' ' + title;
+  const excerpt = compact(entry.excerpt || '');
+  const body = heading + ' ' + excerpt;
   const terms = intent.words;
   const present = terms.filter(word => body.includes(compact(word))).length;
   if (local && (!body.includes(compact(local.place)) || !body.includes(compact(local.word)))) return null;
@@ -85,8 +113,14 @@ function relevance(intent, url, entry, local) {
   if (terms.length > 1 && present < Math.ceil(terms.length / 2)) return null;
   const exactSite = compact(domainToUnicode(parse(domain, suffixOptions).domainWithoutSuffix || '')) === intent.brand;
   const exactTitle = title === intent.brand;
-  return (terms.length ? 9 * (1 - present / terms.length) : 0) -
+  const headingMatches = terms.filter(word => heading.includes(compact(word))).length;
+  let evidencePenalty = 0;
+  if (!intent.sites.length && terms.length && !exactSite && !exactTitle) {
+    if (!headingMatches) evidencePenalty = 8;
+    else if (!excerpt && path !== '/' && !terms.some(word => location.includes(compact(word)))) evidencePenalty = 18;
+  }
+  return (searchListing ? 36 : 0) + evidencePenalty + (terms.length ? 9 * (1 - present / terms.length) : 0) -
     (exactSite ? 6 : 0) - (exactTitle ? 2 : 0) - (exactSite && url.pathname === '/' ? 3 : 0) -
-    (terms.length ? 2 * terms.filter(word => heading.includes(compact(word))).length / terms.length : 0);
+    (terms.length ? 2 * headingMatches / terms.length : 0);
 }
 module.exports = { parseQuery, searchUrl, addressResult, matchesSite, siteGroup, relevance, words };

@@ -36,6 +36,10 @@ A `site:` restriction matches the named domain, subdomains and optional path.
 For sparse matches it can also consult the public site's permitted sitemap.
 Exact organization names and redirects can supply an official address from
 Wikidata or a labelled Wikipedia infobox. Each such result links to its record.
+Requests such as “ขอเว็บกรมสรรพากร” and “official website of OpenStreetMap”
+first look up the named organization. A verified response includes a link to
+search all websites for that name. If a record is missing, the web indexes
+supply regular results with their source labels.
 For sparse Thai place searches, a verified place name and the guide's matching
 section can supply additional business websites from Wikivoyage listings. Each
 listing includes the guide and license. The curated-only view remains available. The system reports upstream outages
@@ -50,6 +54,12 @@ pagination. Public search has a separate admission budget and shares upstream
 cooldowns, in-flight requests and cached public responses with Sentinel.
 Regular searches use a URL fragment. OpenSearch clients can use `/search?q=…`.
 The comparison of up to three links stays in the tab's session storage.
+
+Results are numbered in displayed order. Guests and members can say
+“เปิดผลที่สอง”, “อ่านผลที่หนึ่งให้ฟัง”, “แสดงผลเพิ่มเติม” or
+“กลับไปผลค้นหา”. The reader has its own microphone and a playback button
+for the retrieved public text. Spoken results and page text use the browser's
+speech synthesis when available. Voice actions operate on the current search view.
 
 The artwork links to The Met, object 45434, *Under the Wave off Kanagawa*
 (public domain). The bundled Gloock typeface includes its OFL in the search
