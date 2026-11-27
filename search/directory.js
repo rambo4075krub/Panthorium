@@ -70,7 +70,36 @@ const PanthoriumSearchDirectory = (() => {
     }
     return row[b.length];
   }
+  // Thai province names from the public province-name dataset on data.go.th.
+  // These only supply optional spelling suggestions. The original query always reaches the indexes.
+  const provinces = (
+    'กรุงเทพมหานคร กระบี่ กาญจนบุรี กาฬสินธุ์ กำแพงเพชร ขอนแก่น จันทบุรี ฉะเชิงเทรา ชลบุรี ชัยนาท ชัยภูมิ ชุมพร ' +
+    'เชียงราย เชียงใหม่ ตรัง ตราด ตาก นครนายก นครปฐม นครพนม นครราชสีมา นครศรีธรรมราช นครสวรรค์ นนทบุรี ' +
+    'นราธิวาส น่าน บึงกาฬ บุรีรัมย์ ปทุมธานี ประจวบคีรีขันธ์ ปราจีนบุรี ปัตตานี พระนครศรีอยุธยา พะเยา พังงา ' +
+    'พัทลุง พิจิตร พิษณุโลก เพชรบุรี เพชรบูรณ์ แพร่ ภูเก็ต มหาสารคาม มุกดาหาร แม่ฮ่องสอน ยโสธร ยะลา ' +
+    'ร้อยเอ็ด ระนอง ระยอง ราชบุรี ลพบุรี ลำปาง ลำพูน เลย ศรีสะเกษ สกลนคร สงขลา สตูล สมุทรปราการ ' +
+    'สมุทรสงคราม สมุทรสาคร สระแก้ว สระบุรี สิงห์บุรี สุโขทัย สุพรรณบุรี สุราษฎร์ธานี สุรินทร์ หนองคาย ' +
+    'หนองบัวลำภู อ่างทอง อำนาจเจริญ อุดรธานี อุตรดิตถ์ อุทัยธานี อุบลราชธานี'
+  ).split(' ');
+  function provinceSuggestion(query) {
+    if (query.length > 100 || /[@:/]/u.test(query)) return '';
+    const tokens = [...query.matchAll(/(?:^|\s)(?:จังหวัด)?([ก-๙]{6,18})(?=\s|$)/gu)];
+    if (tokens.some(item => provinces.includes(item[1]))) return '';
+    for (const item of tokens) {
+      const value = item[1];
+      const candidates = provinces.filter(name => name.slice(0,3) === value.slice(0,3) && Math.abs(name.length-value.length) <= 2)
+        .map(name => ({name,distance:editDistance(value,name)})).filter(item => item.distance <= 2)
+        .sort((a,b) => a.distance-b.distance);
+      const [first, second] = candidates;
+      if (!first || second?.distance === first.distance) continue;
+      const start = item.index + item[0].length - value.length;
+      return query.slice(0,start) + first.name + query.slice(start+value.length);
+    }
+    return '';
+  }
   function suggest(query) {
+    const province = provinceSuggestion(query);
+    if (province) return province;
     const key = spellingKey(query);
     if (!/^[ก-๙]{8,64}$/u.test(key)) return '';
     const matches = [];

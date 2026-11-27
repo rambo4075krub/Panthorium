@@ -43,6 +43,12 @@ async function main() {
     assert.equal((await (await post({query:'Bangkok riverside hotels',scope:'selected'})).json()).selected.length, 3);
     assert.deepEqual(calls, []);
     assert.deepEqual(directory.match('hotels in London'), []);
+    assert.equal(directory.suggest('เชียงแม่'),'เชียงใหม่');
+    assert.equal(directory.suggest('ร้านหนังสือ เชียงแม่'),'ร้านหนังสือ เชียงใหม่');
+    assert.equal(directory.suggest('จังหวัดเชียงแม่'),'จังหวัดเชียงใหม่');
+    assert.equal(directory.suggest('เชียงราย'),'');
+    assert.equal(directory.suggest('ร้านหนังสือ เชียงใหม่'),'');
+    assert.equal(directory.suggest('https://example.org/เชียงแม่'),'');
     assert.equal(directory.match('นิทรรศการ ศิลปะ กรุงเทพ').length, 3);
     assert.equal(directory.suggest('พิภิธภัณศิลปะ ไทย ร้องสมัย'), 'พิพิธภัณฑ์ศิลปะไทยร่วมสมัย');
     for (const exactOrUnrelated of ['โรงแรมริมแม่น้ำเจ้าพระยา','โรงแรมริมแม่น้ำเจ้าพระยาราคาถูก','โรงแรมริมแม่น้ำเชียงราย','นิทรรศการศิลปะกรุงโซล','ไฟน์ไดนิ่งในกรุงธนบุรี','โรงแรม Kyoto','ตารางรถไฟไปขอนแก่น','อย่าเปิดไฟล์']) {
