@@ -2,16 +2,16 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const html = fs.readFileSync(path.join(__dirname, "..", "sentinel.html"), "utf8");
-const start = html.indexOf("function openFiles() {");
-const ownerStart = html.indexOf("const ownerId =", start);
-const helpersEnd = html.indexOf("const messageFor =", ownerStart);
+const source = fs.readFileSync(path.join(__dirname, "..", "sentinel-shell.js"), "utf8");
+const start = source.indexOf("function openFiles() {");
+const ownerStart = source.indexOf("const ownerId =", start);
+const helpersEnd = source.indexOf("const messageFor =", ownerStart);
 
 assert.notEqual(start, -1, "Files window should be present");
 assert.ok(ownerStart > start, "Files should resolve an account owner");
 assert.ok(helpersEnd > ownerStart, "Files owner helpers should remain before error mapping");
 
-const helperSource = html.slice(ownerStart, helpersEnd);
+const helperSource = source.slice(ownerStart, helpersEnd);
 const createHelpers = new Function("OS", helperSource + "; return { ownerId, isRegistered };");
 
 const accountId = "11111111-1111-4111-8111-111111111111";
@@ -41,8 +41,8 @@ console.log("Cloud Files UI session: registered-account upload gating and Guest 
   const payload = { ok: true, ...folderListing([{id: '1', name:'photo.png', size:10}, {id:'2',name:'report.xlsx',size:20}]), usedBytes:30,maxBytes:100 };
   let resolveLate;
   w.authorizedFetch = async () => ({ ok:true, json:async()=>payload });
-  const end = html.indexOf('// ---------- App: Terminal', start);
-  w.eval(html.slice(start, end));
+  const end = source.indexOf('// ---------- App: Terminal', start);
+  w.eval(source.slice(start, end));
   w.openFiles();
   const tick = () => new Promise(resolve => setTimeout(resolve, 10));
   await tick();

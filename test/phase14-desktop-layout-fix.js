@@ -5,7 +5,7 @@ const fs = require('fs');
 
 const desktop = fs.readFileSync('staging-admin-desktop.js', 'utf8');
 const production = fs.readFileSync('production-intelligence-ui.js', 'utf8');
-const shell = fs.readFileSync('sentinel.html', 'utf8');
+const shell = (fs.readFileSync('sentinel.html', 'utf8') + '\n' + fs.readFileSync('sentinel-shell.js', 'utf8'));
 const uiLayout = fs.readFileSync('ui-layout.js', 'utf8');
 
 assert(desktop.includes('grid-auto-flow:column'), 'staging admin desktop should wrap overflowing icons into top-to-bottom columns');

@@ -11,7 +11,7 @@ const { AgentWorkflowService } = require('../services/agentWorkflowService');
 const { createApiRouter } = require('../routes/api');
 const catalog = require('../voice-window-catalog');
 const source = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
-assert.equal((source('sentinel.html').match(/authorizeAudio\(audio\)/g) || []).length, 0, 'both voice input paths rely on the single server-side speaker check');
+assert.equal((source('sentinel-shell.js').match(/authorizeAudio\(audio\)/g) || []).length, 0, 'both voice input paths rely on the single server-side speaker check');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 // The full-window fixture represents the system owner; real owner binding has separate server tests.
 require('../services/founderAccount').isFounderAccount = id => id === 'voice-admin';
@@ -153,12 +153,12 @@ const guest = { id: 'voice-guest', username: 'guest', permissions: ['chat', 'sys
       // code is real; no open/close functions are mocked for the success cases.
       return Response.json({ ok: true, providers: [], sessions: [], metrics: { providers: [], totals: {} }, summary: {}, examples: [], versions: [], entries: [], alerts: [], blocks: [], memories: [], documents: [], runs: [], jobs: [], integrations: [], history: [], incidents: [], stats: {}, status: 'ready', score: 100 });
     };
-    const inline = [...w.document.scripts].find(script => script.textContent.includes('const OS ='))?.textContent;
-    assert(inline);
+    const runtimeSource = source('sentinel-shell.js');
+    assert(runtimeSource);
     // Hardware/WebGL boot is outside this DOM regression; the actual runtime
     // functions below and both SpeechRecognition event paths remain unchanged.
     load('panthorium-window-base.js');
-    evaluate(inline.replace(/\n    boot\(\);/, '\n    OS.state.booted = true;'));
+    evaluate(runtimeSource.replace(/\n    boot\(\);/, '\n    OS.state.booted = true;'));
     load('phase2-auth.js'); await tick();
     await w.PanthoriumAuth.login('admin', 'fixture');
     w.document.getElementById('desktop').classList.add('active');

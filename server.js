@@ -92,7 +92,7 @@ const { BiometricIdentityService } = require("./services/biometricIdentityServic
 const { createEmailOtpRepository } = require("./services/emailOtpRepository");
 const { EmailOtpService } = require("./services/emailOtpService");
 const { requestContext } = require("./middleware/requestContext");
-const { createPublicAssetMiddleware } = require("./middleware/publicAssets");
+const { createPublicAssetMiddleware, releaseAssetPath } = require("./middleware/publicAssets");
 const { createGeminiLiveWebSocketGateway } = require("./services/geminiLiveWebSocket");
 const { ActionLedgerRepository } = require('./services/actionLedgerRepository');
 const { VoiceSessionRepository } = require('./services/voiceSessionRepository');
@@ -113,14 +113,9 @@ const { createOrganizationResourcesRouter } = require('./routes/organizationReso
 const { createOrganizationGovernanceRouter } = require('./routes/organizationGovernance');
 
 const app = express();
+app.use(require("./middleware/publicHttps").redirectPublicHttp(config.trustProxy));
 const notebookControl = require("./services/notebookControl").installNotebookControl(app);
 app.use(require("./middleware/localProfile").localProfileGuard);
-if (process.env.PANTHORIUM_LOCAL_QWEN === "1") {
-  app.get("/qwen", (req, res) => res.sendFile(path.join(__dirname, "qwen-local.html")));
-  app.get("/local-media-client.js", (req, res) => res.sendFile(path.join(__dirname, "local-media-client.js")));
-  app.get("/qwen-local.js", (req, res) => res.sendFile(path.join(__dirname, "qwen-local.js")));
-}
-if (process.env.PANTHORIUM_LOCAL_PROFILE === "1") app.get(["/local-ai", "/local-ai.html"], (req, res) => res.sendFile(path.join(__dirname, "local-ai.html")));
 if (config.trustProxy) app.set("trust proxy", "loopback");
 app.use(require("./services/securityIp").requestIdentity(config.trustProxy));
 
@@ -306,7 +301,16 @@ sentinel.training = sentinelTraining;
 sentinel.sentinelControl = sentinelOrchestrator;
 
 app.disable("x-powered-by");
-app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:", "https://api.omise.co"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins, (req) => `${req.protocol === "https" ? "wss" : "ws"}://${req.get("host")}`], frameSrc: ["'self'"], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
+app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:", "https://api.omise.co"], mediaSrc: ["'self'", "blob:"], connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", ...config.allowedOrigins, (req) => `${req.protocol === "https" ? "wss" : "ws"}://${req.get("host")}`], frameSrc: ["'self'"], workerSrc: ["'self'", "blob:"], objectSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginEmbedderPolicy: false }));
+if (process.env.PANTHORIUM_LOCAL_QWEN === "1") {
+  app.get("/qwen", (req, res) => res.sendFile(path.join(__dirname, "qwen-local.html")));
+  app.get("/local-media-client.js", (req, res) => res.sendFile(path.join(__dirname, "local-media-client.js")));
+  app.get("/qwen-local.js", (req, res) => res.sendFile(path.join(__dirname, "qwen-local.js")));
+}
+if (process.env.PANTHORIUM_LOCAL_PROFILE === "1") {
+  app.get(["/local-ai", "/local-ai.html"], (req, res) => res.sendFile(path.join(__dirname, "local-ai.html")));
+  app.get("/local-ai-client.js", (req, res) => res.sendFile(path.join(__dirname, "local-ai-client.js")));
+}
 const allowElectronFileOrigin = process.env.ALLOW_ELECTRON_ORIGIN === "1";
 app.use((req, res, next) => {
   const origin = req.get("origin");
@@ -428,7 +432,7 @@ app.get('/vendor/online-pdf-1.17.1.js', (_req, res) => {
 });
 app.get("/vendor/hls.min.js", (req, res) => res.type("application/javascript").sendFile(require.resolve("hls.js/dist/hls.min.js")));
 
-for (const script of [...shellScripts, "panthorium-window-base.js", "personal-chat-ui.css", "workspace-ui.css", "online-tools.css", "online-share.js", "social-player.html", "social-player.js", "payment-return.html", "payment-return.css"]) {
+for (const script of [...shellScripts, "sentinel-shell.js", "panthorium-window-base.js", "personal-chat-ui.css", "workspace-ui.css", "online-tools.css", "online-share.js", "social-player.html", "social-player.js", "payment-return.html", "payment-return.css"]) {
   app.get(`/${script}`, (req, res, next) => {
     try {
       res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -438,7 +442,7 @@ for (const script of [...shellScripts, "panthorium-window-base.js", "personal-ch
         res.set("Referrer-Policy", "strict-origin-when-cross-origin");
         res.set("Content-Security-Policy", "default-src 'none'; script-src 'self' https://www.youtube.com https://s.ytimg.com; style-src 'self' 'unsafe-inline'; media-src 'self' blob: https:; connect-src 'self' https:; frame-src https://www.youtube-nocookie.com https://tv.trueid.net; frame-ancestors 'self'; base-uri 'none'; object-src 'none'");
       }
-      res.sendFile(path.join(frontendRoot, script));
+      res.sendFile(path.join(frontendRoot, config.env === "development" ? script : releaseAssetPath(script)));
     } catch (error) {
       next(error);
     }

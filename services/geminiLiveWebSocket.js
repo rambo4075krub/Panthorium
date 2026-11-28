@@ -715,6 +715,10 @@ function createGeminiLiveWebSocketGateway({
     let pathname;
     try { pathname = new URL(req.url, "https://panthorium.invalid").pathname; } catch { return; }
     if (pathname !== "/api/live") return;
+    if (require('../middleware/publicHttps').publicHttpOrigin(req, trustProxy)) {
+      socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+      return;
+    }
     if (!isAllowedOrigin(req, allowedOrigins)) {
       socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       socket.destroy();

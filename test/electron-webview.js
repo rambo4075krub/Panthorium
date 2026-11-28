@@ -1,6 +1,6 @@
 const assert=require('assert'),fs=require('fs'),path=require('path');
 const read=f=>fs.readFileSync(path.join(__dirname,'..',f),'utf8');
-const main=read('electron/main.cjs'),preload=read('electron/preload.cjs'),external=read('external-apps-ui.js'),sentinel=read('sentinel.html'),pkg=JSON.parse(read('package.json'));
+const main=read('electron/main.cjs'),preload=read('electron/preload.cjs'),external=read('external-apps-ui.js'),sentinel=read('sentinel-shell.js'),pkg=JSON.parse(read('package.json'));
 assert(pkg.scripts.desktop.includes('electron'));
 const policy=read('electron/browser-security.cjs');
 assert.match(pkg.version,/^\d+\.\d+\.\d+$/);

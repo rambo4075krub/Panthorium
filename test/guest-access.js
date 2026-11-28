@@ -98,7 +98,12 @@ const catalog = require('../voice-window-catalog');
     assert(biometricOwners.includes(admin.id), 'administrator voice enrollment stays on the administrator owner');
     assert(biometricOwners.filter(owner => owner !== admin.id).every(owner => owner === guest.id), 'guest voice data stays scoped to its guest session id');
     assert.equal((await call('/api/sentinel/command', guest, { command: 'ค้นความรู้ private' })).status, 403);
-    assert.equal((await call('/api/chat', guest, { message: 'hello' })).status, 200);
+    for (const route of ['/api/chat', '/api/chat/stream']) {
+      const response = await call(route, guest, { message: 'hello' });
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).error, 'registered_account_required');
+    }
+    assert.equal((await call('/api/chat', user, { message: 'hello' })).status, 200);
     assert.equal((await call('/api/sentinel/status', guest)).status, 200);
     console.log('Access control: all 12 exclusions enforced for guest and standard users; admin retained; public apps remain available');
   } finally { await new Promise(resolve => server.close(resolve)); }

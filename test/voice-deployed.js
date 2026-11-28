@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const WebSocket = require('ws');
+const { releaseAssetPath } = require('../middleware/publicAssets');
 (async () => {
   const base = new URL(process.env.STAGING_URL);
   assert.equal(base.protocol, 'https:');
@@ -39,15 +40,18 @@ const WebSocket = require('ws');
     if (route === '/') html = page;
   }
   const deployedDOM = new JSDOM(html);
-  const testedDOM = new JSDOM(fs.readFileSync(path.join(__dirname, '..', 'sentinel.html'), 'utf8'));
   try {
-    const runtime = dom => [...dom.window.document.scripts].find(script => script.textContent.includes('const OS ='))?.textContent;
-    assert(runtime(testedDOM), 'test checkout must contain the voice runtime');
-    assert.equal(runtime(deployedDOM), runtime(testedDOM), 'deployed inline voice runtime must exactly match the tested shell');
-    assert(runtime(deployedDOM).includes('AbortSignal.timeout(40000)'), 'voice request allows the backend verification deadline to return');
-    assert(runtime(deployedDOM).includes('voice_verification_unavailable'), 'cloud verification failures have a specific user message');
-    assert(runtime(deployedDOM).includes('error?.voiceDiagnostic'), 'staging rejection feedback includes only match score metadata');
-  } finally { deployedDOM.window.close(); testedDOM.window.close(); }
+    const entry = deployedDOM.window.document.querySelector('script[src="/sentinel-shell.js"]');
+    assert(entry, 'deployed shell declares its bootstrap');
+    const asset = await fetch(new URL(entry.getAttribute('src'), base), { signal: AbortSignal.timeout(20000) });
+    assert.equal(asset.status, 200);
+    const runtime = await asset.text();
+    assert.equal(runtime, fs.readFileSync(path.join(__dirname, '..', releaseAssetPath('sentinel-shell.js')), 'utf8'), 'deployed voice runtime must match the release asset');
+    const testedSource = fs.readFileSync(path.join(__dirname, '..', 'sentinel-shell.js'), 'utf8');
+    assert(testedSource.includes('AbortSignal.timeout(40000)'), 'voice request allows the backend verification deadline to return');
+    assert(testedSource.includes('voice_verification_unavailable'), 'cloud verification failures have a specific user message');
+    assert(testedSource.includes('error?.voiceDiagnostic'), 'staging rejection feedback includes only match score metadata');
+  } finally { deployedDOM.window.close(); }
   assert.equal((await post('/api/sentinel/command', { command: 'เปิด AI Platform' })).status, 401);
   const sessionResponse = await post('/api/auth/guest', {});
   assert.equal(sessionResponse.status, 200);
@@ -156,24 +160,34 @@ const WebSocket = require('ws');
   assert.equal(forbidden.status, 403);
   assert.equal((await forbidden.json()).error, 'voice_action_permission_denied');
   assert.equal((await post('/api/sentinel/command', { command: 'เปิด AI Platform' }, session.accessToken)).status, 403);
-  const chatResponse = await fetch(new URL('/api/chat', base), { method: 'POST', headers: { Origin: base.origin, 'Content-Type': 'application/json', Authorization: `Bearer ${session.accessToken}` }, body: JSON.stringify({ message: 'ตอบสั้น ๆ ว่า Sentinel พร้อมทดสอบ', sessionId: 'staging-guest-smoke', provider: 'gemini-live' }), signal: AbortSignal.timeout(90000) });
-  assert.equal(chatResponse.status, 200, 'guest chat HTTP status');
+  for (const route of ['/api/chat', '/api/chat/stream']) {
+    const reply = await post(route, { message: 'ทดสอบการเข้าสู่ระบบ' }, session.accessToken);
+    assert.equal(reply.status, 403);
+    assert.equal((await reply.json()).error, 'registered_account_required');
+  }
+  const memberToken = process.env.STAGING_CHAT_MEMBER_TOKEN;
+  if (!memberToken) {
+    console.log('Staging: guest text chat denied; guest navigation and live voice verified. Member text smoke requires a staging member session.');
+    return;
+  }
+  const chatResponse = await fetch(new URL('/api/chat', base), { method: 'POST', headers: { Origin: base.origin, 'Content-Type': 'application/json', Authorization: `Bearer ${memberToken}` }, body: JSON.stringify({ message: 'ตอบสั้น ๆ ว่า Sentinel พร้อมทดสอบ', sessionId: 'staging-member-smoke', provider: 'gemini-live' }), signal: AbortSignal.timeout(90000) });
+  assert.equal(chatResponse.status, 200, 'member chat HTTP status');
   const chat = await chatResponse.json();
-  if (!chat.ok && Array.isArray(chat.providerFailureCodes)) console.error('Vertex guest chat diagnostics:', JSON.stringify(chat.providerFailureCodes));
-  assert.equal(chat.ok, true, `guest AI chat failed: ${chat.error || 'unknown'}${chat.providerFailureCodes ? ` (${JSON.stringify(chat.providerFailureCodes)})` : ''}`);
+  if (!chat.ok && Array.isArray(chat.providerFailureCodes)) console.error('Vertex member chat diagnostics:', JSON.stringify(chat.providerFailureCodes));
+  assert.equal(chat.ok, true, `member AI chat failed: ${chat.error || 'unknown'}${chat.providerFailureCodes ? ` (${JSON.stringify(chat.providerFailureCodes)})` : ''}`);
   if (chat.provider !== 'gemini-live') console.error('Vertex fallback diagnostic:', JSON.stringify(chat.providerFailureCodes || []));
   assert.equal(chat.provider, 'gemini-live', `tuned Vertex endpoint unavailable (fallback: ${chat.provider || 'none'})`);
-  assert(chat.text?.trim(), 'guest chat answer must be nonempty');
+  assert(chat.text?.trim(), 'member chat answer must be nonempty');
 
   const streamStartedAt = Date.now();
   const streamResponse = await fetch(new URL('/api/chat/stream', base), {
     method: 'POST',
-    headers: { Origin: base.origin, 'Content-Type': 'application/json', Authorization: `Bearer ${session.accessToken}` },
-    body: JSON.stringify({ message: 'ตอบสั้นที่สุดว่า Sentinel พร้อม', sessionId: 'staging-guest-stream-smoke', provider: 'gemini-live' }),
+    headers: { Origin: base.origin, 'Content-Type': 'application/json', Authorization: `Bearer ${memberToken}` },
+    body: JSON.stringify({ message: 'ตอบสั้นที่สุดว่า Sentinel พร้อม', sessionId: 'staging-member-stream-smoke', provider: 'gemini-live' }),
     signal: AbortSignal.timeout(90000)
   });
-  assert.equal(streamResponse.status, 200, 'guest streaming chat HTTP status');
-  assert(streamResponse.body, 'guest streaming chat must return an SSE body');
+  assert.equal(streamResponse.status, 200, 'member streaming chat HTTP status');
+  assert(streamResponse.body, 'member streaming chat must return an SSE body');
   const reader = streamResponse.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -207,7 +221,7 @@ const WebSocket = require('ws');
   }
   buffer += decoder.decode();
   if (buffer.trim()) consumeFrames([buffer]);
-  assert.equal(streamError, null, `guest streaming chat failed: ${streamError || ''}`);
+  assert.equal(streamError, null, `member streaming chat failed: ${streamError || ''}`);
   assert(streamDone, 'guest stream must finish with a done event');
   assert.equal(streamDone.provider, 'gemini-live');
   assert.equal(streamDone.model, 'gemini-3.8-live');

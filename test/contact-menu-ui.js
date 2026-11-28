@@ -12,7 +12,7 @@ const read = f => fs.readFileSync(require('node:path').join(__dirname, '..', f),
   try {
     w.fetch = async () => ({ ok: true, json: async () => ({ ok: true, items: [] }) });
     evaluate(read('panthorium-window-base.js'));
-    evaluate([...d.scripts].find(s => s.textContent.includes('const OS =')).textContent.replace(/\n    boot\(\);/, '\n    OS.state.booted = true;'));
+    evaluate(read('sentinel-shell.js').replace(/\n    boot\(\);/, '\n    OS.state.booted = true;'));
     w.PanthoriumAuth = { isAdministrator: () => evaluate('OS.state.user?.roles?.includes("administrator")') };
     for (const file of ['start-menu-ui.js', 'access-shell-ui.js', 'contact-ui.js']) evaluate(read(file));
     d.dispatchEvent(new w.Event('DOMContentLoaded'));

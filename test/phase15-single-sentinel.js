@@ -62,7 +62,7 @@ function buildSentinel({ benchmarkScore = 92, releaseAllowed = true, activeRunni
   const sentinelService = fs.readFileSync('services/sentinel.js', 'utf8');
   const gatewayService = fs.readFileSync('services/aiGateway.js', 'utf8');
   const server = fs.readFileSync('server.js', 'utf8');
-  const shell = fs.readFileSync('sentinel.html', 'utf8');
+  const shell = fs.readFileSync('sentinel-shell.js', 'utf8');
   assert(api.includes('router.post("/chat/stream"'), 'Sentinel must expose its SSE chat route');
   assert(api.includes('router.post("/sentinel/command"'), 'administrator commands must use the Sentinel route');
   assert(shell.includes('unlockVoiceAudio();'), 'a user gesture must unlock browser audio before the AI request');
