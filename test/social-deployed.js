@@ -1,14 +1,18 @@
 "use strict";
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const { releaseAssetPath } = require("../middleware/publicAssets");
 (async () => {
   const base = process.env.SOCIAL_SMOKE_URL;
   if (!base) throw Error("SOCIAL_SMOKE_URL required");
+  const runtime = await fetch(base + "/sentinel-shell.js");
+  assert.equal(runtime.status, 200);
+  assert((await runtime.text()).includes("PanthoriumSocial?.renderMenu?.()"), "missing Social menu rebuild hook");
   for (const path of ["/", "/admin"]) {
     const r = await fetch(base + path);
     assert.equal(r.status, 200);
     const html = await r.text();
-    assert(html.includes("window.PanthoriumSocial?.renderMenu?.()"), path + " missing Social menu rebuild hook");
+    assert(html.includes('src="/sentinel-shell.js"'), path + " missing desktop script");
     assert(html.includes("social-ui.js?v=social-experience-20261027"), path + " missing Watch cache version");
     for (const file of ["social-ui.js", "social-rtc.js", "contact-ui.js"])
       assert(html.includes(file), path + " missing " + file);
@@ -28,7 +32,7 @@ const fs = require("node:fs");
     assert.equal(r.status, 200);
     assert.equal(
       await r.text(),
-      fs.readFileSync(file, "utf8"),
+      fs.readFileSync(releaseAssetPath(file), "utf8"),
       file + " differs from release",
     );
   }

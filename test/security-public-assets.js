@@ -19,10 +19,10 @@ const privateFiles = [
   ".env", ".git/config", "browser-download.js.map", "manifest.json.bak"
 ];
 
-function request(server, requestPath, method = "GET") {
+function request(server, requestPath, method = "GET", headers = {}) {
   // Use raw paths so the client cannot normalize traversal cases before testing.
   return new Promise((resolve, reject) => {
-    const req = http.request({ hostname: "127.0.0.1", port: server.address().port, path: requestPath, method }, (res) => {
+    const req = http.request({ hostname: "127.0.0.1", port: server.address().port, path: requestPath, method, headers }, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
@@ -87,6 +87,7 @@ async function run() {
   }
 
   process.env.NODE_ENV = "test";
+  process.env.TRUST_PROXY = "1";
   process.env.JWT_SECRET = "test-only-public-asset-boundary-secret";
   process.env.DATA_FILE = path.join(fixture, "runtime", "panthorium.json");
   process.env.AUDIT_FILE = path.join(fixture, "logs", "audit.log");
@@ -101,6 +102,33 @@ async function run() {
     }
     const shell = await request(server, "/");
     assert.equal(shell.status, 200);
+    const host = { Host: "panthorium.net", "X-Forwarded-Proto": "http" };
+    for (const method of ["GET", "HEAD", "POST"]) {
+      const redirect = await request(server, "/browser?lang=th", method, host);
+      assert.equal(redirect.status, method === "POST" ? 308 : 301);
+      assert.equal(redirect.headers.location, "https://panthorium.net/browser?lang=th");
+    }
+    const secure = await request(server, "/", "GET", { Host: "panthorium.net", "X-Forwarded-Proto": "https" });
+    assert.equal(secure.status, 200, "HTTPS visitors behind the tunnel must reach the app");
+    assert.equal((await request(server, "/", "GET", { Host: "example.test" })).headers.location, undefined);
+    const { publicHttpOrigin } = require("../middleware/publicHttps");
+    assert.equal(publicHttpOrigin({ socket: { remoteAddress: "192.0.2.7" }, headers: {
+      host: "panthorium.net", "x-forwarded-proto": "https"
+    } }, true), "https://panthorium.net", "only the local tunnel can attest the visitor's protocol");
+
+    const { JSDOM } = require("jsdom");
+    for (const route of ["/", "/admin", "/admin/", "/admin.html", "/sentinel.html"]) {
+      const response = await request(server, route);
+      const doc = new JSDOM(response.body.toString());
+      try {
+        const directives = response.headers["content-security-policy"].split(";").map(value => value.trim());
+        const faceApi = doc.window.document.querySelector('script[integrity]').getAttribute("src");
+        assert(directives.includes("script-src 'self' " + faceApi));
+        assert(directives.includes("script-src-attr 'none'"));
+        assert.equal(doc.window.document.querySelectorAll("script:not([src])").length, 0);
+        assert.equal(doc.window.document.querySelectorAll('script[src="/sentinel-shell.js"]').length, 1);
+      } finally { doc.window.close(); }
+    }
     const download = await request(server, "/browser-download.html");
     assert.equal(download.status, 200);
     const html = shell.body.toString() + download.body.toString();
@@ -128,7 +156,7 @@ async function run() {
     assert.ok(version, "face-api must use an exact release");
     assert.match(faceApiTag, /integrity="sha384-[A-Za-z0-9+/]{64}"/);
     assert.match(faceApiTag, /crossorigin="anonymous"/);
-    assert.ok(html.includes(`face-api@${version}/model/`), "face models and library releases must match");
+    assert.ok((await request(server, "/sentinel-shell.js")).body.toString().includes(`face-api@${version}/model/`), "face models and library releases must match");
     console.log(`Public asset security tests passed (${localAssets.size} UI assets; runtime logs, private files and traversal denied)`);
   } finally {
     await new Promise((resolve) => server.close(resolve));

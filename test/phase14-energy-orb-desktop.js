@@ -1,7 +1,7 @@
 const assert = require('assert');
 const fs = require('fs');
 
-const shell = fs.readFileSync('sentinel.html', 'utf8').replace(/\r\n/g, '\n');
+const shell = (fs.readFileSync('sentinel.html', 'utf8') + '\n' + fs.readFileSync('sentinel-shell.js', 'utf8')).replace(/\r\n/g, '\n');
 
 assert(!shell.includes('/energy-orb-ui.js'), 'desktop must not load the duplicate replacement orb');
 assert(shell.includes('initBackground();'), 'desktop must initialize the source prototype orb');

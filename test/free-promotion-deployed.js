@@ -2,13 +2,14 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const catalog = require('../billing-catalog');
+const { releaseAssetPath } = require('../middleware/publicAssets');
 (async () => {
   const base = String(process.env.PROMOTION_SMOKE_URL || '').replace(/\/$/, '');
   if (!/^https:\/\//.test(base)) throw new Error('PROMOTION_SMOKE_URL must be an HTTPS deployment URL');
   const request = (path, options = {}) => fetch(base + path, { ...options, signal: AbortSignal.timeout(30000) });
   for (const file of ['account-ui.js', 'voice-identity-ui.js', 'billing-catalog.js', 'billing-ui.js']) {
     const response = await request('/' + file); assert.equal(response.status, 200);
-    assert.equal(await response.text(), fs.readFileSync(require.resolve('../' + file), 'utf8'), 'deployed asset: ' + file);
+    assert.equal(await response.text(), fs.readFileSync(require.resolve('../' + releaseAssetPath(file)), 'utf8'), 'deployed asset: ' + file);
   }
   const response = await request('/api/billing/catalog'); assert.equal(response.status, 200);
   const listing = await response.json();

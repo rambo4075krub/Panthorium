@@ -22,7 +22,7 @@ async function main() {
       ? { ok: true, catalog: JSON.parse(read('services/catalog/cloud-app-packs.json')), readiness: {} }
       : { ok: true, items: [], organizations: [], runs: [], memories: [], files: [], calls: [], orders: [] } });
     for (const file of ['panthorium-window-base.js', 'start-menu-ui.js']) evaluate(read(file));
-    evaluate([...d.scripts].find(s => s.textContent.includes('const OS =')).textContent.replace(/\n    boot\(\);/, '\n    OS.state.booted = true;'));
+    evaluate(read('sentinel-shell.js').replace(/\n    boot\(\);/, '\n    OS.state.booted = true;'));
     evaluate(`OS.state.user = ${JSON.stringify(user('user'))}; OS.config.accessToken = 'test';`);
     d.getElementById('desktop').classList.add('active');
     w.PanthoriumAuth = { isAdministrator: () => evaluate('OS.state.user.roles.includes("administrator")') };

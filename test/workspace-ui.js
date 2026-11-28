@@ -110,7 +110,7 @@ const read = name => fs.readFileSync(name, 'utf8');
   w.$=id=>w.document.getElementById(id);w.createWindow=(id,title,content,opts)=>api.create({...opts,id,title,content,legacyContent:true});
   w.createAdaptiveVoiceDetector=()=>({});w.unlockVoiceAudio=()=>{};w.toast=()=>{};w.voiceResponseNeedsSpeech=()=>false;
   let requests=0;w.callAI=async()=>{requests++;return {ok:true,text:'reply'};};
-  const shell=read('sentinel.html'); const start=shell.indexOf('    function openSentinel()');
+  const shell=read('sentinel-shell.js'); const start=shell.indexOf('    function openSentinel()');
   w.eval(shell.slice(start,shell.indexOf('    // ---------- App: Settings',start)));w.openSentinel();
   const chat=w.document.getElementById('chat-input'); assert.equal(chat.tagName,'TEXTAREA');
   assert.equal(w.document.querySelectorAll('.pt-action[data-pt-prompt]').length,3);

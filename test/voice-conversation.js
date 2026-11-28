@@ -110,9 +110,9 @@ const user = { id: 'voice-test', username: 'admin', permissions: ['chat', 'setti
       }
       return fetch(base + pathname, options);
     };
-    const inline = [...w.document.scripts].find(script => script.textContent.includes('const OS =')).textContent;
+    const runtimeSource = source('sentinel-shell.js');
     evaluate(source('panthorium-window-base.js'));
-    evaluate(inline.replace(/\n    boot\(\);/, '\n    OS.state.booted = true;'));
+    evaluate(runtimeSource.replace(/\n    boot\(\);/, '\n    OS.state.booted = true;'));
   const quietDetector = evaluate("createAdaptiveVoiceDetector()");
   quietDetector.observe(0.018, 500);
   assert.equal(quietDetector.observe(0.018, 600), true, 'quiet mobile speech must cross the adaptive voice threshold');

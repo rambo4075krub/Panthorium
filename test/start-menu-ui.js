@@ -23,7 +23,7 @@ assert(doc.querySelector('script[src^="/start-menu-ui.js?v="]'), 'versioned Star
 assert(server.includes('"start-menu-ui.js"'), 'the new helper is served without a stale static cache');
 assert(!adminDesktop.includes('#start-menu #sm-apps{display:none!important;}'), 'administrator menu keeps a searchable launcher list');
 assert(accessShell.includes("id === 'notes' || id === 'files'"), 'Start Menu preserves account-authorized Notes and Files launchers');
-assert(shell.includes('adminManager.menuApps()'), 'Start Menu includes permitted administrator tools');
+assert(read('sentinel-shell.js').includes('adminManager.menuApps()'), 'Start Menu includes permitted administrator tools');
 assert.equal(doc.getElementById('start-search').type, 'search');
 assert.equal(doc.getElementById('clock').tagName, 'TIME');
 assert(doc.getElementById('system-controls-left').contains(doc.getElementById('start-btn')));

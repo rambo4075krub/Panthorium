@@ -1,0 +1,3796 @@
+    // =========================================================
+    // Panthorium OS - Sentinel Runtime
+    // =========================================================
+    function defaultBackendOrigin() {
+        // Resolve the cloud API from the served origin; native builds may inject a public endpoint.
+        const configured = String(window.PANTHORIUM_BACKEND_URL || "").trim();
+        if (configured && /^https?:\/\//i.test(configured)) return new URL(configured).origin;
+        if (/^https?:$/.test(window.location.protocol)) return window.location.origin;
+        return "https://panthorium-backend-staging-124818950958.asia-southeast1.run.app";
+    }
+    if (window.panthoriumDesktop?.isElectron) document.documentElement.dataset.desktopShell = "true";
+    const OS = {
+        // Internal shell and browser release metadata for compatibility.
+        version: "1.1.0",
+        releaseVersion: "15.0.10",
+        state: {
+            booted: false,
+            loggedIn: false,
+            online: navigator.onLine,
+            verified: false
+        },
+        config: {
+            // Backend / Sentinel
+            backendUrl: defaultBackendOrigin(),
+            useBackend: true,
+            // Conversations use one account-scoped server session across devices.
+            sessionId: "account-default",
+            // Access token stays in memory only; provider secrets remain server-side.
+            accessToken: ""
+        },
+        conversationHistory: [],
+        windows: new Map(),
+        zCounter: 100,
+        apps: {},
+        sentinelOnline: false
+    };
+
+    const WINDOW_PREFERENCES_KEY = "panthorium.window.preferences.v2";
+    const DEFAULT_WINDOW_PREFERENCES = Object.freeze({
+        fullscreenOnOpen: false,
+        minimizeToStartMenu: true,
+        preserveStateUntilClose: true,
+        landscapeEdgeToEdge: true
+    });
+    function loadWindowPreferences() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(WINDOW_PREFERENCES_KEY) || "{}");
+            return Object.fromEntries(Object.keys(DEFAULT_WINDOW_PREFERENCES).map(key => [
+                key, typeof saved[key] === "boolean" ? saved[key] : DEFAULT_WINDOW_PREFERENCES[key]
+            ]));
+        } catch (_) { return { ...DEFAULT_WINDOW_PREFERENCES }; }
+    }
+    let windowPreferences = loadWindowPreferences();
+    document.documentElement.dataset.windowLandscapeEdgeToEdge = String(windowPreferences.landscapeEdgeToEdge);
+    function isNativeAndroidShell() {
+        try { return window.Capacitor?.isNativePlatform?.() === true && window.Capacitor?.getPlatform?.() === "android"; }
+        catch (_) { return false; }
+    }
+    function isFullscreenDisplayMode() {
+        try { return window.matchMedia?.("(display-mode: fullscreen)").matches === true; }
+        catch (_) { return false; }
+    }
+    function syncImmersiveMarker() {
+        const immersive = isNativeAndroidShell() || isFullscreenDisplayMode() || document.fullscreenElement === document.documentElement;
+        document.documentElement.dataset.panthoriumImmersive = String(immersive);
+    }
+    syncImmersiveMarker();
+    document.addEventListener("fullscreenchange", syncImmersiveMarker);
+    window.matchMedia?.("(display-mode: fullscreen)").addEventListener?.("change", syncImmersiveMarker);
+    document.addEventListener("click", event => {
+        const launcher = event.target?.closest?.(".sm-app[data-app-id], #desktop-icons [data-app-id]");
+        if (!launcher || !windowPreferences.fullscreenOnOpen) return;
+        if (isNativeAndroidShell() || isFullscreenDisplayMode()) { syncImmersiveMarker(); return; }
+        if (document.fullscreenElement || !document.documentElement.requestFullscreen) return;
+        try {
+            const request = document.documentElement.requestFullscreen({ navigationUI: "hide" });
+            Promise.resolve(request).then(syncImmersiveMarker).catch(syncImmersiveMarker);
+        } catch (_) { syncImmersiveMarker(); }
+    }, true);
+    function saveWindowPreferences(next = {}) {
+        windowPreferences = Object.fromEntries(Object.keys(DEFAULT_WINDOW_PREFERENCES).map(key => [
+            key, typeof next[key] === "boolean" ? next[key] : windowPreferences[key]
+        ]));
+        document.documentElement.dataset.windowLandscapeEdgeToEdge = String(windowPreferences.landscapeEdgeToEdge);
+        try { localStorage.setItem(WINDOW_PREFERENCES_KEY, JSON.stringify(windowPreferences)); } catch (_) {}
+        return { ...windowPreferences };
+    }
+
+    // Retire device-only connection settings and sensitive local biometric descriptors.
+    (function clearLegacyDeviceStorage() {
+        try {
+            ["pt_backend_url", "pt_use_backend", "pt_session_id", "pt_face", "pt_voice", "pt_enrolled"]
+                .forEach(key => localStorage.removeItem(key));
+        } catch (error) { console.warn("Legacy device settings could not be cleared:", error); }
+    })();
+
+    // ---------- Utilities ----------
+    function toast(msg, duration = 2500) {
+        const el = document.getElementById("orb-system-notice");
+        if (!el) return;
+        el.textContent = String(msg ?? "");
+        el.classList.add("show");
+        clearTimeout(el.__voiceTimer);
+        el.__voiceTimer = setTimeout(() => el.classList.remove("show"), duration);
+    }
+
+    function $(id) { return document.getElementById(id); }
+
+    // ---------- Gregorian calendar and local time ----------
+    function updateClock() {
+        const now = new Date();
+        const locale = "th-TH-u-ca-gregory-nu-latn";
+        const date = now.toLocaleDateString(locale, { day: "numeric", month: "short", year: "numeric" });
+        const time = now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+        const clock = $("clock");
+        if (clock) {
+            clock.textContent = `${date} · ${time}`;
+            clock.dateTime = now.toISOString();
+        }
+    }
+    setInterval(updateClock, 10000);
+    updateClock();
+
+    // ---------- Network Status ----------
+    function setNetworkStatus(online) {
+        const isOnline = Boolean(online);
+        OS.state.online = isOnline;
+        const dot = $("status-dot");
+        if (dot) {
+            dot.style.background = isOnline ? "var(--success)" : "var(--danger)";
+            dot.style.boxShadow = isOnline ? "0 0 8px var(--success)" : "0 0 8px var(--danger)";
+            dot.title = isOnline ? "Online" : "Offline";
+            dot.setAttribute("aria-label", isOnline ? "ออนไลน์" : "ออฟไลน์");
+        }
+        const label = $("sm-status");
+        if (label) label.textContent = isOnline ? "Online" : "Offline";
+    }
+    window.addEventListener("online", () => setNetworkStatus(true));
+    window.addEventListener("offline", () => setNetworkStatus(false));
+    setNetworkStatus(navigator.onLine);
+
+    // ---------- Boot Sequence ----------
+    async function boot() {
+        if (OS.state.booted) return;
+        const bar = $("boot-bar");
+        const status = $("boot-status");
+        const steps = [
+            { p: 20, t: "โหลด Kernel..." },
+            { p: 40, t: "เริ่มต้นระบบกราฟิก..." },
+            { p: 60, t: "เตรียม Desktop Environment..." },
+            { p: 80, t: "ลงทะเบียนแอปพลิเคชัน..." },
+            { p: 100, t: "พร้อมใช้งาน" }
+        ];
+        for (const s of steps) {
+            bar.style.width = s.p + "%";
+            status.textContent = s.t;
+            await new Promise(r => setTimeout(r, 220 + Math.random() * 150));
+        }
+        await new Promise(r => setTimeout(r, 300));
+        const finishBoot = () => {
+            if (OS.state.booted) return;
+            $("boot-screen").style.display = "none";
+            // เข้าสู่ระบบฟรีทันที ไม่ต้อง login
+            $("login-screen").style.display = "none";
+            $("desktop").classList.add("active");
+            OS.state.booted = true;
+            OS.state.loggedIn = true;
+            OS.state.verified = true;
+            try { initDesktop(); } catch (error) { console.error("Desktop initialization failed", error); activateOrbFallback(error); }
+            try { initGlobalVoice(); } catch (error) { console.error("Voice initialization failed", error); }
+            toast("ยินดีต้อนรับสู่ Panthorium OS");
+        };
+        $("boot-screen").classList.add("hidden");
+        setTimeout(finishBoot, 120);
+        // A failed animation/WebGL initialization must never leave the OS on boot.
+        setTimeout(() => {
+            if (!OS.state.booted) finishBoot();
+        }, 3500);
+    }
+
+    window.addEventListener("error", event => {
+        if (!OS.state.booted) {
+            console.error("Boot runtime error", event.error || event.message);
+            try { boot(); } catch (_) {}
+        }
+    });
+
+    // ---------- Biometrics ----------
+    let faceModelsLoaded = false;
+    let analyser = null;
+
+    async function loadFaceModels() {
+        if (faceModelsLoaded) return true;
+        try {
+            const MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/";
+            await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+            faceModelsLoaded = true;
+            return true;
+        } catch (e) {
+            console.warn("Face models failed", e);
+            return false;
+        }
+    }
+
+    async function startCamera() {
+        const video = $("faceVideo");
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: "user", width: 320, height: 240 },
+                audio: true
+            });
+            video.srcObject = stream;
+
+            // Audio analyser for voiceprint
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioCtx.createMediaStreamSource(stream);
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 512;
+            source.connect(analyser);
+
+            return true;
+        } catch (e) {
+            console.warn("Media access denied", e);
+            return false;
+        }
+    }
+
+    function extractVoiceFeatures() {
+        if (!analyser) return 0;
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(data);
+        let sum = 0;
+        for (let i = 0; i < 48; i++) sum += data[i];
+        return sum / 48;
+    }
+
+    // ---------- Speech ----------
+    let aiSpeechActive = false;
+    let aiSpeechPulse = 0;
+    let aiSpeechEnvelope = 0;
+    let userSpeechActive = false;
+    const ORB_WELCOME_TEXT = "หากยังไม่มีคำถาม ให้ถามว่าทำอะไรได้บ้าง";
+    let orbTranscriptLines = [ORB_WELCOME_TEXT];
+    let orbTranscriptOffsets = [];
+    let orbTranscriptIndex = 0;
+    let orbTranscriptTouchY = null;
+    let orbTranscriptLastNav = 0;
+
+    function splitOrbTranscript(text) {
+        const source = String(text || "").replace(/\s+/g, " ").trim();
+        if (!source) return [];
+        const sentences = source.match(/[^.!?…]+[.!?…]?/g)?.map(part => part.trim()).filter(Boolean) || [source];
+        if (sentences.length > 1 || source.length <= 96) return sentences;
+        const words = source.split(" ");
+        const chunks = [];
+        let chunk = "";
+        for (const word of words) {
+            if (chunk && (chunk + " " + word).length > 72) { chunks.push(chunk); chunk = word; }
+            else chunk += (chunk ? " " : "") + word;
+        }
+        if (chunk) chunks.push(chunk);
+        return chunks;
+    }
+
+    function renderOrbTranscript() {
+        const panel = $("orb-transcript");
+        if (!panel) return;
+        panel.querySelector('[data-orb-line="previous"]').textContent = orbTranscriptLines[orbTranscriptIndex - 1] || "";
+        panel.querySelector('[data-orb-line="current"]').textContent = orbTranscriptLines[orbTranscriptIndex] || "";
+        panel.querySelector('[data-orb-line="next"]').textContent = orbTranscriptLines.slice(orbTranscriptIndex + 1).join(" ");
+        panel.setAttribute("aria-label", orbTranscriptLines.length ? `ข้อความ AI ประโยคที่ ${orbTranscriptIndex + 1} จาก ${orbTranscriptLines.length}` : "ข้อความประกอบเสียงตอบของ AI");
+    }
+
+    function setOrbTranscript(sentences, index = 0) {
+        const next = Array.isArray(sentences) ? sentences.map(String).filter(Boolean) : splitOrbTranscript(sentences);
+        orbTranscriptLines = next;
+        orbTranscriptOffsets = [];
+        let offset = 0;
+        for (const sentence of next) { orbTranscriptOffsets.push(offset); offset += sentence.length + 1; }
+        orbTranscriptIndex = Math.min(Math.max(0, Number(index) || 0), Math.max(0, next.length - 1));
+        renderOrbTranscript();
+    }
+
+    // A new visit must not display an answer from the previous visit/account.
+    function resetOrbWelcome() {
+        orbTranscriptTouchY = null;
+        setOrbTranscript(ORB_WELCOME_TEXT);
+    }
+    let orbTranscriptAccount = "";
+    window.addEventListener("pageshow", resetOrbWelcome);
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) resetOrbWelcome();
+    });
+    window.addEventListener("panthorium:auth-changed", () => {
+        const account = String(OS.state.user?.sub || OS.state.user?.id || "");
+        if (account !== orbTranscriptAccount) {
+            orbTranscriptAccount = account;
+            resetOrbWelcome();
+        }
+    });
+
+    function showOrbTranscriptSentence(index) {
+        orbTranscriptIndex = Math.min(Math.max(0, Number(index) || 0), Math.max(0, orbTranscriptLines.length - 1));
+        renderOrbTranscript();
+    }
+
+    function showOrbTranscriptForChar(charIndex) {
+        let sentenceIndex = 0;
+        for (let i = 0; i < orbTranscriptOffsets.length; i++) {
+            if (charIndex >= orbTranscriptOffsets[i]) sentenceIndex = i;
+        }
+        showOrbTranscriptSentence(sentenceIndex);
+    }
+
+    function initOrbTranscriptControls() {
+        const panel = $("orb-transcript");
+        if (!panel || panel.dataset.ready) return;
+        panel.dataset.ready = "1";
+        const move = direction => showOrbTranscriptSentence(orbTranscriptIndex + direction);
+        panel.querySelector('[data-orb-line="previous"]').onclick = () => move(-1);
+        panel.querySelector('[data-orb-line="next"]').onclick = () => move(1);
+        panel.addEventListener("wheel", event => {
+            event.preventDefault();
+            const now = performance.now();
+            if (Math.abs(event.deltaY) > 4 && now - orbTranscriptLastNav > 240) { orbTranscriptLastNav = now; move(event.deltaY > 0 ? 1 : -1); }
+        }, { passive: false });
+        panel.addEventListener("keydown", event => {
+            if (["ArrowUp", "ArrowLeft", "PageUp"].includes(event.key)) { event.preventDefault(); move(-1); }
+            if (["ArrowDown", "ArrowRight", "PageDown"].includes(event.key)) { event.preventDefault(); move(1); }
+        });
+        panel.addEventListener("touchstart", event => { orbTranscriptTouchY = event.changedTouches[0].clientY; }, { passive: true });
+        panel.addEventListener("touchend", event => {
+            if (orbTranscriptTouchY === null) return;
+            const distance = orbTranscriptTouchY - event.changedTouches[0].clientY;
+            if (Math.abs(distance) > 24) move(distance > 0 ? 1 : -1);
+            orbTranscriptTouchY = null;
+        }, { passive: true });
+        renderOrbTranscript();
+    }
+
+    function languageForText(text) {
+        const value = String(text || "");
+        if (/[฀-๿]/.test(value)) return "th-TH";
+        if (/[぀-ヿ]/.test(value)) return "ja-JP";
+        if (/[가-힯]/.test(value)) return "ko-KR";
+        if (/[؀-ۿ]/.test(value)) return "ar-SA";
+        if (/[Ѐ-ӿ]/.test(value)) return "ru-RU";
+        if (/[一-鿿]/.test(value)) return "zh-CN";
+        if (/[A-Za-zÀ-ÿ]/.test(value)) return "en-US";
+        return "en-US";
+    }
+
+    function splitSpeechByLanguage(text) {
+        const source = String(text || "").replace(/\s+/g, " ").trim();
+        if (!source) return [];
+        // One voice and one pronunciation path for every script: English
+        // words are spoken by the system's Thai male Niwat voice too.
+        const pieces = [];
+        let remaining = source;
+        while (remaining.length > 6000) {
+            let cut = remaining.lastIndexOf(" ", 5500);
+            if (cut < 3000) cut = 5500;
+            pieces.push({ text: remaining.slice(0, cut).trim(), lang: "th-TH" });
+            remaining = remaining.slice(cut).trim();
+        }
+        if (remaining) pieces.push({ text: remaining, lang: "th-TH" });
+        return pieces;
+    }
+
+    const voiceAudio = new Audio();
+    let voicePlaybackContext = null;
+    let voicePlaybackSource = null;
+    const voiceAudioPlayers = [voiceAudio, new Audio()];
+    const reservedVoiceAudioPlayers = new Set();
+    const voiceAudioPlayerWaiters = [];
+    const unlockedVoiceAudioPlayers = new Set();
+    let voiceAudioUnlocked = false;
+    let voiceAudioUnlocking = false;
+    let activeSpeechRun = 0;
+    let cancelRemotePlayback = null;
+    let speechInterruptedByUser = false;
+    let currentSpeechText = "";
+    let interruptedSpeechText = "";
+    const sentinelSpeechIsActive = () => aiSpeechActive || streamingSpeechActive;
+    function normalizeVoiceStopText(text) {
+        return String(text || "").normalize("NFKC").toLowerCase()
+            .replace(/[\s\u200b\u200c\u200d\uFEFF]+/gu, "")
+            .replace(/(?:ครับ|ค่ะ|คะ|นะ|หน่อย)$/u, "")
+            .replace(/[.,!?;:。！？、ฯๆ]+$/gu, "")
+            .replace(/[.,!?;:。！？、]/gu, "");
+    }
+    function isVoiceStopCommand(text) {
+        const normalized = normalizeVoiceStopText(text);
+        return /^(?:หยุด(?:พูด|เดี๋ยวนี้|เสียง|ก่อน|ที|เลย|ได้แล้ว|ต่อ)?|ไม่ต้องพูด(?:แล้ว|ต่อ)?|พอ(?:แล้ว|ที|ก่อน|เถอะ)?|เซา(?:ๆ|เซา)?|เซ้า(?:ๆ|เซ้า)?)$/u.test(normalized);
+    }
+    function isVoiceContinueCommand(text) {
+        const normalized = normalizeVoiceStopText(text);
+        return /^(?:พูดต่อ(?:ไป|ได้(?:เลย)?|เลย)?|ต่อ(?:ไป|ได้(?:เลย)?|เลย)?|เล่าต่อ(?:ไป|ได้)?|อ่านต่อ(?:ไป|ได้)?|continue(?:speaking|please)?|pleasecontinue|goon|keepgoing|carryon|goahead)$/u.test(normalized);
+    }
+    window.addEventListener("panthorium:live-start", () => { stopSentinelSpeech(); try { window.speechSynthesis?.cancel(); } catch (_) {} });
+    function stopSentinelSpeech() {
+        speechInterruptedByUser = true;
+        if (currentSpeechText) interruptedSpeechText = currentSpeechText;
+        currentSpeechText = "";
+        cancelStreamingSpeech();
+        activeSpeechRun += 1;
+        try { cancelRemotePlayback?.(); } catch (_) {}
+        cancelRemotePlayback = null;
+        for (const audio of voiceAudioPlayers) { try { audio.pause(); audio.currentTime = 0; } catch (_) {} }
+        try { voiceAudio.pause(); voiceAudio.currentTime = 0; } catch (_) {}
+        try { voicePlaybackSource?.stop(); } catch (_) {}
+        voicePlaybackSource = null;
+        aiSpeechActive = false;
+        aiSpeechPulse = 0;
+        window.PanthoriumOrb?.setAISpeaking(false);
+        window.dispatchEvent(new CustomEvent("panthorium:voice-end", { detail: { interrupted: true } }));
+    }
+    function unlockVoiceAudio() {
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        if (!voicePlaybackContext && AudioContextCtor) {
+            try { voicePlaybackContext = new AudioContextCtor(); } catch (_) {}
+        }
+        if (voicePlaybackContext?.state === "suspended") voicePlaybackContext.resume().catch(() => {});
+        if (voiceAudioUnlocked || voiceAudioUnlocking || aiSpeechActive) return;
+        if (!URL.createObjectURL) return;
+        // Warm every reusable player from the user's tap; Android Chrome can
+        // block media elements that first call play() after a network wait.
+        const wav = new ArrayBuffer(44 + 320);
+        const view = new DataView(wav);
+        const label = (offset, value) => [...value].forEach((char, i) => view.setUint8(offset + i, char.charCodeAt(0)));
+        label(0, "RIFF"); view.setUint32(4, wav.byteLength - 8, true); label(8, "WAVE"); label(12, "fmt ");
+        view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+        view.setUint32(24, 8000, true); view.setUint32(28, 16000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+        label(36, "data"); view.setUint32(40, 320, true);
+        voiceAudioUnlocking = true;
+        let remaining = voiceAudioPlayers.length;
+        const finish = (audio, warmupUrl, unlocked) => {
+            if (audio.src === warmupUrl) { audio.pause(); audio.currentTime = 0; }
+            if (unlocked) unlockedVoiceAudioPlayers.add(audio);
+            URL.revokeObjectURL(warmupUrl);
+            remaining -= 1;
+            if (!remaining) {
+                voiceAudioUnlocking = false;
+                voiceAudioUnlocked = voiceAudioPlayers.every(player => unlockedVoiceAudioPlayers.has(player));
+            }
+        };
+        for (const audio of voiceAudioPlayers) {
+            const warmupUrl = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
+            audio.preload = "auto"; audio.src = warmupUrl; audio.volume = 0;
+            try { Promise.resolve(audio.play()).then(() => finish(audio, warmupUrl, true), () => finish(audio, warmupUrl, false)); }
+            catch (_) { finish(audio, warmupUrl, false); }
+        }
+    }
+
+    async function requestRemoteChunk(text, lang) {
+        const controller = new AbortController();
+        // The server performs one bounded synthesis attempt. Do not keep a
+        // second browser retry queued behind a slow first response.
+        const timeout = setTimeout(() => controller.abort(), Math.max(20000, Math.min(300000, String(text).length * 80)));
+        try {
+            const base = OS.config.backendUrl.replace(/\/$/, "");
+            const response = await authorizedFetch(base + "/api/speech", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ text: String(text).slice(0, 6000), lang }),
+                signal: controller.signal
+            });
+            if (!response.ok) return null;
+            const expectedMaleProfile = "th-TH-NiwatNeural";
+            const receivedProfile = response.headers.get("x-sentinel-voice-profile") || "";
+            if (expectedMaleProfile && receivedProfile !== expectedMaleProfile) return null;
+            const blob = await response.blob();
+            if (!blob.size) return null;
+            return { objectUrl: URL.createObjectURL(blob), blob };
+        } catch (_) {
+            return null;
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    function reserveVoiceAudioPlayer() {
+        const available = voiceAudioPlayers.find(audio => !reservedVoiceAudioPlayers.has(audio));
+        if (available) { reservedVoiceAudioPlayers.add(available); return Promise.resolve(available); }
+        return new Promise(resolve => voiceAudioPlayerWaiters.push(resolve));
+    }
+    function releaseRemoteChunk(prepared) {
+        if (prepared?.audio) {
+            const audio = prepared.audio; prepared.audio = null;
+            try {
+                audio.pause(); audio.onended = null; audio.onerror = null; audio.ontimeupdate = null;
+                audio.removeAttribute("src"); audio.load();
+            } catch (_) {}
+            const waiter = voiceAudioPlayerWaiters.shift();
+            if (waiter) waiter(audio); else reservedVoiceAudioPlayers.delete(audio);
+        }
+        if (prepared?.objectUrl) URL.revokeObjectURL(prepared.objectUrl);
+    }
+    async function preloadRemoteChunk(prepared) {
+        if (!prepared?.objectUrl || prepared.audio) return prepared;
+        const audio = await reserveVoiceAudioPlayer();
+        prepared.audio = audio; audio.preload = "auto"; audio.volume = 0; audio.src = prepared.objectUrl;
+        await new Promise(resolve => {
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true; clearTimeout(timer);
+                audio.removeEventListener("canplay", finish); audio.removeEventListener("error", finish);
+                resolve();
+            };
+            const timer = setTimeout(finish, 1800);
+            audio.addEventListener("canplay", finish, { once: true });
+            audio.addEventListener("error", finish, { once: true });
+            try { audio.load(); } catch (_) {}
+            if (audio.readyState >= 2) finish();
+        });
+        audio.volume = 1;
+        return prepared;
+    }
+
+    function playMobileRemoteChunk(prepared, text, transcriptRange = {}) {
+        return new Promise(resolve => {
+            const Context = window.AudioContext || window.webkitAudioContext;
+            if (!Context || !prepared?.blob) { resolve(null); return; }
+            if (!voicePlaybackContext) {
+                try { voicePlaybackContext = new Context(); } catch (_) { resolve(null); return; }
+            }
+            const context = voicePlaybackContext;
+            let settled = false;
+            let progressTimer = null;
+            let watchdog = null;
+            let source = null;
+            const finish = value => {
+                if (settled) return;
+                settled = true;
+                clearInterval(progressTimer); clearTimeout(watchdog);
+                if (voicePlaybackSource === source) voicePlaybackSource = null;
+                if (source) { source.onended = null; try { source.disconnect(); } catch (_) {} }
+                releaseRemoteChunk(prepared);
+                if (cancelRemotePlayback === cancel) cancelRemotePlayback = null;
+                resolve(value);
+            };
+            const cancel = () => { try { source?.stop(); } catch (_) {} finish(false); };
+            cancelRemotePlayback = cancel;
+            (async () => {
+                try {
+                    if (context.state === "suspended") await context.resume();
+                    const encoded = await prepared.blob.arrayBuffer();
+                    const buffer = await context.decodeAudioData(encoded);
+                    if (settled || speechInterruptedByUser) { finish(false); return; }
+                    source = context.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(context.destination);
+                    voicePlaybackSource = source;
+                    source.onended = () => {
+                        const lastChar = Math.max(0, Number(transcriptRange.end) - 1);
+                        showOrbTranscriptForChar(lastChar);
+                        window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex: lastChar } }));
+                        finish(true);
+                    };
+                    const start = Number(transcriptRange.start) || 0;
+                    const end = Math.max(start + 1, Number(transcriptRange.end) || start + String(text).length);
+                    const startedAt = context.currentTime;
+                    const update = () => {
+                        const elapsed = Math.max(0, context.currentTime - startedAt);
+                        const progress = Math.min(1, elapsed / Math.max(buffer.duration, 0.001));
+                        const charIndex = Math.min(end - 1, Math.floor(start + (end - start) * progress));
+                        showOrbTranscriptForChar(charIndex);
+                        window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex } }));
+                    };
+                    progressTimer = setInterval(update, 120);
+                    watchdog = setTimeout(() => finish(false), Math.max(15000, buffer.duration * 1000 + 10000));
+                    source.start();
+                } catch (_) { finish(false); }
+            })();
+        });
+    }
+    function playRemoteChunk(prepared, text, transcriptRange = {}) {
+        if (isMobileDevice()) {
+            const result = playMobileRemoteChunk(prepared, text, transcriptRange);
+            return result.then(value => value === null ? playRemoteChunk(prepared, text, transcriptRange) : value);
+        }
+        return new Promise(resolve => {
+            if (!prepared?.objectUrl) { resolve(false); return; }
+            const audio = prepared.audio || voiceAudio;
+            let settled = false;
+            const finish = value => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                audio.pause();
+                audio.onended = null;
+                audio.onerror = null;
+                audio.ontimeupdate = null;
+                releaseRemoteChunk(prepared);
+                if (cancelRemotePlayback === cancel) cancelRemotePlayback = null;
+                resolve(value);
+            };
+            const cancel = () => finish(false);
+            cancelRemotePlayback = cancel;
+            const timeout = setTimeout(() => finish(false), Math.max(30000, Math.min(1200000, String(text).length * 500)));
+            (async () => {
+                try {
+                    if (!prepared.audio) {
+                        audio.pause();
+                        audio.currentTime = 0;
+                        audio.src = prepared.objectUrl;
+                        audio.preload = "auto";
+                    }
+                    audio.volume = 1;
+                    // Pitch and tone are transformed server-side; keep playback
+                    // brisk here without changing the new male register.
+                    audio.playbackRate = 1.0;
+                    if ("preservesPitch" in audio) audio.preservesPitch = true;
+                    if ("mozPreservesPitch" in audio) audio.mozPreservesPitch = true;
+                    if ("webkitPreservesPitch" in audio) audio.webkitPreservesPitch = true;
+                    const transcriptStartChar = Number(transcriptRange.start) || 0;
+                    const transcriptEndChar = Math.max(transcriptStartChar + 1, Number(transcriptRange.end) || transcriptStartChar + String(text).length);
+                    const updateTranscript = (complete = false) => {
+                        const progress = complete ? 1 : Number.isFinite(audio.duration) && audio.duration > 0 ? audio.currentTime / audio.duration : 0;
+                        const charIndex = Math.min(transcriptEndChar - 1, Math.floor(transcriptStartChar + (transcriptEndChar - transcriptStartChar) * progress));
+                        aiSpeechPulse = Math.min(1, aiSpeechPulse + 0.2);
+                        showOrbTranscriptForChar(charIndex);
+                        window.dispatchEvent(new CustomEvent("panthorium:voice-boundary", { detail: { charIndex } }));
+                    };
+                    audio.ontimeupdate = () => updateTranscript(false);
+                    audio.onended = () => { updateTranscript(true); finish(true); };
+                    audio.onerror = () => finish(false);
+                    updateTranscript(false);
+                    await audio.play();
+                } catch (_) { finish(false); }
+            })();
+        });
+    }
+
+    function voiceSafeText(text) {
+        const value = String(text || "").replace(/^\s*เสียงตอบกลับ\s*[:：-]?\s*/u, "").replace(/\s*(?:ครับ|ค่ะ|คะ)(?=\s|[,.!?;:…。、]|$)/g, "").trim();
+        if (/ข้อความเท่านั้น|ไม่มีเสียงพูด|ไม่สามารถพูด|ไม่มีระบบเสียง/i.test(value)) {
+            return "รับทราบ ระบบพร้อมรับคำสั่งเสียงและตอบกลับด้วยเสียงแล้ว กรุณาพูดคำสั่งได้เลย";
+        }
+        return value;
+    }
+
+    async function speak(text, { firstPrepared = null, firstPreparedAttempted = false } = {}) {
+        if (document.body.dataset.aiMode === "gemini-live-only") return false;
+        if (speechInterruptedByUser) {
+            releaseRemoteChunk(firstPrepared);
+            return false;
+        }
+        text = voiceSafeText(text);
+        currentSpeechText = text;
+        setOrbTranscript(text, 0);
+        const speechRun = ++activeSpeechRun;
+        const rawChunks = splitSpeechByLanguage(text);
+        let transcriptSearchOffset = 0;
+        const chunks = rawChunks.map(chunk => {
+            const found = text.indexOf(chunk.text, transcriptSearchOffset);
+            const transcriptStartChar = found >= 0 ? found : transcriptSearchOffset;
+            const transcriptEndChar = Math.min(text.length, transcriptStartChar + chunk.text.length);
+            transcriptSearchOffset = transcriptEndChar;
+            return { ...chunk, transcriptStartChar, transcriptEndChar };
+        });
+        if (!chunks.length) return false;
+        voiceAudio.pause();
+        if (speechRun !== activeSpeechRun) return false;
+        aiSpeechActive = true;
+        aiSpeechPulse = 1;
+        window.PanthoriumOrb?.setAISpeaking(true);
+        window.dispatchEvent(new CustomEvent("panthorium:voice-start", { detail: { text } }));
+        let spokeAny = false;
+        // Use the same authenticated system voice for every chunk and prefetch
+        // the next two audio pieces while the current one is playing.
+        const preparedRemotePromises = chunks.map(() => Promise.resolve(null));
+        if (firstPreparedAttempted && chunks.length) preparedRemotePromises[0] = Promise.resolve(firstPrepared);
+        let nextRemoteChunk = firstPreparedAttempted ? 1 : 0;
+        const prefetchRemote = currentIndex => {
+            const through = Math.min(chunks.length - 1, currentIndex + 2);
+            while (nextRemoteChunk <= through) {
+                const index = nextRemoteChunk++;
+                preparedRemotePromises[index] = requestRemoteChunk(chunks[index].text, "th-TH");
+            }
+        };
+        const releasePendingRemote = startIndex => preparedRemotePromises.slice(startIndex).forEach(promise => promise.then(releaseRemoteChunk));
+        prefetchRemote(-1);
+        for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+            const chunk = chunks[chunkIndex];
+            const preparedRemote = await preparedRemotePromises[chunkIndex];
+            prefetchRemote(chunkIndex);
+            if (speechRun !== activeSpeechRun) {
+                releaseRemoteChunk(preparedRemote);
+                releasePendingRemote(chunkIndex + 1);
+                break;
+            }
+            if (!preparedRemotePromises[chunkIndex].__voicePlayerPromise) {
+                preparedRemotePromises[chunkIndex].__voicePlayerPromise = preloadRemoteChunk(preparedRemote);
+            }
+            const currentReady = await preparedRemotePromises[chunkIndex].__voicePlayerPromise;
+            if (chunkIndex + 1 < chunks.length && !preparedRemotePromises[chunkIndex + 1].__voicePlayerPromise) {
+                preparedRemotePromises[chunkIndex + 1].__voicePlayerPromise = preparedRemotePromises[chunkIndex + 1].then(preloadRemoteChunk).catch(() => null);
+            }
+            const transcriptRange = { start: chunk.transcriptStartChar, end: chunk.transcriptEndChar };
+            const spoken = speechRun === activeSpeechRun && await playRemoteChunk(currentReady, chunk.text, transcriptRange);
+            spokeAny = spokeAny || spoken;
+        }
+        if (speechRun === activeSpeechRun) {
+            currentSpeechText = "";
+            aiSpeechActive = false;
+            aiSpeechPulse = 0;
+            window.PanthoriumOrb?.setAISpeaking(false);
+            window.dispatchEvent(new CustomEvent("panthorium:voice-end"));
+        }
+        return spokeAny;
+    }
+
+    function transcribeWithBrowserSpeechRecognition(SpeechRecognitionCtor, { timeoutMs = 12000, onListening = null } = {}) {
+        if (document.body.dataset.aiMode === 'local-only') return Promise.reject(new Error('local_transcription_required'));
+        if (typeof SpeechRecognitionCtor !== "function") {
+            return Promise.reject(new Error("transcription_provider_unavailable"));
+        }
+        return new Promise((resolve, reject) => {
+            let recognition;
+            let settled = false;
+            const finish = (error, text = "") => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                if (recognition) {
+                    recognition.onresult = null;
+                    recognition.onerror = null;
+                    recognition.onend = null;
+                    try { recognition.stop(); } catch (_) {}
+                }
+                if (error) reject(error);
+                else resolve(text);
+            };
+            const timer = setTimeout(() => finish(new Error("transcription_timeout")), timeoutMs);
+            try {
+                recognition = new SpeechRecognitionCtor();
+                recognition.lang = "th-TH";
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.maxAlternatives = 1;
+                recognition.onresult = event => {
+                    for (let index = event.resultIndex || 0; index < event.results.length; index += 1) {
+                        const result = event.results[index];
+                        if (!result?.isFinal) continue;
+                        const text = String(result?.[0]?.transcript || "").trim();
+                        const confidence = Number(result?.[0]?.confidence);
+                        if (!text || !Number.isFinite(confidence) || confidence < 0.55) {
+                            finish(new Error("transcription_uncertain"));
+                            return;
+                        }
+                        finish(null, text);
+                        return;
+                    }
+                };
+                recognition.onerror = event => {
+                    const error = ["not-allowed", "service-not-allowed", "audio-capture"].includes(event?.error)
+                        ? "microphone_permission_denied"
+                        : "transcription_fallback_unavailable";
+                    finish(new Error(error));
+                };
+                recognition.onend = () => finish(new Error("transcription_uncertain"));
+                onListening?.();
+                recognition.start();
+            } catch (error) {
+                finish(error?.name === "NotAllowedError" ? new Error("microphone_permission_denied") : new Error("transcription_fallback_unavailable"));
+            }
+        });
+    }
+
+    function createAdaptiveVoiceDetector() {
+        let noiseFloor = 0.008;
+        let samples = 0;
+        let voicedFrames = 0;
+        return {
+            observe(level, elapsedMs) {
+                const value = Number.isFinite(level) ? level : 0;
+                // Do not learn a loud first syllable as "background noise".
+                // Mobile users often begin speaking as soon as the mic opens.
+                if (elapsedMs < 450 && value < 0.025) {
+                    samples += 1;
+                    noiseFloor += (value - noiseFloor) / samples;
+                }
+                const threshold = Math.min(0.035, Math.max(0.005, noiseFloor * 1.35));
+                if (value >= threshold) voicedFrames += 1;
+                else voicedFrames = Math.max(0, voicedFrames - 1);
+                return voicedFrames >= 2;
+            }
+        };
+    }
+
+    // Browsers may keep speech synthesis paused until the first user gesture.
+    window.addEventListener("pointerdown", () => {
+        unlockVoiceAudio();
+    }, { once: false, passive: true });
+
+    // Stream-safe speech: speak stable phrases while a voice answer is still
+    // arriving. Serialize the queue so later fragments never interrupt earlier ones.
+    let streamingSpeechBuffer = "";
+    let streamingSpeechTimer = null;
+    let streamingSpeechQueue = Promise.resolve();
+    let streamingSpeechGeneration = 0;
+    let streamingSpeechActive = false;
+    let streamingSpeechSucceeded = false;
+    let streamingSpeechInterrupted = false;
+    let streamingSpeechTtsInFlight = 0;
+    const streamingSpeechTtsPending = [];
+    function prepareStreamingSpeech(chunk, generation) {
+        return new Promise(resolve => {
+            streamingSpeechTtsPending.push({ chunk, generation, resolve });
+            pumpStreamingSpeechTts();
+        });
+    }
+    function pumpStreamingSpeechTts() {
+        if (document.body.dataset.aiMode === "gemini-live-only") return;
+        while (streamingSpeechTtsInFlight < 2 && streamingSpeechTtsPending.length) {
+            const job = streamingSpeechTtsPending.shift();
+            if (job.generation !== streamingSpeechGeneration) { job.resolve(null); continue; }
+            streamingSpeechTtsInFlight += 1;
+            requestRemoteChunk(job.chunk, "th-TH").then(prepared => {
+                if (job.generation !== streamingSpeechGeneration) {
+                    releaseRemoteChunk(prepared);
+                    job.resolve(null);
+                } else job.resolve(prepared);
+            }).catch(() => job.resolve(null)).finally(() => {
+                streamingSpeechTtsInFlight = Math.max(0, streamingSpeechTtsInFlight - 1);
+                pumpStreamingSpeechTts();
+            });
+        }
+    }
+    function findSpeechChunkCut(text, maxLength, minimumLength = 18) {
+        const value = String(text || "");
+        const limit = Math.min(value.length, maxLength);
+        let cut = 0;
+        const boundaryPattern = /[,;:!?…。！？，；：\s]/gu;
+        let match;
+        while ((match = boundaryPattern.exec(value)) && match.index < limit) {
+            const end = match.index + match[0].length;
+            if (end <= limit && end >= minimumLength) cut = end;
+        }
+        if (cut >= minimumLength) return cut;
+        try {
+            if (typeof Intl.Segmenter === "function") {
+                for (const part of new Intl.Segmenter("th", { granularity: "word" }).segment(value)) {
+                    const end = part.index + part.segment.length;
+                    if (end > limit) break;
+                    if (part.isWordLike && end >= minimumLength) cut = end;
+                }
+            }
+        } catch (_) {}
+        if (cut >= minimumLength) return cut;
+        try {
+            if (typeof Intl.Segmenter === "function") {
+                for (const part of new Intl.Segmenter("th", { granularity: "grapheme" }).segment(value)) {
+                    const end = part.index + part.segment.length;
+                    if (end > limit) break;
+                    if (end >= minimumLength) cut = end;
+                }
+            }
+        } catch (_) {}
+        return cut >= minimumLength ? cut : 0;
+    }
+    function queueStreamingSpeech(text) {
+        const chunk = String(text || "").trim();
+        if (!chunk || speechInterruptedByUser) return;
+        if (!streamingSpeechActive) streamingSpeechInterrupted = false;
+        streamingSpeechActive = true;
+        const generation = streamingSpeechGeneration;
+        // Prepare every phrase before it reaches the playback head. The TTS
+        // pump bounds concurrent provider calls to two, while playback stays serial.
+        const preparedPromise = prepareStreamingSpeech(chunk, generation);
+        streamingSpeechQueue = streamingSpeechQueue.then(async () => {
+            const prepared = await preparedPromise;
+            if (generation !== streamingSpeechGeneration) { releaseRemoteChunk(prepared); return false; }
+            const succeeded = await speak(chunk, { firstPrepared: prepared, firstPreparedAttempted: true });
+            streamingSpeechSucceeded = streamingSpeechSucceeded || succeeded;
+            return succeeded;
+        }).catch(error => { console.warn("[Sentinel stream speech]", error?.message || error); return false; });
+    }
+    function drainStreamingSpeech(force = false, flushPartial = false) {
+        streamingSpeechBuffer = streamingSpeechBuffer.trimStart();
+        while (streamingSpeechBuffer) {
+            const sentence = streamingSpeechBuffer.match(/^([\s\S]*?[.!?。！？…\n])(?:\s|$)/u);
+            const sentenceLength = sentence ? sentence[1].trim().length : 0;
+            const minimumSentenceLength = streamingSpeechActive ? 120 : 24;
+            if (sentence && sentenceLength >= minimumSentenceLength) {
+                queueStreamingSpeech(sentence[1]);
+                streamingSpeechBuffer = streamingSpeechBuffer.slice(sentence[1].length).trimStart();
+                continue;
+            }
+            const firstChunk = !streamingSpeechActive;
+            // Keep later phrases small enough to synthesize while the
+            // current clip is still playing; large buffers create audible gaps
+            // on mobile networks and slower TTS responses.
+            const minimumChunkLength = firstChunk ? 24 : 120;
+            const maximumChunkLength = firstChunk ? 80 : 160;
+            if (streamingSpeechBuffer.length >= minimumChunkLength) {
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, maximumChunkLength, firstChunk ? 18 : 120);
+                if (cut) {
+                    queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
+                    streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
+                    continue;
+                }
+            }
+            if (flushPartial && streamingSpeechBuffer.length >= (streamingSpeechActive ? 120 : 24)) {
+                const cut = findSpeechChunkCut(streamingSpeechBuffer, streamingSpeechBuffer.length, streamingSpeechActive ? 120 : 24);
+                if (cut) {
+                    queueStreamingSpeech(streamingSpeechBuffer.slice(0, cut).trim());
+                    streamingSpeechBuffer = streamingSpeechBuffer.slice(cut).trimStart();
+                    continue;
+                }
+            }
+            if (force) {
+                queueStreamingSpeech(streamingSpeechBuffer);
+                streamingSpeechBuffer = "";
+            }
+            break;
+        }
+    }
+    async function finishStreamingSpeech() {
+        clearTimeout(streamingSpeechTimer);
+        drainStreamingSpeech(true);
+        await streamingSpeechQueue;
+        streamingSpeechActive = false;
+        window.dispatchEvent(new CustomEvent("panthorium:voice-stream-finished"));
+        const succeeded = streamingSpeechSucceeded || streamingSpeechInterrupted;
+        streamingSpeechSucceeded = false;
+        streamingSpeechInterrupted = false;
+        return succeeded;
+    }
+    function cancelStreamingSpeech() {
+        clearTimeout(streamingSpeechTimer);
+        streamingSpeechGeneration += 1;
+        streamingSpeechBuffer = "";
+        streamingSpeechActive = false;
+        streamingSpeechSucceeded = false;
+        streamingSpeechInterrupted = true;
+        for (const job of streamingSpeechTtsPending.splice(0)) job.resolve(null);
+    }
+    window.addEventListener("panthorium:ai-stream-delta", event => {
+        if (document.body.dataset.aiMode === "gemini-live-only") return;
+        if (speechInterruptedByUser) return;
+        streamingSpeechBuffer += String(event.detail?.text ?? event.detail ?? "");
+        clearTimeout(streamingSpeechTimer);
+        // Queue speech while text is still arriving so the first audio does
+        // not wait for the complete answer to be synthesized on mobile.
+        drainStreamingSpeech(false);
+        streamingSpeechTimer = setTimeout(() => { if (streamingSpeechBuffer.trim().length >= (streamingSpeechActive ? 120 : 18)) drainStreamingSpeech(false, true); }, streamingSpeechActive ? 400 : 140);
+    });
+    // The SSE caller owns stream completion and awaits this method directly.
+    // Do not finish here as well; racing two finish calls can consume success state.
+    window.PanthoriumVoiceStream = { finish: finishStreamingSpeech };
+    window.PanthoriumVoiceCommands = { isStop: isVoiceStopCommand, isContinue: isVoiceContinueCommand };
+
+    // Global voice path: accepts commands without opening Sentinel chat.
+    function initGlobalVoice() {
+        if (["gemini-live-only", "local-only"].includes(document.body.dataset.aiMode)) return;
+        const button = $("global-voice");
+        if (!button || button.dataset.ready) return;
+        button.dataset.ready = "1";
+        const SR = document.body.dataset.aiMode === 'local-only' ? null : window.SpeechRecognition || window.webkitSpeechRecognition;
+        const electronVoice = Boolean(window.panthoriumDesktop?.isElectron);
+        const recorderSupported = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+        let recognition = null;
+        let interruptionRecognition = null;
+        let interruptionMonitorEnabled = false;
+        let interruptionRestartTimer = null;
+        let interruptionStartRetries = 0;
+        let autoResume = true;
+        let recognitionBlocked = false;
+        let voiceState = "idle";
+        let voiceTurnId = 0;
+        let activeVoiceRequestController = null;
+        let silenceTimer = null;
+        let transcriptParts = new Map();
+        let latestInterim = "";
+        let discardOnEnd = false;
+        let listenWatchdog = null;
+        const status = (kind, label, announce = true) => {
+            button.classList.toggle("listening", kind === "listening");
+            button.classList.toggle("processing", kind === "processing");
+            button.textContent = kind === "listening" ? "⏹" : kind === "processing" ? "⏳" : "🎤";
+            button.title = label;
+            document.querySelectorAll("[data-voice-status]").forEach(row => row.classList.remove("active"));
+            const row = document.querySelector(`[data-voice-status="${kind === "listening" ? "listening" : kind === "processing" ? "processing" : "error"}"]`);
+            if (row) { row.classList.add("active"); row.textContent = label; }
+            if (announce) toast(label, kind === "processing" || kind === "unresponsive" ? 10000 : 2500);
+        };
+        window.addEventListener("panthorium:voice-start", () => {
+            if (voiceState === "processing") status("processing", "กำลังพูดคำตอบ", false);
+        });
+        if (!recorderSupported && document.body?.dataset.voiceIdentityRequired === "true") {
+            status("unsupported", "เบราว์เซอร์นี้ไม่รองรับการตรวจเสียงผู้พูด");
+            button.onclick = () => status("unsupported", "เบราว์เซอร์นี้ไม่รองรับการตรวจเสียงผู้พูด");
+            return;
+        }
+        if (!SR && !recorderSupported) {
+            status("unsupported", "ไม่รองรับคำสั่ง");
+            button.onclick = () => status("unsupported", "ไม่รองรับคำสั่ง");
+            return;
+        }
+
+        // Assigned by the active voice path so processTranscript can resume listening.
+        let resumeAfterTranscript = () => {};
+        const startInterruptionRecognition = () => {
+            if (!interruptionMonitorEnabled || !sentinelSpeechIsActive() || interruptionRecognition || !SR) return;
+            let monitor;
+            try { monitor = new SR(); } catch (_) { interruptionMonitorEnabled = false; return; }
+            interruptionRecognition = monitor;
+            monitor.lang = "th-TH";
+            monitor.continuous = true;
+            monitor.interimResults = true;
+            monitor.maxAlternatives = 1;
+            monitor.onresult = event => {
+                if (!sentinelSpeechIsActive() || !interruptionMonitorEnabled) return;
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const result = event.results[i];
+                    if (!result?.isFinal) continue;
+                    const text = String(result?.[0]?.transcript || "").trim();
+                    const confidence = Number(result?.[0]?.confidence);
+                    if (!text || (Number.isFinite(confidence) && confidence < 0.55)) continue;
+                    const normalized = normalizeVoiceStopText(text);
+                    const assistantText = normalizeVoiceStopText(currentSpeechText);
+                    if (assistantText.includes(normalized) || !isVoiceStopCommand(text)) continue;
+                    interruptionMonitorEnabled = false;
+                    try { if (typeof monitor.abort === "function") monitor.abort(); else monitor.stop(); } catch (_) {}
+                    stopSentinelSpeech();
+                    status("ready", "หยุดเสียงแล้ว", false);
+                    return;
+                }
+            };
+            monitor.onerror = event => {
+                if (interruptionRecognition !== monitor) return;
+                if (["not-allowed", "service-not-allowed", "audio-capture"].includes(event?.error)) {
+                    interruptionMonitorEnabled = false;
+                }
+            };
+            monitor.onend = () => {
+                if (interruptionRecognition === monitor) interruptionRecognition = null;
+                if (interruptionMonitorEnabled && sentinelSpeechIsActive()) {
+                    clearTimeout(interruptionRestartTimer);
+                    interruptionRestartTimer = setTimeout(startInterruptionRecognition, 250);
+                }
+            };
+            try {
+                monitor.start();
+                interruptionStartRetries = 0;
+            } catch (_) {
+                interruptionRecognition = null;
+                interruptionStartRetries += 1;
+                if (interruptionStartRetries >= 3) interruptionMonitorEnabled = false;
+                else {
+                    clearTimeout(interruptionRestartTimer);
+                    interruptionRestartTimer = setTimeout(startInterruptionRecognition, 350);
+                }
+            }
+        };
+        const startSpeechInterruptionMonitor = () => {
+            if (!sentinelSpeechIsActive()) return;
+            interruptionMonitorEnabled = true;
+            interruptionStartRetries = 0;
+            startInterruptionRecognition();
+        };
+        const stopSpeechInterruptionMonitor = () => {
+            if (streamingSpeechActive && !speechInterruptedByUser) return;
+            interruptionMonitorEnabled = false;
+            clearTimeout(interruptionRestartTimer);
+            interruptionRestartTimer = null;
+            const monitor = interruptionRecognition;
+            interruptionRecognition = null;
+            if (monitor) {
+                monitor.onend = null;
+                monitor.onerror = null;
+                try { if (typeof monitor.abort === "function") monitor.abort(); else monitor.stop(); } catch (_) {}
+            }
+        };
+        window.addEventListener("panthorium:voice-start", startSpeechInterruptionMonitor);
+        window.addEventListener("panthorium:voice-end", stopSpeechInterruptionMonitor);
+        window.addEventListener("panthorium:voice-stream-finished", stopSpeechInterruptionMonitor);
+
+        // Shared transcript handler (Web Speech + MediaRecorder)
+        const processTranscript = async (text, expectedTurnId = null) => {
+            const turnId = expectedTurnId == null ? ++voiceTurnId : expectedTurnId;
+            if (turnId !== voiceTurnId) return;
+            const value = String(text || "").trim();
+            if (!value) {
+                voiceState = "idle";
+                status("unresponsive", "ยังไม่ได้ยินเสียง");
+                resumeAfterTranscript();
+                return;
+            }
+            setOrbTranscript(value, 0);
+            voiceState = "processing";
+            status("processing", "กำลังประมวลผล");
+            const controller = new AbortController();
+            activeVoiceRequestController = controller;
+            try {
+                if (interruptedSpeechText && isVoiceContinueCommand(value)) {
+                    const continuation = interruptedSpeechText;
+                    interruptedSpeechText = "";
+                    speechInterruptedByUser = false;
+                    voiceState = "speaking";
+                    status("processing", "พูดต่อ", false);
+                    await speakVoiceResponse(continuation);
+                    if (turnId === voiceTurnId) status("ready", "พูดต่อจบแล้ว", false);
+                    return;
+                }
+                speechInterruptedByUser = false;
+                const { intent, response: res } = await requestVoiceInput(value, controller.signal);
+                if (turnId !== voiceTurnId || controller.signal.aborted) return;
+                if (!res || !res.ok || !res.text) {
+                    const reason = res?.text || "ระบบไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง";
+                    status("unresponsive", reason);
+                    return;
+                }
+                if (voiceResponseNeedsSpeech(intent, res)) {
+                    voiceState = "speaking";
+                    status("processing", res.confirmationRequired ? res.text : res.streamSpoken ? "กำลังพูดคำตอบ" : "กำลังเตรียมเสียงตอบ", false);
+                    if (turnId !== voiceTurnId || speechInterruptedByUser) {
+                        status("ready", "หยุดเสียงแล้ว", false);
+                        return;
+                    }
+                    if (res.streamSpoken && res.streamSpeechOk === false) {
+                        status("unresponsive", voicePlaybackFailure);
+                        return;
+                    }
+                    if (!res.streamSpoken && !(await speakVoiceResponse(res.text))) {
+                        status("unresponsive", voicePlaybackFailure);
+                        return;
+                    }
+                }
+                if (turnId === voiceTurnId) status("ready", "พร้อมใช้งาน", intent === "conversation");
+            } catch (error) {
+                if (turnId !== voiceTurnId || controller.signal.aborted) return;
+                console.warn("Global voice command failed", error);
+                status("unresponsive", "ไม่ตอบสนอง");
+            } finally {
+                if (turnId === voiceTurnId) {
+                    if (activeVoiceRequestController === controller) activeVoiceRequestController = null;
+                    voiceState = "idle";
+                    resumeAfterTranscript();
+                }
+            }
+        };
+
+        // Use one transcription path for desktop and web browsers. Web Speech
+        // can report an opaque "no-speech"/"network" error even with a working mic.
+        if (recorderSupported) {
+            let recorder = null;
+            let recorderStream = null;
+            let recorderChunks = [];
+            let recorderMime = "audio/webm";
+            let recorderContext = null;
+            let recorderSource = null;
+            let recorderAnalyser = null;
+            let recorderData = null;
+            let recorderMonitor = null;
+            let recorderStartedAt = 0;
+            let recorderLastVoiceAt = 0;
+            let recorderVoiceDetector = createAdaptiveVoiceDetector();
+            let endpointRecognition = null;
+            let endpointRestartTimer = null;
+            let endpointDisabled = false;
+            let endpointLastSpeechAt = 0;
+            const stopSpeechEndpoint = () => {
+                clearTimeout(endpointRestartTimer);
+                endpointRestartTimer = null;
+                const current = endpointRecognition;
+                endpointRecognition = null;
+                if (!current) return;
+                current.onresult = null;
+                current.onerror = null;
+                current.onend = null;
+                try { current.abort?.(); } catch (_) { try { current.stop?.(); } catch (_) {} }
+            };
+            const startSpeechEndpoint = () => {
+                const EndpointRecognition = document.body.dataset.aiMode === 'local-only' ? null : window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!isMobileDevice() || !EndpointRecognition || endpointDisabled || endpointRecognition || voiceState !== "listening" || !autoResume) return;
+                let endpoint;
+                try { endpoint = new EndpointRecognition(); } catch (_) { endpointDisabled = true; return; }
+                endpointRecognition = endpoint;
+                endpoint.lang = "th-TH";
+                endpoint.continuous = true;
+                endpoint.interimResults = true;
+                endpoint.maxAlternatives = 1;
+                endpoint.onresult = event => {
+                    if (voiceState !== "listening") return;
+                    for (let i = event.resultIndex || 0; i < (event.results || []).length; i++) {
+                        const transcript = String(event.results[i]?.[0]?.transcript || "").trim();
+                        if (!transcript) continue;
+                        // This recognizer only detects speech end on Android; the
+                        // server STT remains authoritative for the final transcript.
+                        endpointLastSpeechAt = performance.now();
+                    }
+                };
+                endpoint.onerror = event => {
+                    if (["not-allowed", "service-not-allowed", "audio-capture", "network"].includes(event?.error)) endpointDisabled = true;
+                };
+                endpoint.onend = () => {
+                    if (endpointRecognition !== endpoint) return;
+                    endpointRecognition = null;
+                    if (voiceState === "listening" && autoResume && !endpointDisabled) {
+                        endpointRestartTimer = setTimeout(startSpeechEndpoint, endpointLastSpeechAt ? 220 : 900);
+                    }
+                };
+                try { endpoint.start(); }
+                catch (_) { endpointRecognition = null; endpointDisabled = true; }
+            };
+
+            const restartListening = () => {
+                if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
+                setTimeout(() => {
+                    if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
+                    startRecorder();
+                }, 350);
+            };
+            resumeAfterTranscript = restartListening;
+
+            const primeRecorderAudioContext = () => {
+                const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+                if (!recorderContext && AudioContextCtor) {
+                    try { recorderContext = new AudioContextCtor(); } catch (_) {}
+                }
+                if (recorderContext && recorderContext.state !== "running") {
+                    try { recorderContext.resume?.().catch?.(() => {}); } catch (_) {}
+                }
+            };
+            window.addEventListener("beforeunload", () => {
+                try { recorderContext?.close?.(); } catch (_) {}
+            }, { once: true });
+
+            const cleanupRecorder = () => {
+                clearTimeout(recorderMonitor);
+                stopSpeechEndpoint();
+                recorderMonitor = null;
+                try { recorderSource?.disconnect?.(); } catch (_) {}
+                recorderSource = null;
+                recorderAnalyser = null;
+                recorderData = null;
+                // Keep the context alive between utterances. Mobile browsers
+                // suspend contexts created outside a fresh touch gesture.
+                recorderStream?.getTracks?.().forEach(track => track.stop());
+                recorderStream = null;
+            };
+            const toDataUrl = async blob => {
+                const bytes = new Uint8Array(await blob.arrayBuffer());
+                let binary = "";
+                const step = 0x8000;
+                for (let offset = 0; offset < bytes.length; offset += step) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + step, bytes.length)));
+                const mimeType = String(blob.type || recorderMime).split(";")[0] || "audio/webm";
+                return "data:" + mimeType + ";base64," + btoa(binary);
+            };
+            const transcribeRecorderBlob = async blob => {
+                const audio = await toDataUrl(blob);
+                // The backend verifies this exact audio once before sending it to STT.
+                const transcribeDirect = async () => {
+                    const base = OS.config.backendUrl.replace(/\/$/, "");
+                    const response = await authorizedFetch(base + "/api/speech/transcribe", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ audio, language: "th-TH", clientCaptureMs: Math.max(0, Math.round(performance.now() - recorderStartedAt)) }),
+                        signal: AbortSignal.timeout(40000),
+                        cache: "no-store"
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (data.voiceTiming) console.debug("[Panthorium voice pipeline timing]", data.voiceTiming);
+                    return { data, statusCode: response.status };
+                };
+                const transcribeWithFallback = () => transcribeDirect();
+
+                let data;
+                let statusCode;
+
+                if (electronVoice) {
+                    if (
+                        Number(window.panthoriumDesktop?.bridgeVersion || 0) < 4 ||
+                        typeof window.panthoriumDesktop?.transcribeAudio !== "function"
+                    ) throw new Error("browser_update_required");
+
+                    if (!(await ensureAuth())) throw new Error("authentication_required");
+
+                    try {
+                        let result = await window.panthoriumDesktop.transcribeAudio(
+                            audio,
+                            "th-TH",
+                            OS.config.accessToken
+                        );
+
+                        if (result?.status === 401 && await ensureAuth(true)) {
+                            result = await window.panthoriumDesktop.transcribeAudio(
+                                audio,
+                                "th-TH",
+                                OS.config.accessToken
+                            );
+                        }
+
+                        const bridgeError = String(result?.data?.error || "");
+
+                        if (
+                            !result ||
+                            bridgeError.startsWith("electron_upload_failed") ||
+                            bridgeError === "invalid_server_response"
+                        ) {
+                            throw new Error(bridgeError || "electron_bridge_empty");
+                        }
+
+                        data = result.data || {};
+                        statusCode = Number(result.status || 500);
+                    } catch (bridgeError) {
+                        console.warn(
+                            "[Sentinel transcription bridge fallback]",
+                            bridgeError?.message || bridgeError
+                        );
+                        ({ data, statusCode } = await transcribeWithFallback());
+                    }
+                } else {
+                    ({ data, statusCode } = await transcribeWithFallback());
+                }
+
+                if (statusCode === 403 && data?.error === "voice_enrollment_required") {
+                    const base = OS.config.backendUrl.replace(/\/$/, "");
+                    const response = await authorizedFetch(base + "/api/speech/identity-navigation", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ audio, language: "th-TH" }),
+                        signal: AbortSignal.timeout(22000),
+                        cache: "no-store"
+                    });
+                    const navigation = await response.json().catch(() => ({}));
+                    if (response.ok && navigation.ok && ["register", "login"].includes(navigation.intent)) return { identityNavigation: navigation.intent };
+                    throw new Error(navigation.error || "voice_navigation_unavailable");
+                }
+
+                if (
+                    statusCode < 200 ||
+                    statusCode >= 300 ||
+                    !data.ok ||
+                    typeof data.text !== "string" ||
+                    !data.text.trim()
+                ) {
+                    const error = new Error(data.error || "transcription_unavailable");
+                    error.statusCode = statusCode;
+                    if (data.voiceDiagnostic && typeof data.voiceDiagnostic === "object") error.voiceDiagnostic = data.voiceDiagnostic;
+                    if (data.voiceTiming && typeof data.voiceTiming === "object") error.voiceTiming = data.voiceTiming;
+                    throw error;
+                }
+
+                return data.text.trim();
+            };
+            const finishRecorder = ({ discard = false } = {}) => {
+                if (!recorder || recorder.state !== "recording") return;
+                clearTimeout(recorderMonitor);
+                stopSpeechEndpoint();
+                discardOnEnd = discard;
+                voiceState = "stopping";
+                if (!discard) status("processing", "ฟังจบแล้ว กำลังเตรียมประมวลผล");
+                try { recorder.stop(); } catch (_) { cleanupRecorder(); voiceState = "idle"; restartListening(); }
+            };
+            const monitorRecorder = () => {
+                if (!recorder || recorder.state !== "recording") return;
+                const now = performance.now();
+                const meterRunning = recorderContext?.state === "running" && recorderAnalyser && recorderData;
+                if (meterRunning) {
+                    recorderAnalyser.getByteTimeDomainData(recorderData);
+                    let sum = 0;
+                    for (const value of recorderData) { const centered = (value - 128) / 128; sum += centered * centered; }
+                    const level = Math.sqrt(sum / recorderData.length);
+                    if (recorderVoiceDetector.observe(level, now - recorderStartedAt)) recorderLastVoiceAt = now;
+                }
+                const meteredSilence = meterRunning && recorderLastVoiceAt > 0 && now - recorderLastVoiceAt > 1100;
+                const endpointSilence = endpointLastSpeechAt > 0 && now - endpointLastSpeechAt > 1700;
+                // Require both active signals to agree when the microphone meter is working. A stale browser recognition event must not cut speech that the microphone still hears.
+                const meterHasSpeech = meterRunning && recorderLastVoiceAt > 0;
+                const confirmedSilence = meterHasSpeech
+                    ? meteredSilence && (!endpointLastSpeechAt || endpointSilence)
+                    : endpointSilence;
+                // If neither detector can hear speech, stop the capture after a bounded wait.
+                const noDetectedSpeechTimeout = !recorderLastVoiceAt && !endpointLastSpeechAt && now - recorderStartedAt > 8000;
+                if ((confirmedSilence && now - recorderStartedAt > 1000) || noDetectedSpeechTimeout || now - recorderStartedAt > 30000) { finishRecorder({ discard: false }); return; }
+                recorderMonitor = setTimeout(monitorRecorder, 100);
+            };
+            const startRecorder = async () => {
+                if (!autoResume || voiceState !== "idle" || recorder) return;
+                activeVoiceRequestController?.abort();
+                activeVoiceRequestController = null;
+                const captureTurnId = ++voiceTurnId;
+                try {
+                    // Resume/create the meter synchronously from the microphone
+                    // gesture before awaiting permission or network work.
+                    primeRecorderAudioContext();
+                    recorderStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+                    if (recorderContext && recorderContext.state !== "running") {
+                        try { await recorderContext.resume(); } catch (_) {}
+                    }
+                    const supportedMime = typeof MediaRecorder.isTypeSupported === "function"
+                        ? ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find(type => MediaRecorder.isTypeSupported(type))
+                        : "";
+                    recorderMime = supportedMime || "";
+                    recorderChunks = [];
+                    recorder = recorderMime ? new MediaRecorder(recorderStream, { mimeType: recorderMime }) : new MediaRecorder(recorderStream);
+                    recorderMime = recorder.mimeType || recorderMime || "audio/webm";
+                    recorder.ondataavailable = event => { if (event.data?.size) recorderChunks.push(event.data); };
+                    recorder.onerror = () => status("unresponsive", "บันทึกเสียงไม่สำเร็จ ตรวจสอบไมโครโฟนแล้วลองใหม่");
+                    recorder.onstop = async () => {
+                        const chunks = recorderChunks.slice();
+                        const discard = discardOnEnd;
+                        recorder = null;
+                        recorderChunks = [];
+                        cleanupRecorder();
+                        userSpeechActive = false;
+                        window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
+                        if (captureTurnId !== voiceTurnId) { discardOnEnd = false; voiceState = "idle"; return; }
+                        if (discard) { discardOnEnd = false; voiceState = "idle"; restartListening(); return; }
+                        // Submit recorded audio even when a mobile browser has
+                        // suspended its analyser; ASR can validate silence and
+                        // quiet speech more reliably than the local VAD gate.
+                        if (!chunks.length) { voiceState = "idle"; status("unresponsive", "ยังไม่ได้ยินเสียง ตรวจสอบไมโครโฟนแล้วลองพูดอีกครั้ง"); restartListening(); return; }
+                        voiceState = "processing";
+                        status("processing", "กำลังถอดเสียง");
+                        try {
+                            const transcript = await transcribeRecorderBlob(new Blob(chunks, { type: recorderMime }));
+                            if (captureTurnId !== voiceTurnId) return;
+                            if (transcript && typeof transcript === "object" && transcript.identityNavigation) {
+                                const identity = window.PanthoriumVoiceIdentity;
+                                if (transcript.identityNavigation === "login") identity?.openLogin?.();
+                                else identity?.openRegistration?.();
+                                voiceState = "idle";
+                                status("ready", "เปิดหน้าต่าง Voice Identity แล้ว");
+                                restartListening();
+                                return;
+                            }
+                            const text = String(transcript || "").trim();
+                            window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
+                            await processTranscript(text, captureTurnId);
+                        } catch (error) {
+                            if (captureTurnId !== voiceTurnId) return;
+                            console.warn("[Sentinel transcription]", error);
+                            voiceState = "idle";
+                            const errorCode = String(error?.message || "").split(":")[0];
+                            let message = ({
+                                transcription_provider_unavailable: "บริการถอดเสียงหลักขัดข้อง กรุณาพูดซ้ำอีกครั้ง",
+                                transcription_fallback_unavailable: "ระบบถอดเสียงสำรองใช้ไม่ได้ กรุณาลองใหม่อีกครั้ง",
+                                microphone_permission_denied: "กรุณาอนุญาตสิทธิ์ไมโครโฟนแล้วลองใหม่",
+                                transcription_uncertain: "โปรดพูดอีกครั้ง",
+                                transcription_unavailable: "บริการถอดเสียงตอบกลับผิดพลาด กรุณาลองอีกครั้ง",
+                                invalid_audio: "รูปแบบหรือขนาดเสียงไม่ถูกต้อง ลองพูดให้สั้นลง",
+                                audio_too_large: "เสียงยาวเกินไป ลองพูดให้สั้นลง",
+                                authentication_required: "เซสชันยังไม่พร้อม กรุณาลองอีกครั้ง",
+                                invalid_or_expired_token: "เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง",
+                                voice_session_changed: "เริ่มเซสชันใหม่แล้ว กรุณาพูดอีกครั้ง",
+                                electron_upload_failed: "Panthorium Browser ส่งเสียงไม่สำเร็จ กรุณาลองอีกครั้ง",
+                                browser_update_required: "Panthorium Browser รุ่นนี้เก่าเกินไป กรุณาอัปเดตเป็นรุ่นล่าสุด",
+                                transcription_timeout: "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง",
+                                untrusted_origin: "Panthorium Browser ไม่อนุญาตต้นทางนี้",
+                                voice_not_authorized: "ยังยืนยันเสียงผู้พูดไม่ได้ คำสั่งยังไม่ถูกส่งไปประมวลผล ลองพูดใหม่ให้ชัดและต่อเนื่องขึ้น หากเป็นคำสั่งสั้นให้พูดเพิ่มอีกนิด",
+                                voice_audio_too_short: "เสียงพูดสั้นเกินไป กรุณาพูดต่อเนื่องเพิ่มอีกนิดแล้วลองใหม่",
+                                voice_audio_unclear: "รับเสียงพูดไม่ชัด กรุณาพูดใกล้ไมโครโฟนและลองอีกครั้ง",
+                                voice_audio_invalid_duration: "ความยาวเสียงอยู่นอกช่วงที่รองรับ กรุณาพูดใหม่แล้วลองอีกครั้ง",
+                                voice_audio_invalid: "อ่านเสียงที่บันทึกไม่ได้ กรุณาตรวจไมโครโฟนแล้วลองอีกครั้ง",
+                                voice_verification_unavailable: "บริการยืนยันเสียงขัดข้องจริง กรุณาลองอีกครั้งภายหลัง",
+                                speaker_verification_not_configured: "ระบบยืนยันตัวตนด้วยเสียงยังตั้งค่าไม่ครบ"
+                            })[errorCode] || (error?.name === "TimeoutError" || error?.name === "AbortError"
+                                ? "บริการถอดเสียงใช้เวลานานเกินไป กรุณาลองอีกครั้ง"
+                                : "ส่งเสียงไปยังบริการถอดเสียงไม่สำเร็จ กรุณาตรวจการเชื่อมต่อ");
+                            const diagnostic = error?.voiceDiagnostic;
+                            if (errorCode === "voice_not_authorized" && diagnostic && Number.isFinite(Number(diagnostic.score))) {
+                                const score = Number(diagnostic.score).toFixed(2);
+                                const threshold = Number(diagnostic.threshold);
+                                message += Number.isFinite(threshold) ? ` (คะแนน ${score} / เกณฑ์ ${threshold.toFixed(2)})` : ` (คะแนน ${score})`;
+                            }
+                            const activeSeconds = Number(diagnostic?.speechDurationSeconds);
+                            if (Number.isFinite(activeSeconds) && activeSeconds < 2) message += ` (เสียงที่ใช้ตรวจประมาณ ${activeSeconds.toFixed(1)} วินาที)`;
+                            if (error?.voiceTiming) console.debug("[Panthorium voice pipeline timing]", error.voiceTiming);
+                            status("unresponsive", message);
+                            if (String(error?.message || "").startsWith("transcription_uncertain")) {
+                                await speakVoiceResponse("โปรดพูดอีกครั้ง");
+                            }
+                            restartListening();
+                        }
+                    };
+                    recorder.start(250);
+                    recorderStartedAt = performance.now();
+                    recorderLastVoiceAt = 0;
+                    endpointLastSpeechAt = 0;
+                    endpointDisabled = false;
+                    recorderVoiceDetector = createAdaptiveVoiceDetector();
+                    voiceState = "listening";
+                    discardOnEnd = false;
+                    userSpeechActive = true;
+                    window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
+                    status("listening", "กำลังฟัง...", false);
+                    if (recorderContext?.state === "running") {
+                        recorderSource = recorderContext.createMediaStreamSource(recorderStream);
+                        recorderAnalyser = recorderContext.createAnalyser();
+                        recorderAnalyser.fftSize = 512;
+                        recorderData = new Uint8Array(recorderAnalyser.fftSize);
+                        recorderSource.connect(recorderAnalyser);
+                    } else {
+                        // Keep recording with manual stop/30s safety limit if
+                        // WebAudio metering is unavailable on this device.
+                        recorderAnalyser = null;
+                        recorderData = null;
+                    }
+                    recorderMonitor = setTimeout(monitorRecorder, 100);
+                    if (recorderContext?.state !== "running") startSpeechEndpoint();
+                } catch (error) {
+                    cleanupRecorder();
+                    autoResume = false;
+                    recognitionBlocked = true;
+                    voiceState = "idle";
+                    const denied = error?.name === "NotAllowedError" || error?.name === "SecurityError";
+                    status("unsupported", denied ? "กรุณาอนุญาตสิทธิ์ไมโครโฟนให้ Panthorium Browser" : "เปิดไมโครโฟนไม่สำเร็จ");
+                }
+            };
+            const stopRecorder = () => finishRecorder({ discard: false });
+            window.PanthoriumVoice = {
+                pause() { autoResume = false; clearTimeout(recorderMonitor); if (voiceState === "listening") finishRecorder({ discard: true }); },
+                resume() { if (recognitionBlocked) return; autoResume = true; if (voiceState === "idle") setTimeout(startRecorder, 350); },
+                recognitionFailure() { status("unresponsive", "Electron ไม่สามารถถอดเสียงได้"); },
+                state() { return voiceState; }
+            };
+            button.onclick = async () => {
+                unlockVoiceAudio();
+                primeRecorderAudioContext();
+                if (aiSpeechActive || voiceState === "speaking") {
+                    autoResume = false;
+                    stopSentinelSpeech();
+                    voiceState = "idle";
+                    status("ready", "หยุดเสียงแล้ว กดไมค์เมื่อต้องการพูด", false);
+                    return;
+                }
+                if (voiceState === "speaking") {
+                    stopSentinelSpeech();
+                    voiceState = "idle";
+                }
+                if (voiceState === "processing" || voiceState === "stopping") {
+                    autoResume = false;
+                    voiceTurnId += 1;
+                    activeVoiceRequestController?.abort();
+                    activeVoiceRequestController = null;
+                    stopSentinelSpeech();
+                    voiceState = "idle";
+                    status("ready", "ยกเลิกรอบเสียงแล้ว", false);
+                    return;
+                }
+                if (voiceState === "listening") { autoResume = false; stopRecorder(); return; }
+                recognitionBlocked = false;
+                autoResume = true;
+                await startRecorder();
+            };
+            const mobileRecorder = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+            // On phones, opening AudioContext after an automatic page-load
+            // start leaves Android's WebAudio meter suspended. Start from the
+            // mic tap so VAD is live and the utterance is not held for 30s.
+            autoResume = !mobileRecorder;
+            if (mobileRecorder) status("ready", "แตะไมโครโฟนเพื่อพูด", false);
+            else setTimeout(() => { if (autoResume && !recognitionBlocked) startRecorder(); }, 400);
+            return;
+        }
+
+        if (!SR) {
+            status("unsupported", "ไม่รองรับคำสั่ง");
+            button.onclick = () => status("unsupported", "ไม่รองรับคำสั่ง");
+            return;
+        }
+        recognition = new SR();
+        recognition.lang = "th-TH";
+        // Android/iOS implementations often terminate continuous recognition
+        // without a final result event. A one-command session is more reliable
+        // on mobile; onend below still processes the latest interim transcript.
+        const mobileSpeech = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+        recognition.continuous = !mobileSpeech;
+        recognition.interimResults = true;
+        const prepareMobileMicrophone = async () => {
+            if (!mobileSpeech || !navigator.mediaDevices?.getUserMedia) return true;
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                });
+                stream.getTracks().forEach(track => track.stop());
+                return true;
+            } catch (error) {
+                autoResume = false;
+                const denied = error?.name === "NotAllowedError" || error?.name === "SecurityError";
+                status("unsupported", denied ? "กรุณาอนุญาตสิทธิ์ไมโครโฟนให้เว็บไซต์" : "เปิดไมโครโฟนไม่สำเร็จ");
+                return false;
+            }
+        };
+        recognition.onstart = () => {
+            voiceState = "listening";
+            discardOnEnd = false;
+            transcriptParts = new Map();
+            latestInterim = "";
+            userSpeechActive = true;
+            window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
+            status("listening", "กำลังฟัง...", false);
+            clearTimeout(listenWatchdog);
+            listenWatchdog = setTimeout(() => {
+                if (voiceState === "listening" && !transcriptParts.size && !latestInterim) {
+                    status("listening", "ยังไม่ได้ยินเสียง ตรวจสอบสิทธิ์ไมโครโฟนแล้วลองพูดอีกครั้ง");
+                }
+            }, 7000);
+        };
+        const restartListening = () => {
+            if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
+            setTimeout(() => {
+                if (recognitionBlocked || !autoResume || voiceState !== "idle") return;
+                try { recognition.start(); } catch { status("unresponsive", "ไม่ตอบสนอง"); }
+            }, 350);
+        };
+        resumeAfterTranscript = restartListening;
+        const finishListening = ({ discard = false } = {}) => {
+            if (voiceState !== "listening") return;
+            clearTimeout(silenceTimer);
+            discardOnEnd = discard;
+            voiceState = "stopping";
+            if (!discard) status("processing", "ฟังจบแล้ว กำลังเตรียมประมวลผล");
+            try { recognition.stop(); } catch (_) {}
+        };
+        recognition.onresult = event => {
+            if (voiceState !== "listening" && voiceState !== "stopping") return;
+            clearTimeout(listenWatchdog);
+            latestInterim = "";
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const result = event.results[i];
+                const value = String(result?.[0]?.transcript || "").trim();
+                if (!value) continue;
+                if (result.isFinal) transcriptParts.set(i, value);
+                else latestInterim = value;
+            }
+            if (voiceState === "listening") {
+                clearTimeout(silenceTimer);
+                // Wait for a real pause instead of treating the first final phrase as the whole command.
+                silenceTimer = setTimeout(finishListening, 850);
+            }
+        };
+        const recognitionFailure = event => {
+            clearTimeout(listenWatchdog);
+            clearTimeout(silenceTimer);
+            userSpeechActive = false;
+            const permissionDenied = event.error === "not-allowed" || event.error === "service-not-allowed";
+            const terminalFailure = permissionDenied || ["network", "audio-capture", "language-not-supported"].includes(event.error);
+            if (terminalFailure) {
+                recognitionBlocked = true;
+                autoResume = false;
+                discardOnEnd = true;
+                transcriptParts.clear();
+                latestInterim = "";
+            }
+            if (voiceState !== "processing" && voiceState !== "speaking") voiceState = "idle";
+            const message = event.error === "network"
+                ? (window.panthoriumDesktop?.isElectron
+                    ? "Electron เชื่อมต่อบริการรู้จำเสียงไม่ได้ (network) หยุดลองซ้ำแล้ว ใช้แชตพิมพ์ข้อความได้"
+                    : "เชื่อมต่อบริการรู้จำเสียงไม่ได้ (network) ตรวจเครือข่ายแล้วกดไมค์เพื่อลองใหม่")
+                : permissionDenied ? "ไม่ได้รับอนุญาตให้ใช้บริการรู้จำเสียง ตรวจสิทธิ์ไมโครโฟน"
+                : event.error === "audio-capture" ? "เข้าถึงไมโครโฟนไม่ได้ ตรวจอุปกรณ์แล้วกดไมค์เพื่อลองใหม่"
+                : event.error === "language-not-supported" ? "บริการรู้จำเสียงไม่รองรับภาษาที่เลือก"
+                : "ไม่ตอบสนอง";
+            console.warn('[Sentinel recognition]', event.error || 'unknown');
+            status(permissionDenied ? "unsupported" : "unresponsive", message);
+        };
+        recognition.onerror = recognitionFailure;
+        recognition.onend = () => {
+            clearTimeout(silenceTimer);
+            clearTimeout(listenWatchdog);
+            userSpeechActive = false;
+            window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
+            const text = [...transcriptParts.values()].join(" ").trim() || latestInterim.trim();
+            const shouldProcess = !discardOnEnd && !!text && (voiceState === "stopping" || voiceState === "listening");
+            latestInterim = "";
+            transcriptParts.clear();
+            discardOnEnd = false;
+            if (shouldProcess) {
+                window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
+                processTranscript(text);
+                return;
+            }
+            if (voiceState === "stopping") {
+                voiceState = "idle";
+                status("ready", "พร้อมใช้งาน");
+                restartListening();
+                return;
+            }
+            if (voiceState === "listening") voiceState = "idle";
+            restartListening();
+        };
+        button.onclick = async () => {
+            unlockVoiceAudio();
+            try { window.speechSynthesis?.resume(); } catch (_) {}
+            if (aiSpeechActive || voiceState === "speaking") {
+                autoResume = false;
+                stopSentinelSpeech();
+                voiceState = "idle";
+                status("ready", "หยุดเสียงแล้ว กดไมค์เมื่อต้องการพูด", false);
+                return;
+            }
+            if (voiceState === "speaking") {
+                stopSentinelSpeech();
+                voiceState = "idle";
+            }
+            if (voiceState === "processing" || voiceState === "stopping") {
+                autoResume = false;
+                voiceTurnId += 1;
+                activeVoiceRequestController?.abort();
+                activeVoiceRequestController = null;
+                stopSentinelSpeech();
+                voiceState = "idle";
+                status("ready", "ยกเลิกรอบเสียงแล้ว", false);
+                return;
+            }
+            if (voiceState === "listening") {
+                autoResume = false;
+                // A tap on the stop button means "finish this command". The
+                // previous code discarded the mobile transcript at this point.
+                finishListening({ discard: false });
+                return;
+            }
+            recognitionBlocked = false; // An explicit click permits one fresh attempt.
+            autoResume = true;
+            if (!(await prepareMobileMicrophone())) return;
+            try { recognition.start(); } catch { status("unresponsive", "ไม่ตอบสนอง"); }
+        };
+        window.PanthoriumVoice = {
+            pause() {
+                autoResume = false;
+                clearTimeout(silenceTimer);
+                if (voiceState === "listening" || voiceState === "stopping") {
+                    discardOnEnd = true;
+                    voiceState = "stopping";
+                    try { recognition.stop(); } catch (_) {}
+                }
+            },
+            resume() {
+                if (recognitionBlocked) return;
+                autoResume = true;
+                if (voiceState === "idle") restartListening();
+            },
+            recognitionFailure,
+            state() { return voiceState; }
+        };
+        // Keep hands-free startup on every device. If a mobile browser blocks
+        // automatic capture, tapping the microphone runs the permission warmup.
+        autoResume = true;
+        setTimeout(() => { if (!autoResume || recognitionBlocked) return; try { recognition.start(); } catch { status("unsupported", "แตะปุ่มไมโครโฟนเพื่ออนุญาตการฟัง"); } }, 400);
+    }
+    if (window.speechSynthesis) {
+        speechSynthesis.getVoices();
+        speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+    }
+
+    // ---------- Authentication boundary ----------
+    async function ensureAuth(force = false) {
+        if (OS.config.accessToken && !force) return true;
+        try {
+            const base = OS.config.backendUrl.replace(/\/$/, "");
+            const res = await fetch(base + "/api/auth/guest", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: "{}",
+                credentials: "include",
+                signal: AbortSignal.timeout(5000)
+            });
+            if (!res.ok) throw new Error("guest auth failed");
+            const data = await res.json();
+            OS.config.accessToken = data.accessToken || "";
+            OS.state.user = data.user || null;
+            return !!OS.config.accessToken;
+        } catch (e) {
+            console.warn("Authentication unavailable:", e.message);
+            OS.config.accessToken = "";
+            return false;
+        }
+    }
+
+    let sessionRefreshInFlight = null;
+    async function authorizedFetch(url, options = {}) {
+        const principal = () => OS.state.user?.id || OS.state.user?.sub || "";
+        if (!(await ensureAuth())) throw new Error("authentication_required");
+        const owner = principal();
+        const headers = new Headers(options.headers || {});
+        if (OS.config.accessToken) headers.set("Authorization", `Bearer ${OS.config.accessToken}`);
+        let res = await fetch(url, { ...options, headers, credentials: "include" });
+        if (res.status === 401) {
+            if (principal() !== owner) throw new Error("voice_session_changed");
+            // Other in-flight audio chunks may already have refreshed the token.
+            let refreshed = Boolean(OS.config.accessToken && headers.get("Authorization") !== `Bearer ${OS.config.accessToken}`);
+            if (!refreshed && !sessionRefreshInFlight) {
+                sessionRefreshInFlight = Promise.resolve().then(() => window.PanthoriumAuth?.refreshSession
+                    ? window.PanthoriumAuth.refreshSession() : ensureAuth(true)).catch(() => false).finally(() => { sessionRefreshInFlight = null; });
+            }
+            if (!refreshed) refreshed = await sessionRefreshInFlight;
+            if (principal() !== owner) throw new Error("voice_session_changed");
+            if (refreshed) {
+                headers.set("Authorization", `Bearer ${OS.config.accessToken}`);
+                res = await fetch(url, { ...options, headers, credentials: "include" });
+            }
+        }
+        if (principal() !== owner) throw new Error("voice_session_changed");
+        return res;
+    }
+
+    async function requestVoiceInput(text, signal) {
+        const classify = window.PanthoriumWindowCatalog?.classifyVoiceInput;
+        if (!classify) return { intent: "command", response: { ok: false, text: "โมดูลคำสั่งเสียงยังโหลดไม่สำเร็จ กรุณาโหลดหน้าใหม่" } };
+        const { kind, text: input } = classify(text);
+        const response = await callAI(input, { voiceMode: kind === "command", conversationalVoice: kind === "conversation", signal });
+        return { intent: kind, response };
+    }
+
+    function voiceResponseNeedsSpeech(intent, response) {
+        return document.body.dataset.aiMode !== "gemini-live-only" && Boolean(response?.ok && response.text && (intent === "conversation" || response.confirmationRequired));
+    }
+
+    const voicePlaybackFailure = "ได้รับคำตอบแล้ว แต่เล่นเสียงไม่สำเร็จ ตรวจสอบเสียงเว็บไซต์หรือบริการเสียง แล้วแตะไมโครโฟนเพื่อลองใหม่";
+    async function speakVoiceResponse(text) {
+        // The answer remains readable under the Orb even if playback is blocked.
+        try {
+            const spoken = await speak(text);
+            if (!spoken && speechInterruptedByUser) {
+                speechInterruptedByUser = false;
+                return true;
+            }
+            return spoken;
+        } catch (_) { return false; }
+    }
+
+    // ---------- AI: Sentinel (Backend) ----------
+    async function checkSentinelStatus() {
+        try {
+            const base = OS.config.backendUrl.replace(/\/$/, "");
+            const res = await fetch(base + "/api/health", { signal: AbortSignal.timeout(2500) });
+            if (!res.ok) throw new Error("bad status");
+            const data = await res.json();
+            OS.sentinelOnline = !!(data && data.ok);
+            return OS.sentinelOnline;
+        } catch {
+            OS.sentinelOnline = false;
+            return false;
+        }
+    }
+
+    async function callAI(prompt, { voiceMode = false, conversationalVoice = false, thinking, requestId } = {}) {
+        if (voiceMode) {
+            if (!window.PanthoriumVoiceCommands) return { ok: false, text: "โมดูลคำสั่งเสียงยังโหลดไม่สำเร็จ กรุณาโหลดหน้าใหม่" };
+            return window.PanthoriumVoiceCommands.execute(prompt);
+        }
+        // 1) พยายามใช้ Sentinel บนเซิร์ฟเวอร์ก่อน
+        if (OS.config.useBackend) {
+            try {
+                const base = OS.config.backendUrl.replace(/\/$/, "");
+                const res = await authorizedFetch(base + "/api/chat", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-session-id": OS.config.sessionId
+                    },
+                    body: JSON.stringify({
+                        message: `ตอบด้วยภาษาของผู้ใช้และตอบกลับด้วยเสียงได้ ระบบนี้ไม่ใช่ระบบข้อความเท่านั้น ห้ามบอกว่าไม่มีเสียงพูด หากข้อความมีหลายภาษา ให้รักษาภาษาของแต่ละส่วนตามบริบท ห้ามใช้คำลงท้ายภาษาไทยว่า ครับ ค่ะ หรือ คะ\n${prompt}`,
+                        sessionId: OS.config.sessionId,
+                        clientHistory:window.PanthoriumChats?.requestHistory?.(),
+                        requestId,
+                        mode: "default",
+                        voice: conversationalVoice,
+                        thinking
+                    }),
+                    signal: AbortSignal.timeout(75000)
+                });
+                const data = await res.json().catch(() => ({}));
+                OS.sentinelOnline = res.ok;
+                if (res.ok && data.ok && typeof data.text === "string" && data.text.trim()) {
+                    return {
+                        ok: true,
+                        text: data.text,
+                        provider: "Sentinel AI",
+                        via: "sentinel"
+                    };
+                }
+                const code = /^[a-z0-9_]{1,80}$/i.test(data.error || "") ? data.error : res.ok ? "empty_ai_response" : `http_${res.status}`;
+                const text = res.status === 401 ? "เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง"
+                    : code === "registered_account_required" ? "กรุณาเข้าสู่ระบบบัญชี Panthorium เพื่อใช้แชต AI"
+                    : res.status === 403 ? "บัญชีนี้ไม่มีสิทธิ์ถามข้อมูล AI"
+                    : res.status === 429 ? "เรียก AI เกินขีดจำกัด กรุณารอสักครู่"
+                    : typeof data.text === "string" && data.text.trim() ? data.text : "ยังไม่ได้รับคำตอบจาก AI";
+                return { ok: false, text: `${text} (${code})`, error: code, status: res.status, provider: "Sentinel", via: "sentinel" };
+            } catch (e) {
+                console.warn("Sentinel unavailable:", e.message);
+                OS.sentinelOnline = false;
+                const msg = String(e && e.message || "");
+                const error = msg === "voice_session_changed" ? "voice_session_changed"
+                    : msg === "authentication_required" ? "authentication_required"
+                    : /TimeoutError|AbortError/.test(e.name || "") || /aborted|timeout/i.test(msg) ? "chat_timeout"
+                    : "chat_network_error";
+                const text = error === "voice_session_changed" ? "บัญชีผู้ใช้เปลี่ยนแล้ว กรุณาถามใหม่"
+                    : error === "authentication_required" ? "ยังเข้าสู่ระบบไม่ได้ — ตรวจ Backend หรือลองโหลดหน้าใหม่"
+                    : error === "chat_timeout" ? "รอคำตอบ AI เกินเวลา กรุณาลองใหม่"
+                    : "เชื่อมต่อ AI ไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ";
+                return { ok: false, text: `${text} (${error})`, error, via: "sentinel" };
+            }
+        }
+
+        // Provider API keys are intentionally never exposed to the browser.
+        return { ok: false, text: "Sentinel ไม่พร้อมใช้งาน กรุณาตรวจสอบ Backend", provider: "Sentinel", via: "sentinel" };
+    }
+
+
+    // ---------- Window Manager ----------
+    function createWindow(id, title, contentHTML, opts = {}) {
+        const fullscreenOnOpen = id !== "calculator" && (opts.fullscreenOnOpen ?? windowPreferences.fullscreenOnOpen);
+        window.PanthoriumWindow.create({ ...opts, id, title, content: contentHTML, legacyContent: true, fullscreenOnOpen });
+        return OS.windows.get(id);
+    }
+
+    function focusWindow(id) {
+        const win = OS.windows.get(id);
+        if (!win) return;
+        win.el.classList.remove("is-minimized");
+        win.el.style.display = win.displayMode || "flex";
+        win.el.style.zIndex = ++OS.zCounter;
+        win.minimized = false;
+        updateTaskbar();
+    }
+
+    function minimizeWindow(id) {
+        const win = OS.windows.get(id);
+        if (!win) return false;
+        win.minimized = true;
+        win.el.style.display = "none";
+        updateTaskbar();
+        exitDocumentFullscreenIfNoVisibleWindow();
+        return true;
+    }
+
+    function exitDocumentFullscreenIfNoVisibleWindow() {
+        const anyVisible = Array.from(OS.windows.values()).some(win => win.el?.isConnected && win.el.style.display !== "none");
+        if (!anyVisible && document.fullscreenElement === document.documentElement && document.exitFullscreen) {
+            document.exitFullscreen().then(syncImmersiveMarker).catch(() => {});
+        }
+    }
+
+    function closeWindow(id) {
+        const win = OS.windows.get(id);
+        if (!win) return;
+        if (typeof win.onClose === "function") { try { win.onClose(); } catch (error) { console.warn("Window cleanup failed", error); } }
+        if (document.fullscreenElement === win.el && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+        win.el.remove();
+        OS.windows.delete(id);
+        updateTaskbar();
+        exitDocumentFullscreenIfNoVisibleWindow();
+    }
+
+    function findWindowByAppId(appId) {
+        for (const [id, win] of OS.windows) if (win.menuAppId === appId || id === appId) return { id, ...win };
+        const catalogApp = window.PanthoriumWindowCatalog?.apps?.find(app => app.id === appId && app.windowId);
+        if (catalogApp) {
+            const win = OS.windows.get(catalogApp.windowId);
+            if (win) { win.menuAppId = appId; return { id: catalogApp.windowId, ...win }; }
+        }
+        return null;
+    }
+
+    function setWindowFullscreen(id, active) {
+        const win = OS.windows.get(id);
+        if (!win) return false;
+        if (id === "calculator" && active) return false;
+        if (win.external) {
+            if (active) win.el.classList.add("panthorium-window-fullscreen");
+            else win.el.classList.remove("panthorium-window-fullscreen");
+        } else {
+            win.el.classList.toggle("maximized", Boolean(active));
+        }
+        win.fullscreen = Boolean(active);
+        return true;
+    }
+
+    function registerExternalWindow(id, title, element, opts = {}) {
+        if (!element) return null;
+        const current = OS.windows.get(id);
+        if (current?.el === element) return current;
+        if (current) closeWindow(id);
+        const fullscreen = id !== "calculator"
+            && (typeof opts.fullscreenOnOpen === "boolean" ? opts.fullscreenOnOpen : windowPreferences.fullscreenOnOpen);
+        if (!element.dataset.panthoriumWindowedStyle) element.dataset.panthoriumWindowedStyle = element.getAttribute("style") || "";
+        element.classList.add("panthorium-managed-window");
+        if (fullscreen) element.classList.add("panthorium-window-fullscreen");
+        const displayMode = getComputedStyle(element).display === "none" ? (opts.displayMode || "flex") : getComputedStyle(element).display;
+        OS.zCounter = Math.max(OS.zCounter, 10030) + 1;
+        element.style.zIndex = String(OS.zCounter);
+        const record = {
+            el: element, title, menuAppId: opts.menuAppId || id,
+            minimized: element.style.display === "none", external: true,
+            fullscreen, displayMode
+        };
+        OS.windows.set(id, record);
+        if (element.dataset.panthoriumFocusBound !== "true") {
+            element.dataset.panthoriumFocusBound = "true";
+            element.addEventListener("pointerdown", () => focusWindow(id));
+        }
+        updateTaskbar();
+        return record;
+    }
+
+    function findWindowByAppId(appId) {
+        for (const [id, win] of OS.windows) if (win.menuAppId === appId || id === appId) return { id, ...win };
+        const catalogApp = window.PanthoriumWindowCatalog?.apps?.find(app => app.id === appId && app.windowId);
+        if (catalogApp) {
+            const win = OS.windows.get(catalogApp.windowId);
+            if (win) { win.menuAppId = appId; return { id: catalogApp.windowId, ...win }; }
+        }
+        return null;
+    }
+
+    function setWindowFullscreen(id, active) {
+        const win = OS.windows.get(id);
+        if (!win) return false;
+        if (id === "calculator" && active) return false;
+        if (win.external) {
+            win.el.classList.toggle("panthorium-window-fullscreen", Boolean(active));
+        } else {
+            win.el.classList.toggle("maximized", Boolean(active));
+        }
+        win.fullscreen = Boolean(active);
+        return true;
+    }
+
+    function registerExternalWindow(id, title, element, opts = {}) {
+        if (!element) return null;
+        const current = OS.windows.get(id);
+        if (current?.el === element) return current;
+        if (current) closeWindow(id);
+        const fullscreen = id !== "calculator"
+            && (typeof opts.fullscreenOnOpen === "boolean" ? opts.fullscreenOnOpen : windowPreferences.fullscreenOnOpen);
+        if (!element.dataset.panthoriumWindowedStyle) element.dataset.panthoriumWindowedStyle = element.getAttribute("style") || "";
+        element.classList.add("panthorium-managed-window");
+        if (fullscreen) element.classList.add("panthorium-window-fullscreen");
+        const displayMode = getComputedStyle(element).display === "none" ? (opts.displayMode || "flex") : getComputedStyle(element).display;
+        OS.zCounter = Math.max(OS.zCounter, 10030) + 1;
+        element.style.zIndex = String(OS.zCounter);
+        const record = {
+            el: element, title, menuAppId: opts.menuAppId || id,
+            minimized: element.style.display === "none", external: true,
+            fullscreen, displayMode
+        };
+        OS.windows.set(id, record);
+        if (element.dataset.panthoriumFocusBound !== "true") {
+            element.dataset.panthoriumFocusBound = "true";
+            element.addEventListener("pointerdown", () => focusWindow(id));
+        }
+        updateTaskbar();
+        return record;
+    }
+
+    function updateTaskbar() {
+        const container = $("sm-apps");
+        if (!container || !OS?.windows?.forEach) return;
+        container.querySelectorAll("[data-minimized-window]").forEach(item => item.remove());
+        container.querySelectorAll(".sm-app[data-managed-minimized-window]").forEach(item => {
+            const label = item.querySelector("span:not(.ico)");
+            if (label && item.dataset.baseLabel) label.textContent = item.dataset.baseLabel;
+            delete item.dataset.managedMinimizedWindow;
+            item.classList.remove("sm-window-app");
+        });
+        OS.windows.forEach((win, id) => {
+            if (win.el.style.display !== "none") return;
+            const catalogApp = window.PanthoriumWindowCatalog?.apps?.find(app => app.windowId === id);
+            const appId = catalogApp?.id || win.menuAppId || id;
+            win.menuAppId = appId;
+            const accessApp = window.PanthoriumWindowCatalog?.apps?.find(app => app.id === appId);
+            if (accessApp && !window.PanthoriumWindowCatalog.allowed(accessApp, OS.state?.user)) return;
+            const launcher = Array.from(container.querySelectorAll(".sm-app[data-app-id]"))
+                .find(item => item.dataset.appId === appId);
+            if (launcher) {
+                const label = launcher.querySelector("span:not(.ico)");
+                if (label) {
+                    if (!launcher.dataset.baseLabel) launcher.dataset.baseLabel = label.textContent || win.title;
+                    label.textContent = `ย่อไว้ · ${win.title}`;
+                }
+                launcher.dataset.managedMinimizedWindow = id;
+                launcher.classList.add("sm-window-app");
+                return;
+            }
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "sm-app sm-window-app";
+            button.dataset.minimizedWindow = id;
+            button.dataset.appId = win.menuAppId || id;
+            button.dataset.searchText = `${id} ${win.title}`;
+            const icon = document.createElement("span");
+            icon.className = "ico";
+            icon.setAttribute("aria-hidden", "true");
+            icon.textContent = "▱";
+            const label = document.createElement("span");
+            label.textContent = `ย่อไว้ · ${win.title}`;
+            button.append(icon, label);
+            button.onclick = () => {
+                focusWindow(id);
+                closeStartMenu();
+            };
+            container.appendChild(button);
+        });
+        applyStartMenuSearch();
+    }
+
+    window.PanthoriumWindowManager = {
+        get preferences() { return { ...windowPreferences }; },
+        setPreferences: saveWindowPreferences,
+        focus: focusWindow,
+        restore: focusWindow,
+        minimize: minimizeWindow,
+        close: closeWindow,
+        findByAppId: findWindowByAppId,
+        registerExternalWindow,
+        setFullscreen: setWindowFullscreen,
+        toggleFullscreen(id) {
+            const win = OS.windows.get(id);
+            if (!win) return false;
+            return setWindowFullscreen(id, true);
+        }
+    };
+    window.PanthoriumWindow.connectShell(OS, window.PanthoriumWindowManager);
+    // ---------- Apps Definition ----------
+    const BROWSER_RELEASE_URL = "/browser-download.html";
+    function browserDownloadUrl() {
+        const roles = typeof OS !== "undefined" && Array.isArray(OS.state?.user?.roles) ? OS.state.user.roles : [];
+        const isAdmin = window.PanthoriumAuth?.isAdministrator?.() === true
+            || (roles.includes("admin") && !roles.includes("guest"));
+        return BROWSER_RELEASE_URL + (isAdmin ? "?edition=admin" : "?edition=user");
+    }
+    const isAdminShell = /^\/admin(?:\/|$)/i.test(window.location.pathname);
+    let deferredInstallPrompt = null;
+
+    window.addEventListener("beforeinstallprompt", event => {
+        event.preventDefault();
+        deferredInstallPrompt = event;
+    });
+    window.addEventListener("appinstalled", () => { deferredInstallPrompt = null; });
+
+    function isMobileDevice() {
+        return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    }
+
+    window.PanthoriumPWAInstall = async () => {
+        if (!deferredInstallPrompt) return false;
+        deferredInstallPrompt.prompt();
+        const result = await deferredInstallPrompt.userChoice;
+        deferredInstallPrompt = null;
+        return result.outcome === "accepted";
+    };
+
+    function openBrowserDownload() {
+        if (isMobileDevice()) {
+            const installAction = deferredInstallPrompt
+                ? `<button type="button" data-install-pwa style="padding:11px 18px;border:0;border-radius:10px;background:linear-gradient(135deg,#00c9b7,#159dff);color:#03101a;font-weight:700;cursor:pointer;">ติดตั้งบนอุปกรณ์นี้</button>`
+                : `<a href="${browserDownloadUrl()}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:11px 18px;border-radius:10px;background:linear-gradient(135deg,#00c9b7,#159dff);color:#03101a;text-decoration:none;font-weight:700;">เปิด Panthorium</a>`;
+            const html = `
+                <div style="padding:24px;text-align:center;line-height:1.7;">
+                    <div style="font-size:42px;margin-bottom:8px;">🌐</div>
+                    <h2 style="margin:0 0 8px;">ติดตั้ง Panthorium บนมือถือ</h2>
+                    <p style="color:var(--text-dim);font-size:13px;margin:0 0 18px;">ติดตั้งเป็นแอปบนหน้าจอหลักเพื่อเปิด Panthorium OS ได้ทันที</p>
+                    ${installAction}
+                    <p style="color:var(--text-dim);font-size:11px;margin:16px 0 0;">iPhone: กด Share → Add to Home Screen<br>Android: กดเมนูเบราว์เซอร์ → Install app</p>
+                </div>`;
+            const installer = createWindow("browser-download", "ติดตั้ง Panthorium", html, { width: 440, height: 360 });
+            const button = installer?.el.querySelector("[data-install-pwa]");
+            if (button) button.onclick = window.PanthoriumPWAInstall;
+            return;
+        }
+        window.open(browserDownloadUrl(), "_blank", "noopener,noreferrer");
+    }
+
+    function openCalculator() {
+        if (OS.windows.has("calculator")) { focusWindow("calculator"); return; }
+        const math = window.PanthoriumCalculatorMath;
+        if (!math || typeof math.evaluate !== "function") {
+            toast("เครื่องคิดเลขยังโหลดไม่สำเร็จ กรุณาโหลดหน้าใหม่");
+            return;
+        }
+
+        const keys = [
+            { label: "C", action: "clear" }, { label: "⌫", action: "backspace" }, { label: "(", value: "(" }, { label: "÷", value: "÷" },
+            { label: "7", value: "7" }, { label: "8", value: "8" }, { label: "9", value: "9" }, { label: "×", value: "×" },
+            { label: "4", value: "4" }, { label: "5", value: "5" }, { label: "6", value: "6" }, { label: "−", value: "-" },
+            { label: "1", value: "1" }, { label: "2", value: "2" }, { label: "3", value: "3" }, { label: "+", value: "+" },
+            { label: "±", action: "sign" }, { label: "0", value: "0" }, { label: ".", value: "." }, { label: "=", action: "equals" }
+        ];
+        const keyHtml = keys.map(key => {
+            const action = key.action || "insert";
+            const value = key.value == null ? "" : key.value;
+            const accent = ["÷", "×", "−", "+", "="].includes(key.label);
+            return `<button type="button" data-calculator-action="${action}" data-calculator-value="${value}" aria-label="${key.label}" style="min-height:48px;border:1px solid ${accent ? "rgba(0,255,204,.28)" : "rgba(148,163,184,.2)"};border-radius:12px;background:${key.label === "=" ? "linear-gradient(135deg,#00d8b5,#168cff)" : accent ? "rgba(0,255,204,.08)" : "rgba(30,41,59,.82)"};color:${key.label === "=" ? "#03101a" : "var(--text)"};font-size:20px;font-weight:650;cursor:pointer;touch-action:manipulation;">${key.label}</button>`;
+        }).join("");
+        const html = `
+            <div style="height:100%;display:flex;flex-direction:column;gap:12px;padding:14px;background:linear-gradient(145deg,rgba(16,34,52,.97),rgba(5,10,21,.99));box-sizing:border-box;">
+                <input id="calculator-display" type="text" aria-label="ผลคำนวณ" value="0" readonly style="width:100%;min-height:66px;box-sizing:border-box;border:1px solid rgba(0,255,204,.2);border-radius:12px;background:rgba(3,9,18,.72);color:var(--text);padding:12px;font-size:30px;text-align:right;font-variant-numeric:tabular-nums;outline:none;">
+                <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;flex:1;">${keyHtml}</div>
+                <div style="font-size:11px;color:var(--text-dim);text-align:center;">การคำนวณไม่ส่งหรือบันทึกข้อมูล</div>
+            </div>`;
+        const calculator = createWindow("calculator", "เครื่องคิดเลข", html, {
+            width: Math.min(320, Math.max(240, window.innerWidth - 48)),
+            height: Math.min(460, window.innerHeight - 80)
+        });
+        const display = calculator.el.querySelector("#calculator-display");
+        let expression = "";
+        let justEvaluated = false;
+        const render = () => { display.value = expression || "0"; };
+        const insert = value => {
+            if (justEvaluated && (/[0-9.]/.test(value) || value === "(")) expression = "";
+            justEvaluated = false;
+            expression += value;
+            render();
+        };
+        const calculate = () => {
+            if (!expression) return;
+            try {
+                expression = String(math.evaluate(expression));
+                justEvaluated = true;
+                render();
+            } catch (_) {
+                expression = "";
+                justEvaluated = true;
+                display.value = "Error";
+            }
+        };
+        calculator.el.querySelectorAll("[data-calculator-action]").forEach(button => {
+            button.addEventListener("click", () => {
+                const action = button.dataset.calculatorAction;
+                if (action === "clear") { expression = ""; justEvaluated = false; render(); }
+                else if (action === "backspace") {
+                    if (justEvaluated) expression = "";
+                    else expression = expression.slice(0, -1);
+                    justEvaluated = false;
+                    render();
+                } else if (action === "sign") {
+                    if (!expression) expression = "-";
+                    else expression = "-(" + expression + ")";
+                    justEvaluated = false;
+                    render();
+                } else if (action === "equals") calculate();
+                else insert(button.dataset.calculatorValue || "");
+            });
+        });
+        calculator.el.addEventListener("keydown", event => {
+            if (/^[0-9.+\-*/()]$/.test(event.key)) { event.preventDefault(); insert(event.key); }
+            else if (event.key === "Enter" || event.key === "=") { event.preventDefault(); calculate(); }
+            else if (event.key === "Backspace") {
+                event.preventDefault();
+                expression = justEvaluated ? "" : expression.slice(0, -1);
+                justEvaluated = false;
+                render();
+            } else if (event.key === "Escape") { expression = ""; justEvaluated = false; render(); }
+        });
+    }
+
+    const APP_LIST = [
+        { id: "sentinel", name: "Sentinel AI", menuName: "Sentinel AI แชท", icon: "🤖", open: openSentinel },
+        { id: "calculator", name: "เครื่องคิดเลข", icon: "🧮", open: openCalculator },
+        { id: "calendar", name: "ปฏิทิน", icon: "📅", startMenuOnly: true, open: () => window.PanthoriumCalendar?.open?.(), visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
+        { id: "notes", name: "บันทึก", icon: "📝", open: openNotes, visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
+        { id: "files", name: "ไฟล์", icon: "📁", open: openFiles, visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
+        { id: "goals", name: "เป้าหมาย", icon: "🎯", open: () => window.PanthoriumGoals?.open?.(), visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
+        { id: "assistant-preferences", name: "ความชอบ Sentinel", icon: "⚙️", open: () => window.PanthoriumAssistantPreferences?.open?.(), visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
+        { id: "account-register", name: "ลงทะเบียน", icon: "📝", startMenuOnly: true, visible: () => !OS.state.user || OS.state.user.roles?.includes("guest"), open: () => window.PanthoriumAccounts?.openRegistration?.() },
+        { id: "account-login", name: "เข้าสู่ระบบ / ลืมรหัสผ่าน", icon: "🔐", startMenuOnly: true, visible: () => !OS.state.user || OS.state.user.roles?.includes("guest"), open: () => window.PanthoriumAccounts?.openLogin?.() },
+        { id: "account-logout", name: "ออกจากระบบ", icon: "🚪", startMenuOnly: true, open: () => window.PanthoriumAccounts?.openLogout?.(), visible: () => Boolean(OS.state.user && !OS.state.user.roles?.includes("guest")) },
+        { id: "billing", name: "แพ็กเกจและชำระเงิน", icon: "💳", startMenuOnly: true, open: () => window.PanthoriumBilling?.open?.() },
+        { id: "contact", name: "ศูนย์ช่วยเหลือ", icon: "✉️", startMenuOnly: true, open: () => window.PanthoriumContact?.open?.() },
+        { id: "reminders", name: "ตั้งค่าการแจ้งเตือน", icon: "🔔", startMenuOnly: true, open: () => window.PanthoriumReminders?.open?.(), visible: () => {
+            const user = OS.state.user;
+            return Boolean(user && !user.roles?.includes("guest") && user.permissions?.includes("chat"));
+        } },
+        { id: "privacy-policy", name: "Privacy/Policy", icon: "🔐", startMenuOnly: true, open: () => window.PanthoriumPrivacyPolicy?.open?.() }
+    ];
+
+    function visibleApps() {
+        return APP_LIST.filter(app => !app.visible || app.visible());
+    }
+
+    function applyStartMenuSearch() {
+        const search = $("start-search");
+        const list = $("sm-apps");
+        if (!search || !list) return 0;
+        const emptyState = $("sm-empty");
+        return window.PanthoriumStartMenuUI?.filter(search.value, list, emptyState) ?? 0;
+    }
+
+    function renderAppLaunchers() {
+        const apps = visibleApps();
+        const adminManager = window.PanthoriumStagingAdminDesktop;
+        const baseAppIds = new Set(apps.map(app => app.id));
+        if (typeof adminManager?.menuApps === "function") {
+            adminManager.menuApps().forEach(app => {
+                if (baseAppIds.has(app.id)) return;
+                baseAppIds.add(app.id);
+                apps.push({
+                    id: app.id,
+                    name: app.label,
+                    icon: app.icon,
+                    open: () => adminManager.open(app.id)
+                });
+            });
+        }
+        const desk = $("desktop-icons");
+        const sm = $("sm-apps");
+        if (!desk || !sm) return;
+
+        desk.innerHTML = "";
+        apps.filter(app => !app.startMenuOnly).forEach(app => {
+            const el = document.createElement("div");
+            el.className = "desk-icon";
+            el.dataset.appId = app.id;
+            el.innerHTML = `<div class="icon-img">${app.icon}</div><span>${app.name}</span>`;
+            el.onclick = () => {
+                const existingWindow = findWindowByAppId(app.id);
+                if (existingWindow) focusWindow(existingWindow.id);
+                else app.open();
+            };
+            desk.appendChild(el);
+        });
+
+        sm.innerHTML = "";
+        const settingsGroup = window.PanthoriumStartMenuUI?.group?.("settings", "ตั้งค่า", sm);
+        const settingsApps = new Set(["goals", "assistant-preferences", "contact", "reminders", "account-logout"]);
+        apps.forEach(app => {
+            const label = app.menuName || app.name;
+            const el = document.createElement("button");
+            el.type = "button";
+            el.className = "sm-app";
+            el.dataset.appId = app.id;
+            el.dataset.baseLabel = label;
+            el.dataset.voiceLauncher = String(app.id !== "account-logout");
+            el.dataset.searchText = `${app.id} ${label}`;
+            el.innerHTML = `<div class="ico" aria-hidden="true">${app.icon}</div><span>${label}</span>`;
+            el.onclick = () => {
+                const existingWindow = findWindowByAppId(app.id);
+                if (existingWindow) focusWindow(existingWindow.id);
+                else app.open();
+                closeStartMenu();
+            };
+            const target = settingsGroup && settingsApps.has(app.id) ? window.PanthoriumStartMenuUI.groupItems(settingsGroup) : sm;
+            target.appendChild(el);
+        });
+        // Rebuild extension launchers after replacing the base menu on every Start click.
+        window.PanthoriumBrowser?.installLauncher?.();
+        window.PanthoriumSocial?.renderMenu?.();
+        window.PanthoriumStartMenuUI?.pinLast?.("privacy-policy", sm);
+        window.PanthoriumStartMenuUI?.keepPinnedLast?.(sm);
+        updateTaskbar();
+        applyStartMenuSearch();
+    }
+
+
+    function initDesktop() {
+        renderAppLaunchers();
+
+        try {
+            initBackground();
+        } catch (error) {
+            activateOrbFallback(error);
+        }
+        // ตรวจสอบ Sentinel เงียบ ๆ หลังเข้า Desktop
+        checkSentinelStatus().then((ok) => {
+            if (ok) toast("Sentinel ออนไลน์");
+        });
+    }
+
+    window.addEventListener("panthorium:auth-changed", () => {
+        const localMode = document.getElementById('chat-ai-mode');
+        if (localMode) localMode.value = 'instant';
+        try { renderAppLaunchers(); }
+        catch (error) { console.error("Launcher refresh failed", error); }
+    });
+
+    // Start menu and searchable vertical launcher list.
+    $("start-btn").onclick = () => {
+        renderAppLaunchers();
+        const menu = $("start-menu");
+        const opening = !menu.classList.contains("open");
+        menu.classList.toggle("open", opening);
+        $("start-btn").setAttribute("aria-expanded", String(opening));
+    };
+    $("start-search").addEventListener("input", applyStartMenuSearch);
+    $("start-search").addEventListener("keydown", event => {
+        if (event.key === "Escape") {
+            closeStartMenu();
+            $("start-btn").focus();
+        } else if (event.key === "Enter" && event.currentTarget.value.trim()) {
+            const firstVisible = Array.from($("sm-apps").children).find(item => !item.hidden && item.dataset.searchHidden !== "true" && item.style.display !== "none");
+            firstVisible?.click();
+        }
+    });
+    if (window.MutationObserver && $("sm-apps")) {
+        const launcherObserver = new MutationObserver(() => applyStartMenuSearch());
+        launcherObserver.observe($("sm-apps"), { childList: true });
+    }
+    document.addEventListener("click", (e) => {
+        if (!$("start-menu").contains(e.target) && !$("start-btn").contains(e.target)) {
+            closeStartMenu();
+        }
+    });
+    function closeStartMenu() {
+        $("start-menu").classList.remove("open");
+        $("start-btn").setAttribute("aria-expanded", "false");
+    }
+
+    $("btn-settings-quick").onclick = () => { openSettings(); closeStartMenu(); };
+    $("btn-logout").onclick = () => {
+        if (confirm("ต้องการรีสตาร์ทระบบหรือไม่?")) {
+            location.reload();
+        }
+    };
+
+    // ---------- App: Sentinel AI ----------
+    function openSentinel() {
+        const html = window.PanthoriumWorkspace?.chatMarkup?.() || `
+            <div class="chat-container">
+                <div class="chat-messages" id="chat-messages">
+                    <div class="msg ai">สวัสดี ฉันคือ Sentinel AI ผู้ช่วยของ Panthorium OS<br>มีอะไรให้ช่วยไหม?</div>
+                </div>
+                <div class="chat-input-area">
+                    <button class="chat-mic" id="chat-mic" type="button" aria-label="เริ่มพูดกับ Sentinel AI" aria-pressed="false" title="พูด">🎤</button>
+                    <input class="chat-input" id="chat-input" placeholder="พิมพ์ข้อความหรือใช้เสียง..." />
+                    <button class="chat-send" id="chat-send">➤</button>
+                </div>
+            </div>
+        `;
+        createWindow("sentinel", "Sentinel AI", html, { width: 440, height: 520,
+            onClose: () => window.PanthoriumLiveVoice?.stopChatSession?.()
+        });
+        window.PanthoriumLiveVoice?.syncChatButton?.();
+        window.PanthoriumChats?.mount?.();
+
+        const input = $("chat-input");
+        const sendBtn = $("chat-send");
+        const micBtn = $("chat-mic");
+        const messages = $("chat-messages");
+        let localMode;
+        if (document.body.dataset.aiMode === 'local-only') {
+            localMode = document.createElement('select');
+            localMode.id = 'chat-ai-mode';
+            localMode.setAttribute('aria-label', 'โหมด Qwen 4B');
+            localMode.innerHTML = '<option value="instant">Instant · ตอบเร็ว</option><option value="thinking">Thinking · คิดละเอียด</option>';
+            localMode.style.cssText = 'max-width:180px;font:inherit;color:var(--text-primary,#e7f3ff);background:var(--bg-panel,#14202e);border:1px solid var(--accent,#00ffcc);border-radius:8px;padding:5px;';
+            const modeHost = document.querySelector('.pt-left-tools') || input.parentElement;
+            modeHost.querySelector('.pt-mode')?.remove();
+            modeHost.appendChild(localMode);
+        }
+
+        let sendBusy = false;
+        async function send({ resumeGlobalVoice = false } = {}) {
+            const text = input.value.trim();
+            if (!text || sendBusy) return;
+            speechInterruptedByUser = false;
+            sendBusy = true;
+            window.PanthoriumVoice?.pause();
+            if (window.PanthoriumLiveVoice?.isActive?.()) window.PanthoriumLiveVoice.stop();
+            unlockVoiceAudio();
+            try { window.speechSynthesis?.resume(); } catch (_) {}
+            input.value = "";
+            input.style.height = "";
+            sendBtn.disabled = true;
+            appendMsg(text, "user");
+            appendMsg("กำลังคิด...", "ai", true);
+            try {
+                const { intent, response: res } = resumeGlobalVoice
+                    ? await requestVoiceInput(text) : { intent: "conversation", response: await callAI(text, localMode ? {thinking:localMode.value === 'thinking'} : {}) };
+                // remove loading
+                const last = messages.querySelector('.msg.loading, .msg[data-streaming="1"]');
+                if (last) last.remove();
+
+                const reply = (res && res.text && String(res.text).trim()) || "ยังไม่ได้รับคำตอบจาก AI";
+                appendMsg(reply, "ai", false, res?.provider);
+                if (!res?.ok) toast(reply, 10000);
+                else if (voiceResponseNeedsSpeech(intent, res) && ((res.streamSpoken && res.streamSpeechOk === false) || (!res.streamSpoken && !(await speakVoiceResponse(res.text))))) toast(voicePlaybackFailure, 10000);
+            } catch (err) {
+                messages.querySelector('.msg.loading, .msg[data-streaming="1"]')?.remove();
+                const reason = err && err.message === "authentication_required"
+                    ? "ยังเข้าสู่ระบบไม่ได้ — ตรวจ Backend หรือลองโหลดหน้าใหม่"
+                    : "รับคำตอบไม่สำเร็จ กรุณาลองใหม่";
+                appendMsg(reason, "ai");
+                toast(reason, 10000);
+                console.warn("send() failed:", err);
+            } finally {
+                sendBusy = false;
+                sendBtn.disabled = false;
+                if (resumeGlobalVoice) window.PanthoriumVoice?.resume();
+            }
+        }
+
+        function appendMsg(text, type, loading = false, provider = null) {
+            const div = document.createElement("div");
+            div.className = `msg ${type}` + (loading ? " loading" : "");
+            div.textContent = text;
+            if (provider) { const label = document.createElement("div"); label.className = "provider"; label.textContent = `via ${provider}`; div.appendChild(label); }
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        sendBtn.onclick = send;
+        input.onkeydown = (e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); send(); }
+        };
+        input.oninput = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 120) + 'px'; };
+        document.querySelectorAll('[data-pt-prompt]').forEach(button => {
+            button.onclick = () => { input.value = button.dataset.ptPrompt; input.dispatchEvent(new Event('input')); input.focus(); };
+        });
+
+        // Voice — Electron uses MediaRecorder + server STT; browsers use Web Speech API
+        let recognition = null;
+        let voiceSilenceTimer = null;
+        let voiceRecognitionFailed = false;
+        let voiceParts = new Map();
+        let voiceInterim = "";
+        let chatRecorder = null;
+        let chatRecorderStream = null;
+        let chatRecorderChunks = [];
+        let chatRecorderMime = "audio/webm";
+        let chatRecorderMonitor = null;
+        let chatRecorderStartedAt = 0;
+        let chatRecorderLastVoiceAt = 0;
+        let chatVoiceDetector = createAdaptiveVoiceDetector();
+        let chatRecorderContext = null;
+        let chatRecorderAnalyser = null;
+        let chatRecorderData = null;
+        const chatElectron = Boolean(window.panthoriumDesktop?.isElectron);
+        const chatRecorderOk = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+        const SR = document.body.dataset.aiMode === 'local-only' ? null : window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        const cleanupChatRecorder = () => {
+            clearTimeout(chatRecorderMonitor);
+            chatRecorderMonitor = null;
+            if (chatRecorderContext) { try { chatRecorderContext.close(); } catch (_) {} }
+            chatRecorderContext = null;
+            chatRecorderAnalyser = null;
+            chatRecorderData = null;
+            chatRecorderStream?.getTracks?.().forEach(t => t.stop());
+            chatRecorderStream = null;
+        };
+
+        const transcribeChatBlob = async blob => {
+            const bytes = new Uint8Array(await blob.arrayBuffer());
+            let binary = "";
+            const step = 0x8000;
+            for (let offset = 0; offset < bytes.length; offset += step) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + step, bytes.length)));
+            const mimeType = String(blob.type || chatRecorderMime).split(";")[0] || "audio/webm";
+            const audio = "data:" + mimeType + ";base64," + btoa(binary);
+            // The backend verifies this exact audio once before sending it to STT.
+            const base = OS.config.backendUrl.replace(/\/$/, "");
+            const post = async () => {
+                const response = await authorizedFetch(base + "/api/speech/transcribe", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ audio, language: "th-TH" }),
+                    signal: AbortSignal.timeout(35000),
+                    cache: "no-store"
+                });
+                return { data: await response.json().catch(() => ({})), statusCode: response.status };
+            };
+            let data, statusCode;
+            if (chatElectron && typeof window.panthoriumDesktop?.transcribeAudio === "function") {
+                if (!(await ensureAuth())) throw new Error("authentication_required");
+                try {
+                    let result = await window.panthoriumDesktop.transcribeAudio(audio, "th-TH", OS.config.accessToken);
+                    if (result?.status === 401 && await ensureAuth(true)) {
+                        result = await window.panthoriumDesktop.transcribeAudio(audio, "th-TH", OS.config.accessToken);
+                    }
+                    data = result?.data || {};
+                    statusCode = Number(result?.status || 500);
+                } catch (_) {
+                    ({ data, statusCode } = await post());
+                }
+            } else {
+                ({ data, statusCode } = await post());
+            }
+            if (statusCode === 403 && data?.error === "voice_enrollment_required") {
+                const response = await authorizedFetch(base + "/api/speech/identity-navigation", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ audio, language: "th-TH" }),
+                    signal: AbortSignal.timeout(22000),
+                    cache: "no-store"
+                });
+                const navigation = await response.json().catch(() => ({}));
+                if (response.ok && navigation.ok && ["register", "login"].includes(navigation.intent)) return { identityNavigation: navigation.intent };
+                throw new Error(navigation.error || "voice_navigation_unavailable");
+            }
+            if (statusCode < 200 || statusCode >= 300 || !data.ok || typeof data.text !== "string" || !data.text.trim()) {
+                throw new Error(data.error || "transcription_unavailable");
+            }
+            return data.text.trim();
+        };
+
+        const startChatRecorder = async () => {
+            chatRecorderStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+            const supportedMime = typeof MediaRecorder.isTypeSupported === "function"
+                ? ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find(type => MediaRecorder.isTypeSupported(type))
+                : "";
+            chatRecorderMime = supportedMime || "";
+            chatRecorderChunks = [];
+            chatRecorder = chatRecorderMime ? new MediaRecorder(chatRecorderStream, { mimeType: chatRecorderMime }) : new MediaRecorder(chatRecorderStream);
+            chatRecorderMime = chatRecorder.mimeType || chatRecorderMime || "audio/webm";
+            chatRecorder.ondataavailable = event => { if (event.data?.size) chatRecorderChunks.push(event.data); };
+            chatRecorder.onstop = async () => {
+                const chunks = chatRecorderChunks.slice();
+                chatRecorder = null;
+                chatRecorderChunks = [];
+                cleanupChatRecorder();
+                userSpeechActive = false;
+                window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
+                micBtn.classList.remove("listening");
+                if (!chunks.length) {
+                    toast("ยังไม่ได้ยินเสียง");
+                    window.PanthoriumVoice?.resume();
+                    return;
+                }
+                toast("กำลังถอดเสียง...", 4000);
+                try {
+                    const transcript = await transcribeChatBlob(new Blob(chunks, { type: chatRecorderMime }));
+                    if (transcript && typeof transcript === "object" && transcript.identityNavigation) {
+                        const identity = window.PanthoriumVoiceIdentity;
+                        if (transcript.identityNavigation === "login") identity?.openLogin?.();
+                        else identity?.openRegistration?.();
+                        toast("เปิดหน้าต่างบัญชีแล้ว");
+                        window.PanthoriumVoice?.resume();
+                        return;
+                    }
+                    const text = String(transcript || "").trim();
+                    input.value = text;
+                    window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
+                    await send({ resumeGlobalVoice: true });
+                } catch (error) {
+                    console.warn("[Sentinel chat transcription]", error);
+                    toast(error?.message === "voice_not_authorized" ? "เสียงนี้ไม่ได้รับอนุญาต จึงไม่ส่งให้ Sentinel" : error?.message === "transcription_uncertain" ? "โปรดพูดอีกครั้ง" : "ถอดเสียงไม่สำเร็จ กรุณาลองใหม่หรือพิมพ์ข้อความ");
+                    if (error?.message === "transcription_uncertain") await speakVoiceResponse("โปรดพูดอีกครั้ง");
+                    window.PanthoriumVoice?.resume();
+                }
+            };
+            chatRecorder.start(250);
+            chatRecorderStartedAt = performance.now();
+            chatRecorderLastVoiceAt = 0;
+            chatVoiceDetector = createAdaptiveVoiceDetector();
+            userSpeechActive = true;
+            window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
+            micBtn.classList.add("listening");
+            try {
+                chatRecorderContext = new AudioContext();
+                const source = chatRecorderContext.createMediaStreamSource(chatRecorderStream);
+                chatRecorderAnalyser = chatRecorderContext.createAnalyser();
+                chatRecorderAnalyser.fftSize = 512;
+                chatRecorderData = new Uint8Array(chatRecorderAnalyser.fftSize);
+                source.connect(chatRecorderAnalyser);
+            } catch (_) {}
+            const monitor = () => {
+                if (!chatRecorder || chatRecorder.state !== "recording") return;
+                const now = performance.now();
+                if (chatRecorderAnalyser && chatRecorderData) {
+                    chatRecorderAnalyser.getByteTimeDomainData(chatRecorderData);
+                    let sum = 0;
+                    for (const value of chatRecorderData) { const c = (value - 128) / 128; sum += c * c; }
+                    const level = Math.sqrt(sum / chatRecorderData.length);
+                    if (chatVoiceDetector.observe(level, now - chatRecorderStartedAt)) chatRecorderLastVoiceAt = now;
+                }
+                const chatSpeechEnded = chatRecorderLastVoiceAt > 0 && now - chatRecorderLastVoiceAt > 1800 && now - chatRecorderStartedAt > 700;
+                const noChatSpeechTimeout = !chatRecorderLastVoiceAt && now - chatRecorderStartedAt > 8000;
+                if (chatSpeechEnded || noChatSpeechTimeout || now - chatRecorderStartedAt > 30000) {
+                    try { chatRecorder.stop(); } catch (_) {}
+                    return;
+                }
+                chatRecorderMonitor = setTimeout(monitor, 100);
+            };
+            chatRecorderMonitor = setTimeout(monitor, 100);
+        };
+
+        if (SR && !chatElectron) {
+            recognition = new SR();
+            recognition.lang = "th-TH";
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.onresult = (e) => {
+                voiceInterim = "";
+                for (let i = e.resultIndex; i < e.results.length; i++) {
+                    const result = e.results[i];
+                    const value = String(result?.[0]?.transcript || "").trim();
+                    if (!value) continue;
+                    if (result.isFinal) voiceParts.set(i, value);
+                    else voiceInterim = value;
+                }
+                const preview = [...voiceParts.values(), voiceInterim].filter(Boolean).join(" ").trim();
+                if (preview) input.value = preview;
+                clearTimeout(voiceSilenceTimer);
+                voiceSilenceTimer = setTimeout(() => {
+                    try { recognition.stop(); } catch (_) {}
+                }, 850);
+            };
+            recognition.onstart = () => {
+                voiceRecognitionFailed = false;
+                voiceParts = new Map();
+                voiceInterim = "";
+                userSpeechActive = true;
+                window.dispatchEvent(new CustomEvent("panthorium:voice-user-start"));
+                micBtn.classList.add("listening");
+            };
+            recognition.onend = async () => {
+                clearTimeout(voiceSilenceTimer);
+                userSpeechActive = false;
+                window.dispatchEvent(new CustomEvent("panthorium:voice-user-end"));
+                micBtn.classList.remove("listening");
+                const text = [...voiceParts.values()].join(" ").trim() || voiceInterim.trim();
+                voiceParts.clear();
+                voiceInterim = "";
+                if (!voiceRecognitionFailed && text) {
+                    input.value = text;
+                    window.dispatchEvent(new CustomEvent("panthorium:voice-user-result", { detail: { text } }));
+                    await send({ resumeGlobalVoice: true });
+                } else {
+                    window.PanthoriumVoice?.resume();
+                }
+            };
+            recognition.onerror = event => {
+                voiceRecognitionFailed = true;
+                clearTimeout(voiceSilenceTimer);
+                userSpeechActive = false;
+                micBtn.classList.remove("listening");
+                const code = event?.error || "";
+                if (code === "no-speech") {
+                    toast("ยังไม่ได้ยินเสียง พูดอีกครั้งได้");
+                    window.PanthoriumVoice?.resume();
+                } else if (code === "aborted") {
+                    window.PanthoriumVoice?.resume();
+                } else if (typeof window.PanthoriumVoice?.recognitionFailure === "function") {
+                    window.PanthoriumVoice.recognitionFailure(event);
+                } else if (code === "not-allowed" || code === "service-not-allowed") {
+                    toast("กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์");
+                } else if (code === "network") {
+                    toast("รู้จำเสียงต้องใช้อินเทอร์เน็ต — ตรวจการเชื่อมต่อ");
+                } else {
+                    toast("รู้จำเสียงไม่สำเร็จ ลองใหม่");
+                }
+            };
+        }
+
+        micBtn.onclick = async () => {
+            if (document.body.dataset.aiMode === 'local-only') {
+                if (!window.PanthoriumHybridVoice) { toast('ระบบเสียงในเครื่องกำลังโหลด'); return; }
+                await window.PanthoriumHybridVoice.start();
+                return;
+            }
+            if (document.body.dataset.aiMode === "gemini-live-only") {
+                if (!window.PanthoriumLiveVoice) { toast("ระบบเสียงกำลังโหลด กรุณาลองอีกครั้ง"); return; }
+                await window.PanthoriumLiveVoice.toggle();
+                return;
+            }
+            if (aiSpeechActive) stopSentinelSpeech();
+            // Electron / recorder path
+            if (chatRecorderOk) {
+                if (chatRecorder && chatRecorder.state === "recording") {
+                    try { chatRecorder.stop(); } catch (_) {}
+                    return;
+                }
+                window.PanthoriumVoice?.pause();
+                unlockVoiceAudio();
+                try {
+                    await startChatRecorder();
+                } catch (error) {
+                    cleanupChatRecorder();
+                    micBtn.classList.remove("listening");
+                    const denied = error?.name === "NotAllowedError" || error?.name === "SecurityError";
+                    toast(denied ? "กรุณาอนุญาตไมโครโฟนให้ Panthorium Browser" : "เปิดไมโครโฟนไม่สำเร็จ");
+                    window.PanthoriumVoice?.resume();
+                }
+                return;
+            }
+            if (!chatRecorderOk && document.body?.dataset.voiceIdentityRequired === "true") {
+                toast("เบราว์เซอร์นี้ไม่รองรับการตรวจเสียงผู้พูด");
+                return;
+            }
+            if (!recognition) {
+                toast("เบราว์เซอร์นี้ไม่รองรับการรู้จำเสียง (แนะนำ Chrome, Edge หรือ Panthorium Browser)");
+                return;
+            }
+            if (micBtn.classList.contains("listening")) {
+                try { recognition.stop(); } catch (_) {}
+                return;
+            }
+            window.PanthoriumVoice?.pause();
+            unlockVoiceAudio();
+            try { window.speechSynthesis?.resume(); } catch (_) {}
+            micBtn.classList.add("listening");
+            try {
+                recognition.start();
+            } catch (err) {
+                try { recognition.abort(); } catch (_) {}
+                setTimeout(() => {
+                    try {
+                        recognition.start();
+                    } catch (_) {
+                        micBtn.classList.remove("listening");
+                        toast("ไม่สามารถเริ่มรู้จำเสียงได้ — ลองกดไมค์อีกครั้ง");
+                        window.PanthoriumVoice?.resume();
+                    }
+                }, 250);
+            }
+        };
+    }
+
+    // ---------- App: Settings ----------
+    function openSettings() {
+        const sentinelStatus = OS.sentinelOnline ? "🟢 Online" : "🔴 Offline";
+        const html = `
+            <div class="app-content">
+                <div class="settings-section">
+                    <h3>🧠 Sentinel · Cloud</h3>
+                    <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px;">
+                        สถานะ: <strong id="sentinel-status-text">${sentinelStatus}</strong><br>
+                        <span style="font-size:12px;">AI ประมวลผลผ่านเซิร์ฟเวอร์ ข้อมูลบัญชีถูกแยกตามผู้ใช้ และ API Key ไม่ถูกเก็บบนอุปกรณ์</span>
+                    </p>
+                    <div class="setting-row">
+                        <label>เซิร์ฟเวอร์: <strong id="backend-url-display"></strong></label>
+                    </div>
+                    <button class="btn-primary" id="test-sentinel" style="background:rgba(0,255,204,0.2);color:var(--accent);">ตรวจสอบการเชื่อมต่อเซิร์ฟเวอร์</button>
+                </div>
+                <div class="settings-section">
+                    <h3>🔐 Voice Identity · บัญชีบนเซิร์ฟเวอร์</h3>
+                    <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px;">
+                        การลงทะเบียนชีวมิติแบบเก็บข้อมูลบนอุปกรณ์ถูกปิดแล้ว ใช้ Voice Identity เพื่อจัดการตัวตนผ่านบัญชีและเซิร์ฟเวอร์
+                    </p>
+                    <button class="btn-primary" id="open-cloud-identity">เปิด Voice Identity</button>
+                </div>
+                <div class="settings-section">
+                    <h3>ℹ️ ระบบ</h3>
+                    <p style="font-size:13px;color:var(--text-dim);line-height:1.6;">
+                        Panthorium OS<br>
+                        สถาปัตยกรรม: Panthorium Client + Sentinel Cloud API<br>
+                        โน้ตและความทรงจำซิงก์ตามบัญชีที่เข้าสู่ระบบ
+                    </p>
+                </div>
+            </div>
+        `;
+        createWindow("settings", "ตั้งค่า", html, { width: 420, height: 560 });
+        $("backend-url-display").textContent = OS.config.backendUrl;
+
+        $("test-sentinel").onclick = async () => {
+            toast("กำลังตรวจสอบเซิร์ฟเวอร์...");
+            const ok = await checkSentinelStatus();
+            const el = $("sentinel-status-text");
+            if (el) el.textContent = ok ? "🟢 Online" : "🔴 Offline";
+            toast(ok ? "เชื่อมต่อ Sentinel สำเร็จ" : "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้");
+        };
+
+        $("open-cloud-identity").onclick = () => {
+            const identity = window.PanthoriumVoiceIdentity;
+            if (typeof identity?.open === "function") identity.open();
+            else toast("Voice Identity ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่");
+        };
+    }
+
+    // ---------- App: Notes ----------
+    function openNotes() {
+        if (OS.windows.has("notes")) { focusWindow("notes"); return; }
+        openNotes.instance = (openNotes.instance || 0) + 1;
+        const instance = openNotes.instance;
+        if (openNotes.authChangedHandler) window.removeEventListener("panthorium:auth-changed", openNotes.authChangedHandler);
+
+        const html =
+            '<div style="height:100%;display:flex;flex-direction:column;">' +
+                '<div style="padding:8px 12px;min-height:42px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+                    '<span id="notes-sync-status" role="status" aria-live="polite">กำลังโหลดบัญชี…</span>' +
+                    '<button id="notes-account-login" type="button" hidden style="border:1px solid rgba(0,255,204,.3);background:rgba(0,255,204,.08);color:var(--text);border-radius:8px;padding:7px 10px;">เข้าสู่ระบบ / สมัครบัญชี</button>' +
+                    '<button id="notes-import-legacy" type="button" hidden style="border:1px solid rgba(0,255,204,.3);background:rgba(0,255,204,.08);color:var(--text);border-radius:8px;padding:7px 10px;">นำเข้าบันทึกเดิมจากอุปกรณ์นี้</button>' +
+                    '<button id="notes-save-retry" type="button" hidden style="border:1px solid rgba(0,255,204,.3);background:rgba(0,255,204,.08);color:var(--text);border-radius:8px;padding:7px 10px;">ลองอีกครั้ง</button>' +
+                '</div>' +
+                '<textarea class="notes-area" id="notes-area" maxlength="12000" disabled placeholder="เขียนบันทึกที่นี่..."></textarea>' +
+            '</div>';
+        createWindow("notes", "บันทึก", html, { width: 420, height: 400 });
+
+        const area = $("notes-area");
+        const status = $("notes-sync-status");
+        const loginButton = $("notes-account-login");
+        const importButton = $("notes-import-legacy");
+        const retryButton = $("notes-save-retry");
+        area.style.height = "auto";
+        area.style.flex = "1";
+        area.style.minHeight = "0";
+        const noteTitle = "บันทึกจากแอป Panthorium";
+        let activeOwner = "";
+        let noteMemoryId = "";
+        let remoteSync = false;
+        let ready = false;
+        let pendingLegacyImport = false;
+        let saveTimer = null;
+        let revision = 0;
+        let saveQueue = Promise.resolve();
+        const isCurrent = () => openNotes.instance === instance && OS.windows.has("notes");
+        const currentUserId = () => {
+            const user = OS.state.user || {};
+            return String(user.sub || user.id || "");
+        };
+        const isRegisteredUser = () => {
+            const user = OS.state.user || {};
+            const id = currentUserId();
+            return Boolean(id) && !id.startsWith("guest:") && !user.roles?.includes("guest");
+        };
+        const legacyNote = () => { try { return localStorage.getItem("pt_notes") || ""; } catch (_) { return ""; } };
+        const setStatus = (value) => { status.textContent = value; };
+        const showLegacyImport = () => { importButton.hidden = !legacyNote(); };
+
+        async function loadNotes() {
+            ready = false;
+            remoteSync = false;
+            area.disabled = true;
+            retryButton.hidden = true;
+            importButton.hidden = true;
+            loginButton.hidden = true;
+            setStatus("กำลังโหลดบันทึกบนคลาวด์…");
+            try {
+                if (window.PanthoriumAuth?.ensureSession) await window.PanthoriumAuth.ensureSession();
+                else await ensureAuth();
+                if (!isCurrent()) return;
+
+                activeOwner = currentUserId();
+                if (!activeOwner) throw new Error("account_unavailable");
+                if (!isRegisteredUser()) {
+                    area.value = "";
+                    loginButton.hidden = false;
+                    setStatus("เข้าสู่ระบบหรือสมัครบัญชีเพื่อบันทึกและซิงก์โน้ตบนคลาวด์");
+                    return;
+                }
+
+                const owner = activeOwner;
+                const response = await authorizedFetch(OS.config.backendUrl.replace(/\/$/, "") + "/api/agent/memory?kind=note&limit=100", { signal: AbortSignal.timeout(10000) });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) {
+                    const error = new Error(data.error || "notes_load_failed");
+                    error.httpStatus = response.status;
+                    error.requestId = response.headers.get("x-request-id") || "";
+                    throw error;
+                }
+                if (!isCurrent() || owner !== currentUserId()) return;
+
+                remoteSync = true;
+                const savedNote = (data.memories || []).find(item => item.title === noteTitle);
+                if (savedNote) {
+                    noteMemoryId = savedNote.memoryId;
+                    area.value = savedNote.content || "";
+                    setStatus("บันทึกและซิงก์กับบัญชีของคุณบนคลาวด์แล้ว");
+                    importButton.hidden = true;
+                } else {
+                    noteMemoryId = "";
+                    area.value = "";
+                    setStatus("โน้ตใหม่จะบันทึกบนเซิร์ฟเวอร์และใช้ได้บนอุปกรณ์อื่นเมื่อเข้าสู่บัญชีนี้");
+                    showLegacyImport();
+                }
+                ready = true;
+                area.disabled = false;
+            } catch (error) {
+                if (!isCurrent()) return;
+                ready = false;
+                remoteSync = false;
+                area.disabled = true;
+                const code = String(error?.message || "unknown").slice(0, 64);
+                const httpStatus = Number(error?.httpStatus) || 0;
+                console.warn("[Notes] Cloud load failed", { code, httpStatus, requestId: error?.requestId || "" });
+                let message = "โหลดโน้ตจากคลาวด์ไม่สำเร็จ";
+                if (httpStatus === 401 || code === "authentication_required") {
+                    message = "เซสชันบัญชีหมดอายุ • เข้าสู่ระบบใหม่แล้วลองอีกครั้ง";
+                } else if (httpStatus === 403 && code === "permission_denied") {
+                    message = "บัญชีที่เข้าสู่ระบบไม่มีสิทธิ์ Chat สำหรับเรียกข้อมูล • ออกจากระบบแล้วเข้าบัญชีที่ได้รับสิทธิ์";
+                } else if (httpStatus === 403 && code === "user_feature_restricted") {
+                    message = "เซิร์ฟเวอร์จำกัดสิทธิ์ Notes ของบัญชีนี้ผิดพลาด • ไม่ต้องเข้าสู่ระบบซ้ำ";
+                } else if (httpStatus === 403 && code === "memory_requires_account") {
+                    if (isRegisteredUser()) {
+                        message = "เซิร์ฟเวอร์ยังไม่ยืนยันสิทธิ์ Notes ของบัญชีนี้ • แตะลองอีกครั้งเพื่อซิงก์";
+                    } else {
+                        message = "เซสชันปัจจุบันเป็น Guest • เข้าสู่ระบบด้วยบัญชีผู้ใช้แล้วลองอีกครั้ง";
+                        loginButton.hidden = false;
+                    }
+                } else if (httpStatus === 403) {
+                    message = "เซิร์ฟเวอร์ปฏิเสธสิทธิ์บัญชี • ตรวจสอบบัญชีที่เข้าสู่ระบบ";
+                } else if (code === "notes_storage_unconfigured") {
+                    message = "ยังไม่ได้ตั้งค่าพื้นที่ bucket สำหรับ Notes • ข้อมูลเดิมยังไม่ถูกลบ";
+                } else if (code === "notes_storage_permission_denied") {
+                    message = "บริการ bucket ไม่มีสิทธิ์เข้าถึง Notes • เซสชันบัญชียังอยู่ ลองอีกครั้งภายหลัง";
+                } else if (code === "notes_migration_conflict" || code === "note_conflict") {
+                    message = "ตรวจพบข้อมูล Notes ที่ไม่ตรงกัน • ระบบคงข้อมูลเดิมไว้เพื่อป้องกันข้อมูลสูญหาย";
+                } else if (code === "notes_storage_corrupt") {
+                    message = "ไฟล์ Notes บน bucket อ่านไม่ได้ • ข้อมูล SQL เดิมจะไม่ถูกลบก่อนตรวจสอบ";
+                } else if (code === "note_too_large" || code === "notes_count_limit") {
+                    message = "Notes เกินขีดจำกัดพื้นที่หรือจำนวนที่รองรับ";
+                } else if (httpStatus === 429) {
+                    message = "มีคำขอมากเกินไป • รอสักครู่แล้วลองอีกครั้ง";
+                } else if (httpStatus >= 500) {
+                    message = "เซิร์ฟเวอร์คลาวด์ขัดข้อง (HTTP " + httpStatus + ") • ลองอีกครั้งภายหลัง";
+                } else if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+                    message = "เซิร์ฟเวอร์คลาวด์ตอบช้าเกินไป • แตะลองอีกครั้ง";
+                } else if (error instanceof TypeError || code === "Failed to fetch") {
+                    message = "เชื่อมต่อเซิร์ฟเวอร์คลาวด์ไม่ได้ • ตรวจสอบอินเทอร์เน็ตแล้วลองอีกครั้ง";
+                } else if (httpStatus) {
+                    message = "เซิร์ฟเวอร์ปฏิเสธคำขอ (HTTP " + httpStatus + ") • ลองเข้าสู่ระบบใหม่";
+                }
+                if (error?.requestId) message += " • รหัส " + String(error.requestId).slice(0, 36);
+                setStatus(message);
+                retryButton.hidden = false;
+            }
+        }
+
+        async function saveSnapshot(content, owner, version) {
+            if (!ready || !remoteSync || !isCurrent() || owner !== activeOwner || owner !== currentUserId() || version !== revision || !isRegisteredUser()) return;
+            let response;
+            if (!content.trim()) {
+                if (!noteMemoryId) { setStatus("บันทึกแล้วบนคลาวด์"); return; }
+                response = await authorizedFetch(OS.config.backendUrl.replace(/\/$/, "") + "/api/agent/memory/" + encodeURIComponent(noteMemoryId), {
+                    method: "DELETE",
+                    signal: AbortSignal.timeout(10000)
+                });
+            } else if (noteMemoryId) {
+                response = await authorizedFetch(OS.config.backendUrl.replace(/\/$/, "") + "/api/agent/memory/" + encodeURIComponent(noteMemoryId), {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ content }),
+                    signal: AbortSignal.timeout(10000)
+                });
+            } else {
+                response = await authorizedFetch(OS.config.backendUrl.replace(/\/$/, "") + "/api/agent/memory", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ kind: "note", title: noteTitle, content, tags: ["notes-app"], source: "notes-app", importance: 50 }),
+                    signal: AbortSignal.timeout(10000)
+                });
+            }
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.ok) throw new Error(data.error || "notes_save_failed");
+            if (owner !== currentUserId()) return;
+            if (content.trim()) noteMemoryId = data.memory?.memoryId || noteMemoryId;
+            else noteMemoryId = "";
+            setStatus("บันทึกแล้ว • ซิงก์กับบัญชีบนคลาวด์");
+            retryButton.hidden = true;
+            if (pendingLegacyImport && legacyNote() === content) {
+                try { localStorage.removeItem("pt_notes"); } catch (_) {}
+                pendingLegacyImport = false;
+            }
+        }
+
+        function scheduleSave(immediate = false) {
+            if (!ready || !remoteSync || !isRegisteredUser() || !activeOwner) return;
+            clearTimeout(saveTimer);
+            const owner = activeOwner;
+            const content = area.value;
+            const version = ++revision;
+            retryButton.hidden = true;
+            setStatus("กำลังบันทึกและซิงก์บนคลาวด์…");
+            const enqueue = () => {
+                saveQueue = saveQueue.catch(() => {}).then(() => saveSnapshot(content, owner, version)).catch(() => {
+                    if (!isCurrent() || version !== revision) return;
+                    setStatus("บันทึกบนเซิร์ฟเวอร์ไม่สำเร็จ • ข้อความยังอยู่ในช่องนี้");
+                    retryButton.hidden = false;
+                });
+            };
+            if (immediate) enqueue();
+            else saveTimer = setTimeout(enqueue, 600);
+        }
+
+        loginButton.addEventListener("click", () => {
+            const identity = window.PanthoriumVoiceIdentity;
+            if (typeof identity?.openLogin === "function") identity.openLogin();
+            else if (typeof identity?.open === "function") identity.open();
+            else if (typeof toast === "function") toast("เปิดเมนู Voice Identity เพื่อเข้าสู่ระบบหรือสมัครบัญชี");
+        });
+        importButton.addEventListener("click", () => {
+            if (!ready || !remoteSync || !isRegisteredUser()) return;
+            const oldValue = legacyNote();
+            if (!oldValue) return;
+            area.value = oldValue.slice(0, 12000);
+            pendingLegacyImport = true;
+            importButton.hidden = true;
+            scheduleSave(true);
+        });
+        retryButton.addEventListener("click", () => {
+            if (ready) scheduleSave(true);
+            else loadNotes();
+        });
+        area.addEventListener("input", () => {
+            if (!pendingLegacyImport) importButton.hidden = true;
+            scheduleSave();
+        });
+
+        const authChanged = () => {
+            const nextOwner = currentUserId();
+            if (!activeOwner || nextOwner === activeOwner || !isCurrent()) return;
+            clearTimeout(saveTimer);
+            ready = false;
+            closeWindow("notes");
+            if (nextOwner) openNotes();
+        };
+        openNotes.authChangedHandler = authChanged;
+        window.addEventListener("panthorium:auth-changed", authChanged);
+        loadNotes();
+    }
+    // ---------- App: Calculator ----------
+    function openCalc() {
+        const html = `
+            <div style="display:flex;flex-direction:column;height:100%;">
+                <div class="calc-display" id="calc-display">0</div>
+                <div class="calc-grid">
+                    <button class="calc-btn" data-v="C">C</button>
+                    <button class="calc-btn" data-v="±">±</button>
+                    <button class="calc-btn" data-v="%">%</button>
+                    <button class="calc-btn op" data-v="/">÷</button>
+                    <button class="calc-btn" data-v="7">7</button>
+                    <button class="calc-btn" data-v="8">8</button>
+                    <button class="calc-btn" data-v="9">9</button>
+                    <button class="calc-btn op" data-v="*">×</button>
+                    <button class="calc-btn" data-v="4">4</button>
+                    <button class="calc-btn" data-v="5">5</button>
+                    <button class="calc-btn" data-v="6">6</button>
+                    <button class="calc-btn op" data-v="-">−</button>
+                    <button class="calc-btn" data-v="1">1</button>
+                    <button class="calc-btn" data-v="2">2</button>
+                    <button class="calc-btn" data-v="3">3</button>
+                    <button class="calc-btn op" data-v="+">+</button>
+                    <button class="calc-btn" data-v="0" style="grid-column:span 2;">0</button>
+                    <button class="calc-btn" data-v=".">.</button>
+                    <button class="calc-btn eq" data-v="=">=</button>
+                </div>
+            </div>
+        `;
+        createWindow("calc", "เครื่องคิดเลข", html, { width: 300, height: 420 });
+
+        let expr = "";
+        const display = $("calc-display");
+        document.querySelectorAll("#calc-display").length; // ensure
+        const win = OS.windows.get("calc").el;
+        win.querySelectorAll(".calc-btn").forEach(btn => {
+            btn.onclick = () => {
+                const v = btn.dataset.v;
+                if (v === "C") { expr = ""; display.textContent = "0"; return; }
+                if (v === "=") {
+                    try {
+                        const r = Function('"use strict";return (' + expr.replace(/×/g,"*").replace(/÷/g,"/").replace(/−/g,"-") + ")")();
+                        display.textContent = r;
+                        expr = String(r);
+                    } catch { display.textContent = "Error"; expr = ""; }
+                    return;
+                }
+                if (v === "±") {
+                    if (expr) { expr = String(-parseFloat(expr)); display.textContent = expr; }
+                    return;
+                }
+                expr += v;
+                display.textContent = expr;
+            };
+        });
+    }
+
+    // ---------- App: Files ----------
+    function openFiles() {
+        if (OS.windows.has("files")) { focusWindow("files"); return; }
+        const html = '<div style="height:100%;display:flex;flex-direction:column;gap:10px;padding:12px;">' +
+            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+                '<span id="files-sync-status" role="status" aria-live="polite" style="flex:1;">กำลังตรวจสอบบัญชี…</span>' +
+                '<button id="files-refresh" type="button">รีเฟรช</button>' +
+                '<button id="files-upload" type="button">อัปโหลดไฟล์</button>' +
+                '<input id="files-input" type="file" hidden>' +
+            '</div>' +
+            '<div style="font-size:12px;opacity:.72;">ไฟล์ส่วนตัว • จัดโฟลเดอร์ตามประเภทอัตโนมัติ • สูงสุด 20 MB ต่อไฟล์ • พื้นที่รวมตามแพ็กเกจ</div>' +
+            '<nav id="files-folders" aria-label="โฟลเดอร์ไฟล์" style="display:flex;flex-wrap:wrap;gap:6px;"></nav>' +
+            '<div id="files-location" role="status"></div>' +
+            '<div id="files-list" style="overflow:auto;flex:1;display:flex;flex-direction:column;gap:7px;"></div>' +
+        '</div>';
+        createWindow("files", "ไฟล์บนคลาวด์", html, { width: 620, height: 460 });
+
+        const status = document.getElementById("files-sync-status");
+        const list = document.getElementById("files-list");
+        const foldersNav = document.getElementById("files-folders");
+        const locationLabel = document.getElementById("files-location");
+        let folderId = "all", cachedFiles = [], cachedFolders = [];
+        let loadVersion = 0;
+        const refreshButton = document.getElementById("files-refresh");
+        const uploadButton = document.getElementById("files-upload");
+        const input = document.getElementById("files-input");
+        let busy = false;
+        const isCurrent = () => list.isConnected && OS.windows.has("files");
+        const apiBase = () => String(OS.config.backendUrl || "").replace(/\/$/, "");
+        const escapeHtml = value => String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+        const formatBytes = value => {
+            const bytes = Math.max(0, Number(value) || 0);
+            if (bytes < 1024) return bytes + " B";
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+            return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+        };
+        const ownerId = () => {
+            const user = OS.state.user || {};
+            return String(user.sub || user.id || "");
+        };
+        const isRegistered = () => {
+            const user = OS.state.user || {};
+            const id = ownerId();
+            return Boolean(id && !id.startsWith("guest:") && !(user.roles || []).includes("guest"));
+        };
+        const messageFor = error => {
+            const code = String(error && error.message || "");
+            if (code === "account_required") return "ยังไม่สามารถใช้ Cloud Storage กับเซสชันนี้ได้";
+            if (code === "files_storage_unconfigured") return "บริการไฟล์ยังไม่ได้ตั้งค่าพื้นที่จัดเก็บ";
+            if (code === "files_storage_permission_denied") return "Cloud Run ยังไม่มีสิทธิ์เข้าถึง bucket";
+            if (code === "quota_exceeded:downloadBytes") return "แพ็กเกจนี้ไม่มีโควต้าดาวน์โหลด หรือโควต้าหมดแล้ว • กดเปิดดูเพื่อดูไฟล์ภายในระบบ";
+            if (code === "file_not_found") return "ไม่พบไฟล์นี้ในบัญชีปัจจุบัน • กรุณารีเฟรชรายการ";
+            if (code === "files_quota_exceeded") return "พื้นที่บัญชีถึงขีดจำกัดของแพ็กเกจ";
+            if (code === "files_count_limit") return "บัญชีมีไฟล์ถึงขีดจำกัดรุ่นทดสอบ";
+            if (code === "file_too_large") return "ไฟล์ใหญ่เกิน 20 MB";
+            if (error && error.status === 401) return "เซสชันใช้ Files ไม่ได้ • รีเฟรชเพื่อเชื่อมต่อใหม่";
+            return "เชื่อมต่อ Cloud Storage ไม่สำเร็จ • ลองอีกครั้ง";
+        };
+        async function ensureAccount() {
+            if (window.PanthoriumAuth && typeof window.PanthoriumAuth.ensureSession === "function") {
+                await window.PanthoriumAuth.ensureSession();
+            }
+            if (!isCurrent()) return "";
+            if (!isRegistered()) {
+                uploadButton.disabled = true;
+                status.textContent = "Cloud Storage ยังไม่พร้อมใช้งานสำหรับเซสชันนี้";
+                return "";
+            }
+            uploadButton.disabled = false;
+            return ownerId();
+        }
+        function renderFiles() {
+            const folders = [{ id: 'all', name: 'ไฟล์ทั้งหมด', count: cachedFiles.length }, ...cachedFolders];
+            foldersNav.replaceChildren();
+            for (const folder of folders) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.dataset.folderId = folder.id;
+                button.textContent = (folder.id === 'all' ? '' : '📁 ') + folder.name + ' (' + folder.count + ')';
+                button.setAttribute('aria-pressed', String(folder.id === folderId));
+                button.style.cssText = 'padding:8px 10px;border-radius:9px;color:var(--text);border:1px solid rgba(255,155,60,.4);background:' + (folder.id === folderId ? 'rgba(255,128,32,.25)' : 'rgba(20,25,35,.8)');
+                button.addEventListener('click', () => { folderId = folder.id; renderFiles(); });
+                foldersNav.appendChild(button);
+            }
+            const files = cachedFiles.filter(file => folderId === 'all' || file.folderId === folderId);
+            locationLabel.textContent = 'ไฟล์ของฉัน / ' + (folders.find(folder => folder.id === folderId)?.name || 'ไฟล์ทั้งหมด');
+            list.innerHTML = files.length ? files.map(file =>
+                    '<div style="display:flex;gap:8px;align-items:center;padding:10px;border:1px solid rgba(0,255,204,.18);border-radius:10px;background:rgba(12,24,44,.65);">' +
+                        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(file.name) + '">' + escapeHtml(file.name) + '</span>' +
+                        '<span style="font-size:12px;opacity:.7;">' + formatBytes(file.size) + '</span>' +
+                        '<button type="button" data-files-action="open" data-file-id="' + escapeHtml(file.id) + '">เปิดดู</button>' +
+                        '<button type="button" data-files-action="download" data-file-id="' + escapeHtml(file.id) + '" data-file-name="' + escapeHtml(file.name) + '">ดาวน์โหลด</button>' +
+                        '<button type="button" data-files-action="delete" data-file-id="' + escapeHtml(file.id) + '">ลบ</button>' +
+                    '</div>'
+                ).join("") : '<div style="padding:18px;text-align:center;opacity:.7;">ยังไม่มีไฟล์ในโฟลเดอร์นี้</div>';
+        }
+        async function loadFiles() {
+            if (!isCurrent() || busy) return;
+            busy = true;
+            const version = ++loadVersion;
+            status.textContent = "กำลังโหลดรายการจาก bucket ส่วนตัว…";
+            try {
+                const owner = await ensureAccount();
+                if (!owner) return;
+                const response = await authorizedFetch(apiBase() + "/api/files", { signal: AbortSignal.timeout(15000) });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) throw Object.assign(new Error(data.error || "files_load_failed"), { status: response.status });
+                if (!isCurrent() || owner !== ownerId() || version !== loadVersion) return;
+                const files = Array.isArray(data.files) ? data.files : [];
+                cachedFiles = files; cachedFolders = Array.isArray(data.folders) ? data.folders : [];
+                renderFiles();
+                status.textContent = "ซิงก์แล้ว • " + files.length + " ไฟล์ • ใช้ " + formatBytes(data.usedBytes) + " จาก " + formatBytes(data.maxBytes);
+            } catch (error) {
+                if (isCurrent()) status.textContent = messageFor(error);
+                list.innerHTML = "";
+            } finally {
+                busy = false;
+            }
+        }
+        refreshButton.addEventListener("click", () => { loadFiles(); });
+        uploadButton.addEventListener("click", () => input.click());
+        input.addEventListener("change", async () => {
+            const file = input.files && input.files[0];
+            input.value = "";
+            if (!file || busy) return;
+            if (file.size > 20 * 1024 * 1024) { status.textContent = "ไฟล์ใหญ่เกิน 20 MB"; return; }
+            busy = true;
+            uploadButton.disabled = true;
+            status.textContent = "กำลังอัปโหลดไฟล์ไปยัง Cloud Storage…";
+            try {
+                const owner = await ensureAccount();
+                if (!owner) return;
+                const response = await authorizedFetch(apiBase() + "/api/files", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/octet-stream",
+                        "X-File-Name": encodeURIComponent(file.name),
+                        "X-File-Content-Type": file.type || "application/octet-stream"
+                    },
+                    body: file,
+                    signal: AbortSignal.timeout(120000)
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) throw Object.assign(new Error(data.error || "files_upload_failed"), { status: response.status });
+                status.textContent = "อัปโหลดและบันทึกในบัญชีคลาวด์แล้ว";
+                busy = false;
+                await loadFiles();
+            } catch (error) {
+                status.textContent = messageFor(error);
+            } finally {
+                busy = false;
+                uploadButton.disabled = !isRegistered();
+            }
+        });
+        list.addEventListener("click", async event => {
+            const button = event.target.closest("[data-files-action]");
+            if (!button || busy) return;
+            const id = button.getAttribute("data-file-id") || "";
+            const action = button.getAttribute("data-files-action");
+            if (action === "open") {
+                const file = cachedFiles.find(item => item.id === id);
+                if (file) window.PanthoriumFilePreview?.open(file);
+                return;
+            }
+            const actionOwner = ownerId();
+            busy = true;
+            try {
+                if (action === "download") {
+                    status.textContent = "กำลังดาวน์โหลดจาก Cloud Storage…";
+                    const response = await authorizedFetch(apiBase() + "/api/files/" + encodeURIComponent(id), { signal: AbortSignal.timeout(120000) });
+                    if (!response.ok) {
+                        const data = await response.json().catch(() => ({}));
+                        throw Object.assign(new Error(data.error || "files_download_failed"), { status: response.status });
+                    }
+                    const blob = await response.blob();
+                    if (!isCurrent() || actionOwner !== ownerId()) return;
+                    const link = document.createElement("a");
+                    const href = URL.createObjectURL(blob);
+                    link.href = href;
+                    link.download = button.getAttribute("data-file-name") || "file";
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    setTimeout(() => URL.revokeObjectURL(href), 1000);
+                    status.textContent = "ดาวน์โหลดไฟล์แล้ว";
+                } else if (action === "delete" && window.confirm("ลบไฟล์นี้ออกจากบัญชีคลาวด์หรือไม่?")) {
+                    const response = await authorizedFetch(apiBase() + "/api/files/" + encodeURIComponent(id), { method: "DELETE" });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok || !data.ok) throw Object.assign(new Error(data.error || "files_delete_failed"), { status: response.status });
+                    status.textContent = "ลบไฟล์แล้ว";
+                    busy = false;
+                    await loadFiles();
+                    return;
+                }
+            } catch (error) {
+                status.textContent = messageFor(error);
+            } finally {
+                busy = false;
+            }
+        });
+        if (openFiles.authChangedHandler) window.removeEventListener("panthorium:auth-changed", openFiles.authChangedHandler);
+        openFiles.authChangedHandler = (() => {
+            if (isCurrent()) {
+                ++loadVersion; busy = false; folderId = "all";
+                cachedFiles = []; cachedFolders = []; renderFiles();
+                loadFiles();
+            }
+        });
+        window.removeEventListener("panthorium:auth-changed", openFiles.authChangedHandler);
+        window.addEventListener("panthorium:auth-changed", openFiles.authChangedHandler);
+        loadFiles();
+    }
+
+
+    // ---------- App: Terminal ----------
+    function openTerminal() {
+        const html = `
+            <div class="term" id="term">
+                <div class="term-line">Panthorium OS Terminal</div>
+                <div class="term-line">พิมพ์ "help" เพื่อดูคำสั่ง</div>
+                <div class="term-input-line">
+                    <span class="term-prompt">guest@panthorium:~$</span>
+                    <input class="term-input" id="term-input" autofocus />
+                </div>
+            </div>
+        `;
+        createWindow("terminal", "Terminal", html, { width: 560, height: 360 });
+
+        const term = $("term");
+        const input = $("term-input");
+
+        const commands = {
+            help: () => "คำสั่ง: help, clear, date, whoami, version, echo [text], ai [คำถาม], neofetch",
+            clear: () => { term.querySelectorAll(".term-line").forEach(l => l.remove()); return null; },
+            date: () => new Date().toLocaleString("th-TH"),
+            whoami: () => "guest",
+            version: () => `Panthorium OS`,
+            neofetch: () => `
+ ██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗ ██████╗ ██████╗ ██╗██╗   ██╗███╗   ███╗
+ ██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝██║  ██║██╔═══██╗██╔══██╗██║██║   ██║████╗ ████║
+ ██████╔╝███████║██╔██╗ ██║   ██║   ███████║██║   ██║██████╔╝██║██║   ██║██╔████╔██║
+ ██╔═══╝ ██╔══██║██║╚██╗██║   ██║   ██╔══██║██║   ██║██╔══██╗██║██║   ██║██║╚██╔╝██║
+ ██║     ██║  ██║██║ ╚████║   ██║   ██║  ██║╚██████╔╝██║  ██║██║╚██████╔╝██║ ╚═╝ ██║
+ ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝ ╚═════╝ ╚═╝     ╚═╝
+ OS: Panthorium (Web)
+ Host: ${navigator.platform}
+ Browser: ${navigator.userAgent.split(" ").pop()}
+ Online: ${OS.state.online}
+            `.trim()
+        };
+
+        input.onkeydown = async (e) => {
+            if (e.key !== "Enter") return;
+            const cmd = input.value.trim();
+            input.value = "";
+
+            const line = document.createElement("div");
+            line.className = "term-line";
+            line.textContent = `guest@panthorium:~$ ${cmd}`;
+            term.insertBefore(line, input.parentElement);
+
+            if (!cmd) return;
+
+            let out = "";
+            const parts = cmd.split(" ");
+            const name = parts[0].toLowerCase();
+
+            if (name === "echo") {
+                out = parts.slice(1).join(" ");
+            } else if (name === "ai") {
+                const q = parts.slice(1).join(" ");
+                if (!q) out = "ใช้งาน: ai [คำถาม]";
+                else {
+                    const res = await callAI(q);
+                    out = res.text;
+                }
+            } else if (commands[name]) {
+                out = commands[name]();
+            } else {
+                out = `คำสั่งไม่พบ: ${name}`;
+            }
+
+            if (out !== null && out !== undefined) {
+                const o = document.createElement("div");
+                o.className = "term-line";
+                o.textContent = out;
+                term.insertBefore(o, input.parentElement);
+            }
+            term.scrollTop = term.scrollHeight;
+        };
+    }
+
+    // ---------- App: About ----------
+    function openAbout() {
+        const html = `
+            <div class="about-content">
+                <div class="about-logo"><img src="/panthorium-logo.svg?v=original-orange-20261015" data-panthorium-logo alt="Panthorium" style="width:72px;height:72px;object-fit:contain;"></div>
+                <h2 style="margin-bottom:8px;">Panthorium OS</h2>
+                <p style="font-size:13px;line-height:1.7;color:var(--text-dim);max-width:300px;margin:0 auto;">
+                    ระบบปฏิบัติการจำลองที่ทำงานบนเว็บ<br>
+                    รองรับทุกอุปกรณ์และทุกระบบปฏิบัติการ<br>
+                    ขับเคลื่อนด้วย Sentinel AI
+                </p>
+                <p style="margin-top:24px;font-size:12px;color:var(--text-dim);">
+                    พัฒนาเพื่อการศึกษาและสาธิต<br>
+                    ไม่ใช่ระบบปฏิบัติการจริงของเครื่อง
+                </p>
+            </div>
+        `;
+        createWindow("about", "เกี่ยวกับ", html, { width: 360, height: 380 });
+    }
+
+    // ---------- Interactive Procedural Energy Orb ----------
+    let scene, camera, renderer, orbGroup, orb, orbMaterial, orbCore, orbHalo;
+    let orbViewportScale = 1;
+    let orbHandheldPortraitRatio = 0;
+    let orbPulse = 0;
+    let orbLastFrame = performance.now();
+    let orbAIActive = false;
+    let orbAIEnergy = 0;
+    let orbVoiceEnergy = 0;
+    let orbExternalVoiceLevel = 0;
+    let orbMicPermissionAttempted = false;
+    let orbMicContext = null;
+    let orbMicStream = null;
+    let orbMicAnalyser = null;
+    let orbMicData = null;
+    let orbContextLost = false;
+    let orbFallbackPulseTimer = 0;
+    let orbFallbackControlsReady = false;
+    const orbTarget = { x: 0, y: 0 };
+    const orbCurrent = { x: 0, y: 0 };
+
+    function activateOrbFallback(error) {
+        orbContextLost = true;
+        const desktop = $("desktop");
+        const fallback = $("orb-fallback");
+        const host = document.body;
+        host.classList.add("orb-fallback-active");
+        if (error) console.error("[PanthoriumOrb] WebGL fallback activated:", error);
+        initOrbTranscriptControls();
+        if (!orbFallbackControlsReady) {
+            orbFallbackControlsReady = true;
+            const pulse = () => {
+                host.classList.remove("orb-fallback-pulse");
+                void fallback?.offsetWidth;
+                host.classList.add("orb-fallback-pulse");
+                clearTimeout(orbFallbackPulseTimer);
+                orbFallbackPulseTimer = setTimeout(() => host.classList.remove("orb-fallback-pulse"), 700);
+            };
+            fallback?.addEventListener("pointerdown", () => {
+                pulse();
+                if (!orbMicPermissionAttempted) { orbMicPermissionAttempted = true; enableOrbMicrophone(); }
+            });
+            window.addEventListener("panthorium:ai-speaking", event => host.classList.toggle("orb-fallback-ai", Boolean(event.detail?.speaking ?? event.detail)));
+            window.addEventListener("panthorium:voice-level", event => host.classList.toggle("orb-fallback-voice", Number(event.detail?.level ?? event.detail) > .04));
+            window.PanthoriumOrb = {
+                setAISpeaking(active) { host.classList.toggle("orb-fallback-ai", Boolean(active)); },
+                setVoiceLevel(level) { host.classList.toggle("orb-fallback-voice", Number(level) > .04); },
+                setTranscript: setOrbTranscript,
+                setCurrentSentence: showOrbTranscriptSentence,
+                previousSentence() { showOrbTranscriptSentence(orbTranscriptIndex - 1); },
+                nextSentence() { showOrbTranscriptSentence(orbTranscriptIndex + 1); },
+                enableMicrophone: enableOrbMicrophone,
+                disableMicrophone: disableOrbMicrophone,
+                pulse
+            };
+        }
+    }
+
+    function createOrbRadialTexture() {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 256;
+        const context = canvas.getContext("2d");
+        const gradient = context.createRadialGradient(128, 128, 4, 128, 128, 128);
+        gradient.addColorStop(0, "rgba(180,255,255,.9)");
+        gradient.addColorStop(.12, "rgba(30,190,255,.45)");
+        gradient.addColorStop(.42, "rgba(40,40,255,.13)");
+        gradient.addColorStop(1, "rgba(0,0,0,0)");
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, 256, 256);
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    async function enableOrbMicrophone() {
+        if (orbMicStream) return true;
+        try {
+            if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
+            orbMicStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+            orbMicContext = orbMicContext || new (window.AudioContext || window.webkitAudioContext)();
+            await orbMicContext.resume();
+            orbMicAnalyser = orbMicContext.createAnalyser();
+            orbMicAnalyser.fftSize = 512;
+            orbMicAnalyser.smoothingTimeConstant = .72;
+            orbMicData = new Uint8Array(orbMicAnalyser.fftSize);
+            orbMicContext.createMediaStreamSource(orbMicStream).connect(orbMicAnalyser);
+            return true;
+        } catch {
+            orbMicStream = null;
+            orbMicAnalyser = null;
+            orbMicData = null;
+            return false;
+        }
+    }
+
+    function disableOrbMicrophone() {
+        if (orbMicStream) orbMicStream.getTracks().forEach(track => track.stop());
+        orbMicStream = null;
+        orbMicAnalyser = null;
+        orbMicData = null;
+        orbVoiceEnergy = 0;
+    }
+
+    function fitOrbViewport() {
+        if (!camera || !renderer) return;
+        const width = Math.max(1, window.innerWidth);
+        const height = Math.max(1, window.innerHeight);
+        // Phones and tablets use their landscape diameter in both orientations.
+        const handheld = isMobileDevice() || navigator.userAgentData?.mobile === true ||
+            (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+        orbHandheldPortraitRatio = handheld && height > width ? width / height : 0;
+        orbViewportScale = handheld ? 1 : .98;
+        const compact = width <= 600;
+        const aspect = width / height;
+        const halfVerticalFov = camera.fov * Math.PI / 360;
+        const halfHorizontalFov = Math.atan(Math.tan(halfVerticalFov) * aspect);
+        const compactDistance = 1.22 / Math.tan(Math.min(halfVerticalFov, halfHorizontalFov));
+        camera.aspect = aspect;
+        camera.position.set(0, 0, compact ? Math.max(4.65, compactDistance) : 4.65);
+        camera.lookAt(0, 0, 0);
+        camera.updateProjectionMatrix();
+        if (orbGroup) orbGroup.position.y = compact ? .5 : .27;
+        renderer.setSize(width, height);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        if (orbMaterial) orbMaterial.uniforms.uPixel.value = renderer.getPixelRatio();
+    }
+
+    function initBackground() {
+        const canvas = $("bg-canvas");
+        if (!window.THREE) throw new Error("Three.js failed to load");
+        scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x01030a, .08);
+        camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, .1, 100);
+        camera.position.set(0, 0, 4.65);
+
+        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0x01030a, 1);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.35;
+
+        orbGroup = new THREE.Group();
+        orbGroup.position.y = .27;
+        scene.add(orbGroup);
+
+        const particleCount = window.innerWidth < 700 ? 12360 : 23100;
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        const seeds = new Float32Array(particleCount);
+        const golden = Math.PI * (3 - Math.sqrt(5));
+        for (let i = 0; i < particleCount; i++) {
+            const y = 1 - (i / (particleCount - 1)) * 2;
+            const radius = Math.sqrt(1 - y * y);
+            const theta = golden * i;
+            const fuzz = (Math.random() - .5) * .022;
+            positions[i * 3] = Math.cos(theta) * (radius + fuzz);
+            positions[i * 3 + 1] = y;
+            positions[i * 3 + 2] = Math.sin(theta) * (radius + fuzz);
+            seeds[i] = Math.random();
+        }
+        geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 1));
+
+        orbMaterial = new THREE.ShaderMaterial({
+            uniforms: { uTime: { value: 0 }, uPulse: { value: 0 }, uAI: { value: 0 }, uVoice: { value: 0 }, uPixel: { value: renderer.getPixelRatio() } },
+            vertexShader: `uniform float uTime; uniform float uPulse; uniform float uAI; uniform float uVoice; uniform float uPixel; attribute float aSeed; varying float vGlow; varying vec3 vPos;
+                void main(){ vec3 p=position; float n=sin(p.x*8.0+uTime*1.9)*sin(p.y*7.0-uTime*1.3)*cos(p.z*9.0+uTime);
+                n += .45*sin((p.x+p.y+p.z)*15.0-uTime*2.4+aSeed*6.28); float wave=uPulse*sin(length(p)*18.0-uTime*4.0);
+                float aiWave=uAI*(sin(p.y*17.0-uTime*8.0)*.035+cos(p.x*13.0+uTime*6.0)*.02);
+                float voiceWave=uVoice*sin((p.x+p.y+p.z)*19.0-uTime*10.0)*.014;
+                p += normalize(p)*(n*.075+wave*.055+aiWave+voiceWave); p += .022*vec3(sin(uTime+p.y*12.0),cos(uTime*.8+p.z*11.0),sin(uTime*1.2+p.x*10.0));
+                float pointGlow=.55+.45*n; vGlow=pointGlow-uPulse*.18; vPos=p; vec4 mv=modelViewMatrix*vec4(p,1.0); gl_Position=projectionMatrix*mv;
+                gl_PointSize=uPixel*(1.15+2.4*pow(max(pointGlow,0.0),2.0))*(8.86578/-mv.z); }`,
+            fragmentShader: `varying float vGlow; varying vec3 vPos; void main(){ vec2 q=gl_PointCoord-.5; float d=length(q); if(d>.5) discard;
+                float a=smoothstep(.5,.05,d); vec3 cyan=vec3(.03,.58,1.0), white=vec3(.7,1.0,1.0), violet=vec3(.32,.08,1.0);
+                float side=smoothstep(-1.0,1.0,vPos.x+vPos.y*.35); vec3 col=mix(violet,cyan,side); col=mix(col,white,clamp(vGlow*.75,0.0,1.0));
+                float redSheen=.008*smoothstep(.25,1.0,.5+.5*sin((vPos.x-vPos.y+vPos.z)*7.0)); col=mix(col,vec3(1.0,.04,.02),redSheen); gl_FragColor=vec4(col,a*(.21+max(vGlow,0.0)*.5)); }`,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        orb = new THREE.Points(geometry, orbMaterial);
+        orbGroup.add(orb);
+
+        orbCore = new THREE.Mesh(new THREE.SphereGeometry(.77, 64, 64), new THREE.ShaderMaterial({
+            uniforms: { uTime: { value: 0 }, uPulse: { value: 0 } },
+            transparent: true,
+            side: THREE.BackSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            vertexShader: `varying vec3 vN; varying vec3 vP; void main(){vN=normalize(normalMatrix*normal);vP=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+            fragmentShader: `uniform float uTime;uniform float uPulse;varying vec3 vN;varying vec3 vP;void main(){float rim=pow(1.0-abs(vN.z),2.2);float bands=.5+.5*sin(vP.y*13.0+sin(vP.x*9.0+uTime)*2.0-uTime*2.0);vec3 c=mix(vec3(.02,.08,.3),vec3(.05,.72,1.),bands);c=mix(c,vec3(1.0,.04,.02),.006);gl_FragColor=vec4(c,max(.02,.08+rim*.3-uPulse*.045));}`
+        }));
+        orbGroup.add(orbCore);
+
+        orbHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: createOrbRadialTexture(),
+            color: 0x159dff,
+            transparent: true,
+            opacity: .24,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        }));
+        orbHalo.scale.set(3.1, 3.1, 1);
+        orbGroup.add(orbHalo);
+
+        const starsGeometry = new THREE.BufferGeometry();
+        const stars = new Float32Array(750 * 3);
+        for (let i = 0; i < 750; i++) {
+            const radius = 3 + Math.random() * 8;
+            const a = Math.random() * Math.PI * 2;
+            const b = Math.acos(2 * Math.random() - 1);
+            stars[i * 3] = radius * Math.sin(b) * Math.cos(a);
+            stars[i * 3 + 1] = radius * Math.cos(b);
+            stars[i * 3 + 2] = radius * Math.sin(b) * Math.sin(a);
+        }
+        starsGeometry.setAttribute("position", new THREE.BufferAttribute(stars, 3));
+        scene.add(new THREE.Points(starsGeometry, new THREE.PointsMaterial({ color: 0x216aa8, size: .012, transparent: true, opacity: .4, depthWrite: false })));
+
+        canvas.addEventListener("pointermove", event => {
+            orbTarget.y = (event.clientX / window.innerWidth - .5) * .72;
+            orbTarget.x = (event.clientY / window.innerHeight - .5) * .58;
+        });
+        canvas.addEventListener("pointerdown", () => {
+            orbPulse = 1;
+            if (!orbMicPermissionAttempted) { orbMicPermissionAttempted = true; enableOrbMicrophone(); }
+        });
+        canvas.addEventListener("webglcontextlost", event => {
+            event.preventDefault();
+            activateOrbFallback(new Error("WebGL context lost"));
+        }, false);
+        window.addEventListener("resize", () => {
+            fitOrbViewport();
+        });
+        window.addEventListener("panthorium:ai-speaking", event => { orbAIActive = Boolean(event.detail?.speaking ?? event.detail); });
+        window.addEventListener("panthorium:voice-level", event => { orbExternalVoiceLevel = Math.min(1, Math.max(0, Number(event.detail?.level ?? event.detail) || 0)); });
+        window.addEventListener("panthorium:transcript", event => {
+            const detail = event.detail || {};
+            if (Array.isArray(detail.sentences) && detail.sentences.length) setOrbTranscript(detail.sentences, Number.isFinite(detail.index) ? detail.index : 0);
+        });
+        window.addEventListener("panthorium:transcript-index", event => showOrbTranscriptSentence(Number(event.detail?.index ?? event.detail) || 0));
+
+        initOrbTranscriptControls();
+        window.PanthoriumOrb = {
+            setAISpeaking(active) { orbAIActive = Boolean(active); },
+            setVoiceLevel(level) { orbExternalVoiceLevel = Math.min(1, Math.max(0, Number(level) || 0)); },
+            setTranscript: setOrbTranscript,
+            setCurrentSentence: showOrbTranscriptSentence,
+            previousSentence() { showOrbTranscriptSentence(orbTranscriptIndex - 1); },
+            nextSentence() { showOrbTranscriptSentence(orbTranscriptIndex + 1); },
+            enableMicrophone: enableOrbMicrophone,
+            disableMicrophone: disableOrbMicrophone
+        };
+        fitOrbViewport();
+        animateBg();
+    }
+
+    function animateBg(now = performance.now()) {
+        requestAnimationFrame(animateBg);
+        if (orbContextLost || document.hidden) return;
+        const delta = Math.min((now - orbLastFrame) / 1000, .05);
+        orbLastFrame = now;
+        const time = now * .001;
+        orbCurrent.x += (orbTarget.x - orbCurrent.x) * .045;
+        orbCurrent.y += (orbTarget.y - orbCurrent.y) * .045;
+        orbGroup.rotation.x = orbCurrent.x;
+        orbGroup.rotation.y = orbCurrent.y + time * .075;
+
+        let sensedVoice = Math.max(orbExternalVoiceLevel, userSpeechActive ? .22 : 0);
+        if (orbMicAnalyser && orbMicData) {
+            orbMicAnalyser.getByteTimeDomainData(orbMicData);
+            let sum = 0;
+            for (let i = 0; i < orbMicData.length; i++) {
+                const sample = (orbMicData[i] - 128) / 128;
+                sum += sample * sample;
+            }
+            const rms = Math.sqrt(sum / orbMicData.length);
+            sensedVoice = Math.max(sensedVoice, Math.min(1, Math.max(0, rms - .025) * 8));
+        }
+        const synthesisSpeaking = Boolean(window.speechSynthesis && window.speechSynthesis.speaking);
+        const aiTarget = orbAIActive || aiSpeechActive || synthesisSpeaking ? 1 : 0;
+        orbAIEnergy += (aiTarget - orbAIEnergy) * (1 - Math.exp(-delta * (aiTarget ? 8 : 3.5)));
+        orbVoiceEnergy += (sensedVoice - orbVoiceEnergy) * (1 - Math.exp(-delta * (sensedVoice > orbVoiceEnergy ? 14 : 5)));
+        orbPulse = Math.max(0, orbPulse - delta * 1.18);
+        const smoothPulse = orbPulse * orbPulse * (3 - 2 * orbPulse);
+
+        orbMaterial.uniforms.uTime.value = time;
+        orbMaterial.uniforms.uPulse.value = smoothPulse;
+        orbMaterial.uniforms.uAI.value = orbAIEnergy;
+        orbMaterial.uniforms.uVoice.value = orbVoiceEnergy;
+        orbCore.material.uniforms.uTime.value = time;
+        orbCore.material.uniforms.uPulse.value = smoothPulse;
+        const breathe = 1 + Math.sin(time * 1.35) * .022 + smoothPulse * .16 + orbAIEnergy * (.15 + Math.sin(time * 9) * .01) + orbVoiceEnergy * .018;
+        let orbScale = .98 * orbViewportScale * breathe;
+        if (orbHandheldPortraitRatio) {
+            // Match the projected sphere diameter at the landscape camera distance (4.65).
+            // Include perspective depth so rotation retains the same size even during pulses.
+            const ratio = orbHandheldPortraitRatio;
+            orbScale *= ratio * camera.position.z /
+                Math.sqrt(4.65 * 4.65 - orbScale * orbScale * (1 - ratio * ratio));
+        }
+        orbGroup.scale.setScalar(orbScale);
+        orbHalo.material.opacity = Math.max(.08, .2 + Math.sin(time * 1.6) * .035 - smoothPulse * .08 + orbAIEnergy * .035 + orbVoiceEnergy * .012);
+        renderer.render(scene, camera);
+    }
+
+    // ---------- PWA ----------
+    if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+
+    // Deployment updates are managed by app-update-client.js on every platform.
+
+    // ---------- Start ----------
+    boot();

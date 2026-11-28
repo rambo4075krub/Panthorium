@@ -20,8 +20,8 @@ const modules = ["feed", "short", "watch", "live", "tv", "market", "community", 
       w.fetch = async () => ({ ok: true, json: async () => ({ ok: true, items: [], calls: [], orders: [] }) });
       const load = (file) => evaluate(read(file));
       load("panthorium-window-base.js");
-      const inline = [...d.scripts].find(s => s.textContent.includes("const OS =")).textContent;
-      evaluate(inline.replace(/\n    boot\(\);/, "\n    OS.state.booted = true;"));
+      const runtimeSource = read('sentinel-shell.js');
+      evaluate(runtimeSource.replace(/\n    boot\(\);/, "\n    OS.state.booted = true;"));
       evaluate(`OS.state.user = ${JSON.stringify({sub: "menu-test", roles: [role], permissions: ["chat"]})}`);
       w.PanthoriumAuth = { isAdministrator: () => role === "administrator" };
       for (const file of ["start-menu-ui.js", "voice-window-catalog.js", "social-ui.js", "access-shell-ui.js"]) load(file);

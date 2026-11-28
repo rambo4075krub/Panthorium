@@ -35,6 +35,13 @@ function createApiRouter(sentinel, authService, audit, aiOperations, agentServic
     rateLimit({ ...aiRateOptions, limit: 300 }),
     rateLimit({ ...aiRateOptions, limit: 30, keyGenerator: req => req.user.sub || req.user.id })
   ];
+  const chatAccount = (req, res, next) => {
+    const id = req.user?.sub || req.user?.id;
+    if (!id || String(id).startsWith('guest:') || req.user.roles?.includes('guest')) {
+      return res.status(403).json({ ok: false, error: 'registered_account_required' });
+    }
+    next();
+  };
   const speechLimiter = rateLimit({ windowMs: 60 * 1000, limit: 90, standardHeaders: true, legacyHeaders: false });
   const identityNavigationLimiter = rateLimit({ windowMs: 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false });
   const agentLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
@@ -281,7 +288,7 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
   router.get("/conversations", auth, requirePermission("chat"), async (req, res) => res.json({ ok: true, sessions: await sentinel.conversationSessions(req.user.sub, Number(req.query.limit) || 30) }));
   router.get("/conversations/:sessionId", auth, requirePermission("chat"), async (req, res) => { if (!validText(req.params.sessionId, 120)) return res.status(400).json({ ok: false, error: "invalid_session_id" }); res.json({ ok: true, sessionId: req.params.sessionId, messages: await sentinel.conversationHistory(req.user.sub, req.params.sessionId, Number(req.query.limit) || 40) }); });
   router.delete("/conversations/:sessionId", auth, requirePermission("chat"), async (req, res) => { if (!validText(req.params.sessionId, 120)) return res.status(400).json({ ok: false, error: "invalid_session_id" }); await sentinel.clearConversation(req.user.sub, req.params.sessionId); audit.record("ai.conversation_deleted", { userId: req.user.sub, sessionId: req.params.sessionId }); res.json({ ok: true }); });
-  router.post("/chat/stream", auth, requirePermission("chat"), chatLimiter, async (req, res) => {
+  router.post("/chat/stream", auth, requirePermission("chat"), chatAccount, chatLimiter, async (req, res) => {
     const error = validChatBody(req.body || {});
     if (error) return res.status(400).json({ ok: false, error });
     const { message, sessionId, provider, model, voice, thinking } = req.body || {};
@@ -325,7 +332,7 @@ router.get("/agent/runs", auth, requirePermission("chat"), agentLimiter, async (
       if (!res.writableEnded) res.end();
     }
   });
-  router.post("/chat", auth, requirePermission("chat"), chatLimiter, async (req, res) => { const controller=new AbortController();const cancel=()=>{if(!res.writableEnded)controller.abort();};res.once('close',cancel);try { const error = validChatBody(req.body || {}); if (error) return res.status(400).json({ ok: false, error }); const { message, sessionId, provider, model, voice, thinking } = req.body || {}; const sid = sessionId || req.headers["x-session-id"] || randomUUID(); const result = await sentinel.chat({ signal:controller.signal,clientHistory:req.body.clientHistory,sessionId: sid, userId: req.user.sub, message, mode: "default", provider: provider?.toLowerCase(), model, thinking, voiceMode: voice === true, user: req.user, functionCalling, requestId: stableActionRequestId(req) || req.requestId || randomUUID() }); audit.record("sentinel.chat", { userId: req.user.sub, sessionId: sid, provider: result.provider || null, model: result.model || null, usage: result.usage || null, latencyMs: result.latencyMs || null, functionCallCount: result.functionCallCount || 0, ok: result.ok }); res.json({ ...result, sessionId: sid }); } catch (err) { if(!res.destroyed)res.status(500).json({ ok: false, error: "internal_error" }); } finally {res.off('close',cancel);} });
+  router.post("/chat", auth, requirePermission("chat"), chatAccount, chatLimiter, async (req, res) => { const controller=new AbortController();const cancel=()=>{if(!res.writableEnded)controller.abort();};res.once('close',cancel);try { const error = validChatBody(req.body || {}); if (error) return res.status(400).json({ ok: false, error }); const { message, sessionId, provider, model, voice, thinking } = req.body || {}; const sid = sessionId || req.headers["x-session-id"] || randomUUID(); const result = await sentinel.chat({ signal:controller.signal,clientHistory:req.body.clientHistory,sessionId: sid, userId: req.user.sub, message, mode: "default", provider: provider?.toLowerCase(), model, thinking, voiceMode: voice === true, user: req.user, functionCalling, requestId: stableActionRequestId(req) || req.requestId || randomUUID() }); audit.record("sentinel.chat", { userId: req.user.sub, sessionId: sid, provider: result.provider || null, model: result.model || null, usage: result.usage || null, latencyMs: result.latencyMs || null, functionCallCount: result.functionCallCount || 0, ok: result.ok }); res.json({ ...result, sessionId: sid }); } catch (err) { if(!res.destroyed)res.status(500).json({ ok: false, error: "internal_error" }); } finally {res.off('close',cancel);} });
   router.post("/sentinel/command", auth, aiLimiter, async (req, res, next) => {
     try {
       const { command, provider } = req.body || {};

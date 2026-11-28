@@ -16,6 +16,12 @@ const PUBLIC_ASSET_FILES = Object.freeze([
   "panthorium-window-base.js"
 ]);
 
+const BUILT_SCRIPTS = Object.freeze(["sentinel-shell.js", "start-menu-ui.js", "billing-catalog.js", "work-brief.js"]);
+
+function releaseAssetPath(file) {
+  return BUILT_SCRIPTS.includes(file) ? path.join("build", "browser", file) : file;
+}
+
 function createPublicAssetMiddleware(frontendRoot, { maxAge = 0 } = {}) {
   const root = path.resolve(frontendRoot);
   const assets = new Map(PUBLIC_ASSET_FILES.map((file) => [`/${file}`, path.join(root, file)]));
@@ -33,4 +39,4 @@ function createPublicAssetMiddleware(frontendRoot, { maxAge = 0 } = {}) {
   };
 }
 
-module.exports = { createPublicAssetMiddleware, PUBLIC_ASSET_FILES };
+module.exports = { createPublicAssetMiddleware, PUBLIC_ASSET_FILES, BUILT_SCRIPTS, releaseAssetPath };
